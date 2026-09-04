@@ -55,9 +55,12 @@ if "%CXX%"=="" (
 )
 
 rem -- Banner ----------------------------------------------------------
+set "VERSION="
+for /f "tokens=3" %%v in ('findstr /c:"project(ADOCAO VERSION" CMakeLists.txt') do set "VERSION=%%v"
+if "%VERSION%"=="" set "VERSION=?"
 echo(
 echo ==============================================
-echo   ADOCAO  v3.0.0  --  Build Script
+echo   ADOCAO  v%VERSION%  --  Build Script
 echo ==============================================
 echo(
 echo Compiler detected: %COMPILER_KIND%
@@ -117,6 +120,11 @@ rem -- CMake build -----------------------------------------------------
 echo Building...
 cmake --build . --parallel
 if %ERRORLEVEL% NEQ 0 (taskkill /f /im adocao.exe >nul 2>&1 & cmake --build . --parallel)
+if %ERRORLEVEL% NEQ 0 (
+    echo Build FAILED.
+    cd ..
+    exit /b 1
+)
 cd ..
 
 rem -- Done ------------------------------------------------------------

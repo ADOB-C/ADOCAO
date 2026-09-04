@@ -108,10 +108,14 @@ function Prompt-Bool {
 }
 
 # ── Main ────────────────────────────────────────────────────────
+$m = Select-String -Path CMakeLists.txt -Pattern 'project\(ADOCAO VERSION ([0-9]+\.[0-9]+\.[0-9]+)'
+$version = if ($m) { $m.Matches[0].Groups[1].Value } else { '?' }
+$boxLine = "║     ADOCAO  v$version  —  Build Script"
+$boxLine = $boxLine.PadRight(41) + "║"
 Write-Host ""
-Write-Cyan "╔══════════════════════════════════════════╗"
-Write-Cyan "║     ADOCAO  v3.0.0  —  Build Script      ║"
-Write-Cyan "╚══════════════════════════════════════════╝"
+Write-Cyan "╔════════════════════════════════════════════╗"
+Write-Cyan $boxLine
+Write-Cyan "╚════════════════════════════════════════════╝"
 Write-Host ""
 
 # ── Determine mode ──────────────────────────────────────────────

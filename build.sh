@@ -144,7 +144,10 @@ done; then
 fi
 
 # ── Done ─────────────────────────────────────────────────────────
-OUT="$(ls ADOCAO ADOCAO.exe 2>/dev/null | head -1)"
+# Only one of ADOCAO/ADOCAO.exe exists on a given platform; `ls` exits
+# non-zero when the other is missing, and pipefail would poison this
+# assignment (set -e aborts before the banner).
+OUT="$(ls ADOCAO ADOCAO.exe 2>/dev/null | head -1 || true)"
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════╗"
 echo -e "${GREEN}║            Build successful!             ║"

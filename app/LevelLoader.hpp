@@ -1,13 +1,19 @@
 #pragma once
 
-#include "LoadingWindow.hpp"
-#include "LauncherWindow.hpp"
-#include "core/level/LevelData.hpp"
-#include "core/timeline/Timeline.hpp"
-#include "core/timeline/PlaybackClock.hpp"
-#include "audio/HitsoundManager.hpp"
+// Loading is the app's glue between core (parse + timeline), audio (engine +
+// hitsound synthesis) and the loading window. Heavy headers are included in
+// LevelLoader.cpp only — this header forward-declares everything except the
+// by-value audio members of LoadResult.
+
 #include "audio/AudioEngine.hpp"
+#include "audio/HitsoundManager.hpp"
 #include <memory>
+
+struct LauncherConfig;
+struct LoadingProgress;
+class LevelData;
+class Timeline;
+class PlaybackClock;
 
 struct LoadResult {
     std::shared_ptr<LevelData> level;

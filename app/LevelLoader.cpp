@@ -1,4 +1,10 @@
 #include "LevelLoader.hpp"
+
+#include "LauncherWindow.hpp"
+#include "LoadingWindow.hpp"
+#include "core/level/LevelData.hpp"
+#include "core/timeline/Timeline.hpp"
+#include "core/timeline/PlaybackClock.hpp"
 #include <cstring>
 #include <thread>
 #include <future>

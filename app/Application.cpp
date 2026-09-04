@@ -3,7 +3,10 @@
 #include "LoadingWindow.hpp"
 #include "LevelLoader.hpp"
 #include "GameWindow.hpp"
+#include "audio/HitsoundManager.hpp"
+#include "core/level/LevelData.hpp"
 #include "core/timeline/Timeline.hpp"
+#include "core/timeline/PlaybackClock.hpp"
 #include "core/util/Logger.hpp"
 #include <GLFW/glfw3.h>
 

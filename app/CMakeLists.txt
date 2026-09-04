@@ -12,6 +12,21 @@ set(ADOCAO_APP_SOURCES
     LevelLoader.hpp
     GameWindow.cpp
     GameWindow.hpp
+    CameraController.cpp
+    CameraController.hpp
+    LevelScene.cpp
+    LevelScene.hpp
+    wizard/WizardState.hpp
+    wizard/WizardChrome.cpp
+    wizard/WizardChrome.hpp
+    wizard/FileDialogs.cpp
+    wizard/FileDialogs.hpp
+    wizard/PageWelcome.cpp
+    wizard/PagePreload.cpp
+    wizard/PageHitsounds.cpp
+    wizard/PageGraphics.cpp
+    wizard/PageVisuals.cpp
+    wizard/PageMusic.cpp
 )
 
 add_library(adocao_imgui STATIC

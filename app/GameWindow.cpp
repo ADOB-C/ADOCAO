@@ -1,100 +1,24 @@
 #include "GameWindow.hpp"
+
+#include "LauncherWindow.hpp"
+#include "LevelLoader.hpp"
+#include "LevelScene.hpp"
 #include "glad/gl_core.hpp"
-#include "render/Shader.hpp"
-#include "render/Shaders.hpp"
-#include "render/Camera.hpp"
-#include "render/TileMesh.hpp"
-#include "render/Planet.hpp"
-#include "render/PlanetTrail.hpp"
+#include "core/level/LevelData.hpp"
 #include "core/timeline/Timeline.hpp"
 #include "core/timeline/PlaybackClock.hpp"
-#include "core/timeline/PositionSolver.hpp"
 #include "core/util/Logger.hpp"
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
-#include <glm/gtc/type_ptr.hpp>
 #include <chrono>
 #include <cmath>
-#include <fstream>
+#include <cstdio>
 #include <thread>
 #include <vector>
 
-#ifdef __APPLE__
-#include <mach-o/dyld.h>
-#endif
-
-#ifdef __linux__
-#include <unistd.h>
-#include <limits.h>
-#endif
-
 namespace {
 
-struct Viewport { int x=0, y=0, w=0, h=0; };
-
-static std::string executableDirectory() {
-#ifdef __APPLE__
-    uint32_t size = 0;
-    _NSGetExecutablePath(nullptr, &size);
-    std::vector<char> buf(size > 0 ? size : 1);
-    if (_NSGetExecutablePath(buf.data(), &size) != 0) return {};
-    std::string dir(buf.data());
-    auto pos = dir.find_last_of('/');
-    if (pos != std::string::npos) dir = dir.substr(0, pos);
-    return dir;
-#elif defined(__linux__)
-    char buf[PATH_MAX];
-    ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-    if (len <= 0) return {};
-    buf[len] = '\0';
-    std::string dir(buf);
-    auto pos = dir.find_last_of('/');
-    if (pos != std::string::npos) dir = dir.substr(0, pos);
-    return dir;
-#else
-    return {};
-#endif
-}
-
-static bool fileExists(const std::string& path) {
-    std::ifstream f(path);
-    return f.good();
-}
-
-static std::string assetPath(const std::string& relative) {
-    std::vector<std::string> candidates;
-    candidates.push_back(relative);
-
-    const std::string exeDir = executableDirectory();
-    if (!exeDir.empty()) {
-        candidates.push_back(exeDir + "/" + relative);
-        auto dir = exeDir;
-        for (int i = 0; i < 3 && !dir.empty(); i++) {
-            const auto slash = dir.find_last_of("/\\");
-            if (slash == std::string::npos) { dir.clear(); break; }
-            dir = dir.substr(0, slash);
-        }
-        if (!dir.empty())
-            candidates.push_back(dir + "/" + relative);
-    }
-
-    for (const auto& c : candidates) {
-        if (fileExists(c)) return c;
-    }
-    return relative;
-}
-
-Viewport computeLetterbox(int fbW, int fbH, float targetAspect) {
-    float fbAspect = (float)fbW / (float)fbH;
-    Viewport vp;
-    if (targetAspect > fbAspect) {
-        vp.w = fbW; vp.h = (int)(fbW / targetAspect); vp.x = 0; vp.y = (fbH - vp.h) / 2;
-    } else {
-        vp.h = fbH; vp.w = (int)(fbH * targetAspect); vp.x = (fbW - vp.w) / 2; vp.y = 0;
-    }
-    return vp;
-}
-
+// Start playback from the given floor (used for Space-from-selected-tile).
 static void jumpToTile(Timeline& timeline, PlaybackClock& clock, AudioEngine& audio, HitsoundManager& hs,
                         const LevelData& level, int floor) {
     if (floor < 0 || floor >= (int)level.tiles.size()) return;
@@ -108,19 +32,9 @@ static void jumpToTile(Timeline& timeline, PlaybackClock& clock, AudioEngine& au
     else audio.play();
 }
 
-// Navigate camera to a tile without starting playback
-static void navigateToTile(const LevelData& level, int floor,
-                            Camera& camera, double& baseTX, double& baseTY,
-                            double& offX, double& offY, int& selTile) {
-    if (floor < 0 || floor >= (int)level.tiles.size()) return;
-    auto& t = level.tiles[floor];
-    camera.setTarget(t.position[0], t.position[1]);
-    baseTX = t.position[0]; baseTY = t.position[1];
-    offX = 0; offY = 0;
-    selTile = floor;
-}
-
 } // namespace
+
+GameWindow::~GameWindow() = default;
 
 bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     m_cfg = &cfg;
@@ -131,13 +45,6 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     m_audioEngine = &result.audio;
     m_targetAspect = (float)cfg.resolutionW / (float)cfg.resolutionH;
     LOG_D("GameWindow::init: %zu tiles, fullscreen=%d exclusive=%d", m_level->tiles.size(), cfg.fullscreen, cfg.exclusiveFullscreen);
-    m_tileVisEnabled = (m_level->settings.trackDisappearAnimation != "None" ||
-                        m_level->settings.trackAnimation != "None" ||
-                        !m_level->atStates.empty());
-    LOG_D("TrackVis: enabled=%d da=%s aa=%s atStates=%zu", m_tileVisEnabled,
-          m_level->settings.trackDisappearAnimation.c_str(),
-          m_level->settings.trackAnimation.c_str(),
-          m_level->atStates.size());
 
     // Create window
     m_exclusiveFullscreen = cfg.exclusiveFullscreen;
@@ -208,90 +115,62 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     const char* vendor = (const char*)glGetString(GL_VENDOR);
     const char* renderer = (const char*)glGetString(GL_RENDERER);
     LOG_D("GPU vendor=%s renderer=%s", vendor ? vendor : "?", renderer ? renderer : "?");
+    bool useAsyncBuild = false;
     if (vendor) {
         std::string v(vendor);
-        m_useAsyncBuild = (v.find("NVIDIA") != std::string::npos);
-    } else {
-        m_useAsyncBuild = false;
+        useAsyncBuild = (v.find("NVIDIA") != std::string::npos);
     }
-    LOG_D("Async build: %s", m_useAsyncBuild ? "ON" : "OFF (sync)");
+    LOG_D("Async build: %s", useAsyncBuild ? "ON" : "OFF (sync)");
 
     // Show window immediately so user sees it while heavy init runs
     glClearColor(0.12f, 0.12f, 0.14f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     glfwSwapBuffers(m_window);
 
-    // Shaders (heap-allocated, freed on destruction)
-    m_tileShader = new Shader();
-    m_planetShader = new Shader();
-    m_trailShader = new Shader();
-    m_highlightShader = new Shader();
-
-    auto compileShader = [](Shader& s, const char* vp, const char* fp, const char* vs, const char* fs) -> bool {
-        if (s.compileFile(vp, fp)) return true;
-        LOG_W("Shader file loading failed, using inline fallback");
-        return s.compile(vs, fs);
-    };
-    if (!compileShader(*m_tileShader, assetPath("shaders/tile.vert").c_str(), assetPath("shaders/tile.frag").c_str(), Shaders::kTileVertSrc, Shaders::kTileFragSrc)
-     || !compileShader(*m_planetShader, assetPath("shaders/planet.vert").c_str(), assetPath("shaders/planet.frag").c_str(), Shaders::kPlanetVertSrc, Shaders::kPlanetFragSrc)
-     || !compileShader(*m_trailShader, assetPath("shaders/trail.vert").c_str(), assetPath("shaders/trail.frag").c_str(), Shaders::kTrailVertSrc, Shaders::kTrailFragSrc)
-     || !compileShader(*m_highlightShader, assetPath("shaders/highlight.vert").c_str(), assetPath("shaders/highlight.frag").c_str(), Shaders::kHighlightVertSrc, Shaders::kHighlightFragSrc)) {
-        LOG_E("Shader compilation failed"); glfwDestroyWindow(m_window); return false;
+    // Scene: shaders / tile mesh / planets (heap objects freed by LevelScene)
+    m_scene = std::make_unique<LevelScene>();
+    if (!m_scene->init(cfg, *m_level)) {
+        // Shader compile failed; fall back strings are already exhausted
+        m_scene.reset();
+        glfwDestroyWindow(m_window);
+        return false;
     }
 
-    // Track
-    m_tileMesh = new TileMesh();
-
-    // Render-layer planets. The core timeline/clock only produce pure frame
-    // data; GameWindow owns the actual GL drawable Planet objects.
-    m_redPlanet = std::make_unique<Planet>(glm::vec3(1.0f, 0.0f, 0.0f), cfg.showTrail);
-    m_bluePlanet = std::make_unique<Planet>(glm::vec3(0.0f, 0.0f, 1.0f), cfg.showTrail);
-
-    if (m_useAsyncBuild) {
-        // Async: build on shared GL context in background thread
-        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-        glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
-        glfwWindowHint(GLFW_SAMPLES, 0);
-        m_sharedWindow = glfwCreateWindow(1, 1, "buildctx", nullptr, m_window);
-        if (m_sharedWindow) {
-            LOG_D("Spawning background mesh build thread");
-            m_buildFuture = std::async(std::launch::async, [this, &cfg]() {
-                glfwMakeContextCurrent(m_sharedWindow);
-                m_tileMesh->build(*m_level, cfg.trackFillColor, cfg.trackStrokeColor, cfg.legacyCulling);
-                if (m_redPlanet) {
-                    m_redPlanet->buildGPU();
-                    m_bluePlanet->buildGPU();
-                }
-                glfwMakeContextCurrent(nullptr);
-            });
-        } else {
-            LOG_W("Shared context creation failed, falling back to sync build");
-            m_useAsyncBuild = false;
-        }
-    }
-
-    if (!m_useAsyncBuild) {
-        // Sync: build on main thread (window already visible)
-        m_tileMesh->build(*m_level, cfg.trackFillColor, cfg.trackStrokeColor, cfg.legacyCulling);
-        std::vector<double>().swap(m_level->angleData);
-        m_level->tileBPMs.clear(); m_level->tileBPMs.shrink_to_fit();
-        m_level->tileHasTwirl.clear(); m_level->tileHasTwirl.shrink_to_fit();
-        m_level->tileHasSetSpeed.clear(); m_level->tileHasSetSpeed.shrink_to_fit();
-        if (m_redPlanet) { m_redPlanet->buildGPU(); m_bluePlanet->buildGPU(); }
-        m_meshReady = true;
-    }
     // Camera + background
     {
         std::string hex = cfg.backgroundColor;
         if (hex.length()>=6) { unsigned r,g,b; sscanf(hex.c_str(),"%02x%02x%02x",&r,&g,&b);
             m_bgR=r/255.0f; m_bgG=g/255.0f; m_bgB=b/255.0f; }
     }
+    m_camCtrl.attach(m_camera);
     m_camera.setZoom(m_level->settings.zoom);
-    if (!m_level->tiles.empty()) { auto& t = m_level->tiles[0];
-        m_camera.setTarget(t.position[0], t.position[1]);
-        m_input.baseTargetX = t.position[0]; m_input.baseTargetY = t.position[1];
+    if (!m_level->tiles.empty()) {
+        auto& t = m_level->tiles[0];
+        m_camCtrl.snapTo(t.position[0], t.position[1]);
     }
-    m_input.camera = &m_camera;
+
+    // Mesh build: async on a shared GL context (NVIDIA), sync otherwise
+    if (useAsyncBuild) {
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+        glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+        glfwWindowHint(GLFW_SAMPLES, 0);
+        m_sharedWindow = glfwCreateWindow(1, 1, "buildctx", nullptr, m_window);
+        if (m_sharedWindow) {
+            LOG_D("Spawning background mesh build thread");
+            if (!m_scene->beginAsyncBuild(*m_level, m_sharedWindow)) {
+                LOG_W("Async build failed to start, falling back to sync build");
+                glfwDestroyWindow(m_sharedWindow);
+                m_sharedWindow = nullptr;
+            }
+        } else {
+            LOG_W("Shared context creation failed, falling back to sync build");
+        }
+    }
+    if (!m_sharedWindow) {
+        // Sync: build on main thread (window already visible)
+        m_scene->buildSync(*m_level);
+        releaseMeshTemporaries();
+    }
 
     // Hitsound attach
     if (m_hitsoundMgr->isSynthesized()) {
@@ -300,26 +179,20 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
             m_hitsoundMgr->cursor(), m_hitsoundMgr->playing());
     }
 
-    // Input callbacks
-    glfwSetWindowUserPointer(m_window, &m_input);
+    // Input callbacks → CameraController (pan/zoom/click state)
+    glfwSetWindowUserPointer(m_window, &m_camCtrl);
     glfwSetMouseButtonCallback(m_window, [](GLFWwindow* w, int b, int a, int) {
-        auto* in = static_cast<Input*>(glfwGetWindowUserPointer(w));
-        if (b == GLFW_MOUSE_BUTTON_LEFT) {
-            if (a == GLFW_PRESS) { in->dragActive=true; in->dragStartX=in->cursorX; in->dragStartY=in->cursorY; }
-            else { double dx=in->cursorX-in->dragStartX, dy=in->cursorY-in->dragStartY;
-                in->dragActive=false; in->baseTargetX+=in->offsetX; in->baseTargetY+=in->offsetY;
-                in->offsetX=0; in->offsetY=0; if (dx*dx+dy*dy < 25.0) in->justClicked = true; }
-        }
+        auto* ctrl = static_cast<CameraController*>(glfwGetWindowUserPointer(w));
+        if (b == GLFW_MOUSE_BUTTON_LEFT)
+            ctrl->onMouseButton(a == GLFW_PRESS);
     });
     glfwSetCursorPosCallback(m_window, [](GLFWwindow* w, double x, double y) {
-        auto* in = static_cast<Input*>(glfwGetWindowUserPointer(w)); in->cursorX=x; in->cursorY=y;
+        auto* ctrl = static_cast<CameraController*>(glfwGetWindowUserPointer(w));
+        ctrl->onCursorPos(x, y);
     });
     glfwSetScrollCallback(m_window, [](GLFWwindow* w, double, double dy) {
-        auto* in = static_cast<Input*>(glfwGetWindowUserPointer(w));
-        float minZoom = ADOCAO_MIN_ZOOM, maxZoom = 1000.0f;
-        float z = in->camera->zoom() * (1.0f + (float)dy * 0.1f);
-        if (z<minZoom)z=minZoom; if (z>maxZoom)z=maxZoom;
-        in->camera->setZoom(z);
+        auto* ctrl = static_cast<CameraController*>(glfwGetWindowUserPointer(w));
+        ctrl->onScroll(dy);
     });
 
     glEnable(GL_DEPTH_TEST);
@@ -328,6 +201,13 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     m_lastFrameTime = glfwGetTime();
     m_autoPlayTriggerTime = glfwGetTime() + (cfg.autoPlay ? 0.5 : 999999.0);
     return true;
+}
+
+void GameWindow::navigateToTile(int floor) {
+    if (floor < 0 || floor >= (int)m_level->tiles.size()) return;
+    auto& t = m_level->tiles[floor];
+    m_camCtrl.snapTo(t.position[0], t.position[1]);
+    m_selectedTile = floor;
 }
 
 void GameWindow::handleInput() {
@@ -351,16 +231,10 @@ void GameWindow::handleInput() {
     if (spacePressed && !m_wasSpacePressed) {
         m_autoPlayTriggerTime = 999999.0;
         if (!m_playback->isPlaying()) {
-            float offsetSec = m_level->settings.offset / 1000.0f;
-            if (m_input.selectedTile >= 0) {
-                double targetTime = m_timeline->tileStartTimes()[m_input.selectedTile];
-                float audioPos = (float)(targetTime + offsetSec);
-                if (audioPos < 0) audioPos = 0;
-                m_playback->startAt(glfwGetTime(), audioPos, offsetSec);
-                m_hitsoundMgr->resetAt(audioPos);
-                if (m_audioEngine->hasMusic()) { m_audioEngine->seek(audioPos); m_audioEngine->play(); }
-                else m_audioEngine->play();
-                m_input.selectedTile = -1;
+            if (m_selectedTile >= 0) {
+                int startFloor = m_selectedTile;
+                m_selectedTile = -1;
+                jumpToTile(*m_timeline, *m_playback, *m_audioEngine, *m_hitsoundMgr, *m_level, startFloor);
             } else {
                 m_playback->start(glfwGetTime());
                 m_hitsoundMgr->resetAt(0);
@@ -371,30 +245,21 @@ void GameWindow::handleInput() {
     m_wasSpacePressed = spacePressed;
 
     // Click-to-select tile (only when stopped)
-    if (!m_playback->isPlaying() && m_input.justClicked) {
-        m_input.justClicked = false;
-        int fbW, fbH, winW, winH;
+    if (!m_playback->isPlaying() && m_camCtrl.consumeClick()) {
+        int fbW, fbH;
         glfwGetFramebufferSize(m_window, &fbW, &fbH);
-        glfwGetWindowSize(m_window, &winW, &winH);
-        Viewport vp2 = computeLetterbox(fbW, fbH, m_targetAspect);
-        double halfH = 6.0/(m_camera.zoom()/100.0);
-        double halfW = halfH*(double)vp2.w/(double)vp2.h;
-        double pxToWorldX = (2.0*halfW)/(double)vp2.w;
-        double pxToWorldY = (2.0*halfH)/(double)vp2.h;
-        double worldX = m_camera.targetX() + (m_input.cursorX - vp2.x)*pxToWorldX - halfW;
-        double worldY = m_camera.targetY() - (m_input.cursorY - vp2.y)*pxToWorldY + halfH;
+        glm::dvec2 world = m_camCtrl.screenToWorld(m_camCtrl.cursorX(), m_camCtrl.cursorY(),
+                                                   fbW, fbH, m_targetAspect);
 
         int best = -1; double bestDist = 1.0;
         for (int i = 0; i < (int)m_level->tiles.size()-1; i++) {
-            double dx = m_level->tiles[i].position[0] - worldX;
-            double dy = m_level->tiles[i].position[1] - worldY;
+            double dx = m_level->tiles[i].position[0] - world.x;
+            double dy = m_level->tiles[i].position[1] - world.y;
             double d = dx*dx + dy*dy;
             if (d < bestDist*bestDist) { bestDist = std::sqrt(d); best = i; }
         }
-        m_input.selectedTile = best;
-        if (best >= 0) navigateToTile(*m_level, best, m_camera,
-            m_input.baseTargetX, m_input.baseTargetY,
-            m_input.offsetX, m_input.offsetY, m_input.selectedTile);
+        if (best >= 0) navigateToTile(best);
+        else m_selectedTile = -1;
     }
 
     // Bookmark navigation: Ctrl+Left/Right with long-press repeat (only when stopped)
@@ -406,10 +271,10 @@ void GameWindow::handleInput() {
               && (glfwGetKey(m_window,GLFW_KEY_RIGHT)==GLFW_PRESS);
         double now = glfwGetTime();
         auto jumpBM = [&](bool left) {
-            int cur=m_input.selectedTile, target=-1;
+            int cur=m_selectedTile, target=-1;
             if (left) { for (int b : m_level->bookmarkFloors) { if (b<cur) target=b; else break; } }
             else      { for (int b : m_level->bookmarkFloors) { if (b>cur) { target=b; break; } } }
-            if (target>=0) navigateToTile(*m_level,target,m_camera,m_input.baseTargetX,m_input.baseTargetY,m_input.offsetX,m_input.offsetY,m_input.selectedTile);
+            if (target>=0) navigateToTile(target);
         };
         if (bmL) {
             if (bmLHoldStart == 0) { bmLHoldStart = now; jumpBM(true); }
@@ -424,7 +289,7 @@ void GameWindow::handleInput() {
     // Arrow key tile navigation: long-press with 0.5s initial delay (only when stopped, tile selected, Ctrl NOT held)
     bool ctrlHeld = (glfwGetKey(m_window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
                  || (glfwGetKey(m_window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS);
-    if (!m_playback->isPlaying() && m_input.selectedTile >= 0 && !ctrlHeld) {
+    if (!m_playback->isPlaying() && m_selectedTile >= 0 && !ctrlHeld) {
         static double arrowHoldStart = 0;
         bool al=(glfwGetKey(m_window,GLFW_KEY_LEFT)==GLFW_PRESS);
         bool ar=(glfwGetKey(m_window,GLFW_KEY_RIGHT)==GLFW_PRESS);
@@ -435,11 +300,9 @@ void GameWindow::handleInput() {
             if (firstPress) arrowHoldStart = now;
             bool move = firstPress || (now - arrowHoldStart >= 0.5);
             if (move) {
-                if (al && m_input.selectedTile > 0) m_input.selectedTile--;
-                if (ar && m_input.selectedTile < tn - 1) m_input.selectedTile++;
-                navigateToTile(*m_level, m_input.selectedTile, m_camera,
-                    m_input.baseTargetX, m_input.baseTargetY,
-                    m_input.offsetX, m_input.offsetY, m_input.selectedTile);
+                if (al && m_selectedTile > 0) m_selectedTile--;
+                if (ar && m_selectedTile < tn - 1) m_selectedTile++;
+                navigateToTile(m_selectedTile);
             }
         } else {
             arrowHoldStart = 0;
@@ -468,7 +331,7 @@ void GameWindow::update(float) {
     }
 
     if (m_playback->isPlaying()) {
-        applyPlaybackFrame();
+        m_scene->applyFrame(m_playback->frame(), *m_timeline);
     }
 
     // Camera follow during playback
@@ -476,65 +339,20 @@ void GameWindow::update(float) {
         int tileIdx = m_playback->currentTileIndex();
         if (tileIdx >= 0 && tileIdx < (int)m_level->tiles.size()) {
             auto& p = m_level->tiles[tileIdx].position;
-            m_camera.setTarget(p[0], p[1]);
-            m_input.baseTargetX = p[0]; m_input.baseTargetY = p[1];
-            m_input.offsetX = 0; m_input.offsetY = 0;
+            m_camCtrl.snapTo(p[0], p[1]);
         }
     }
 
-    // Drag (only when not playing)
-    if (!m_playback->isPlaying() && m_input.dragActive) {
-        int fbW, fbH, winW, winH;
-        glfwGetFramebufferSize(m_window, &fbW, &fbH);
-        glfwGetWindowSize(m_window, &winW, &winH);
-        Viewport vp = computeLetterbox(fbW, fbH, m_targetAspect);
-        if (vp.w>0 && vp.h>0) {
-            double halfH = 6.0/(m_camera.zoom()/100.0);
-            double halfW = halfH*(double)vp.w/(double)vp.h;
-            double pxToWorldX = (2.0*halfW)/(double)vp.w;
-            double pxToWorldY = (2.0*halfH)/(double)vp.h;
-            m_input.offsetX = -(m_input.cursorX - m_input.dragStartX)*pxToWorldX;
-            m_input.offsetY =  (m_input.cursorY - m_input.dragStartY)*pxToWorldY;
-        }
-    }
-    if (!m_playback->isPlaying()) {
-        m_camera.setTarget(m_input.baseTargetX + m_input.offsetX, m_input.baseTargetY + m_input.offsetY);
-    }
-}
-
-void GameWindow::applyPlaybackFrame() {
-    if (!m_redPlanet || !m_bluePlanet || !m_playback) return;
-
-    const auto& frame = m_playback->frame();
-    m_redPlanet->position = glm::vec3((float)frame.redPosition.x, (float)frame.redPosition.y, 9.5f);
-    m_bluePlanet->position = glm::vec3((float)frame.bluePosition.x, (float)frame.bluePosition.y, 9.5f);
-
-    if (!m_cfg->showTrail || !m_redPlanet->trail || !m_bluePlanet->trail) return;
-
-    std::vector<glm::dvec2> redPts, bluePts;
-    PositionSolver::sampleTrail(*m_timeline, frame.timeInLevel,
-                                m_cfg->trailDuration, m_cfg->trailSampleRate,
-                                frame.redPosition, frame.bluePosition,
-                                redPts, bluePts);
-    if (redPts.empty() || bluePts.empty()) return;
-
-    const int maxPoints = (int)std::ceil(m_cfg->trailDuration * m_cfg->trailSampleRate) + 1;
-    std::vector<double> redXY(redPts.size() * 2), blueXY(bluePts.size() * 2);
-    for (size_t i = 0; i < redPts.size(); i++) {
-        redXY[i*2] = redPts[i].x;
-        redXY[i*2+1] = redPts[i].y;
-        blueXY[i*2] = bluePts[i].x;
-        blueXY[i*2+1] = bluePts[i].y;
-    }
-    m_redPlanet->setTrailPoints(redXY.data(), (int)redPts.size(), maxPoints);
-    m_bluePlanet->setTrailPoints(blueXY.data(), (int)bluePts.size(), maxPoints);
+    // Pan/drag (only when not playing)
+    int fbW, fbH;
+    glfwGetFramebufferSize(m_window, &fbW, &fbH);
+    m_camCtrl.update(fbW, fbH, m_targetAspect, !m_playback->isPlaying());
 }
 
 void GameWindow::render() {
-    int fbW, fbH, winW, winH;
+    int fbW, fbH;
     glfwGetFramebufferSize(m_window, &fbW, &fbH);
-    glfwGetWindowSize(m_window, &winW, &winH);
-    Viewport vp = computeLetterbox(fbW, fbH, m_targetAspect);
+    LetterboxedViewport vp = computeLetterbox(fbW, fbH, m_targetAspect);
 
     glViewport(0, 0, fbW, fbH);
     glClearColor(0, 0, 0, 1); glClear(GL_COLOR_BUFFER_BIT);
@@ -548,71 +366,9 @@ void GameWindow::render() {
 
     m_camera.setAspect((float)vp.w, (float)vp.h);
 
-    // Track disappear animation: per-tile check in delta range
-    if (m_tileVisEnabled) {
-        const auto& dt = m_timeline->tileDisappearTimes();
-        const auto& at = m_timeline->tileAppearTimes();
-        int n = (int)dt.size();
-        if (n > 0 && m_playback->isPlaying()) {
-            double t = m_playback->timeInLevel();
-            // Find approximate range: last tile with finite disappearTime <= t
-            int lo = 0, hi = n - 1, rangeEnd = -1;
-            while (lo <= hi) {
-                int m = (lo + hi) / 2;
-                if (dt[m] <= t) { rangeEnd = m; lo = m + 1; }
-                else hi = m - 1;
-            }
-            if (rangeEnd != m_lastHiddenEnd) {
-                int start = std::min(m_lastHiddenEnd, rangeEnd) + 1;
-                int end   = std::max(m_lastHiddenEnd, rangeEnd);
-                for (int i = start; i <= end; i++) {
-                    bool hide = (dt[i] <= t) || (at[i] > t);
-                    m_tileMesh->updateVisibleRange(i, i, !hide);
-                }
-                m_tileMesh->setVisibleThreshold(rangeEnd);
-                m_lastHiddenEnd = rangeEnd;
-            }
-            if (rangeEnd >= 0) m_sgVisibleLatch = true;
-        }
-        // On pause/stop: restore all hidden tiles to visible
-        if (!m_playback->isPlaying() && m_sgVisibleLatch) {
-            m_tileMesh->updateVisibleRange(0, std::max(0, m_lastHiddenEnd), true);
-            m_tileMesh->setVisibleThreshold(-1);
-            m_lastHiddenEnd = -1;
-            m_sgVisibleLatch = false;
-        }
-    }
-
-    // Tiles
-    m_tileShader->use();
-    m_tileShader->setMat4("uVP", glm::value_ptr(m_camera.viewProj()));
-    float vl, vr, vb, vt; m_camera.frustumBounds(vl, vr, vb, vt);
-    m_tileMesh->draw(vl, vr, vb, vt, m_camera.targetX(), m_camera.targetY());
-
-    // Trails
-    if (m_cfg->showTrail && m_playback->isPlaying() && m_redPlanet && m_redPlanet->trail) {
-        m_redPlanet->trail->draw(*m_trailShader, m_camera, m_camera.targetX(), m_camera.targetY());
-        m_bluePlanet->trail->draw(*m_trailShader, m_camera, m_camera.targetX(), m_camera.targetY());
-    }
-
-    // Planets
-    if (m_playback->isPlaying() && m_redPlanet && m_redPlanet->gpuBuilt()) {
-        m_redPlanet->draw(*m_planetShader, m_camera, m_camera.targetX(), m_camera.targetY());
-        m_bluePlanet->draw(*m_planetShader, m_camera, m_camera.targetX(), m_camera.targetY());
-    }
-
-    // Icons
-    m_tileShader->use();
-    m_tileMesh->drawIcons(vl, vr, vb, vt, m_camera.targetX(), m_camera.targetY());
-
-    // Highlight
-    if (!m_playback->isPlaying() && m_input.selectedTile >= 0) {
-        glDisable(GL_DEPTH_TEST);
-        m_highlightShader->use();
-        m_highlightShader->setMat4("uVP", glm::value_ptr(m_camera.viewProj()));
-        m_tileMesh->drawHighlightedTile(m_input.selectedTile, m_camera.targetX(), m_camera.targetY());
-        glEnable(GL_DEPTH_TEST);
-    }
+    bool playing = m_playback->isPlaying();
+    m_scene->render(m_camera, *m_timeline, playing, m_playback->timeInLevel(),
+                    playing ? -1 : m_selectedTile);
 
     glfwSwapBuffers(m_window);
 }
@@ -643,6 +399,13 @@ void GameWindow::toggleFullscreen() {
     }
 }
 
+void GameWindow::releaseMeshTemporaries() {
+    std::vector<double>().swap(m_level->angleData);
+    m_level->tileBPMs.clear(); m_level->tileBPMs.shrink_to_fit();
+    m_level->tileHasTwirl.clear(); m_level->tileHasTwirl.shrink_to_fit();
+    m_level->tileHasSetSpeed.clear(); m_level->tileHasSetSpeed.shrink_to_fit();
+}
+
 void GameWindow::run() {
     double targetFrameTime = 1.0 / 320.0;
 
@@ -651,18 +414,11 @@ void GameWindow::run() {
         handleInput();
 
         // Check async build completion (NVIDIA/AMD only)
-        if (!m_meshReady && m_buildFuture.valid()) {
-            if (m_buildFuture.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-                m_buildFuture.get();
-                m_meshReady = true;
-                if (m_sharedWindow) {
-                    glfwDestroyWindow(m_sharedWindow);
-                    m_sharedWindow = nullptr;
-                }
-                std::vector<double>().swap(m_level->angleData);
-                m_level->tileBPMs.clear(); m_level->tileBPMs.shrink_to_fit();
-                m_level->tileHasTwirl.clear(); m_level->tileHasTwirl.shrink_to_fit();
-                m_level->tileHasSetSpeed.clear(); m_level->tileHasSetSpeed.shrink_to_fit();
+        if (!m_scene->meshReady() && m_sharedWindow) {
+            if (m_scene->pollAsyncBuild()) {
+                glfwDestroyWindow(m_sharedWindow);
+                m_sharedWindow = nullptr;
+                releaseMeshTemporaries();
                 LOG_D("Async mesh build complete");
             }
         }
@@ -682,7 +438,7 @@ void GameWindow::run() {
         if (deltaMs > 500.0f) deltaMs = 0.0f;
         else if (deltaMs > 100.0f) deltaMs = 100.0f;
 
-        if (m_meshReady) {
+        if (m_scene->meshReady()) {
             update(deltaMs);
             render();
         } else {
@@ -697,12 +453,8 @@ void GameWindow::run() {
     }
 
     m_audioEngine->shutdown();
-    // Cleanup heap-allocated objects
-    delete m_tileMesh;
-    delete m_tileShader;
-    delete m_planetShader;
-    delete m_trailShader;
-    delete m_highlightShader;
+    // Cleanup GL objects while the context is still current
+    m_scene.reset();
     glfwDestroyWindow(m_window);
 }
 

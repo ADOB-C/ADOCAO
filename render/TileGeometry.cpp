@@ -1,7 +1,5 @@
 #include "TileGeometry.hpp"
 
-Scratch g_sc;
-
 void pushType(std::vector<float>& c, float type, int n) {
     for (int i = 0; i < n; i++) c.push_back(type);
 }

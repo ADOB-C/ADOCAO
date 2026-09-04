@@ -67,6 +67,7 @@
 
 ### 架构
 - [x] GameWindow 重构为类（init/update/render 分离）
+- [x] P1-P5 结构重构：P1+P2 目录搬迁+CMake 拆库；P3 PlaybackEngine → core/timeline；P4 app 拆分（CameraController/LevelScene + wizard 分页）；P5 资产并入 assets/ + g_sc 清理（见 docs/project-structure.md）
 - [x] dirty check 跳过静止帧 GPU 上传（已回退：导致静止帧黑屏）
 - [x] Spatial grid 加速大关卡剔除（已回退：queryGrid 从未接入 draw，复杂度和 O(n) 遍历无差距）
 

@@ -2,7 +2,9 @@
 
 > 状态：**定稿 v4**——§9 全部决策已拍板并回填正文。本版修订（决策 10）：Easing 与 Camera 同目录、
 > TileGeometry CPU 版废弃改 GLSL、`core/geometry` 取消。
-> 代码进度：P1+P2 已完成（目录搬迁 + CMake 拆库）；P3 已完成（PlaybackEngine → core/timeline）。下一步 P4（app 拆分）。
+> 代码进度：**P1–P5 全部完成** —— P1+P2（目录搬迁 + CMake 拆库）、P3（PlaybackEngine → `core/timeline`）、
+> P4（app 拆分：GameWindow → CameraController/LevelScene；LauncherWindow → `app/wizard/` 分页，见 §4.2/4.3）、
+> P5（资产并入 `assets/` + `g_sc` 清理 + 文档/CI 同步，见 §7）。
 > 目标读者：ADOCAO 维护者。
 > 
 > 背景需求（来自维护者）：
@@ -56,11 +58,19 @@ CMake：单一根 `CMakeLists.txt`（352 行），一个 `add_executable(adocao)
    - `game/PlaybackEngine.hpp` include 了 `audio/HitsoundManager.hpp`（触发打拍音只需时间戳数据，不需要管理器类）。
 6. **全局可变 scratch**：`track/TileGeometry.hpp` 里 `extern Scratch g_sc`（全局复用缓冲），
    目前单线程内安全，但属于"隐式共享状态"，多线程化（并行 mesh 构建）时是隐患。
+
+   > ✅ **P5 已清理**：删除全局 `g_sc`，调用方（`render/TileMesh.cpp`）改用函数局部 `Scratch`，
+   > 为将来并行 mesh 构建扫清障碍（TileGeometry 本身仍是决策 10 的过渡文件，几何 GLSL 化后整文件删除）。
 7. **资产路径分散在 4 处**（若将来移动 `hitsounds/`、`shaders/` 必须同步）：
    - `app/GameWindow.cpp:167-170` — 4 个 `"shaders/*.vert/frag"` 相对 CWD 的路径串；
    - `audio/HitsoundManager.cpp:61-73` — `findAssetsDir()`：Windows 取 exe 旁 `hitsounds/`，否则 CWD 相对；
    - 根 `CMakeLists.txt:317-325` — POST_BUILD 拷贝两目录到 build 根；
    - `.github/workflows/release.yml:46` — `Compress-Archive -Path hitsounds,shaders`。
+
+   > ✅ **P5 已解决（2026-09）**：资产并入 `assets/` 后四处同步为：
+   > `app/LevelScene.cpp` 的 `compileShaders()`（"assets/shaders/…"）、`audio/HitsoundManager.cpp` 的
+   > `findAssetsDir()`（"assets/hitsounds/…"）、`app/CMakeLists.txt` POST_BUILD（拷贝到
+   > `build/assets/{hitsounds,shaders}`）、`.github/workflows/release.yml`（`zip -r ADOCAO-data.zip ../assets`）。
 8. **文档漂移**：`AGENTS.md`/`README.md` 曾残留 GPU compute culling 等已移除功能的描述（2.0.0 起已不需要，现已彻底清理）与不全的 CLI 标志表；重构完成后仍需统一核对目录命名等描述。
 
 ### 1.3 现状依赖图（真实 include 关系，已抽掉标准库）
@@ -128,12 +138,22 @@ ADOCAO/
 ├── app/                        # ★ 可执行 adocao（唯一 exe 目标；依赖所有库 + glfw/imgui/tinyfiledialogs）
 │   ├── CMakeLists.txt
 │   ├── main.cpp / Application.hpp/.cpp
-│   ├── LauncherWindow.hpp/.cpp        # 772 行 → 阶段 4 按向导页拆分
+│   ├── LauncherWindow.hpp/.cpp        # 向导壳：窗口/GL/ImGui 生命周期 + 分页调度（95 行，P4 收窄）
 │   ├── LoadingWindow.hpp/.cpp
-│   ├── LevelLoader.hpp/.cpp
-│   └── GameWindow.hpp/.cpp            # 607 行 → 阶段 4 拆输入/相机控制/渲染编排
+│   ├── LevelLoader.hpp/.cpp           # 解析+音频胶水；头文件已前置声明瘦身（P4）
+│   ├── GameWindow.hpp/.cpp            # 主循环骨架：窗口/输入/音乐↔时钟同步/渲染编排（464 行，P4 收窄）
+│   ├── CameraController.hpp/.cpp      # ★ P4：拖拽平移/滚轮缩放/点击/屏幕↔世界换算状态机
+│   ├── LevelScene.hpp/.cpp            # ★ P4：shader/TileMesh/Planet/轨迹/高亮/图标 + 可见性动画编排
+│   └── wizard/                        # ★ P4：LauncherWindow 向导分页（一页一文件）
+│       ├── WizardState.hpp            # 页面枚举 + 跨页共享编辑状态 + 选项表
+│       ├── WizardChrome.hpp/.cpp      # 向导窗口/ImGui 引导 + 配置页公共 chrome（进度条/Next/Start）
+│       ├── FileDialogs.hpp/.cpp       # 文件/文件夹对话框（Win32 COM / tinyfd）+ 音乐自动检测
+│       ├── PageWelcome.cpp            # Welcome 页 + 预加载线程启动 + Export
+│       ├── PagePreload.cpp            # Preload 过渡页（后台 parse+timeline 进度）
+│       ├── PageHitsounds.cpp / PageGraphics.cpp / PageVisuals.cpp
+│       └── PageMusic.cpp              # Music 页 + Start（提交全部配置）
 │
-├── assets/                     # ★ 运行时资产（已决策：由 shaders/、hitsounds/ 并入，P5 执行）
+├── assets/                     # ★ 运行时资产（P5 已执行：shaders/、hitsounds/ 并入）
 │   ├── shaders/                # ← shaders/（.vert/.frag，运行时相对 CWD 加载）
 │   └── hitsounds/              # ← hitsounds/（27 个 WAV）
 ├── docs/                       # 架构/规划文档（本文件）
@@ -175,8 +195,8 @@ ADOCAO/
 | --------------------------- | ----------------------------------------------------------------------- | ----------------------------- |
 | `app/main.cpp`              | `app/main.cpp`                                                          | 保留（CLI 解析属入口职责）               |
 | `app/Application.*`         | `app/Application.*`                                                     | 保留                            |
-| `app/GameWindow.*`          | `app/GameWindow.*`                                                      | 保留，阶段 4 内部分拆                  |
-| `app/LauncherWindow.*`      | `app/LauncherWindow.*`                                                  | 保留，阶段 4 分页拆分                  |
+| `app/GameWindow.*`          | `app/GameWindow.*`（拆出 `CameraController.*`、`LevelScene.*`，P4 已执行）               | 保留 + 内部分拆                  |
+| `app/LauncherWindow.*`      | `app/LauncherWindow.*`（页面拆入 `app/wizard/`，P4 已执行）                              | 保留 + 向导分页拆分                  |
 | `app/LoadingWindow.*`       | `app/LoadingWindow.*`                                                   | 保留                            |
 | `app/LevelLoader.*`         | `app/LevelLoader.*`                                                     | 保留（胶水层，依赖 core+audio+render）  |
 | `glad/gl_core.*`            | `glad/gl_core.*`                                                        | 位置不变，独立 STATIC 目标             |
@@ -198,7 +218,7 @@ ADOCAO/
 | `util/ThreadPool.*`         | `core/util/ThreadPool.*`                                                | git mv                        |
 | `util/DataFile.*`           | `core/util/DataFile.*`                                                  | git mv（含 miniz 依赖，随库走）        |
 | `util/Easing.hpp`           | `render/Easing.hpp`（与 `Camera.*` 同目录）                                   | git mv（Camera 是唯一使用方）         |
-| `hitsounds/` `shaders/`     | `assets/hitsounds/`、`assets/shaders/`                                   | P5 执行并入（同步 §1.2-7 四处路径）       |
+| `hitsounds/` `shaders/`     | `assets/hitsounds/`、`assets/shaders/`                                   | ✅ P5 已执行并入（四处路径已同步，见 §1.2-7）       |
 
 include 约定：以仓库根为 include 根（与现状一致），新路径为
 `#include "core/level/LevelData.hpp"`、`#include "render/TileMesh.hpp"`、`#include "core/timeline/Timeline.hpp"`。
@@ -220,30 +240,36 @@ include 约定：以仓库根为 include 根（与现状一致），新路径为
 关键解耦点：删掉 `PlaybackEngine.hpp` 对 `Planet.hpp` 与 `HitsoundManager.hpp` 的 include——
 timeline 层只输出 `double`/`dvec2` 与时间戳结构，行星的 GL 外观与打拍音的播放全部由上层消费。
 
-### 4.2 `app/GameWindow.cpp`（607 行）
+### 4.2 `app/GameWindow.cpp`（607 行 → P4 已执行）
 
 | 新文件                         | 职责                                                         |
 | --------------------------- | ---------------------------------------------------------- |
-| `GameWindow.cpp`（收窄）        | 主循环骨架：init/run/update/render 编排、窗口/全屏、音乐与 PlaybackClock 同步 |
-| `CameraController.hpp/.cpp` | 拖拽平移、滚轮缩放、边界处理（现 `GameWindow::Input` 与 handleInput 中相机部分）  |
-| `LevelScene.hpp/.cpp`（可选）   | 把 TileMesh/Planet/轨迹/高亮/图标的创建与逐帧绘制集中，GameWindow 只调用它       |
+| `GameWindow.cpp`（收窄，464 行） | 主循环骨架：窗口/GL 上下文、init/run/update/render 编排、音乐与 PlaybackClock 同步 |
+| `CameraController.hpp/.cpp`（~100 行） | 拖拽平移、滚轮缩放、点击检测、屏幕↔世界换算（原 `GameWindow::Input` 与 handleInput 中相机部分；纯状态机，可单测） |
+| `LevelScene.hpp/.cpp`（~290 行）   | TileMesh/Planet/轨迹/高亮/图标的创建与逐帧绘制 + 轨道出现/消失动画状态，GameWindow 只调用它 |
 
-### 4.3 `app/LauncherWindow.cpp`（772 行）
+GameWindow 内剩下的成员职责：LevelScene（GL 对象，异步 build 轮询）、CameraController、
+窗口/全屏切换、键盘播放控制（Space/书签/方向键）、点击选中 tile（命中测试由 GameWindow 做，
+坐标换算由 CameraController 提供）。
 
-按 5.0.0 向导分页拆分，每页一个自包含 `drawXxxPage()`：
+### 4.3 `app/LauncherWindow.cpp`（772 行 → P4 已执行）
+
+按向导实际页面拆成每页一个文件（页面枚举 + 跨页状态集中在 WizardState）：
 
 ```
 app/wizard/
-├── WizardState.hpp          # 页面枚举 + 跨页共享的 LauncherConfig 编辑状态
-├── PageWelcome.cpp          # Welcome → Hitsounds → Graphics → Visuals → Music → Start
-├── PageHitsounds.cpp
-├── PageGraphics.cpp
-├── PageVisuals.cpp
-├── PageMusic.cpp
-└── PageStart.cpp
+├── WizardState.hpp          # 页面枚举（Welcome/Preload/Hitsounds/Graphics/Visuals/Music）+ State + 选项表
+├── WizardChrome.hpp/.cpp    # 窗口/GL/ImGui 引导（原 LauncherWindow init）+ 配置页公共 chrome
+├── FileDialogs.hpp/.cpp     # openFileDialog/selectFolderDialog（Win32 COM/tinyfd）+ detectMusicFile
+├── PageWelcome.cpp          # Welcome → (Preload 后台线程) → Hitsounds；Export 出口
+├── PagePreload.cpp          # Preload 过渡页（进度条，线程完成后由调度循环推进）
+├── PageHitsounds.cpp / PageGraphics.cpp / PageVisuals.cpp
+└── PageMusic.cpp            # Music 页 + Start 按钮（提交全部配置 → done）
 ```
 
-（LauncherWindow.cpp 保留窗口生命周期与分页调度，~150 行。）
+（LauncherWindow.cpp 保留窗口生命周期与分页调度，~95 行。与蓝图差异：真实向导没有独立
+「Start 页」——Start 是 Music 页底部的提交按钮；「Preload」是 Welcome 与 Hitsounds 之间
+的过渡页，单独成文件。原 §1.2-4 的大文件混杂问题已消除。）
 
 ### 4.4 其余大文件（可选 / 后续）
 
@@ -344,8 +370,8 @@ target_link_libraries(adocao PRIVATE adocao_core adocao_render adocao_audio adoc
 | **P1 目录搬迁**     | 按 §3 映射逐层 `git mv`；批量修正 include 前缀与根 CMakeLists 的 SOURCES 路径；**先不拆文件、不拆库**                                       | `build.sh`/CI 三平台绿；CLI 与向导冒烟                                |
 | **P2 CMake 拆库** | core/render/audio/glad/app 各自 STATIC 目标 + `target_link_libraries`；根 CMakeLists 瘦身                                | 同上；故意去掉一条链接应编译失败（验证边界生效）                                    |
 | **P3 core 化**   | `PlaybackEngine` 按 §4.1 拆为 `core/timeline/*`；Planet 移 `render/`；GameWindow 改为消费纯数据帧；**消灭 core→GL 的一切引用**         | `grep -r "glad\|GLFW\|imgui" core/` 为空；播放/跳转/书签/轨迹/导出行为逐项一致 |
-| **P4 app 拆分**   | GameWindow 拆 CameraController 等（§4.2）；LauncherWindow 向导分页（§4.3）；头文件 include 卫生（前置声明，重 include 移 .cpp）            | 同上 + 向导逐页可用                                                 |
-| **P5 资产与收尾**    | 资产并入 `assets/`（已决策；§1.2-7 四处同步改）；`g_sc` 清理项评估；TODO.md/AGENTS.md/README 与结构同步；可加一条 CI job 或脚本检查"core 无违规 include" | 文档与代码一致                                                     |
+| **P4 app 拆分**   | GameWindow 拆 CameraController 等（§4.2）；LauncherWindow 向导分页（§4.3）；头文件 include 卫生（前置声明，重 include 移 .cpp）            | ✅ 已完成（commit `d9e447c`）；编译 + CLI/向导冒烟通过，逐页可用                 |
+| **P5 资产与收尾**    | 资产并入 `assets/`（已决策；§1.2-7 四处同步改）；`g_sc` 清理项评估；TODO.md/AGENTS.md/README 与结构同步；可加一条 CI job 或脚本检查"core 无违规 include" | ✅ 已完成；资产四处已同步；`g_sc` 全局 scratch 已改局部实例（见 §4.4 备注）；`scripts/check-core-purity.sh` 已加并在 build.yml linux job 运行；文档与代码一致 |
 
 提交节奏（决策 5）：**P1 + P2 合并为一个 commit**（同为机械重构，互相验证），P3、P4、P5 各自独立 commit，便于 bisect / 回滚。
 

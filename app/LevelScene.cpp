@@ -33,8 +33,8 @@
 
 namespace {
 
-// Shader assets live in "shaders/" relative to the working directory, the
-// executable directory or up to 3 parent directories above it (Finder
+// Shader assets live in "assets/shaders/" relative to the working directory,
+// the executable directory or up to 3 parent directories above it (Finder
 // launches / .app bundles / nested build dirs).
 static std::string executableDirectory() {
 #ifdef __APPLE__
@@ -109,10 +109,10 @@ bool LevelScene::compileShaders() {
         return s.compile(vs, fs);
     };
 
-    if (!compileShader(*m_tileShader, assetPath("shaders/tile.vert").c_str(), assetPath("shaders/tile.frag").c_str(), Shaders::kTileVertSrc, Shaders::kTileFragSrc)
-     || !compileShader(*m_planetShader, assetPath("shaders/planet.vert").c_str(), assetPath("shaders/planet.frag").c_str(), Shaders::kPlanetVertSrc, Shaders::kPlanetFragSrc)
-     || !compileShader(*m_trailShader, assetPath("shaders/trail.vert").c_str(), assetPath("shaders/trail.frag").c_str(), Shaders::kTrailVertSrc, Shaders::kTrailFragSrc)
-     || !compileShader(*m_highlightShader, assetPath("shaders/highlight.vert").c_str(), assetPath("shaders/highlight.frag").c_str(), Shaders::kHighlightVertSrc, Shaders::kHighlightFragSrc)) {
+    if (!compileShader(*m_tileShader, assetPath("assets/shaders/tile.vert").c_str(), assetPath("assets/shaders/tile.frag").c_str(), Shaders::kTileVertSrc, Shaders::kTileFragSrc)
+     || !compileShader(*m_planetShader, assetPath("assets/shaders/planet.vert").c_str(), assetPath("assets/shaders/planet.frag").c_str(), Shaders::kPlanetVertSrc, Shaders::kPlanetFragSrc)
+     || !compileShader(*m_trailShader, assetPath("assets/shaders/trail.vert").c_str(), assetPath("assets/shaders/trail.frag").c_str(), Shaders::kTrailVertSrc, Shaders::kTrailFragSrc)
+     || !compileShader(*m_highlightShader, assetPath("assets/shaders/highlight.vert").c_str(), assetPath("assets/shaders/highlight.frag").c_str(), Shaders::kHighlightVertSrc, Shaders::kHighlightFragSrc)) {
         LOG_E("Shader compilation failed");
         return false;
     }

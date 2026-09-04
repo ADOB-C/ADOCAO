@@ -68,6 +68,9 @@ jobs:
             libwayland-dev libxkbcommon-dev libgl-dev \
             libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
 
+      - name: Check core purity
+        run: scripts/check-core-purity.sh
+
       - name: Configure
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release

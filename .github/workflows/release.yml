@@ -75,7 +75,7 @@ jobs:
 
       - name: Package data
         run: |
-          cd build && zip -r ADOCAO-data.zip ../hitsounds ../shaders
+          cd build && zip -r ADOCAO-data.zip ../assets
 
       - name: Upload assets
         uses: softprops/action-gh-release@v2

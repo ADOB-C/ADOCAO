@@ -112,13 +112,14 @@ static std::string findAssetsDir() {
 
     // Prefer CWD-relative hitsounds for command-line usage from the repo/build
     // root, then fall back to the executable directory (Finder / desktop launches).
+    // Assets live in "assets/hitsounds/" (see docs/project-structure.md §2).
     std::vector<std::string> candidates;
 #ifdef _WIN32
-    if (!exeDir.empty()) candidates.push_back(exeDir + "/hitsounds/");
+    if (!exeDir.empty()) candidates.push_back(exeDir + "/assets/hitsounds/");
 #else
-    candidates.push_back("hitsounds/");
+    candidates.push_back("assets/hitsounds/");
     if (!exeDir.empty()) {
-        candidates.push_back(exeDir + "/hitsounds/");
+        candidates.push_back(exeDir + "/assets/hitsounds/");
 
         // If the binary is in a nested build subdirectory (e.g. build/app or
         // build/ADOCAO.app/Contents/MacOS), also look above it for assets
@@ -130,7 +131,7 @@ static std::string findAssetsDir() {
             dir = dir.substr(0, slash);
         }
         if (!dir.empty())
-            candidates.push_back(dir + "/hitsounds/");
+            candidates.push_back(dir + "/assets/hitsounds/");
     }
 #endif
 
@@ -139,7 +140,7 @@ static std::string findAssetsDir() {
             return dir;
     }
 
-    return candidates.empty() ? "hitsounds/" : candidates.front();
+    return candidates.empty() ? "assets/hitsounds/" : candidates.front();
 }
 
 HitsoundManager::HitsoundManager() = default;

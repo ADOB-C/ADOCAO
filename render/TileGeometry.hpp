@@ -3,7 +3,9 @@
 #include <vector>
 #include <cmath>
 
-// Scratch buffer for geometry generation
+// Scratch buffer for geometry generation (owned by the caller — was a global
+// `extern Scratch g_sc` before P5; local instances make future parallel mesh
+// builds safe).
 struct Scratch {
     std::vector<float> verts;      // local xyz
     std::vector<float> types;      // 0.0=stroke, 1.0=fill per vertex
@@ -11,8 +13,6 @@ struct Scratch {
 
     void clear() { verts.clear(); types.clear(); indices.clear(); }
 };
-
-extern Scratch g_sc;
 
 // Constants matching re_adojas
 constexpr float TILE_WIDTH = 0.275f;

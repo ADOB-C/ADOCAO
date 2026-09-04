@@ -115,15 +115,15 @@ endif()
 # ---- Install ----
 install(TARGETS adocao RUNTIME DESTINATION bin)
 
-# ---- Copy hitsounds, shaders, and MinGW DLLs to build directory ----
+# ---- Copy assets (hitsounds, shaders) and MinGW DLLs to build directory ----
 add_custom_command(TARGET adocao POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-    "${PROJECT_SOURCE_DIR}/hitsounds"
-    "${PROJECT_BINARY_DIR}/hitsounds"
+    "${PROJECT_SOURCE_DIR}/assets/hitsounds"
+    "${PROJECT_BINARY_DIR}/assets/hitsounds"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-    "${PROJECT_SOURCE_DIR}/shaders"
-    "${PROJECT_BINARY_DIR}/shaders"
-    COMMENT "Copying hitsounds and shaders to build directory"
+    "${PROJECT_SOURCE_DIR}/assets/shaders"
+    "${PROJECT_BINARY_DIR}/assets/shaders"
+    COMMENT "Copying assets (hitsounds, shaders) to build directory"
 )
 
 # Copy MinGW runtime DLLs next to EXE

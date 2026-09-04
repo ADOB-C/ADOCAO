@@ -5,7 +5,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 导航（先读这里，省 token）
 
 - 目标结构蓝图 + 已拍板决策 1–10：`docs/project-structure.md`
-  ✅ P1+P2 已执行（目录搬迁 + CMake 拆库）；P3 已执行（PlaybackEngine → core/timeline）；P4/P5 待做
+  ✅ P1–P5 全部完成：目录搬迁+CMake 拆库（P1+P2）→ PlaybackEngine 拆 core/timeline（P3）→
+  app 拆分（P4：GameWindow → `app/CameraController`/`app/LevelScene`，LauncherWindow → `app/wizard/` 分页）
+  → 资产并入 `assets/` + g_sc 清理 + 文档/CI 同步（P5）
+- 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 待办（已筛选）：`TODO.md`（未完成 9 条 + 遥远的未来：MoveTrack）
 - 已彻底删除：GPU compute culling（2.0.0 起不需要，勿再引入）
 - 脚本：`scripts/push-ci.sh`（push → gh run watch；`--watch` 默认输出平台耗时/产物）
@@ -94,7 +97,7 @@ OpenGL world space: X right, Y up. View matrix always at origin — camera-relat
 ## Rendering
 
 ### Shader files
-GLSL source in `shaders/` directory — loaded from files at runtime via `Shader::compileFile()`. Embedded fallback strings remain in `render/Shaders.hpp`.
+GLSL source in `assets/shaders/` — loaded from files at runtime via `Shader::compileFile()` (asset lookup: CWD → exe dir → up to 3 parents, see `app/LevelScene.cpp`). Hitsound WAVs live in `assets/hitsounds/` (`audio/HitsoundManager.cpp::findAssetsDir`). Embedded fallback strings remain in `render/Shaders.hpp`.
 
 ### Z-depth render order
 Tiles and icons use depth test ON with per-instance Z values encoding far-to-near order. Ortho far plane reduced to 200 for depth precision (~755K steps, supports 7M-tile levels). Z allocation:

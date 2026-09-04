@@ -116,19 +116,24 @@ Without `--level`, falls through to the ImGui launcher.
 
 ## Project Structure
 
+Libraries are directories: each has its own `CMakeLists.txt` STATIC target and the
+dependency direction is enforced by `target_link_libraries`. `core/` is the pure-logic
+layer (no GL/window/audio-device) and may be exported/reused by other engines.
+
 ```
-app/         Application layer (windows, launcher, game loop)
-audio/       Music playback + hitsound synthesis (miniaudio)
-camera/      Orthographic camera with frustum culling
-game/        Planet rendering + playback engine
-glad/        OpenGL 4.3 Core loader (custom minimal loader)
-level/       .adofai parser + JSON cleaner
-render/      Shader programs + planet trail rendering
-shaders/     GLSL shader source files (.vert / .frag)
-track/       Tile mesh generation + instanced rendering
-util/        Logger + easing functions
-hitsounds/   27 hit sound .wav files
+core/        Pure logic: level/ (.adofai parser), timeline/ (Timeline/PositionSolver/PlaybackClock), util/
+render/      GL rendering: Shader, TileMesh, Planet (+trail), Camera, TileGeometry (transitional)
+audio/       Music playback + hitsound synthesis (miniaudio; core::timeline timestamps in)
+glad/        OpenGL 4.3 Core loader (custom minimal loader, own STATIC target)
+app/         Executable (adocao): main/Application, GameWindow (+ CameraController/LevelScene), launcher
+app/wizard/  Launcher wizard pages (one file per page) + shared wizard state/chrome
+assets/      Runtime assets: assets/shaders/ (.vert/.frag), assets/hitsounds/ (27 .wav files)
+docs/        Architecture blueprint & phase decisions (project-structure.md)
+scripts/     Build/dev pipeline helpers + core-purity check
 ```
+
+Build/run the binary from the repo or build root (assets are resolved relative to the
+working directory, the executable directory, or up to 3 parents above it).
 
 ## Controls
 

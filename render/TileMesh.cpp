@@ -140,7 +140,8 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex, co
     LOG_D("TileMesh::build: %zu unique shapes", shapeGroups.size());
 
     // Split large groups to avoid huge contiguous allocations (e.g. 7M tiles)
-    Scratch& sc=g_sc;
+    // Local scratch: geometry generation is single-threaded per build.
+    Scratch sc;
     // Count total groups after splitting
     size_t totalGroups = 0;
     for (auto& [key, tileIndices] : shapeGroups) {
@@ -361,7 +362,7 @@ void TileMesh::buildIcons(const LevelData& level) {
         if(hs&&i>0&&i<(int)level.tileBPMs.size()){float r=level.tileBPMs[i]/level.tileBPMs[i-1];
             if(r>1.05f||r<0.95f){int ci=(r>1.05f)?1:2;float zo=kIconZBase+(ht?kIconZExtra:(kIconZBase*0.5f));cg[ci].push_back({i,tz+zo});}}
     }
-    const float* cs[3]={TC,SUC,SDC}; Scratch& sc=g_sc; sc.clear();
+    const float* cs[3]={TC,SUC,SDC}; Scratch sc; sc.clear();
     createCircle(0,0,IR,1.0f,sc,IS); size_t vc=sc.verts.size()/3;
     std::vector<float> sv;sv.reserve(vc*4);
     for(size_t vi=0;vi<vc;vi++){sv.push_back(sc.verts[vi*3]);sv.push_back(sc.verts[vi*3+1]);sv.push_back(sc.verts[vi*3+2]);sv.push_back(sc.types[vi]);}

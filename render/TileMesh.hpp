@@ -83,6 +83,15 @@ private:
     std::vector<std::vector<uint8_t>> m_sgVisible;    // per-group, per-instance visibility (1=vis)
     std::vector<std::vector<uint8_t>> m_sgIconVisible; // same for icons
 
+    // CSR icon index: icon instances bucketed by their tile. m_iconEntryFirst is
+    // size (nTiles+1); icons of tile t are m_iconEntries[first[t] .. first[t+1]).
+    // Each entry packs (iconGroupIndex << 20) | localInstanceIndex.
+    // Lets updateVisibleRange() flip only icons on the affected tiles instead of
+    // scanning every icon group (was O(totalIcons) per changed tile, which froze
+    // playback on huge charts like 6.7M tiles / 3M twirl icons).
+    std::vector<uint32_t> m_iconEntryFirst;
+    std::vector<uint32_t> m_iconEntries;
+
     void destroy();
     void buildIcons(const LevelData& level);
     static unsigned int hexToUInt(const std::string& hex);

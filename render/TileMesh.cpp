@@ -73,6 +73,7 @@ void TileMesh::destroy() {
     for(auto& s:m_iconGroups){if(s.instVbo)glDeleteBuffers(1,&s.instVbo);if(s.colorVbo)glDeleteBuffers(1,&s.colorVbo);
     if(s.ebo)glDeleteBuffers(1,&s.ebo);if(s.vbo)glDeleteBuffers(1,&s.vbo);if(s.vao)glDeleteVertexArrays(1,&s.vao);freeSoA(s);}
     m_iconGroups.clear(); m_sgIconTileIndices.clear();
+    m_iconEntryFirst.clear(); m_iconEntries.clear();
 }
 bool TileMesh::empty() const { return m_shapes.empty(); }
 
@@ -105,12 +106,20 @@ void TileMesh::updateVisibleRange(int startTile, int endTile, bool visible) {
         if (inst < 0 || inst >= (int)m_sgVisible[sg].size()) continue;
         m_sgVisible[sg][inst] = v;
     }
-    // Also update icon visibility
-    for (size_t si = 0; si < m_sgIconTileIndices.size(); si++) {
-        auto& ti = m_sgIconTileIndices[si];
-        auto& vi = m_sgIconVisible[si];
-        for (size_t k = 0; k < ti.size(); k++) {
-            if (ti[k] >= startTile && ti[k] <= endTile) vi[k] = v;
+    // Icons via the per-tile CSR index: touch only icons on the affected tiles
+    // (was a full scan of every icon group per changed tile).
+    if (!m_iconEntries.empty()) {
+        const size_t cap = m_iconEntryFirst.size();
+        for (int i = startTile; i <= endTile; i++) {
+            size_t t = (size_t)i;
+            if (t + 1 >= cap) break;
+            uint32_t lo = m_iconEntryFirst[t], hi = m_iconEntryFirst[t + 1];
+            for (uint32_t e = lo; e < hi; e++) {
+                uint32_t h = m_iconEntries[e];
+                uint32_t g = h >> 20, inst = h & 0xFFFFFu;
+                if (g < m_sgIconVisible.size() && inst < m_sgIconVisible[g].size())
+                    m_sgIconVisible[g][inst] = v;
+            }
         }
     }
     // Note: caller should call setVisibleThreshold(lastHidden) once after all
@@ -367,12 +376,15 @@ void TileMesh::buildIcons(const LevelData& level) {
     std::vector<float> sv;sv.reserve(vc*4);
     for(size_t vi=0;vi<vc;vi++){sv.push_back(sc.verts[vi*3]);sv.push_back(sc.verts[vi*3+1]);sv.push_back(sc.verts[vi*3+2]);sv.push_back(sc.types[vi]);}
     unsigned sic=(unsigned)sc.indices.size(); double il=-(double)IR,iL=(double)IR;
+    std::vector<uint64_t> iconTmp;
+    iconTmp.reserve((size_t)cg[0].size() + cg[1].size() + cg[2].size());
     for(int ci=0;ci<3;ci++){if(cg[ci].empty())continue; auto& gr=cg[ci];
         float cr=cs[ci][0],cgv=cs[ci][1],cb=cs[ci][2]; size_t total=gr.size();
         // Split icon groups like tile groups
         for(size_t subStart=0;subStart<total;subStart+=MAX_INSTANCES_PER_GROUP){
             size_t subEnd=std::min(subStart+MAX_INSTANCES_PER_GROUP,total);
             size_t cnt=subEnd-subStart;
+            uint32_t g = (uint32_t)m_iconGroups.size();   // final index of this subgroup
             ShapeGroup sg; sg.indexCount=sic; sg.fillIndexCount=sic;
             if (!m_legacyCulling) allocSoA(sg,cnt);
             if (m_legacyCulling) sg.instances.reserve(cnt);
@@ -380,6 +392,8 @@ void TileMesh::buildIcons(const LevelData& level) {
             double gmx=1e99,gmy=1e99,gMx=-1e99,gMy=-1e99;
             for(size_t k=subStart;k<subEnd;k++){double wx=tiles[gr[k].ti].position[0],wy=tiles[gr[k].ti].position[1];float wz=gr[k].zo;
                 size_t local=k-subStart;
+                iconTmp.push_back(((uint64_t)(uint32_t)gr[k].ti << 32) |
+                                  ((uint64_t)g << 20) | (uint32_t)local);
                 ip.push_back((float)wx);ip.push_back((float)wy);ip.push_back(wz);
                 ic.push_back(cr);ic.push_back(cgv);ic.push_back(cb);ic.push_back(cr);ic.push_back(cgv);ic.push_back(cb);ic.push_back(1);
                 double mx=wx+il,my=wy+il,Mx=wx+iL,My=wy+iL;
@@ -405,6 +419,28 @@ void TileMesh::buildIcons(const LevelData& level) {
             glEnableVertexAttribArray(5);glVertexAttribPointer(5,1,GL_FLOAT,GL_FALSE,cst,(void*)(6*sizeof(float)));glVertexAttribDivisor(5,1);
             { std::vector<int> ti; ti.reserve(cnt); for(size_t k=subStart;k<subEnd;k++) ti.push_back(gr[k].ti); m_sgIconTileIndices.push_back(std::move(ti)); }
             glBindVertexArray(0);m_iconGroups.push_back(std::move(sg));
+        }
+    }
+    // CSR bucket icon instances by tile (counting sort on the tile id).
+    if (iconTmp.empty()) {
+        m_iconEntryFirst.clear();
+        m_iconEntries.clear();
+    } else {
+        m_iconEntryFirst.assign((size_t)n + 1, 0);
+        for (uint64_t e : iconTmp)
+            m_iconEntryFirst[(uint32_t)(e >> 32)]++;
+        uint32_t acc = 0;
+        for (uint32_t i = 0; i < (uint32_t)n; i++) {
+            uint32_t c = m_iconEntryFirst[i];
+            m_iconEntryFirst[i] = acc;
+            acc += c;
+        }
+        m_iconEntryFirst[(size_t)n] = acc;
+        std::vector<uint32_t> cur = m_iconEntryFirst;   // cursor per tile
+        m_iconEntries.assign(acc, 0);
+        for (uint64_t e : iconTmp) {
+            uint32_t t = (uint32_t)(e >> 32);
+            m_iconEntries[cur[t]++] = (uint32_t)(e & 0xFFFFFFFFu);
         }
     }
     m_iconVisCaches.resize(m_iconGroups.size());

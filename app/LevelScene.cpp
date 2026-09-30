@@ -126,6 +126,11 @@ bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level) {
     m_showTrail = cfg.showTrail;
     m_trailDuration = cfg.trailDuration;
     m_trailSampleRate = cfg.trailSampleRate;
+    m_trailAdaptive = cfg.trailAdaptive;
+    m_trailTargetFps = cfg.trailTargetFps;
+    m_trailRateMin = cfg.trailRateMin;
+    m_trailRateMax = cfg.trailRateMax;
+    if (m_trailRateMax < m_trailRateMin) m_trailRateMax = m_trailRateMin;
 
     m_tileVisEnabled = (level.settings.trackDisappearAnimation != "None" ||
                         level.settings.trackAnimation != "None" ||
@@ -183,6 +188,31 @@ bool LevelScene::pollAsyncBuild() {
         return true;
     }
     return false;
+}
+
+void LevelScene::setMeasuredFrameMs(double workMs) {
+    if (workMs <= 0.0) return;
+    m_trailEmaMs = (m_trailEmaMs <= 0.0) ? workMs : m_trailEmaMs * 0.85 + workMs * 0.15;
+    if (!m_trailAdaptive) return;
+
+    // Governor: try to keep the whole frame under 1000/trailTargetFps ms and
+    // spend the leftover budget on a higher trail sample rate. Drop hard when
+    // over budget, raise only with headroom, clamp to [min, max].
+    const double budgetMs = 1000.0 / std::max(1.0, (double)m_trailTargetFps);
+    const double ema = m_trailEmaMs;
+    double target = m_trailSampleRate;
+    if (ema > budgetMs) {
+        target = (double)m_trailSampleRate * (budgetMs * 0.9 / ema);
+        if (target < (double)m_trailSampleRate * 0.25)   // shed at most 75%/frame
+            target = (double)m_trailSampleRate * 0.25;
+    } else if (ema < budgetMs * 0.85) {
+        target = (double)m_trailSampleRate * (budgetMs * 0.85 / ema);
+        if (target > (double)m_trailSampleRate * 1.5)    // grow at most +50%/frame
+            target = (double)m_trailSampleRate * 1.5;
+    }
+    target = std::clamp(target, (double)m_trailRateMin, (double)m_trailRateMax);
+    m_trailSampleRate = (float)std::floor(target + 0.5);
+    if (m_trailSampleRate < 1.0f) m_trailSampleRate = 1.0f;
 }
 
 void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline) {

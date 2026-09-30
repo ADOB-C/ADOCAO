@@ -44,7 +44,10 @@ int main(int argc, char* argv[]) {
         else if (strcmp(argv[i], "--no-exclusive") == 0)   cli.exclusiveFullscreen = false;
         else if (strcmp(argv[i], "--no-trail") == 0)              cli.showTrail = false;
         else if (strcmp(argv[i], "--trail-duration") == 0 && i+1<argc) cli.trailDuration = (float)atof(argv[++i]);
-        else if (strcmp(argv[i], "--trail-sample-rate") == 0 && i+1<argc) cli.trailSampleRate = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--trail-sample-rate") == 0 && i+1<argc) { cli.trailSampleRate = (float)atof(argv[++i]); cli.trailAdaptive = false; } // explicit = fixed
+        else if (strcmp(argv[i], "--trail-target-fps") == 0 && i+1<argc) { cli.trailTargetFps = (float)atof(argv[++i]); cli.trailAdaptive = true; }
+        else if (strcmp(argv[i], "--trail-rate-min") == 0 && i+1<argc) cli.trailRateMin = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--trail-rate-max") == 0 && i+1<argc) cli.trailRateMax = (float)atof(argv[++i]);
         else if (strcmp(argv[i], "--export") == 0)                cli.exportHitsounds = true;
     }
 

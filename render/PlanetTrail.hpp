@@ -37,6 +37,7 @@ private:
     glm::vec3 m_color;
 
     mutable GLuint m_vao = 0, m_vbo = 0, m_ebo = 0;
+    mutable int m_gpuMaxPoints = 0;  // GL buffers sized for this many ring points
     mutable unsigned m_vertexCount = 0, m_indexCount = 0;
     mutable bool m_dirty = false;
 

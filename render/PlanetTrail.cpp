@@ -23,8 +23,10 @@ PlanetTrail::PlanetTrail(PlanetTrail&& o) noexcept
       m_center(o.m_center), m_maxPoints(o.m_maxPoints),
       m_planetRadius(o.m_planetRadius),
       m_color(o.m_color), m_vao(o.m_vao), m_vbo(o.m_vbo), m_ebo(o.m_ebo),
+      m_gpuMaxPoints(o.m_gpuMaxPoints),
       m_vertexCount(o.m_vertexCount), m_indexCount(o.m_indexCount), m_dirty(o.m_dirty) {
     o.m_vao = o.m_vbo = o.m_ebo = 0;
+    o.m_gpuMaxPoints = 0;
     o.m_vertexCount = o.m_indexCount = 0;
 }
 
@@ -39,9 +41,11 @@ PlanetTrail& PlanetTrail::operator=(PlanetTrail&& o) noexcept {
         m_planetRadius = o.m_planetRadius;
         m_color = o.m_color;
         m_vao = o.m_vao; m_vbo = o.m_vbo; m_ebo = o.m_ebo;
+        m_gpuMaxPoints = o.m_gpuMaxPoints;
         m_vertexCount = o.m_vertexCount; m_indexCount = o.m_indexCount;
         m_dirty = o.m_dirty;
         o.m_vao = o.m_vbo = o.m_ebo = 0;
+        o.m_gpuMaxPoints = 0;
         o.m_vertexCount = o.m_indexCount = 0;
     }
     return *this;
@@ -125,19 +129,28 @@ void PlanetTrail::setPoints(const double* xy, int count, int maxExpected) {
 }
 
 void PlanetTrail::ensureGPUResources() const {
-    if (m_vao != 0) return;
-    glGenVertexArrays(1, &m_vao); glBindVertexArray(m_vao);
+    if (m_maxPoints < 2) return;
+    if (m_vao == 0) glGenVertexArrays(1, &m_vao);
+    if (m_maxPoints <= m_gpuMaxPoints) return;   // already sized for this ring
+
+    // (Re)allocate VBO/EBO for the current ring capacity. The sample rate is
+    // adaptive, so m_maxPoints can grow between frames — buffers must follow,
+    // otherwise glBufferSubData would write past the allocation.
     constexpr int segsPerPoint = 4;
     int maxSegments = (m_maxPoints - 1) * segsPerPoint;
     int maxVerts = (maxSegments + 1) * 2;
     int maxIndices = maxSegments * 6;
+    glBindVertexArray(m_vao);
+    if (m_vbo) glDeleteBuffers(1, &m_vbo);
     glGenBuffers(1, &m_vbo); glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(GL_ARRAY_BUFFER, maxVerts * 3 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)maxVerts * 3 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    if (m_ebo) glDeleteBuffers(1, &m_ebo);
     glGenBuffers(1, &m_ebo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, maxIndices * sizeof(unsigned), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)maxIndices * sizeof(unsigned), nullptr, GL_DYNAMIC_DRAW);
     glBindVertexArray(0);
+    m_gpuMaxPoints = m_maxPoints;
 }
 
 void PlanetTrail::rebuildGeometry() {

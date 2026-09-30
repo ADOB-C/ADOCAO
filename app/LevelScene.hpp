@@ -53,6 +53,10 @@ public:
     // (call only while playing).
     void applyFrame(const PlaybackFrame& frame, const Timeline& timeline);
 
+    // GameWindow reports the measured work time (ms, excluding vsync/sleep) of
+    // the previous frame. Used by the trail sample-rate governor.
+    void setMeasuredFrameMs(double workMs);
+
     // Draw the whole scene into the current viewport using the given camera.
     // highlightTile: selected tile index to outline, or -1 for none (only
     // drawn while stopped).
@@ -81,6 +85,12 @@ private:
     bool m_showTrail = true;
     float m_trailDuration = 0.4f;
     float m_trailSampleRate = 200.0f;
+    // Trail sample-rate governor (see setMeasuredFrameMs)
+    bool m_trailAdaptive = true;
+    float m_trailTargetFps = 120.0f;
+    float m_trailRateMin = 60.0f;
+    float m_trailRateMax = 4000.0f;
+    double m_trailEmaMs = 0.0;
 
     // Track appear/disappear animation state
     bool m_tileVisEnabled = false;

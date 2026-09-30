@@ -26,7 +26,11 @@ struct LauncherConfig {
     bool fullscreen = false;
     bool showTrail = true;
     float trailDuration = 0.4f;    // seconds of trail history
-    float trailSampleRate = 200.0f; // samples per second
+    float trailSampleRate = 200.0f; // samples per second (fixed, or the starting rate when adaptive)
+    bool trailAdaptive = true;     // budget-driven adaptive trail sample rate
+    float trailTargetFps = 120.0f; // adaptive: keep at least this FPS before raising the rate
+    float trailRateMin = 60.0f;    // adaptive lower bound (samples per second)
+    float trailRateMax = 4000.0f;  // adaptive upper bound (samples per second)
     bool exportHitsounds = false;
     std::string exportDir;         // hitsound export directory (defaults to level dir)
     bool cancelled = false;

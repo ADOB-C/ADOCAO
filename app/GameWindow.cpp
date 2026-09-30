@@ -404,8 +404,8 @@ void GameWindow::render() {
     bool playing = m_playback->isPlaying();
     m_scene->render(m_camera, *m_timeline, playing, m_playback->timeInLevel(),
                     playing ? -1 : m_selectedTile);
-
-    glfwSwapBuffers(m_window);
+    // (glfwSwapBuffers is called by run() so it can time the work separately
+    // from the vsync/pacing wait.)
 }
 
 void GameWindow::toggleFullscreen() {
@@ -474,8 +474,14 @@ void GameWindow::run() {
         else if (deltaMs > 100.0f) deltaMs = 100.0f;
 
         if (m_scene->meshReady()) {
+            // Time the real work (update+render, excluding the vsync wait) so
+            // the scene can auto-tune the trail sample rate.
+            double t0 = glfwGetTime();
             update(deltaMs);
             render();
+            double workMs = (glfwGetTime() - t0) * 1000.0;
+            m_scene->setMeasuredFrameMs(workMs);
+            glfwSwapBuffers(m_window);
         } else {
             // Still building async: show background color, keep responsive
             int fbW, fbH;

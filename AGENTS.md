@@ -61,7 +61,14 @@ adocao.exe --level <file> --music <file> [--width N] [--height N]
            [--force-hitsound [TYPE]] [--auto-play] [--export] [--legacy-culling]
            [--msaa N] [--exclusive | --no-exclusive]
            [--trail-duration SEC] [--trail-sample-rate N]
+           [--trail-target-fps N] [--trail-rate-min N] [--trail-rate-max N]
 ```
+
+Trail sample rate is **adaptive by default**: the app measures real frame work
+and raises the rate (up to `--trail-rate-max`, default 4000) whenever frames
+fit under `1000/--trail-target-fps` ms, shedding toward `--trail-rate-min`
+(default 60) when frames get too expensive. An explicit `--trail-sample-rate N`
+(or setting the rate in the wizard) pins a fixed rate instead.
 
 Without `--level`, falls through to the ImGui launcher.
 

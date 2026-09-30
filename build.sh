@@ -14,14 +14,14 @@ CYAN='\033[0;36m'; DIM='\033[2m';  NC='\033[0m'
 
 # ── Compiler detection ──────────────────────────────────────────
 detect_compiler() {
-    if command -v g++ &>/dev/null; then
+    if command -v g++ &>/dev/null && command -v gcc &>/dev/null; then
         CXX="$(command -v g++)"; CC="$(command -v gcc)"
-        echo "G++ (GCC)"
-    elif command -v clang++ &>/dev/null; then
+        CXX_KIND="G++ (GCC)"
+    elif command -v clang++ &>/dev/null && command -v clang &>/dev/null; then
         CXX="$(command -v clang++)"; CC="$(command -v clang)"
-        echo "Clang++"
+        CXX_KIND="Clang++"
     else
-        echo ""
+        CXX_KIND=""
     fi
 }
 
@@ -75,9 +75,9 @@ cd build
 
 if [ "$INCREMENTAL" = false ]; then
     # ── 完整流程：编译器检测 / 交互提问 / configure ──
-    CXX_KIND=$(detect_compiler)
+    detect_compiler
     if [[ -z "$CXX_KIND" ]]; then
-        echo -e "${RED}ERROR: No compiler found (g++ or clang++).${NC}"
+        echo -e "${RED}ERROR: No compiler found (g++/gcc or clang++/clang).${NC}"
         exit 1
     fi
     echo -ne "Compiler detected: "; echo -e "${GREEN}$CXX_KIND${NC}"

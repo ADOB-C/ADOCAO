@@ -441,6 +441,14 @@ void LevelData::processActions() {
     }
 
     std::sort(bookmarkFloors.begin(), bookmarkFloors.end());
+
+    // Viewer convenience: tile 0 and the final tile are always jump targets,
+    // even when the chart defines no Bookmark events (Ctrl+←/→ while stopped).
+    bookmarkFloors.push_back(0);
+    if (n > 1) bookmarkFloors.push_back(n - 1);
+    std::sort(bookmarkFloors.begin(), bookmarkFloors.end());
+    bookmarkFloors.erase(std::unique(bookmarkFloors.begin(), bookmarkFloors.end()),
+                         bookmarkFloors.end());
 }
 
 void LevelData::applyPositionTrackOffsets() {

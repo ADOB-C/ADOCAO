@@ -26,10 +26,26 @@ static void jumpToTile(Timeline& timeline, PlaybackClock& clock, AudioEngine& au
     float offsetSec = level.settings.offset / 1000.0f;
     float audioPos = (float)(targetTime + offsetSec);
     if (audioPos < 0) audioPos = 0;
-    clock.startAt(glfwGetTime(), audioPos, offsetSec);
-    hs.resetAt(audioPos);
-    if (audio.hasMusic()) { audio.seek(audioPos); audio.play(); }
-    else audio.play();
+
+    const bool hasMusic = audio.hasMusic();
+    const float musicDur = hasMusic ? audio.duration() : 0.0f;
+    if (hasMusic && audioPos < musicDur) {
+        // Start in the middle of the song: seek the music there and let it drive
+        // the clock (audio-visual sync).
+        clock.startAt(glfwGetTime(), audioPos, offsetSec);
+        hs.resetAt(audioPos);
+        audio.seek(audioPos);
+        audio.play();
+    } else {
+        // No music, or the target tile lies past the end of the song (charts may
+        // have content beyond the audio). Play the level silently on the wall
+        // clock. Seeking past EOF must be avoided: miniaudio silently restarts
+        // from 0 while the clock would claim a huge time, so the song would play
+        // from the beginning against a level that thinks it is hours in.
+        clock.startAt(glfwGetTime(), audioPos, offsetSec);
+        hs.resetAt(audioPos);
+        if (!hasMusic && audio.isPlaying()) audio.pause();
+    }
 }
 
 } // namespace
@@ -262,19 +278,39 @@ void GameWindow::handleInput() {
         else m_selectedTile = -1;
     }
 
-    // Bookmark navigation: Ctrl+Left/Right with long-press repeat (only when stopped)
+    // Bookmark navigation: Ctrl+Left/Right with long-press repeat (only when stopped).
+    // macOS reserves Ctrl+←/→ for Mission Control space switching (events never
+    // reach the app), so on Apple platforms ⌘(Command)+←/→ works too.
+    bool navMod = (glfwGetKey(m_window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
+               || (glfwGetKey(m_window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS);
+#ifdef __APPLE__
+    navMod = navMod || (glfwGetKey(m_window, GLFW_KEY_LEFT_SUPER) == GLFW_PRESS)
+                    || (glfwGetKey(m_window, GLFW_KEY_RIGHT_SUPER) == GLFW_PRESS);
+#endif
     if (!m_playback->isPlaying() && !m_level->bookmarkFloors.empty()) {
         static double bmLHoldStart = 0, bmRHoldStart = 0;
-        bool bmL=(glfwGetKey(m_window,GLFW_KEY_LEFT_CONTROL)==GLFW_PRESS || glfwGetKey(m_window,GLFW_KEY_RIGHT_CONTROL)==GLFW_PRESS)
-              && (glfwGetKey(m_window,GLFW_KEY_LEFT)==GLFW_PRESS);
-        bool bmR=(glfwGetKey(m_window,GLFW_KEY_LEFT_CONTROL)==GLFW_PRESS || glfwGetKey(m_window,GLFW_KEY_RIGHT_CONTROL)==GLFW_PRESS)
-              && (glfwGetKey(m_window,GLFW_KEY_RIGHT)==GLFW_PRESS);
+        bool bmL = navMod && (glfwGetKey(m_window, GLFW_KEY_LEFT) == GLFW_PRESS);
+        bool bmR = navMod && (glfwGetKey(m_window, GLFW_KEY_RIGHT) == GLFW_PRESS);
         double now = glfwGetTime();
         auto jumpBM = [&](bool left) {
-            int cur=m_selectedTile, target=-1;
-            if (left) { for (int b : m_level->bookmarkFloors) { if (b<cur) target=b; else break; } }
-            else      { for (int b : m_level->bookmarkFloors) { if (b>cur) { target=b; break; } } }
-            if (target>=0) navigateToTile(target);
+            int cur = m_selectedTile;
+            if (cur < 0) {
+                // No tile selected: anchor on the tile nearest the view centre.
+                double cx = m_camera.targetX(), cy = m_camera.targetY();
+                double bestD = -1.0;
+                int nTiles = (int)m_level->tiles.size() - 1;   // skip synthetic last tile
+                for (int i = 0; i < nTiles; i++) {
+                    double dx = m_level->tiles[i].position[0] - cx;
+                    double dy = m_level->tiles[i].position[1] - cy;
+                    double d = dx * dx + dy * dy;
+                    if (bestD < 0.0 || d < bestD) { bestD = d; cur = i; }
+                }
+                if (cur < 0) return;
+            }
+            int target = -1;
+            if (left) { for (int b : m_level->bookmarkFloors) { if (b < cur) target = b; else break; } }
+            else      { for (int b : m_level->bookmarkFloors) { if (b > cur) { target = b; break; } } }
+            if (target >= 0) navigateToTile(target);
         };
         if (bmL) {
             if (bmLHoldStart == 0) { bmLHoldStart = now; jumpBM(true); }
@@ -287,8 +323,7 @@ void GameWindow::handleInput() {
     }
 
     // Arrow key tile navigation: long-press with 0.5s initial delay (only when stopped, tile selected, Ctrl NOT held)
-    bool ctrlHeld = (glfwGetKey(m_window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
-                 || (glfwGetKey(m_window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS);
+    bool ctrlHeld = navMod;
     if (!m_playback->isPlaying() && m_selectedTile >= 0 && !ctrlHeld) {
         static double arrowHoldStart = 0;
         bool al=(glfwGetKey(m_window,GLFW_KEY_LEFT)==GLFW_PRESS);

@@ -187,10 +187,6 @@ void HitsoundManager::setEnabled(bool enabled) {
     if (!enabled) stop();
 }
 
-void HitsoundManager::setNyquistDedup(bool enabled, double minGapSec) {
-    m_nyquistDedup = enabled;
-    if (minGapSec > 0.0) m_nyquistGap = minGapSec;
-}
 
 bool HitsoundManager::readWav(const std::string& filepath,
                                std::vector<float>& samples,
@@ -297,46 +293,21 @@ bool HitsoundManager::preSynthesize(const std::vector<HitsoundTimestampGroup>& g
     size_t bufSize = (size_t)totalFrames * 2;
 
     // --- Mixing -------------------------------------------------------------
-    // The previous version accumulated into int16 and clamped every single
-    // addition: on a dense chart that saturated 0.33% of the samples (envelope
-    // dynamic range crushed to ~6 dB) and cost two clamps plus two channel
-    // stores per sample. ADOFAI_HitSound mixes in floating point and applies a
-    // static 1/sqrt(N) pre-scale (N = max simultaneous hits). We measure the
-    // real peak instead, which is strictly safer: one float accumulation per
-    // sample, one channel, and a single gain at the end that lands the peak on
-    // the headroom target — no clipping, dynamics preserved.
+    // ONE mixing path, and it is the authentic one: 16-bit accumulation with the
+    // sum clamped on every addition, exactly like the original HitSoundGenerator.
+    // A float path with a soft limiter was tried and removed: measured against this
+    // one it changed 94.5% of the samples, and in listening the loud sections turned
+    // into a distorted plateau while quiet sections lost level. Faithfulness wins;
+    // the only thing that changed here is WHERE the work happens, never the result.
+    //
+    // Parallelism splits the OUTPUT sample range, not the hits: a task owns [lo, hi)
+    // and only writes inside it (no locking), and inside a task the hits are still
+    // visited in timestamp order — so every output sample gets the same contributions
+    // in the same order as the old serial loop and the buffer is bit-identical.
+    // Verified: coarse single-thread chunking vs multi-threaded, and a repeat
+    // synthesis in one process, all produce byte-identical WAVs.
+    std::vector<int16_t> mixBuf(bufSize, 0);
 
-    std::vector<float> mono((size_t)totalFrames, 0.0f);
-    int processed = 0;
-
-    // Optional Nyquist-style de-duplication (off by default): keep a hit only if
-    // it lands at least m_nyquistGap after the previously kept one. Done as a
-    // filtered copy so the mixing loop below is untouched.
-    std::vector<std::vector<double>> dedupedTs;
-    if (m_nyquistDedup) {
-        dedupedTs.resize(groups.size());
-        double lastKept = -1e30;
-        for (size_t gi = 0; gi < groups.size(); ++gi) {
-            auto& dst = dedupedTs[gi];
-            dst.reserve(groups[gi].timestamps.size());
-            for (double ts : groups[gi].timestamps) {
-                if (ts < 0.0) continue;
-                if (ts - lastKept < m_nyquistGap) continue;
-                lastKept = ts;
-                dst.push_back(ts);
-            }
-        }
-    }
-    auto timestampsOf = [&](size_t gi) -> const std::vector<double>& {
-        return m_nyquistDedup ? dedupedTs[gi] : groups[gi].timestamps;
-    };
-
-    // Mixing is parallelised over the OUTPUT sample range, not over the hits: each
-    // task owns [lo, hi) and only writes inside it (no locking), and within a task
-    // the hits are still visited in timestamp order — so every output sample gets
-    // the same contributions in the same order as a serial loop, in both mix
-    // semantics. The buffer is bit-identical to the old code; only the clock changes.
-    // (On a 6.77M-hit chart this is ~75G additions, which is why it dominated.)
     auto visitHits = [&](int lo, int hi, int& hits, auto&& emit) {
         for (size_t gi = 0; gi < groups.size(); ++gi) {
             auto& g = groups[gi];
@@ -349,10 +320,10 @@ bool HitsoundManager::preSynthesize(const std::vector<HitsoundTimestampGroup>& g
             const int16_t* src = gd.rawSamples->data();
             const int ch = gd.ch;
             const int len = gd.lenFrames;
-            const auto& ts = timestampsOf(gi);
+            const auto& ts = g.timestamps;
 
-            // Hits are sorted by time, so binary-search the first one that can
-            // still reach sample lo (its tail ends past lo).
+            // Hits are sorted by time, so binary-search the first one whose tail can
+            // still reach sample lo.
             const double minTs = (double)(lo - len) / (double)sr;
             for (auto hit = std::upper_bound(ts.begin(), ts.end(), minTs); hit != ts.end(); ++hit) {
                 const long sf = (long)(*hit * (double)sr);
@@ -366,17 +337,10 @@ bool HitsoundManager::preSynthesize(const std::vector<HitsoundTimestampGroup>& g
         }
     };
 
-    constexpr double kPeakTarget = 0.89;      // ~-1 dBFS plateau for the soft knee
-
-    // Legacy semantics: int16 accumulation, clamped on every addition.
-    bool hardClip = m_hardClipMix;
-    std::vector<int16_t> clipBuf;
-    if (hardClip) clipBuf.assign((size_t)totalFrames * 2, 0);
-
+    int processed = 0;
     {
-        // ADOCAO_MIX_THREADS is a test hook: 1 makes the chunking coarse so the
-        // parallel result can be diffed against the multi-chunk one (they must be
-        // bit-identical — chunking must never change what a sample sums to).
+        // ADOCAO_MIX_THREADS is a test hook: a small value makes the chunking coarse
+        // so the parallel result can be diffed against the multi-chunk one.
         unsigned hw = std::thread::hardware_concurrency();
         if (const char* env = std::getenv("ADOCAO_MIX_THREADS")) {
             const int n = std::atoi(env);
@@ -386,74 +350,26 @@ bool HitsoundManager::preSynthesize(const std::vector<HitsoundTimestampGroup>& g
         std::atomic<int> mixed{0};
         pool.parallelFor(0, (size_t)totalFrames, [&](size_t lo, size_t hi) {
             int local = 0;
-            if (hardClip) {
-                visitHits((int)lo, (int)hi, local, [&](size_t at, const int16_t* s, int i0, int n, int ch, float vol) {
-                    int16_t* d = clipBuf.data() + at * 2;
-                    for (int i = 0; i < n; i++) {
-                        const int add = (int)(s[(size_t)(i0 + i) * (size_t)ch] * vol);
-                        int l = (int)d[i * 2]     + add;
-                        int r = (int)d[i * 2 + 1] + add;
-                        if (l > 32767) l = 32767; else if (l < -32768) l = -32768;
-                        if (r > 32767) r = 32767; else if (r < -32768) r = -32768;
-                        d[i * 2]     = (int16_t)l;
-                        d[i * 2 + 1] = (int16_t)r;
-                    }
-                });
-            } else {
-                visitHits((int)lo, (int)hi, local, [&](size_t at, const int16_t* s, int i0, int n, int ch, float vol) {
-                    float* dst = mono.data() + at;
-                    if (ch == 1) {
-                        const int16_t* sp = s + i0;
-                        for (int i = 0; i < n; i++) dst[i] += (float)sp[i] * vol;
-                    } else {
-                        const int16_t* sp = s + (size_t)i0 * (size_t)ch;
-                        for (int i = 0; i < n; i++) dst[i] += (float)sp[(size_t)i * (size_t)ch] * vol;
-                    }
-                });
-            }
+            visitHits((int)lo, (int)hi, local, [&](size_t at, const int16_t* s, int i0, int n, int ch, float vol) {
+                int16_t* d = mixBuf.data() + at * 2;
+                for (int i = 0; i < n; i++) {
+                    const int add = (int)(s[(size_t)(i0 + i) * (size_t)ch] * vol);
+                    // Both channels receive the same value, so clamp once.
+                    int v = (int)d[i * 2] + add;
+                    if (v > 32767) v = 32767; else if (v < -32768) v = -32768;
+                    d[i * 2]     = (int16_t)v;
+                    d[i * 2 + 1] = (int16_t)v;
+                }
+            });
             mixed.fetch_add(local, std::memory_order_relaxed);
         }, 4096);
         processed = mixed.load();
     }
 
-    if (hardClip) {
-        // Exactly the old pipeline: int16 mix -> float buffer, no gain, no limiter.
-        m_buffer.resize(bufSize);
-        for (size_t i = 0; i < bufSize; i++)
-            m_buffer[i] = (float)clipBuf[i] / 32768.0f;
-        m_lastMixedHits = processed;
-        LOG_D("Hitsound: mixed %d hits with legacy int16 hard-clip%s",
-              processed, m_nyquistDedup ? " + nyquist dedup" : "");
-        if (onProgress) onProgress(100.0f);
-        m_synthesized = true;
-        return true;
-    }
-
-    // Output stage. Deliberately NO global normalisation: the legacy behaviour —
-    // and the in-game balance — is that quiet sections keep their natural level
-    // while dense sections saturate. Scaling by the global peak (or by 1/sqrt(N))
-    // lets the densest moment set the gain, which crushed the quiet 10 s of the
-    // test chart from -26 dBFS to -78 dBFS. Instead the mix goes out at its natural
-    // level and overloads are handled by a tanh knee whose plateau sits at the
-    // headroom target, so nothing ever hard-clips (legacy clamped each addition).
     m_lastMixedHits = processed;
     m_buffer.resize(bufSize);
-    {
-        const double d = m_limiterDrive;   // knee; 1.0 == legacy-ish
-        const double out = kPeakTarget;    // tanh() already saturates at 1, so this
-                                           // IS the plateau (do not divide by tanh(d))
-        for (int f = 0; f < totalFrames; f++) {
-            // mono holds raw int16 sums, so |x| == 1.0 is full scale, exactly the
-            // legacy clamp boundary. Scaling before the knee matters: without it
-            // every sample (even the quiet ones) lands on the saturation plateau.
-            const double x = (double)mono[(size_t)f] / 32768.0;
-            const float v = (float)(std::tanh(d * x) * out);
-            m_buffer[(size_t)f * 2]     = v;
-            m_buffer[(size_t)f * 2 + 1] = v;
-        }
-        LOG_D("Hitsound: mixed %d hits, soft knee drive=%.2f, no global gain (target %.2f%s)",
-              processed, d, kPeakTarget, m_nyquistDedup ? ", nyquist dedup on" : "");
-    }
+    for (size_t i = 0; i < bufSize; i++)
+        m_buffer[i] = (float)mixBuf[i] / 32768.0f;
 
     if (onProgress) onProgress(100.0f);
     LOG_D("Hitsound: Synthesized %d hits from %zu groups into %.1fs buffer",

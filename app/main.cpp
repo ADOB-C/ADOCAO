@@ -54,8 +54,6 @@ int main(int argc, char* argv[]) {
         // Optional: measure the trail in tiles instead of seconds (a 0.4s window
         // is tens of thousands of tiles on charts that speed up by 1000x).
         else if (strcmp(argv[i], "--trail-tiles") == 0 && i+1<argc) { cli.trailTiles = (float)atof(argv[++i]); cli.trailLengthInTiles = true; }
-        // Hitsound loudness: tanh soft-limiter drive (1 = linear, no limiting).
-        else if (strcmp(argv[i], "--hitsound-drive") == 0 && i+1<argc) cli.hitsoundDrive = (float)atof(argv[++i]);
         else if (strcmp(argv[i], "--export") == 0)                cli.exportHitsounds = true;
     }
 

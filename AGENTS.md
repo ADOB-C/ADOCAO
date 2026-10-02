@@ -66,7 +66,6 @@ adocao.exe --level <file> --music <file> [--width N] [--height N]
            [--trail-duration SEC] [--trail-sample-rate N]
            [--trail-target-fps N] [--trail-rate-min N] [--trail-rate-max N]
            [--trail-samples-per-tile N] [--trail-tiles N]
-           [--hitsound-drive N]
 ```
 
 Trail sampling — two independent axes, both optional and **off by default** (wizard
@@ -105,31 +104,32 @@ Without `--level`, falls through to the ImGui launcher.
 `ma_decoder` (miniaudio) — supports AIFF, OGG, WAV, FLAC. File read into memory + `ma_decoder_init_memory()`. Output: stereo f32 @ 48000Hz. Device period: 1024 frames (~23ms) for best quality. `m_fileData` kept alive for decoder lifetime. Pause stops the audio device (not just sets a flag).
 
 ### Hitsounds
-**Faithfulness is a product rule: every hit in the chart is mixed.** Do NOT adopt
-`ADOFAI_HitSound`'s Nyquist de-duplication (dropping hits < 41.7 µs apart) even though
-it makes the benchmark ~20x faster on dense charts — measured, it changes 95% of the
-output samples and the sound itself. The `setNyquistDedup` switch exists only so the
-benchmark can quantify that difference; it must stay off in shipped builds. A loudness
-or speed win that alters which hits sound is not a win.
+**Two product rules, both learned the hard way — do not relax them:**
+1. **Every hit in the chart is mixed.** Do NOT adopt `ADOFAI_HitSound`'s Nyquist
+   de-duplication (dropping hits < 41.7 µs apart). Measured: it is 20x faster on dense
+   charts but changes 95% of the output samples, so it is a different sound.
+2. **16-bit accumulation with the sum clamped on every addition** (`HitSoundGenerator`
+   semantics) is the ONLY mixing path. A float path with a soft limiter and a global
+   gain was tried and deleted: it changed 94.5% of the samples, and in listening the
+   loud sections became a distorted plateau while quiet sections lost level. Peak or
+   1/sqrt(N) normalisation also lets the densest moment set the gain — the quiet 10 s
+   of the test chart fell from -26 dBFS to -78 dBFS. Faithfulness wins; the only thing
+   allowed to change is *where* the work happens, never the result.
 
-Pre-synthesis into one float buffer, then a single gain for the whole track (the
-old per-sample int16 hard clip was removed — it saturated 0.33% of samples on a dense
-chart and cost two clamps plus two channel stores per sample, measured ~3.5x slower):
-- Mixing: one float accumulation per sample on a single channel, duplicated to L/R at
-  the end. Benchmarked against `ADOFAI_HitSound` (HitSoundBench) on Tempest and on a
-  6.77M-hit chart.
-- Loudness: peak-normalise to −1 dBFS, then a tanh soft limiter
-  (`--hitsound-drive N`, default 4; 1 = off). Peak normalisation alone cannot control
-  loudness — any gain is divided straight back out — so the linear mix measured
-  RMS −16.06 dBFS while the old hard-clipped one was −7.06 dBFS. drive 4 lands at
-  −7.62 dBFS with DR 9.1 dB (old 5.96 dB) and zero hard clipping; higher drive is
-  louder still (6 → −5.75 dBFS, 8 → −4.70 dBFS).
-- Optional Nyquist-style de-duplication (`HitsoundManager::setNyquistDedup`, off by
-  default) drops hits landing < 41.7 µs after the previous kept hit. Measured 21.9x
-  faster on the 6.77M-hit chart (91.5% of hits dropped: 18.1 s → 0.8 s), but it is
-  NOT transparent — 95.0% of samples change, max |diff| 1.5x full scale, peak-
-  normalised RMS +6.52 dB (Tempest: 3.15% dropped, 92.8% of samples change). Those
-  hits are summed energy, so treat it as a different sound, not a free win.
+What may change (and did):
+- Mixing is parallelised over the OUTPUT sample range, not the hits: a task owns
+  [lo, hi) and only writes inside it (no locking), and inside a task hits are still
+  visited in timestamp order, so each sample sums the same contributions in the same
+  order. Verified byte-identical: coarse single-thread chunking vs multi-threaded, and
+  a repeat synthesis in one process. `ADOCAO_MIX_THREADS=1` is the test hook.
+  6.77M-hit chart (75G additions): 36.3 s -> 23.3 s (1.56x). It is memory-bandwidth
+  bound; the next steps are cache blocking and SIMD saturating adds (paddsw/vqaddq),
+  both of which can stay bit-exact.
+- Fixed a cache bug that made any *second* synthesis in one process wrong: `readWav`'s
+  cache-hit path reported `channels = 1` while the cache keeps the file's layout, so a
+  cached stereo hit became 2x too long (buffer 217.582 s instead of 217.350 s) and had
+  its interleaved L/R mixed as consecutive frames. The cache now stores and returns the
+  real (rate, channels).
 - Multi-type support via `TimestampGroup` (SetHitsound events), 27 hit types
 - Case-insensitive type matching (ADOFAI levels may use mixed case)
 - Unknown type fallback: redirects to default type if WAV not found

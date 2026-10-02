@@ -35,7 +35,6 @@ struct LauncherConfig {
     float trailSamplesPerTile = 4.0f; // per-tile mode: samples per tile (clamped to rateMin/Max)
     bool  trailLengthInTiles = false; // optional: trail length in tiles instead of seconds
     float trailTiles = 8.0f;       // trail length in tiles (when trailLengthInTiles)
-    float hitsoundDrive = 1.0f;    // soft-knee drive; 1.0 == legacy level, no clipping
     bool exportHitsounds = false;
     std::string exportDir;         // hitsound export directory (defaults to level dir)
     bool cancelled = false;

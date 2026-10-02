@@ -33,11 +33,19 @@ public:
     // dropped hits are summed energy, not noise.
     void setNyquistDedup(bool enabled, double minGapSec = 1.0 / 24000.0);
 
+    // Mix semantics. Default (false) = float accumulation + one final gain, which
+    // is what ADOFAI_HitSound does. true = the legacy int16 accumulation with a
+    // clamp on every addition, bit-exact with the pre-2026-10 ADOCAO code and with
+    // HitSoundGenerator.exe (hard-clips 0.33% of samples on a dense chart, but that
+    // saturation is the authentic sound). Both paths are parallelised identically.
+    void setHardClipMix(bool on) { m_hardClipMix = on; }
+
     // Soft-limiter drive applied after peak normalisation (tanh(drive * x)).
     // Peak normalisation alone cannot control loudness — any gain is divided back
     // out — so a peaky impulse mix stays quiet (RMS -16 dBFS on Tempest, while the
     // old hard-clipped mix measured -7 dBFS). 1.0 disables the limiter; ~4 lands
     // at the old loudness with DR 9.1 dB instead of 5.96 dB and no hard clipping.
+    // Ignored by the hard-clip path, which is loud by construction.
     void setLimiterDrive(double drive) { m_limiterDrive = drive > 1.0 ? drive : 1.0; }
 
     // Hits actually mixed by the last preSynthesize() call.
@@ -74,7 +82,8 @@ private:
     bool m_playing = false;
     bool m_nyquistDedup = false;
     double m_nyquistGap = 1.0 / 24000.0;
-    double m_limiterDrive = 4.0;
+    double m_limiterDrive = 1.0;
+    bool m_hardClipMix = false;
     int m_lastMixedHits = 0;
 
     std::string hitsoundPath(const std::string& type) const;

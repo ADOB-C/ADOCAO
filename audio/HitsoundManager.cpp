@@ -2,17 +2,25 @@
 #include "AudioEngine.hpp"
 #include "core/util/Logger.hpp"
 #include "core/util/DataFile.hpp"
+#include "core/util/ThreadPool.hpp"
 
 #include <cmath>
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
 #include <fstream>
+#include <thread>
 #include <unordered_map>
 
 static std::unordered_map<std::string, std::vector<float>> s_wavCache;
 static std::unordered_map<std::string, std::vector<int16_t>> s_wavRawCache;
+// Real (sampleRate, channels) of each cached file. The caches hold the file's own
+// layout, so a cache hit must report these instead of assuming mono/48k: assuming
+// mono made a cached STEREO hit twice as long and mixed L/R as consecutive frames,
+// so any second synthesis in the same process produced wrong audio.
+static std::unordered_map<std::string, std::pair<int,int>> s_wavMeta;
 
 #ifdef _WIN32
 #include <windows.h>
@@ -190,7 +198,9 @@ bool HitsoundManager::readWav(const std::string& filepath,
     // Check cache first
     auto it = s_wavCache.find(filepath);
     if (it != s_wavCache.end()) {
-        sampleRate = AUDIO_SAMPLE_RATE; channels = 1;  // cached data is always mono AUDIO_SAMPLE_RATE
+        const auto meta = s_wavMeta.find(filepath);
+        sampleRate = meta != s_wavMeta.end() ? meta->second.first  : AUDIO_SAMPLE_RATE;
+        channels   = meta != s_wavMeta.end() ? meta->second.second : 1;
         samples = it->second;
         return true;
     }
@@ -233,6 +243,7 @@ bool HitsoundManager::readWav(const std::string& filepath,
     for (size_t i=0;i<raw.size();i++) samples[i]=(float)raw[i]/32768.0f;
     s_wavCache[filepath] = samples;     // cache for later reuse
     s_wavRawCache[filepath] = raw;     // cache raw int16 for hard-clip mixing
+    s_wavMeta[filepath] = { (int)sr, (int)nch };
     return true;
 }
 
@@ -320,77 +331,128 @@ bool HitsoundManager::preSynthesize(const std::vector<HitsoundTimestampGroup>& g
         return m_nyquistDedup ? dedupedTs[gi] : groups[gi].timestamps;
     };
 
-    for (size_t gi = 0; gi < groups.size(); ++gi) {
-        auto& g = groups[gi];
-        if (g.type == "None" || g.type.empty()) continue;
-        auto it = wavData.find(g.type);
-        if (it == wavData.end()) continue;
+    // Mixing is parallelised over the OUTPUT sample range, not over the hits: each
+    // task owns [lo, hi) and only writes inside it (no locking), and within a task
+    // the hits are still visited in timestamp order — so every output sample gets
+    // the same contributions in the same order as a serial loop, in both mix
+    // semantics. The buffer is bit-identical to the old code; only the clock changes.
+    // (On a 6.77M-hit chart this is ~75G additions, which is why it dominated.)
+    auto visitHits = [&](int lo, int hi, int& hits, auto&& emit) {
+        for (size_t gi = 0; gi < groups.size(); ++gi) {
+            auto& g = groups[gi];
+            if (g.type == "None" || g.type.empty()) continue;
+            auto it = wavData.find(g.type);
+            if (it == wavData.end()) continue;
 
-        auto& gd = it->second;
-        const float volScale = g.volume / 100.0f;
-        auto& raw  = *gd.rawSamples;
-        const int16_t* src = raw.data();
-        const int ch = gd.ch;
+            auto& gd = it->second;
+            const float volScale = g.volume / 100.0f;
+            const int16_t* src = gd.rawSamples->data();
+            const int ch = gd.ch;
+            const int len = gd.lenFrames;
+            const auto& ts = timestampsOf(gi);
 
-        // Timestamps are already in tile order from getHitsoundTimestampGroups()
-        for (double ts : timestampsOf(gi)) {
-            if (ts < 0.0) continue;
-            const long sf = (long)(ts * (double)sr);
-            int cl = gd.lenFrames;
-            if (sf + cl > totalFrames) cl = totalFrames - (int)sf;
-            if (cl <= 0) continue;
-            float* dst = mono.data() + (size_t)sf;
-            if (ch == 1) {
-                for (int i = 0; i < cl; i++)
-                    dst[i] += (float)src[i] * volScale;
-            } else {
-                for (int i = 0; i < cl; i++)
-                    dst[i] += (float)src[(size_t)i * (size_t)ch] * volScale;
+            // Hits are sorted by time, so binary-search the first one that can
+            // still reach sample lo (its tail ends past lo).
+            const double minTs = (double)(lo - len) / (double)sr;
+            for (auto hit = std::upper_bound(ts.begin(), ts.end(), minTs); hit != ts.end(); ++hit) {
+                const long sf = (long)(*hit * (double)sr);
+                if (sf >= hi) break;
+                if (sf >= lo) hits++;                 // counted by the chunk it starts in
+                const int i0 = std::max(0, lo - (int)sf);
+                const int i1 = std::min(len, hi - (int)sf);
+                if (i1 <= i0) continue;
+                emit((size_t)sf + (size_t)i0, src, i0, i1 - i0, ch, volScale);
             }
-            processed++;
         }
+    };
+
+    constexpr double kPeakTarget = 0.89;      // ~-1 dBFS plateau for the soft knee
+
+    // Legacy semantics: int16 accumulation, clamped on every addition.
+    bool hardClip = m_hardClipMix;
+    std::vector<int16_t> clipBuf;
+    if (hardClip) clipBuf.assign((size_t)totalFrames * 2, 0);
+
+    {
+        // ADOCAO_MIX_THREADS is a test hook: 1 makes the chunking coarse so the
+        // parallel result can be diffed against the multi-chunk one (they must be
+        // bit-identical — chunking must never change what a sample sums to).
+        unsigned hw = std::thread::hardware_concurrency();
+        if (const char* env = std::getenv("ADOCAO_MIX_THREADS")) {
+            const int n = std::atoi(env);
+            if (n > 0) hw = (unsigned)n;
+        }
+        ThreadPool pool(hw > 0 ? hw : 4u);
+        std::atomic<int> mixed{0};
+        pool.parallelFor(0, (size_t)totalFrames, [&](size_t lo, size_t hi) {
+            int local = 0;
+            if (hardClip) {
+                visitHits((int)lo, (int)hi, local, [&](size_t at, const int16_t* s, int i0, int n, int ch, float vol) {
+                    int16_t* d = clipBuf.data() + at * 2;
+                    for (int i = 0; i < n; i++) {
+                        const int add = (int)(s[(size_t)(i0 + i) * (size_t)ch] * vol);
+                        int l = (int)d[i * 2]     + add;
+                        int r = (int)d[i * 2 + 1] + add;
+                        if (l > 32767) l = 32767; else if (l < -32768) l = -32768;
+                        if (r > 32767) r = 32767; else if (r < -32768) r = -32768;
+                        d[i * 2]     = (int16_t)l;
+                        d[i * 2 + 1] = (int16_t)r;
+                    }
+                });
+            } else {
+                visitHits((int)lo, (int)hi, local, [&](size_t at, const int16_t* s, int i0, int n, int ch, float vol) {
+                    float* dst = mono.data() + at;
+                    if (ch == 1) {
+                        const int16_t* sp = s + i0;
+                        for (int i = 0; i < n; i++) dst[i] += (float)sp[i] * vol;
+                    } else {
+                        const int16_t* sp = s + (size_t)i0 * (size_t)ch;
+                        for (int i = 0; i < n; i++) dst[i] += (float)sp[(size_t)i * (size_t)ch] * vol;
+                    }
+                });
+            }
+            mixed.fetch_add(local, std::memory_order_relaxed);
+        }, 4096);
+        processed = mixed.load();
     }
 
-    // Single gain for the whole track, targeting headroom below full scale.
-    float peak = 0.0f;
-    for (int f = 0; f < totalFrames; f++) {
-        const float a = std::fabs(mono[(size_t)f]);
-        if (a > peak) peak = a;
+    if (hardClip) {
+        // Exactly the old pipeline: int16 mix -> float buffer, no gain, no limiter.
+        m_buffer.resize(bufSize);
+        for (size_t i = 0; i < bufSize; i++)
+            m_buffer[i] = (float)clipBuf[i] / 32768.0f;
+        m_lastMixedHits = processed;
+        LOG_D("Hitsound: mixed %d hits with legacy int16 hard-clip%s",
+              processed, m_nyquistDedup ? " + nyquist dedup" : "");
+        if (onProgress) onProgress(100.0f);
+        m_synthesized = true;
+        return true;
     }
-    constexpr double kPeakTarget = 0.89;      // ~-1 dBFS
-    const double gain = peak > 1e-9f ? kPeakTarget / (double)peak : 1.0;
 
-    // Loudness stage. Peak normalisation cannot make a peaky impulse mix loud —
-    // it divides any gain straight back out — so the old hard-clipped mix (which
-    // measured 9 dB louder in RMS) is the reference to beat. A tanh soft limiter
-    // raises RMS while keeping the peak at the target and never hard-clipping.
+    // Output stage. Deliberately NO global normalisation: the legacy behaviour —
+    // and the in-game balance — is that quiet sections keep their natural level
+    // while dense sections saturate. Scaling by the global peak (or by 1/sqrt(N))
+    // lets the densest moment set the gain, which crushed the quiet 10 s of the
+    // test chart from -26 dBFS to -78 dBFS. Instead the mix goes out at its natural
+    // level and overloads are handled by a tanh knee whose plateau sits at the
+    // headroom target, so nothing ever hard-clips (legacy clamped each addition).
     m_lastMixedHits = processed;
     m_buffer.resize(bufSize);
-    if (m_limiterDrive > 1.0) {
-        const double d = m_limiterDrive;
-        const double norm = std::tanh(d);
-        double limitedPeak = 0.0;
+    {
+        const double d = m_limiterDrive;   // knee; 1.0 == legacy-ish
+        const double out = kPeakTarget;    // tanh() already saturates at 1, so this
+                                           // IS the plateau (do not divide by tanh(d))
         for (int f = 0; f < totalFrames; f++) {
-            const double v = std::tanh(d * (double)mono[(size_t)f] * gain) / norm;
-            m_buffer[(size_t)f * 2] = (float)v;          // scaled in the second pass
-            if (v > limitedPeak) limitedPeak = v;
-        }
-        const double out = limitedPeak > 1e-9 ? kPeakTarget / limitedPeak : 1.0;
-        for (int f = 0; f < totalFrames; f++) {
-            const float v = (float)((double)m_buffer[(size_t)f * 2] * out);
+            // mono holds raw int16 sums, so |x| == 1.0 is full scale, exactly the
+            // legacy clamp boundary. Scaling before the knee matters: without it
+            // every sample (even the quiet ones) lands on the saturation plateau.
+            const double x = (double)mono[(size_t)f] / 32768.0;
+            const float v = (float)(std::tanh(d * x) * out);
             m_buffer[(size_t)f * 2]     = v;
             m_buffer[(size_t)f * 2 + 1] = v;
         }
-        LOG_D("Hitsound: mixed %d hits, peak=%.1f gain=%.6f, limiter drive=%.2f (target %.2f%s)",
-              processed, peak, gain, d, kPeakTarget, m_nyquistDedup ? ", nyquist dedup on" : "");
-    } else {
-        for (int f = 0; f < totalFrames; f++) {
-            const float v = (float)((double)mono[(size_t)f] * gain);
-            m_buffer[(size_t)f * 2]     = v;
-            m_buffer[(size_t)f * 2 + 1] = v;
-        }
-        LOG_D("Hitsound: mixed %d hits, peak=%.1f gain=%.6f (target %.2f, limiter off%s)",
-              processed, peak, gain, kPeakTarget, m_nyquistDedup ? ", nyquist dedup on" : "");
+        LOG_D("Hitsound: mixed %d hits, soft knee drive=%.2f, no global gain (target %.2f%s)",
+              processed, d, kPeakTarget, m_nyquistDedup ? ", nyquist dedup on" : "");
     }
 
     if (onProgress) onProgress(100.0f);

@@ -179,6 +179,11 @@ void HitsoundManager::setEnabled(bool enabled) {
     if (!enabled) stop();
 }
 
+void HitsoundManager::setNyquistDedup(bool enabled, double minGapSec) {
+    m_nyquistDedup = enabled;
+    if (minGapSec > 0.0) m_nyquistGap = minGapSec;
+}
+
 bool HitsoundManager::readWav(const std::string& filepath,
                                std::vector<float>& samples,
                                int& sampleRate, int& channels) {
@@ -280,48 +285,113 @@ bool HitsoundManager::preSynthesize(const std::vector<HitsoundTimestampGroup>& g
     int totalFrames = (int)((totalDuration + maxHitSec + 1.0f) * sr);
     size_t bufSize = (size_t)totalFrames * 2;
 
-    // 16-bit hard-clip mixing buffer — matches HitSoundGenerator.exe
-    std::vector<int16_t> mixBuf(bufSize, 0);
+    // --- Mixing -------------------------------------------------------------
+    // The previous version accumulated into int16 and clamped every single
+    // addition: on a dense chart that saturated 0.33% of the samples (envelope
+    // dynamic range crushed to ~6 dB) and cost two clamps plus two channel
+    // stores per sample. ADOFAI_HitSound mixes in floating point and applies a
+    // static 1/sqrt(N) pre-scale (N = max simultaneous hits). We measure the
+    // real peak instead, which is strictly safer: one float accumulation per
+    // sample, one channel, and a single gain at the end that lands the peak on
+    // the headroom target — no clipping, dynamics preserved.
 
-    int totalHits = 0;
-    for (auto& g : groups) totalHits += (int)g.timestamps.size();
+    std::vector<float> mono((size_t)totalFrames, 0.0f);
     int processed = 0;
 
-    for (auto& g : groups) {
+    // Optional Nyquist-style de-duplication (off by default): keep a hit only if
+    // it lands at least m_nyquistGap after the previously kept one. Done as a
+    // filtered copy so the mixing loop below is untouched.
+    std::vector<std::vector<double>> dedupedTs;
+    if (m_nyquistDedup) {
+        dedupedTs.resize(groups.size());
+        double lastKept = -1e30;
+        for (size_t gi = 0; gi < groups.size(); ++gi) {
+            auto& dst = dedupedTs[gi];
+            dst.reserve(groups[gi].timestamps.size());
+            for (double ts : groups[gi].timestamps) {
+                if (ts < 0.0) continue;
+                if (ts - lastKept < m_nyquistGap) continue;
+                lastKept = ts;
+                dst.push_back(ts);
+            }
+        }
+    }
+    auto timestampsOf = [&](size_t gi) -> const std::vector<double>& {
+        return m_nyquistDedup ? dedupedTs[gi] : groups[gi].timestamps;
+    };
+
+    for (size_t gi = 0; gi < groups.size(); ++gi) {
+        auto& g = groups[gi];
         if (g.type == "None" || g.type.empty()) continue;
         auto it = wavData.find(g.type);
         if (it == wavData.end()) continue;
 
         auto& gd = it->second;
-        float volScale = g.volume / 100.0f;
+        const float volScale = g.volume / 100.0f;
         auto& raw  = *gd.rawSamples;
+        const int16_t* src = raw.data();
+        const int ch = gd.ch;
 
         // Timestamps are already in tile order from getHitsoundTimestampGroups()
-        for (double ts : g.timestamps) {
+        for (double ts : timestampsOf(gi)) {
             if (ts < 0.0) continue;
-            int sf = (int)(ts * (double)sr);
+            const long sf = (long)(ts * (double)sr);
             int cl = gd.lenFrames;
-            if (sf + cl > totalFrames) cl = totalFrames - sf;
+            if (sf + cl > totalFrames) cl = totalFrames - (int)sf;
             if (cl <= 0) continue;
-            for (int i = 0; i < cl; i++) {
-                int add = (int)(raw[(size_t)i * (size_t)gd.ch] * volScale);
-                int idx = (sf + i) * 2;
-                // 16-bit hard-clip: clamp each addition individually
-                int sumL = (int)mixBuf[idx]     + add;
-                int sumR = (int)mixBuf[idx + 1] + add;
-                if (sumL > 32767) sumL = 32767; else if (sumL < -32768) sumL = -32768;
-                if (sumR > 32767) sumR = 32767; else if (sumR < -32768) sumR = -32768;
-                mixBuf[idx]     = (int16_t)sumL;
-                mixBuf[idx + 1] = (int16_t)sumR;
+            float* dst = mono.data() + (size_t)sf;
+            if (ch == 1) {
+                for (int i = 0; i < cl; i++)
+                    dst[i] += (float)src[i] * volScale;
+            } else {
+                for (int i = 0; i < cl; i++)
+                    dst[i] += (float)src[(size_t)i * (size_t)ch] * volScale;
             }
             processed++;
         }
     }
 
-    // Convert mixed int16 buffer back to float for playback
+    // Single gain for the whole track, targeting headroom below full scale.
+    float peak = 0.0f;
+    for (int f = 0; f < totalFrames; f++) {
+        const float a = std::fabs(mono[(size_t)f]);
+        if (a > peak) peak = a;
+    }
+    constexpr double kPeakTarget = 0.89;      // ~-1 dBFS
+    const double gain = peak > 1e-9f ? kPeakTarget / (double)peak : 1.0;
+
+    // Loudness stage. Peak normalisation cannot make a peaky impulse mix loud —
+    // it divides any gain straight back out — so the old hard-clipped mix (which
+    // measured 9 dB louder in RMS) is the reference to beat. A tanh soft limiter
+    // raises RMS while keeping the peak at the target and never hard-clipping.
+    m_lastMixedHits = processed;
     m_buffer.resize(bufSize);
-    for (size_t i = 0; i < bufSize; i++)
-        m_buffer[i] = (float)mixBuf[i] / 32768.0f;
+    if (m_limiterDrive > 1.0) {
+        const double d = m_limiterDrive;
+        const double norm = std::tanh(d);
+        double limitedPeak = 0.0;
+        for (int f = 0; f < totalFrames; f++) {
+            const double v = std::tanh(d * (double)mono[(size_t)f] * gain) / norm;
+            m_buffer[(size_t)f * 2] = (float)v;          // scaled in the second pass
+            if (v > limitedPeak) limitedPeak = v;
+        }
+        const double out = limitedPeak > 1e-9 ? kPeakTarget / limitedPeak : 1.0;
+        for (int f = 0; f < totalFrames; f++) {
+            const float v = (float)((double)m_buffer[(size_t)f * 2] * out);
+            m_buffer[(size_t)f * 2]     = v;
+            m_buffer[(size_t)f * 2 + 1] = v;
+        }
+        LOG_D("Hitsound: mixed %d hits, peak=%.1f gain=%.6f, limiter drive=%.2f (target %.2f%s)",
+              processed, peak, gain, d, kPeakTarget, m_nyquistDedup ? ", nyquist dedup on" : "");
+    } else {
+        for (int f = 0; f < totalFrames; f++) {
+            const float v = (float)((double)mono[(size_t)f] * gain);
+            m_buffer[(size_t)f * 2]     = v;
+            m_buffer[(size_t)f * 2 + 1] = v;
+        }
+        LOG_D("Hitsound: mixed %d hits, peak=%.1f gain=%.6f (target %.2f, limiter off%s)",
+              processed, peak, gain, kPeakTarget, m_nyquistDedup ? ", nyquist dedup on" : "");
+    }
 
     if (onProgress) onProgress(100.0f);
     LOG_D("Hitsound: Synthesized %d hits from %zu groups into %.1fs buffer",

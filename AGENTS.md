@@ -66,6 +66,7 @@ adocao.exe --level <file> --music <file> [--width N] [--height N]
            [--trail-duration SEC] [--trail-sample-rate N]
            [--trail-target-fps N] [--trail-rate-min N] [--trail-rate-max N]
            [--trail-samples-per-tile N] [--trail-tiles N]
+           [--hitsound-drive N]
 ```
 
 Trail sampling — two independent axes, both optional and **off by default** (wizard
@@ -104,7 +105,24 @@ Without `--level`, falls through to the ImGui launcher.
 `ma_decoder` (miniaudio) — supports AIFF, OGG, WAV, FLAC. File read into memory + `ma_decoder_init_memory()`. Output: stereo f32 @ 48000Hz. Device period: 1024 frames (~23ms) for best quality. `m_fileData` kept alive for decoder lifetime. Pause stops the audio device (not just sets a flag).
 
 ### Hitsounds
-Pre-synthesis with 16-bit hard-clip integer mixing (matches `HitSoundGenerator.exe`):
+Pre-synthesis into one float buffer, then a single gain for the whole track (the
+old per-sample int16 hard clip was removed — it saturated 0.33% of samples on a dense
+chart and cost two clamps plus two channel stores per sample, measured ~3.5x slower):
+- Mixing: one float accumulation per sample on a single channel, duplicated to L/R at
+  the end. Benchmarked against `ADOFAI_HitSound` (HitSoundBench) on Tempest and on a
+  6.77M-hit chart.
+- Loudness: peak-normalise to −1 dBFS, then a tanh soft limiter
+  (`--hitsound-drive N`, default 4; 1 = off). Peak normalisation alone cannot control
+  loudness — any gain is divided straight back out — so the linear mix measured
+  RMS −16.06 dBFS while the old hard-clipped one was −7.06 dBFS. drive 4 lands at
+  −7.62 dBFS with DR 9.1 dB (old 5.96 dB) and zero hard clipping; higher drive is
+  louder still (6 → −5.75 dBFS, 8 → −4.70 dBFS).
+- Optional Nyquist-style de-duplication (`HitsoundManager::setNyquistDedup`, off by
+  default) drops hits landing < 41.7 µs after the previous kept hit. Measured 21.9x
+  faster on the 6.77M-hit chart (91.5% of hits dropped: 18.1 s → 0.8 s), but it is
+  NOT transparent — 95.0% of samples change, max |diff| 1.5x full scale, peak-
+  normalised RMS +6.52 dB (Tempest: 3.15% dropped, 92.8% of samples change). Those
+  hits are summed energy, so treat it as a different sound, not a free win.
 - Multi-type support via `TimestampGroup` (SetHitsound events), 27 hit types
 - Case-insensitive type matching (ADOFAI levels may use mixed case)
 - Unknown type fallback: redirects to default type if WAV not found

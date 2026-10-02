@@ -227,6 +227,7 @@ int runApplication(bool debugConsole) {
         timeline.build(lvl, true);
         HitsoundManager hm;
         hm.init();
+        hm.setLimiterDrive(cfg.hitsoundDrive);
         if (!hm.preSynthesize(timeline.getHitsoundTimestampGroups(), timeline.totalDuration())) {
             LOG_E("Export: pre-synthesis failed");
             glfwTerminate();
@@ -315,6 +316,7 @@ int runApplicationFromCLI(const LauncherConfig& cfg, bool debugConsole) {
         timeline.build(lvl, true);
         HitsoundManager hm;
         hm.init();
+        hm.setLimiterDrive(config.hitsoundDrive);
         auto groups = timeline.getHitsoundTimestampGroups();
         if (!hm.preSynthesize(groups, timeline.totalDuration())) {
             LOG_E("Export: pre-synthesis failed");

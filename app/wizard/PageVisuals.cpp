@@ -1,25 +1,8 @@
 #include "WizardState.hpp"
 #include "WizardChrome.hpp"
 #include <imgui.h>
-#include <cstdio>
 
 namespace wizard {
-
-namespace {
-
-bool isValidHexColor(const char* buf) {
-    int len = 0;
-    while (buf[len]) len++;
-    if (len != 6) return false;
-    for (int i = 0; i < 6; i++) {
-        char c = buf[i];
-        if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')))
-            return false;
-    }
-    return true;
-}
-
-} // namespace
 
 void drawVisualsPage(State& st, const Chrome& ch) {
     const float S = 1.0f;  // hardcoded sizes are in logical pixels
@@ -49,47 +32,33 @@ void drawVisualsPage(State& st, const Chrome& ch) {
     if (!st.showTrail) ImGui::EndDisabled();
     ImGui::Spacing();
 
-    // Fill / stroke / background colors
-    bool fillOk   = isValidHexColor(st.fillBuf);
-    bool strokeOk = isValidHexColor(st.strokeBuf);
-    bool bgOk     = isValidHexColor(st.bgBuf);
-    ImGui::SetCursorPosX(colX); ImGui::Text("Fill #");
+    // Fill / stroke / background colors. ImGui's color widget: swatch opens the
+    // built-in picker, the inline field stays hex (matches --fill/--stroke/--bg).
+    ImGui::SetCursorPosX(colX); ImGui::Text("Fill");
     ImGui::SameLine(ctrlX);
-    ImGui::SetNextItemWidth(90.0f * S);
-    ImGui::InputText("##fill", st.fillBuf, 7, ImGuiInputTextFlags_CharsUppercase);
-    if (!fillOk && st.fillBuf[0]) { ImGui::SameLine(); ImGui::TextColored(ImVec4(1,0.3f,0.3f,1),"(6 hex)"); }
+    ImGui::SetNextItemWidth(160.0f * S);
+    ImGui::ColorEdit3("##fill", st.fillColor.data(), ImGuiColorEditFlags_DisplayHex);
     ImGui::Spacing();
     ImGui::SetCursorPosX(colX); ImGui::Checkbox("Auto stroke", &st.autoStroke);
     ImGui::Spacing();
     ImGui::Indent(24.0f * S);
+    if (st.autoStroke)
+        st.strokeColor = deriveStroke(st.fillColor.data());   // fill * 0.5
     if (st.autoStroke) ImGui::BeginDisabled();
-    ImGui::SetCursorPosX(colX + 24.0f * S); ImGui::Text("Stroke #");
+    ImGui::SetCursorPosX(colX + 24.0f * S); ImGui::Text("Stroke");
     ImGui::SameLine(ctrlX);
-    ImGui::SetNextItemWidth(90.0f * S);
-    ImGui::InputText("##stroke", st.strokeBuf, 7, ImGuiInputTextFlags_CharsUppercase);
+    ImGui::SetNextItemWidth(160.0f * S);
+    ImGui::ColorEdit3("##stroke", st.strokeColor.data(), ImGuiColorEditFlags_DisplayHex);
     if (st.autoStroke) ImGui::EndDisabled();
-    if (!strokeOk && st.strokeBuf[0]) { ImGui::SameLine(); ImGui::TextColored(ImVec4(1,0.3f,0.3f,1),"(6 hex)"); }
     ImGui::Unindent(24.0f * S);
     ImGui::Spacing();
-    ImGui::SetCursorPosX(colX); ImGui::Text("Background #");
+    ImGui::SetCursorPosX(colX); ImGui::Text("Background");
     ImGui::SameLine(ctrlX);
-    ImGui::SetNextItemWidth(90.0f * S);
-    ImGui::InputText("##bg", st.bgBuf, 7, ImGuiInputTextFlags_CharsUppercase);
-    if (!bgOk && st.bgBuf[0]) { ImGui::SameLine(); ImGui::TextColored(ImVec4(1,0.3f,0.3f,1),"(6 hex)"); }
+    ImGui::SetNextItemWidth(160.0f * S);
+    ImGui::ColorEdit3("##bg", st.bgColor.data(), ImGuiColorEditFlags_DisplayHex);
+    ImGui::Spacing();
 
-    // Auto-calculate stroke from fill when enabled
-    if (st.autoStroke && fillOk) {
-        unsigned r,g,b; sscanf(st.fillBuf,"%02x%02x%02x",&r,&g,&b);
-        r=(unsigned)(r*0.5f); g=(unsigned)(g*0.5f); b=(unsigned)(b*0.5f);
-        snprintf(st.strokeBuf,sizeof(st.strokeBuf),"%02x%02x%02x",r,g,b);
-        strokeOk = true;
-    }
-
-    // Next requires all three colors to be valid 6-hex values
-    bool validHex = isValidHexColor(st.fillBuf) && isValidHexColor(st.strokeBuf) &&
-                    isValidHexColor(st.bgBuf);
-
-    if (drawNavButton(ch, false, validHex)) {
+    if (drawNavButton(ch, false, true)) {
         st.page = Page::Music;
     }
 }

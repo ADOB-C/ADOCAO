@@ -2,6 +2,7 @@
 #include "WizardChrome.hpp"
 #include "FileDialogs.hpp"
 #include <imgui.h>
+#include <array>
 #include <cstdio>
 
 namespace wizard {
@@ -42,9 +43,15 @@ void drawMusicPage(State& st, const Chrome& ch) {
     if (drawNavButton(ch, true, true)) {
         // Collect everything into cfg and leave the wizard
         st.cfg.musicPath         = st.musicBuf;
-        st.cfg.trackFillColor    = st.fillBuf;
-        st.cfg.trackStrokeColor  = st.strokeBuf;
-        st.cfg.backgroundColor   = st.bgBuf;
+        // Colors are edited as float RGB; commit them in the config's hex form.
+        // When auto stroke is on the stroke is derived here as well, so the
+        // result does not depend on the Visuals page having been drawn.
+        st.cfg.trackFillColor    = hexFromRgb(st.fillColor.data());
+        const std::array<float, 3> stroke = st.autoStroke
+                                          ? deriveStroke(st.fillColor.data())
+                                          : st.strokeColor;
+        st.cfg.trackStrokeColor  = hexFromRgb(stroke.data());
+        st.cfg.backgroundColor   = hexFromRgb(st.bgColor.data());
         st.cfg.autoStroke        = st.autoStroke;
         st.cfg.enableHitsounds   = st.enableHitsounds;
         st.cfg.forceHitsoundType = st.forceHS ? kHitsoundTypes[st.forceHSIdx] : "";

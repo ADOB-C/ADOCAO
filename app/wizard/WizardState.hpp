@@ -8,12 +8,48 @@
 #include "app/LoadingWindow.hpp"    // LoadingProgress
 #include <array>
 #include <atomic>
+#include <cstdio>
 #include <string>
 #include <thread>
 
 namespace wizard {
 
 struct Chrome;
+
+// ---- Color conversion (wizard <-> config) ----
+// The wizard edits colors as float RGB so ImGui's color widgets can drive them
+// directly, while LauncherConfig / the CLI keep their "#RRGGBB"-style 6-char
+// hex contract. These helpers are the only crossing point.
+inline std::array<float, 3> rgbFromHex(const std::string& hex) {
+    unsigned v = 0;
+    if (hex.size() >= 6) std::sscanf(hex.c_str(), "%06x", &v);
+    return { (float)((v >> 16) & 0xFFu) / 255.0f,
+             (float)((v >>  8) & 0xFFu) / 255.0f,
+             (float)( v        & 0xFFu) / 255.0f };
+}
+
+inline std::string hexFromRgb(const float rgb[3]) {
+    auto byte = [](float c) {
+        int v = (int)(c * 255.0f + 0.5f);
+        return (unsigned)(v < 0 ? 0 : (v > 255 ? 255 : v));
+    };
+    char out[7];
+    std::snprintf(out, sizeof(out), "%02X%02X%02X", byte(rgb[0]), byte(rgb[1]), byte(rgb[2]));
+    return out;
+}
+
+// Automatic stroke has always been "fill * 0.5" (--no-auto-stroke turns it off).
+// The halving is done in the byte domain exactly like the old hex code did, so
+// odd channels truncate (DEBB7B -> 6F5D3D) instead of rounding up.
+inline std::array<float, 3> deriveStroke(const float fill[3]) {
+    auto half = [](float c) {
+        int v = (int)(c * 255.0f + 0.5f);
+        if (v < 0) v = 0;
+        if (v > 255) v = 255;
+        return (float)(v / 2) / 255.0f;
+    };
+    return { half(fill[0]), half(fill[1]), half(fill[2]) };
+}
 
 // Wizard page ids, in display order.
 enum class Page : int { Welcome = 0, Preload, Hitsounds, Graphics, Visuals, Music };
@@ -27,12 +63,14 @@ struct State {
     LauncherConfig cfg;
     bool done = false;                 // Start/Export pressed (or window closed)
 
-    // Editor buffers (level/music paths, hex colors)
+    // Editor buffers (level/music paths). Colors are float RGB for
+    // ImGui::ColorEdit3, seeded from the hex defaults in cfg so the two stay in
+    // sync (and will pick up CLI-provided colors once the config is shared).
     char levelBuf[1024] = {};
     char musicBuf[1024] = {};
-    char fillBuf[8] = "DEBB7B";
-    char strokeBuf[8] = "6F5D3D";
-    char bgBuf[8] = "000000";
+    std::array<float, 3> fillColor   = rgbFromHex(cfg.trackFillColor);
+    std::array<float, 3> strokeColor = rgbFromHex(cfg.trackStrokeColor);
+    std::array<float, 3> bgColor     = rgbFromHex(cfg.backgroundColor);
 
     // Page option state
     bool autoStroke = true;

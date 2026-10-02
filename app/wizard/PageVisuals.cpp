@@ -25,6 +25,22 @@ void drawVisualsPage(State& st, const Chrome& ch) {
     ImGui::DragFloat("##srate", &st.trailSampleRate, 2.0f, 5.0f, 500.0f, "%.0f/s");
     ImGui::Unindent(24.0f * S);
     ImGui::Spacing();
+    ImGui::SetCursorPosX(colX); ImGui::Text("Speed-aware sampling");
+    ImGui::SameLine(ctrlX);
+    ImGui::Checkbox("##pertile", &st.trailPerTile);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Raise the sample rate to follow the track covered per second\n"
+                          "(step + the arc of the tile's relative angle). Fixes charts\n"
+                          "that speed up by orders of magnitude, and slow tiles that\n"
+                          "sweep a large angle. Never lower than the rate above.");
+    ImGui::Spacing();
+    ImGui::SetCursorPosX(colX); ImGui::Text("Samples / tile");
+    ImGui::SameLine(ctrlX);
+    ImGui::SetNextItemWidth(140.0f * S);
+    if (!st.trailPerTile) ImGui::BeginDisabled();
+    ImGui::DragFloat("##spt", &st.trailSamplesPerTile, 0.25f, 0.5f, 32.0f, "%.2f");
+    if (!st.trailPerTile) ImGui::EndDisabled();
+    ImGui::Spacing();
     ImGui::SetCursorPosX(colX); ImGui::Text("Duration");
     ImGui::SameLine(ctrlX);
     ImGui::SetNextItemWidth(140.0f * S);

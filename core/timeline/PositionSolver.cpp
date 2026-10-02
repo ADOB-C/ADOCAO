@@ -106,6 +106,27 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
     else       { blueOut=pv; redOut=mv; }
 }
 
+double PositionSolver::tilePathSpeed(const Timeline& timeline, double t) {
+    const auto& durations = timeline.tileDurations();
+    if (durations.empty()) return 0.0;
+    int idx = timeline.findTileIndex(t);
+    if (idx < 0) idx = 0;
+    if (idx >= (int)durations.size()) idx = (int)durations.size() - 1;
+    const double d = durations[idx];
+    if (d <= 1e-9) return 0.0;
+
+    // Track covered by one tile: at least the step to the next tile centre, plus
+    // the arc swept by the tile's relative angle (a 180 deg / midspin tile makes
+    // the planet travel a long arc while barely advancing). Sampling has to
+    // follow that arc, otherwise slow sharp turns come out as chunky polylines.
+    const double step = 1.0;
+    const double rot  = std::abs((double)timeline.tileTotalAngles()[idx]);
+    const double radius = std::max((double)timeline.tileStartDist()[idx],
+                                   (double)timeline.tileEndDist()[idx]);
+    const double arc = rot * std::max(0.5, radius);
+    return std::max(step, arc) / d;
+}
+
 void PositionSolver::sampleTrail(const Timeline& timeline, double t, float trailDuration, float sampleRate, const glm::dvec2& redHead, const glm::dvec2& blueHead, std::vector<glm::dvec2>& redOut, std::vector<glm::dvec2>& blueOut) {
     if (sampleRate <= 0.0f || trailDuration <= 0.0f) return;
 

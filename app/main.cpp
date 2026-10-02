@@ -48,6 +48,9 @@ int main(int argc, char* argv[]) {
         else if (strcmp(argv[i], "--trail-target-fps") == 0 && i+1<argc) { cli.trailTargetFps = (float)atof(argv[++i]); cli.trailAdaptive = true; }
         else if (strcmp(argv[i], "--trail-rate-min") == 0 && i+1<argc) cli.trailRateMin = (float)atof(argv[++i]);
         else if (strcmp(argv[i], "--trail-rate-max") == 0 && i+1<argc) cli.trailRateMax = (float)atof(argv[++i]);
+        // Optional: scale the sample rate with the track covered per second
+        // (steps + arc of the tile's relative angle) instead of a fixed Hz rate.
+        else if (strcmp(argv[i], "--trail-samples-per-tile") == 0 && i+1<argc) { cli.trailSamplesPerTile = (float)atof(argv[++i]); cli.trailPerTile = true; }
         else if (strcmp(argv[i], "--export") == 0)                cli.exportHitsounds = true;
     }
 

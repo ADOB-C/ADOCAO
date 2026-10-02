@@ -65,13 +65,31 @@ adocao.exe --level <file> --music <file> [--width N] [--height N]
            [--msaa N] [--exclusive | --no-exclusive]
            [--trail-duration SEC] [--trail-sample-rate N]
            [--trail-target-fps N] [--trail-rate-min N] [--trail-rate-max N]
+           [--trail-samples-per-tile N]
 ```
 
-Trail sample rate is **adaptive by default**: the app measures real frame work
-and raises the rate (up to `--trail-rate-max`, default 4000) whenever frames
-fit under `1000/--trail-target-fps` ms, shedding toward `--trail-rate-min`
-(default 60) when frames get too expensive. An explicit `--trail-sample-rate N`
-(or setting the rate in the wizard) pins a fixed rate instead.
+Trail sampling (wizard Visuals page / CLI):
+- **Fixed rate** — `--trail-sample-rate N`, or the wizard's "Sample rate" slider. The
+  wizard always submits a fixed rate (it hardcodes `trailAdaptive = false`); the CLI
+  leaves it adaptive unless `--trail-sample-rate` is given.
+- **Adaptive** (CLI default) — the app measures real frame work and raises the rate
+  (up to `--trail-rate-max`, default 4000) whenever frames fit under
+  `1000/--trail-target-fps` ms, shedding toward `--trail-rate-min` (default 60) when
+  frames get too expensive. Toggle from the CLI with `--trail-target-fps`,
+  `--trail-rate-min`, `--trail-rate-max`.
+- **Speed-aware** (optional) — `--trail-samples-per-tile N` or the wizard checkbox
+  "Speed-aware sampling": raises the rate to
+  `max(fixedRate, trackCoveredPerSecond × N)`, clamped to `[--trail-rate-min, --trail-rate-max]`.
+  "Track covered per second" counts the step between tiles **plus the arc swept by
+  the tile's relative angle** (`PositionSolver::tilePathSpeed`), because a slow tile
+  can sweep 330° while barely advancing — sampling per tile alone would leave those
+  arcs chunky. Being a `max()` on top of the fixed rate, it is never coarser than
+  fixed mode. Measured on a 6.7M-tile chart that goes BPM 1000 → 8M: fixed 200/s
+  leaves 268 tiles between samples at BPM 1.5M, speed-aware with the default 4000/s
+  cap brings that to 13 tiles (raise `--trail-rate-max` for more). At those speeds
+  the 0.4s window itself spans tens of thousands of tiles, so the trail still reads
+  as a long beam — bounding the trail *length* in tiles is the real fix and is not
+  implemented yet.
 
 Without `--level`, falls through to the ImGui launcher.
 

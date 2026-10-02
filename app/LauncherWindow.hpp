@@ -31,6 +31,8 @@ struct LauncherConfig {
     float trailTargetFps = 120.0f; // adaptive: keep at least this FPS before raising the rate
     float trailRateMin = 60.0f;    // adaptive lower bound (samples per second)
     float trailRateMax = 4000.0f;  // adaptive upper bound (samples per second)
+    bool  trailPerTile = false;    // optional: scale the sample rate with the local tile speed
+    float trailSamplesPerTile = 4.0f; // per-tile mode: samples per tile (clamped to rateMin/Max)
     bool exportHitsounds = false;
     std::string exportDir;         // hitsound export directory (defaults to level dir)
     bool cancelled = false;

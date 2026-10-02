@@ -19,4 +19,11 @@ public:
                             const glm::dvec2& redHead, const glm::dvec2& blueHead,
                             std::vector<glm::dvec2>& redOut,
                             std::vector<glm::dvec2>& blueOut);
+
+    // Track covered per second at time t, in tiles, counting the arc swept by
+    // the tile's relative angle as path length. This is the metric the optional
+    // per-tile trail sampling scales with: tiles/second alone under-samples a
+    // slow tile that sweeps a large angle (180 deg / midspin), while a fixed
+    // samples-per-second rate under-samples fast straight runs.
+    static double tilePathSpeed(const Timeline& timeline, double t);
 };

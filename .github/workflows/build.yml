@@ -105,37 +105,8 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Package thin .app
-        run: |
-          mkdir -p build/ADOCAO.app/Contents/MacOS
-          cp build/ADOCAO build/ADOCAO.app/Contents/MacOS/ADOCAO
-          chmod +x build/ADOCAO.app/Contents/MacOS/ADOCAO
-          cat > build/ADOCAO.app/Contents/Info.plist <<'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleExecutable</key>
-              <string>ADOCAO</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.adocao.ADOCAO</string>
-              <key>CFBundleName</key>
-              <string>ADOCAO</string>
-              <key>CFBundleDisplayName</key>
-              <string>ADOCAO</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>CFBundleShortVersionString</key>
-              <string>6.0.0</string>
-              <key>CFBundleVersion</key>
-              <string>6.0.0</string>
-              <key>LSMinimumSystemVersion</key>
-              <string>12.0</string>
-              <key>NSHighResolutionCapable</key>
-              <true/>
-          </dict>
-          </plist>
-          EOF
+      - name: Package .app bundle (binary + assets, ad-hoc signed)
+        run: scripts/make-app.sh
 
       - uses: actions/upload-artifact@v4
         with:

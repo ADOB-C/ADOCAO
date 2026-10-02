@@ -158,6 +158,7 @@ ADOCAO/
 │   └── hitsounds/              # ← hitsounds/（27 个 WAV）
 ├── docs/                       # 架构/规划文档（本文件）
 ├── scripts/                    # 开发流水线：push-ci.sh（推送+跟踪 CI）run.sh（运行/调试）release.sh（发版）
+│                               #   make-app.sh（macOS 自包含 .app 打包：二进制 + assets + ad-hoc 签名）
 ├── build.sh  build.bat  build.ps1     # 不动（仍 cmake -B build）
 ├── .github/  README.md  TODO.md  AGENTS.md  LICENSE
 ```

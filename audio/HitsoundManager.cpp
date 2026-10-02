@@ -20,6 +20,8 @@ static std::unordered_map<std::string, std::vector<int16_t>> s_wavRawCache;
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
+#include <limits.h>
+#include <stdlib.h>
 #include <vector>
 #endif
 
@@ -88,6 +90,11 @@ static std::string executableDirectory() {
     std::string dir(buf.data());
     auto pos = dir.find_last_of('/');
     if (pos != std::string::npos) dir = dir.substr(0, pos);
+    // The reported path is the one used to launch, which may go through a
+    // symlink (e.g. /Applications/ADOCAO.app). Resolve it so the search roots
+    // below actually point into the bundle.
+    char resolved[PATH_MAX];
+    if (realpath(dir.c_str(), resolved)) dir = resolved;
     return dir;
 #elif defined(__linux__)
     char buf[PATH_MAX];
@@ -120,6 +127,8 @@ static std::string findAssetsDir() {
     candidates.push_back("assets/hitsounds/");
     if (!exeDir.empty()) {
         candidates.push_back(exeDir + "/assets/hitsounds/");
+        // Standard macOS bundle layout (see scripts/make-app.sh).
+        candidates.push_back(exeDir + "/../Resources/assets/hitsounds/");
 
         // If the binary is in a nested build subdirectory (e.g. build/app or
         // build/ADOCAO.app/Contents/MacOS), also look above it for assets

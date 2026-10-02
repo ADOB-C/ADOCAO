@@ -24,6 +24,8 @@
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
+#include <limits.h>
+#include <stdlib.h>
 #endif
 
 #ifdef __linux__
@@ -34,8 +36,9 @@
 namespace {
 
 // Shader assets live in "assets/shaders/" relative to the working directory,
-// the executable directory or up to 3 parent directories above it (Finder
-// launches / .app bundles / nested build dirs).
+// the executable directory, a macOS bundle's Contents/Resources (see
+// scripts/make-app.sh) or up to 3 parent directories above the executable
+// (Finder launches / .app bundles / nested build dirs).
 static std::string executableDirectory() {
 #ifdef __APPLE__
     uint32_t size = 0;
@@ -45,6 +48,11 @@ static std::string executableDirectory() {
     std::string dir(buf.data());
     auto pos = dir.find_last_of('/');
     if (pos != std::string::npos) dir = dir.substr(0, pos);
+    // _NSGetExecutablePath reports the path as invoked, so it may go through a
+    // symlink (e.g. /Applications/ADOCAO.app -> repo/build/ADOCAO.app). Resolve
+    // it, otherwise every search root below points outside the real bundle.
+    char resolved[PATH_MAX];
+    if (realpath(dir.c_str(), resolved)) dir = resolved;
     return dir;
 #elif defined(__linux__)
     char buf[PATH_MAX];
@@ -72,6 +80,8 @@ static std::string assetPath(const std::string& relative) {
     const std::string exeDir = executableDirectory();
     if (!exeDir.empty()) {
         candidates.push_back(exeDir + "/" + relative);
+        // Standard macOS bundle layout, where the packaged assets live.
+        candidates.push_back(exeDir + "/../Resources/" + relative);
         auto dir = exeDir;
         for (int i = 0; i < 3 && !dir.empty(); i++) {
             const auto slash = dir.find_last_of("/\\");

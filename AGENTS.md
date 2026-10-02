@@ -105,6 +105,13 @@ Without `--level`, falls through to the ImGui launcher.
 `ma_decoder` (miniaudio) — supports AIFF, OGG, WAV, FLAC. File read into memory + `ma_decoder_init_memory()`. Output: stereo f32 @ 48000Hz. Device period: 1024 frames (~23ms) for best quality. `m_fileData` kept alive for decoder lifetime. Pause stops the audio device (not just sets a flag).
 
 ### Hitsounds
+**Faithfulness is a product rule: every hit in the chart is mixed.** Do NOT adopt
+`ADOFAI_HitSound`'s Nyquist de-duplication (dropping hits < 41.7 µs apart) even though
+it makes the benchmark ~20x faster on dense charts — measured, it changes 95% of the
+output samples and the sound itself. The `setNyquistDedup` switch exists only so the
+benchmark can quantify that difference; it must stay off in shipped builds. A loudness
+or speed win that alters which hits sound is not a win.
+
 Pre-synthesis into one float buffer, then a single gain for the whole track (the
 old per-sample int16 hard clip was removed — it saturated 0.33% of samples on a dense
 chart and cost two clamps plus two channel stores per sample, measured ~3.5x slower):

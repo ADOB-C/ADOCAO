@@ -13,6 +13,18 @@
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <vector>
+
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#include <limits.h>
+#include <stdlib.h>
+#endif
+
+#ifdef __linux__
+#include <unistd.h>
+#include <limits.h>
+#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -78,16 +90,52 @@ static bool canAppendLog(const std::string& path) {
     return true;
 }
 
-// Where ADOCAO.log goes. CWD first, so terminal runs keep dropping the log next
-// to wherever they were launched from (which .gitignore already covers).
-// Finder/Dock launches have CWD = "/", which is not writable, so fall back to
-// the per-user log directory. The executable directory is deliberately NOT a
-// candidate: inside a .app bundle it is Contents/MacOS (writing there breaks the
-// code signature — see scripts/make-app.sh) and on Windows the install
-// directory may be read-only.
+// Directory of the running executable (symlinks resolved on macOS).
+static std::string executableDir() {
+#ifdef _WIN32
+    char buf[MAX_PATH];
+    DWORD n = GetModuleFileNameA(nullptr, buf, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return {};
+    std::string p(buf, n);
+    const auto pos = p.find_last_of("\\/");
+    return pos == std::string::npos ? std::string{} : p.substr(0, pos);
+#elif defined(__APPLE__)
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::vector<char> buf(size > 0 ? size : 1);
+    if (_NSGetExecutablePath(buf.data(), &size) != 0) return {};
+    std::string dir(buf.data());
+    auto pos = dir.find_last_of('/');
+    if (pos != std::string::npos) dir = dir.substr(0, pos);
+    char resolved[PATH_MAX];
+    if (realpath(dir.c_str(), resolved)) dir = resolved;
+    return dir;
+#elif defined(__linux__)
+    char buf[PATH_MAX];
+    const ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (n <= 0) return {};
+    buf[n] = '\0';
+    std::string dir(buf);
+    const auto pos = dir.find_last_of('/');
+    return pos == std::string::npos ? std::string{} : dir.substr(0, pos);
+#else
+    return {};
+#endif
+}
+
+// Where ADOCAO.log goes: next to the executable first. That is one predictable
+// location regardless of which directory you launched from — a CWD-relative log
+// used to litter whatever directory you happened to be in, $HOME included.
+// Inside a macOS .app the executable directory is Contents/MacOS, and writing
+// there would invalidate the code signature (see scripts/make-app.sh), so that
+// one case falls through to the per-user log directory, then the temp dir.
 static const std::string& logPath() {
     static const std::string path = []() -> std::string {
-        if (canAppendLog("ADOCAO.log")) return "ADOCAO.log";
+        const std::string exeDir = executableDir();
+        if (!exeDir.empty() && exeDir.find("/Contents/MacOS") == std::string::npos) {
+            const std::string p = exeDir + "/ADOCAO.log";
+            if (canAppendLog(p)) return p;
+        }
 
         std::filesystem::path dir;
 #ifdef __APPLE__
@@ -115,7 +163,7 @@ static const std::string& logPath() {
             const std::string p = (tmp / "ADOCAO.log").string();
             if (canAppendLog(p)) return p;
         }
-        return "ADOCAO.log";   // last resort: previous (CWD) behaviour
+        return "ADOCAO.log";   // last resort
     }();
     return path;
 }

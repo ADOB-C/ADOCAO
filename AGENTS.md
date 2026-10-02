@@ -53,7 +53,7 @@ Minimum CMake 3.20. C++20. OpenGL 4.3+ required. Dependencies via FetchContent (
 
 `--debug` flag enables debug console, disables hitsounds by default.
 
-**Logs** (`ADOCAO.log`, written by `app/Application.cpp::logPath()`): first choice is the current directory (terminal runs keep the log next to wherever you launched from; `.gitignore` covers it). When that is not writable — notably a Finder/Dock launch, where CWD is `/` — it falls back to `~/Library/Logs/ADOCAO/` (macOS), `%LOCALAPPDATA%\ADOCAO\logs` (Windows), `$XDG_STATE_HOME/ADOCAO` or `~/.local/state/ADOCAO` (Linux), then the temp directory. The first `Log file:` line in the log records the path actually used. It is deliberately never written next to the executable: inside a `.app` that is `Contents/MacOS`, and writing there would break the code signature.
+**Logs** (`ADOCAO.log`, written by `app/Application.cpp::logPath()`): **next to the executable** — one predictable location no matter which directory you launched from (it used to be CWD-relative, which littered whatever directory you happened to be in, `$HOME` included). The one exception is a macOS `.app`, where the executable directory is `Contents/MacOS` and writing there would break the code signature; that case uses `~/Library/Logs/ADOCAO/`. Fallbacks when the executable directory is not writable: `~/Library/Logs/ADOCAO/` (macOS), `%LOCALAPPDATA%\ADOCAO\logs` (Windows), `$XDG_STATE_HOME/ADOCAO` or `~/.local/state/ADOCAO` (Linux), then the temp directory. The first `Log file:` line in the log records the path actually used.
 
 ## CLI Usage
 

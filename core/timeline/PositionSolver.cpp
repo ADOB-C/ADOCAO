@@ -127,16 +127,71 @@ double PositionSolver::tilePathSpeed(const Timeline& timeline, double t) {
     return std::max(step, arc) / d;
 }
 
-void PositionSolver::sampleTrail(const Timeline& timeline, double t, float trailDuration, float sampleRate, const glm::dvec2& redHead, const glm::dvec2& blueHead, std::vector<glm::dvec2>& redOut, std::vector<glm::dvec2>& blueOut) {
-    if (sampleRate <= 0.0f || trailDuration <= 0.0f) return;
+PositionSolver::TrailWindow PositionSolver::trailWindow(const Timeline& timeline, double t,
+                                                        const TrailSamplingConfig& cfg) {
+    TrailWindow w;
+    w.startTime = t;
+    w.sampleRate = cfg.fixedRate;
+    if (timeline.tileStartTimes().empty()) return w;
 
-    const int maxSamples = (int)std::ceil(trailDuration * sampleRate) + 1;
+    // 1) Window first: seconds (default) or a tile count back.
+    double start = t - (double)cfg.duration;
+    if (cfg.lengthInTiles) {
+        const auto& startTimes = timeline.tileStartTimes();
+        const auto& durations  = timeline.tileDurations();
+        int i = timeline.findTileIndex(t);
+        if (i < 0) i = 0;
+        if (i >= (int)startTimes.size()) i = (int)startTimes.size() - 1;
+        // Walk back by tile COUNT (not by accumulated seconds) and take a
+        // fraction of the tile before that for a fractional request.
+        const double back = std::max(0.0, (double)cfg.tiles);
+        const int whole = (int)std::floor(back);
+        const double frac = back - (double)whole;
+        i = std::max(0, i - whole);
+        start = startTimes[i];
+        if (frac > 1e-6 && i > 0 && i - 1 < (int)durations.size())
+            start -= frac * (double)durations[i - 1];
+    }
+    if (start > t) start = t;
+
+    // 2) Rate. In tiles mode the rate is derived from the window so the point
+    // count is exactly tiles x samplesPerTile whatever the BPM (a fixed Hz rate
+    // is meaningless there: 8 tiles at BPM 1.5M is 0.3 ms, at 120 BPM it is 4 s).
+    // rateMax is deliberately not applied — it exists to cap a Hz-mode rate, and
+    // a large derived rate over a tiny window still yields few points.
+    const double span = t - start;
+    double rate;
+    if (cfg.lengthInTiles) {
+        rate = span > 1e-9
+             ? (double)cfg.tiles * (double)cfg.samplesPerTile / span
+             : (double)cfg.fixedRate;
+        rate = std::max(rate, (double)cfg.rateMin);
+    } else {
+        rate = (double)cfg.fixedRate;
+        if (cfg.speedAware)
+            rate = std::max(rate, tilePathSpeed(timeline, t) * (double)cfg.samplesPerTile);
+        rate = std::clamp(rate, (double)cfg.rateMin, (double)cfg.rateMax);
+    }
+
+    // 3) Hard bound on the point count, whatever the mode.
+    if (span > 1e-9 && rate * span > (double)cfg.maxPoints)
+        rate = (double)cfg.maxPoints / span;
+    if (rate < 1.0) rate = 1.0;
+
+    w.startTime = start;
+    w.sampleRate = (float)rate;
+    return w;
+}
+
+void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime, double t, float sampleRate, const glm::dvec2& redHead, const glm::dvec2& blueHead, std::vector<glm::dvec2>& redOut, std::vector<glm::dvec2>& blueOut) {
+    if (sampleRate <= 0.0f || t <= startTime) return;
+
+    const int maxSamples = (int)std::ceil((t - startTime) * sampleRate) + 1;
     const double dt = 1.0 / sampleRate;
 
     std::vector<double> redXY(maxSamples*2 + 2), blueXY(maxSamples*2 + 2);
     int samples = 0;
 
-    double startTime = t - trailDuration;
     int tileIdx = timeline.findTileIndex(startTime);
     if (tileIdx < 0) tileIdx = 0;
     int tsz = (int)timeline.tileStartTimes().size();
@@ -166,4 +221,9 @@ void PositionSolver::sampleTrail(const Timeline& timeline, double t, float trail
         redOut.emplace_back(redXY[i*2], redXY[i*2+1]);
         blueOut.emplace_back(blueXY[i*2], blueXY[i*2+1]);
     }
+}
+
+void PositionSolver::sampleTrail(const Timeline& timeline, double t, float trailDuration, float sampleRate, const glm::dvec2& redHead, const glm::dvec2& blueHead, std::vector<glm::dvec2>& redOut, std::vector<glm::dvec2>& blueOut) {
+    if (trailDuration <= 0.0f) return;
+    sampleTrailRange(timeline, t - trailDuration, t, sampleRate, redHead, blueHead, redOut, blueOut);
 }

@@ -92,11 +92,9 @@ private:
     float m_trailRateMax = 4000.0f;
     bool  m_trailPerTile = false;          // scale rate with the local tile speed
     float m_trailSamplesPerTile = 4.0f;
+    bool  m_trailLengthInTiles = false;    // optional: length in tiles instead of seconds
+    float m_trailTiles = 8.0f;
     double m_trailEmaMs = 0.0;
-
-    // Sample rate to use this frame: the fixed/adaptive Hz rate, or (in per-tile
-    // mode) samplesPerTile x local tile speed, clamped to [min, max].
-    float trailRateFor(const Timeline& timeline, double t) const;
 
     // Track appear/disappear animation state
     bool m_tileVisEnabled = false;

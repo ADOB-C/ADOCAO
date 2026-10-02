@@ -83,6 +83,8 @@ struct State {
     float trailSampleRate = 200.0f;
     bool  trailPerTile = false;        // optional speed-aware sampling
     float trailSamplesPerTile = 4.0f;
+    bool  trailLengthInTiles = false;  // optional: length in tiles instead of seconds
+    float trailTiles = 8.0f;
     bool fullscreen = false;
     bool legacyCulling = false;
     int  msaaIdx = 0;                  // 0 = Off

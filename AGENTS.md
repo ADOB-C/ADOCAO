@@ -65,31 +65,36 @@ adocao.exe --level <file> --music <file> [--width N] [--height N]
            [--msaa N] [--exclusive | --no-exclusive]
            [--trail-duration SEC] [--trail-sample-rate N]
            [--trail-target-fps N] [--trail-rate-min N] [--trail-rate-max N]
-           [--trail-samples-per-tile N]
+           [--trail-samples-per-tile N] [--trail-tiles N]
 ```
 
-Trail sampling (wizard Visuals page / CLI):
-- **Fixed rate** — `--trail-sample-rate N`, or the wizard's "Sample rate" slider. The
-  wizard always submits a fixed rate (it hardcodes `trailAdaptive = false`); the CLI
-  leaves it adaptive unless `--trail-sample-rate` is given.
-- **Adaptive** (CLI default) — the app measures real frame work and raises the rate
-  (up to `--trail-rate-max`, default 4000) whenever frames fit under
-  `1000/--trail-target-fps` ms, shedding toward `--trail-rate-min` (default 60) when
-  frames get too expensive. Toggle from the CLI with `--trail-target-fps`,
-  `--trail-rate-min`, `--trail-rate-max`.
-- **Speed-aware** (optional) — `--trail-samples-per-tile N` or the wizard checkbox
-  "Speed-aware sampling": raises the rate to
-  `max(fixedRate, trackCoveredPerSecond × N)`, clamped to `[--trail-rate-min, --trail-rate-max]`.
-  "Track covered per second" counts the step between tiles **plus the arc swept by
-  the tile's relative angle** (`PositionSolver::tilePathSpeed`), because a slow tile
-  can sweep 330° while barely advancing — sampling per tile alone would leave those
-  arcs chunky. Being a `max()` on top of the fixed rate, it is never coarser than
-  fixed mode. Measured on a 6.7M-tile chart that goes BPM 1000 → 8M: fixed 200/s
-  leaves 268 tiles between samples at BPM 1.5M, speed-aware with the default 4000/s
-  cap brings that to 13 tiles (raise `--trail-rate-max` for more). At those speeds
-  the 0.4s window itself spans tens of thousands of tiles, so the trail still reads
-  as a long beam — bounding the trail *length* in tiles is the real fix and is not
-  implemented yet.
+Trail sampling — two independent axes, both optional and **off by default** (wizard
+Visuals page / CLI):
+
+**Length** — `--trail-duration SEC` (default) or `--trail-tiles N` (wizard
+"Length in tiles" + "Trail tiles"). A *time* window is unusable on charts whose BPM
+spans orders of magnitude: 0.4 s is ~6,800 tiles at BPM 1.5M, so the trail sweeps
+across the whole map and, whenever the path doubles back inside the window, lands
+mostly in front of the planet (measured: 41,922-tile span, 12,179 tiles ahead of the
+planet on the 6.7M-tile test chart). Measuring the length in tiles bounds the extent
+to N tiles: the same moment with `--trail-tiles 8` spans 2 tiles and nothing ahead.
+Sampling rate cannot fix that — it changes the polyline's resolution, never where the
+history lies.
+
+**Rate** — the fixed Hz rate (`--trail-sample-rate`, governor-adjusted when adaptive)
+by default, optionally raised with the track covered per second
+(`--trail-samples-per-tile N` / wizard "Speed-aware sampling"): rate =
+`max(fixedRate, trackCoveredPerSecond x N)`, clamped to
+`[--trail-rate-min, --trail-rate-max]`. "Track covered per second" counts the step
+between tiles **plus the arc swept by the tile's relative angle**
+(`PositionSolver::tilePathSpeed`), because a slow tile can sweep 330° while barely
+advancing. In tiles-length mode the rate is derived from the window instead
+(`tiles x samplesPerTile / windowSeconds`), so the point count is exactly
+`tiles x samplesPerTile` at any BPM (measured: 34 / 65 / 129 points for 8 / 16 / 32
+tiles at BPM 1.5M) and the sample-count cap `maxPoints` (8192) is the only backstop.
+
+The window/rate maths lives in core (`PositionSolver::trailWindow`,
+`sampleTrailRange`) so it can be exercised headlessly.
 
 Without `--level`, falls through to the ImGui launcher.
 

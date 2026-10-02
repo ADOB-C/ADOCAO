@@ -51,6 +51,9 @@ int main(int argc, char* argv[]) {
         // Optional: scale the sample rate with the track covered per second
         // (steps + arc of the tile's relative angle) instead of a fixed Hz rate.
         else if (strcmp(argv[i], "--trail-samples-per-tile") == 0 && i+1<argc) { cli.trailSamplesPerTile = (float)atof(argv[++i]); cli.trailPerTile = true; }
+        // Optional: measure the trail in tiles instead of seconds (a 0.4s window
+        // is tens of thousands of tiles on charts that speed up by 1000x).
+        else if (strcmp(argv[i], "--trail-tiles") == 0 && i+1<argc) { cli.trailTiles = (float)atof(argv[++i]); cli.trailLengthInTiles = true; }
         else if (strcmp(argv[i], "--export") == 0)                cli.exportHitsounds = true;
     }
 

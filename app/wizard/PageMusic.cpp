@@ -67,6 +67,8 @@ void drawMusicPage(State& st, const Chrome& ch) {
         st.cfg.trailAdaptive     = false;   // wizard sliders = manual fixed rate
         st.cfg.trailPerTile      = st.trailPerTile;
         st.cfg.trailSamplesPerTile = st.trailSamplesPerTile;
+        st.cfg.trailLengthInTiles = st.trailLengthInTiles;
+        st.cfg.trailTiles        = st.trailTiles;
         st.cfg.cancelled         = false;
         st.done = true;
     }

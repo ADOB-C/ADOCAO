@@ -142,6 +142,8 @@ bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level) {
     m_trailRateMax = cfg.trailRateMax;
     m_trailPerTile = cfg.trailPerTile;
     m_trailSamplesPerTile = cfg.trailSamplesPerTile;
+    m_trailLengthInTiles = cfg.trailLengthInTiles;
+    m_trailTiles = cfg.trailTiles;
     if (m_trailRateMax < m_trailRateMin) m_trailRateMax = m_trailRateMin;
 
     m_tileVisEnabled = (level.settings.trackDisappearAnimation != "None" ||
@@ -229,23 +231,17 @@ void LevelScene::setMeasuredFrameMs(double workMs) {
     if (m_trailSampleRate < 1.0f) m_trailSampleRate = 1.0f;
 }
 
-// Trail sample rate for this frame. Fixed/adaptive mode returns the (possibly
-// governor-adjusted) Hz rate. The optional speed-aware mode raises that rate to
-// keep up with the track covered per second (step + the arc of the tile's
-// relative angle): at 1,000,000 BPM a fixed 200/s leaves ~85 tiles between
-// samples and the trail collapses into a straight chord, while a slow tile that
-// sweeps 330 deg needs its arc resolved or it comes out chunky. It is a max()
-// on top of the fixed rate, never a replacement, so slow straight sections stay
-// exactly as dense as before; the result is clamped to [trailRateMin, trailRateMax].
-float LevelScene::trailRateFor(const Timeline& timeline, double t) const {
-    if (!m_trailPerTile) return m_trailSampleRate;
-    const double pathSpeed = PositionSolver::tilePathSpeed(timeline, t);
-    double rate = std::max((double)m_trailSampleRate,
-                           pathSpeed * (double)m_trailSamplesPerTile);
-    rate = std::clamp(rate, (double)m_trailRateMin, (double)m_trailRateMax);
-    return (float)rate;
-}
-
+// Trail window for this frame. Two independent options (both off by default, so
+// the classic "last N seconds at a fixed Hz rate" behaviour is unchanged):
+//  - lengthInTiles: the trail covers the last `trailTiles` tiles instead of the
+//    last `trailDuration` seconds. A time window is unusable on charts whose BPM
+//    spans orders of magnitude — 0.4s is 6,800 tiles at BPM 1.5M, so the trail
+//    sweeps across the map and can lie mostly in front of the planet whenever the
+//    path doubles back inside the window.
+//  - speedAware: raise the rate with the track covered per second (steps + the
+//    arc of the tile's relative angle) so the polyline still follows the track.
+// The window/rate maths lives in core (PositionSolver::trailWindow) so it can be
+// exercised headlessly.
 void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline) {
     if (!m_redPlanet || !m_bluePlanet) return;
 
@@ -254,18 +250,27 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
 
     if (!m_showTrail || !m_redPlanet->trail || !m_bluePlanet->trail) return;
 
-    const float rate = trailRateFor(timeline, frame.timeInLevel);
+    PositionSolver::TrailSamplingConfig sc;
+    sc.lengthInTiles  = m_trailLengthInTiles;
+    sc.duration       = m_trailDuration;
+    sc.tiles          = m_trailTiles;
+    sc.speedAware     = m_trailPerTile;
+    sc.samplesPerTile = m_trailSamplesPerTile;
+    sc.fixedRate      = m_trailSampleRate;      // possibly governor-adjusted
+    sc.rateMin        = m_trailRateMin;
+    sc.rateMax        = m_trailRateMax;
+
+    const PositionSolver::TrailWindow win =
+        PositionSolver::trailWindow(timeline, frame.timeInLevel, sc);
+
     std::vector<glm::dvec2> redPts, bluePts;
-    PositionSolver::sampleTrail(timeline, frame.timeInLevel,
-                                m_trailDuration, rate,
-                                frame.redPosition, frame.bluePosition,
-                                redPts, bluePts);
+    PositionSolver::sampleTrailRange(timeline, win.startTime, frame.timeInLevel, win.sampleRate,
+                                     frame.redPosition, frame.bluePosition,
+                                     redPts, bluePts);
     if (redPts.empty() || bluePts.empty()) return;
 
-    // Ring capacity: in per-tile mode the rate varies per frame, so size the
-    // ring for the mode's maximum instead of the current rate.
-    const float capRate = m_trailPerTile ? m_trailRateMax : rate;
-    const int maxPoints = (int)std::ceil(m_trailDuration * capRate) + 1;
+    const int maxPoints =
+        (int)std::ceil((frame.timeInLevel - win.startTime) * win.sampleRate) + 1;
     std::vector<double> redXY(redPts.size() * 2), blueXY(bluePts.size() * 2);
     for (size_t i = 0; i < redPts.size(); i++) {
         redXY[i*2] = redPts[i].x;

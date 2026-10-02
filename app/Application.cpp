@@ -9,6 +9,10 @@
 #include "core/timeline/PlaybackClock.hpp"
 #include "core/util/Logger.hpp"
 #include <GLFW/glfw3.h>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <string>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -67,9 +71,58 @@ static void enableDPIAwareness() {
 
 static bool s_firstEarlyLog = true;
 
+static bool canAppendLog(const std::string& path) {
+    FILE* f = fopen(path.c_str(), "a");
+    if (!f) return false;
+    fclose(f);
+    return true;
+}
+
+// Where ADOCAO.log goes. CWD first, so terminal runs keep dropping the log next
+// to wherever they were launched from (which .gitignore already covers).
+// Finder/Dock launches have CWD = "/", which is not writable, so fall back to
+// the per-user log directory. The executable directory is deliberately NOT a
+// candidate: inside a .app bundle it is Contents/MacOS (writing there breaks the
+// code signature — see scripts/make-app.sh) and on Windows the install
+// directory may be read-only.
+static const std::string& logPath() {
+    static const std::string path = []() -> std::string {
+        if (canAppendLog("ADOCAO.log")) return "ADOCAO.log";
+
+        std::filesystem::path dir;
+#ifdef __APPLE__
+        if (const char* home = std::getenv("HOME"))
+            dir = std::filesystem::path(home) / "Library" / "Logs" / "ADOCAO";
+#elif defined(_WIN32)
+        if (const char* lad = std::getenv("LOCALAPPDATA"))
+            dir = std::filesystem::path(lad) / "ADOCAO" / "logs";
+#else
+        if (const char* xdg = std::getenv("XDG_STATE_HOME"))
+            dir = std::filesystem::path(xdg) / "ADOCAO";
+        else if (const char* home = std::getenv("HOME"))
+            dir = std::filesystem::path(home) / ".local" / "state" / "ADOCAO";
+#endif
+        if (!dir.empty()) {
+            std::error_code ec;
+            std::filesystem::create_directories(dir, ec);
+            const std::string p = (dir / "ADOCAO.log").string();
+            if (canAppendLog(p)) return p;
+        }
+
+        std::error_code ec;
+        const auto tmp = std::filesystem::temp_directory_path(ec);
+        if (!ec) {
+            const std::string p = (tmp / "ADOCAO.log").string();
+            if (canAppendLog(p)) return p;
+        }
+        return "ADOCAO.log";   // last resort: previous (CWD) behaviour
+    }();
+    return path;
+}
+
 static void earlyLog(const char* msg) {
     // First call truncates old log, subsequent calls append
-    FILE* f = fopen("ADOCAO.log", s_firstEarlyLog ? "w" : "a");
+    FILE* f = fopen(logPath().c_str(), s_firstEarlyLog ? "w" : "a");
     s_firstEarlyLog = false;
     if (f) { fprintf(f, "[EARLY] %s\n", msg); fclose(f); }
 #ifdef _WIN32
@@ -81,11 +134,9 @@ static void earlyLog(const char* msg) {
 int runApplication(bool debugConsole) {
     earlyLog("[ADOCAO] main() entered");
 
-    // Determine log path next to executable
-    std::string logPath = "ADOCAO.log";
-    Logger::instance().init(logPath, debugConsole);
-
+    Logger::instance().init(logPath(), debugConsole);
     LOG_I("ADOCAO starting...");
+    LOG_I("Log file: %s", logPath().c_str());
 
 #ifdef _WIN32
     earlyLog("[ADOCAO] DPI awareness...");
@@ -177,10 +228,10 @@ int runApplication(bool debugConsole) {
 int runApplicationFromCLI(const LauncherConfig& cfg, bool debugConsole) {
     earlyLog("[ADOCAO] CLI mode entered");
 
-    std::string logPath = "ADOCAO.log";
-    Logger::instance().init(logPath, debugConsole);
+    Logger::instance().init(logPath(), debugConsole);
 
     LOG_I("ADOCAO starting (CLI mode)...");
+    LOG_I("Log file: %s", logPath().c_str());
 
 #ifdef _WIN32
     earlyLog("[ADOCAO] DPI awareness...");

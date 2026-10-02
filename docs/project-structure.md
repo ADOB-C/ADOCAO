@@ -141,7 +141,7 @@ ADOCAO/
 │   ├── LauncherWindow.hpp/.cpp        # 向导壳：窗口/GL/ImGui 生命周期 + 分页调度（95 行，P4 收窄）
 │   ├── LoadingWindow.hpp/.cpp
 │   ├── LevelLoader.hpp/.cpp           # 解析+音频胶水；头文件已前置声明瘦身（P4）
-│   ├── GameWindow.hpp/.cpp            # 主循环骨架：窗口/输入/音乐↔时钟同步/渲染编排（464 行，P4 收窄）
+│   ├── GameWindow.hpp/.cpp            # 主循环骨架：窗口/输入/音乐↔时钟同步/渲染编排（505 行，P4 收窄）
 │   ├── CameraController.hpp/.cpp      # ★ P4：拖拽平移/滚轮缩放/点击/屏幕↔世界换算状态机
 │   ├── LevelScene.hpp/.cpp            # ★ P4：shader/TileMesh/Planet/轨迹/高亮/图标 + 可见性动画编排
 │   └── wizard/                        # ★ P4：LauncherWindow 向导分页（一页一文件）
@@ -244,9 +244,14 @@ timeline 层只输出 `double`/`dvec2` 与时间戳结构，行星的 GL 外观�
 
 | 新文件                         | 职责                                                         |
 | --------------------------- | ---------------------------------------------------------- |
-| `GameWindow.cpp`（收窄，464 行） | 主循环骨架：窗口/GL 上下文、init/run/update/render 编排、音乐与 PlaybackClock 同步 |
+| `GameWindow.cpp`（收窄，505 行） | 主循环骨架：窗口/GL 上下文、init/run/update/render 编排、音乐与 PlaybackClock 同步 |
 | `CameraController.hpp/.cpp`（~100 行） | 拖拽平移、滚轮缩放、点击检测、屏幕↔世界换算（原 `GameWindow::Input` 与 handleInput 中相机部分；纯状态机，可单测） |
-| `LevelScene.hpp/.cpp`（~290 行）   | TileMesh/Planet/轨迹/高亮/图标的创建与逐帧绘制 + 轨道出现/消失动画状态，GameWindow 只调用它 |
+| `LevelScene.hpp/.cpp`（~316 行）   | TileMesh/Planet/轨迹/高亮/图标的创建与逐帧绘制 + 轨道出现/消失动画状态，GameWindow 只调用它 |
+
+（行数为当前 master 实测：GameWindow 505 / CameraController 101 / LevelScene 316。P4 落地时的
+初值是 464 / ~100 / ~290；GameWindow 之后的增长来自书签与键盘导航、越歌曲结尾的音频同步、
+以及为自适应拖尾速率做的帧计时，不是拆分失效。§1.1/§1.2 与 §4.4 的行数是重构**前**的盘点
+快照，保留原值未随代码更新。）
 
 GameWindow 内剩下的成员职责：LevelScene（GL 对象，异步 build 轮询）、CameraController、
 窗口/全屏切换、键盘播放控制（Space/书签/方向键）、点击选中 tile（命中测试由 GameWindow 做，

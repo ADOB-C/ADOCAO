@@ -177,6 +177,25 @@ What may change (and did):
 `tests/level_parse_test.cpp` 会把每个明文 fixture 在内存里压成 xz/zstd 再加载一遍，要求逐位一致，
 并检查截断的流是干净失败而不是崩。
 
+**流式窗口（进行中，opt-in）**：`core/level/LevelArchive.hpp` 的 `ArchiveStream` 用两块**固定地址**的半窗
+（默认 96 MB，`ADOCAO_WINDOW_KB` 可调）交替解压；消费方 `WindowParser`（同在 `LevelData.cpp`）按根成员
+逐个处理、把残缺的值 carry 到下一块开头，于是 10 GB 文本不再需要 10 GB 匿名内存——那 10 GB 匿名页装不下
+时会被系统压缩/写 swap，实测吞吐 1.35 GB/s → 0.12 GB/s，而且每次访问都要换回来。
+
+- **默认不走这条路**：只有显式设置 `ADOCAO_WINDOW_KB`（或 `ADOCAO_WINDOW_STREAM`）才启用；
+  没设时行为与以前完全一致（整份解压，`ADOCAO_WHOLE_DECOMPRESS=1` 可强制）。
+- 已验证：38 个 fixture + 284 KB 合成谱（2000 个跨窗 action）在 **4 KB 半窗**下与整份解压逐位一致；
+  256 KB 不可压伪数据的半窗拼接（0 / 1 B / 1 KB 三种 carry）逐字节一致；"单个值大于半窗"能报
+  `stuck()` 而不是死循环。`ADOCAO_WINDOW_REQUIRE=1` 把"窗口路径放弃"变成失败，用来证明用例真的
+  覆盖到它（这个坑踩过一次：静默回退让测试全绿）；`ADOCAO_FAST_REQUIRE=1` 界定"哪些 fixture
+  本来快路径就吃不下、因此允许两条路都放弃"。
+- **已知 bug（未修）**：GB 级谱面上"窗口边界的挂起/重放"还有状态机错位——1.18 GB 那张用 8 MB 半窗
+  会**成功但结果不对**（多出 9 个角度值 / 11660 个 action，即边界处重复解析了一小段），更小的半窗
+  直接放弃并回退（放弃是安全的）。所以默认路径不启用它。复现器：`/tmp/loadprobe/winsynth.cpp`。
+- 实测（1.18 GB TNR，43 MB 的 .xz）：半窗 96 MB 时峰值 3.87 GB vs 整份 4.27 GB，耗时 2932 vs 2561 ms
+  ——目前是"填一块 → 解析一块"，没有重叠，慢的正是没被重叠掉的解码。下一步：解码线程与解析线程
+  并行 + 窗口内再分段并行（工作集小、缓存热，那时分段才是免费的）。
+
 **actions 分块并行解析**（`parseActionRegionParallel`）：actions 数组里每个对象彼此独立，
 所以先扫一遍找切分点（只做括号/字符串配对，不做字段提取，0.44 s/GB），再切 N 段并行解析，
 写进**同一块缓冲的各自槽位**（先按扫描时数出的对象数一次 `resize`，末尾再由各段实际

@@ -596,6 +596,258 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// 窗口化解析：数据由 ArchiveStream 分块提供（一次只有半个窗口的字节），
+// 每个子扫描器遵守同一约定：
+//   返回 end   = 窗口用完，这一项还没处理完。调用方把"这一项的起点"之后的字节
+//                carry 到下一块，并让扫描器从头重放该项（半成品输出要丢掉）。
+//   返回 < end = 这一项处理完了，返回位置是它后面的第一个字节。
+// 输出的结构先放在局部，全部成功后再移进 LevelData（失败时对象保持不动）。
+// ---------------------------------------------------------------------------
+struct WindowParser {
+    std::vector<double> angles;
+    std::vector<LevelData::FastAction> actions;
+    LevelData::Settings settings;
+    std::string pathText;
+    std::string settingsText;
+    bool failed = false;
+    const char* failAt = nullptr;       // 诊断用：失败发生在窗口里的哪个位置
+    const char* failWhy = "";
+    long failA = -1, failB = -1;         // 诊断用：附加数字（如对象长度 / 窗口剩余）
+    bool fail(const char* at, const char* why) { failed = true; failAt = at; failWhy = why; return false; }
+
+    enum class State { Members, InAngles, InActions, InSettings, InPath, InSkip, Done };
+    State state = State::Members;
+    bool seenAngles = false, seenSettings = false, seenActions = false, seenPath = false;
+    bool rootOpened = false, bomChecked = false;
+
+    // 子扫描器的跨窗状态
+    const char* itemStart = nullptr;      // 当前项（值）在窗口里的起点
+    bool resetOnResume = false;           // 重放前要清掉半成品
+    bool inString = false, escaped = false, started = false, inLiteral = false;
+    int depth = 0;
+
+    // ---- angleData：边流边转 double，不留文本 ----
+    const char* parseAngles(const char* p, const char* end) {
+        for (;;) {
+            while (p < end && (jsonWs(*p) || *p == ',')) ++p;
+            if (p >= end) { itemStart = p; return end; }        // 窗口用完
+            if (*p == ']') return p + 1;                        // 数组结束
+            itemStart = p;
+            const char* q = p;
+            double v;
+            // 数字被窗口切断、或根本解析不了：都先当作"需要更多数据"（挂起时返回 end，
+            // 由调用方把这一项 carry 到下一块）。真要是垃圾，下一块还是同样字节、推进不了
+            // -> stream.stuck() -> 整段退回整份解压。
+            if (!parseNumber(q, end, v)) return end;
+            if (q >= end) return end;
+            angles.push_back(v);
+            p = q;
+        }
+    }
+
+    // ---- actions：每个对象必须完整落在窗口内 ----
+    const char* parseActions(const char* p, const char* end) {
+        for (;;) {
+            while (p < end && (jsonWs(*p) || *p == ',')) ++p;
+            if (p >= end) { itemStart = p; return end; }         // 窗口用完
+            if (*p == ']') return p + 1;                         // 数组结束
+            if (*p != '{') { fail(p, "actions 元素不是对象"); return p; }
+            itemStart = p;
+            const char* objEnd = skipContainer(p, end);
+            if (!objEnd) return end;                             // 对象跨窗：carry 补齐后重放
+            ActionFields f;
+            if (!parseActionObject(p + 1, objEnd, f)) {
+                failA = (long)(objEnd - p); failB = (long)(end - p);
+                fail(p, "action 对象解析失败"); return p;
+            }
+            LevelData::FastAction a;
+            bool keep = false;
+            if (!buildAction(f, a, keep)) { fail(p, "action 组装失败"); return p; }
+            if (keep) actions.push_back(std::move(a));
+            p = objEnd;
+        }
+    }
+
+    // ---- settings：原样抄下来（几 KB），稍后交给 cleanJson + RapidJSON ----
+    const char* copySettings(const char* p, const char* end) {
+        if (resetOnResume) { settingsText.clear(); depth = 0; inString = escaped = false; resetOnResume = false; }
+        for (; p < end; ++p) {
+            char c = *p;
+            settingsText.push_back(c);
+            if (inString) {
+                if (escaped) escaped = false;
+                else if (c == '\\') escaped = true;
+                else if (c == '"') inString = false;
+                continue;
+            }
+            if (c == '"') { inString = true; continue; }
+            if (c == '{' || c == '[') ++depth;
+            else if (c == '}' || c == ']') { if (--depth == 0) return p + 1; }
+        }
+        return end;
+    }
+
+    // ---- pathData：抄字符串内容（裸 CR 丢掉；带转义就退回整份路径，与现在一致）----
+    const char* copyPath(const char* p, const char* end) {
+        if (resetOnResume) { pathText.clear(); resetOnResume = false; started = false; }
+        if (!started) {                                       // 首次进入：吃掉开引号
+            if (*p != '"') { fail(p, "pathData 不是字符串"); return p; }
+            ++p;
+            started = true;
+        }
+        for (; p < end; ++p) {
+            char c = *p;
+            if (c == '\\') { fail(p, "pathData 里有转义"); return p; }
+            if (c == '"') return p + 1;
+            if (c != '\r') pathText.push_back(c);
+        }
+        return end;
+    }
+
+    // ---- 其它成员（decorations 等）：跳过整个值 ----
+    const char* skipOne(const char* p, const char* end) {
+        if (resetOnResume) { depth = 0; inString = escaped = started = inLiteral = false; resetOnResume = false; }
+        while (p < end) {
+            char c = *p;
+            if (inLiteral) {
+                while (p < end && !jsonWs(*p) && *p != ',' && *p != ']' && *p != '}') ++p;
+                if (p >= end) return end;
+                inLiteral = false;
+                return p;
+            }
+            if (inString) {
+                if (escaped) escaped = false;
+                else if (c == '\\') escaped = true;
+                else if (c == '"') { inString = false; if (depth == 0) return p + 1; }
+                ++p;
+                continue;
+            }
+            if (depth == 0 && !started) {
+                if (c == '"') { inString = true; started = true; ++p; continue; }
+                if (c != '[' && c != '{') {
+                    if (!(c == '-' || (c >= '0' && c <= '9') || c == 't' || c == 'f' || c == 'n')) {
+                        fail(p, "值首字符非法");
+                        return p;
+                    }
+                    started = true;
+                    inLiteral = true;
+                    continue;
+                }
+                started = true;
+                depth = 1;
+                ++p;
+                continue;
+            }
+            if (c == '"') { inString = true; ++p; continue; }
+            if (c == '[' || c == '{') ++depth;
+            else if (c == ']' || c == '}') { if (--depth == 0) return p + 1; }
+            ++p;
+        }
+        return end;
+    }
+
+    const char* step(const char* p, const char* end) {
+        // 本次调用里"还没提交"的起点就是 p：token 级扫描器（settings/path/skip）整项重放，
+        // 角度/action 子扫描器会把它推进到当前元素的起点（已提交的元素不能重放）。
+        itemStart = p;
+        switch (state) {
+        case State::InAngles: { const char* q = parseAngles(p, end); if (q < end) state = State::Members; return q; }
+        case State::InActions: { const char* q = parseActions(p, end); if (q < end) state = State::Members; return q; }
+        case State::InSettings: { const char* q = copySettings(p, end); if (q < end) state = State::Members; return q; }
+        case State::InPath: { const char* q = copyPath(p, end); if (q < end) state = State::Members; return q; }
+        case State::InSkip: { const char* q = skipOne(p, end); if (q < end) state = State::Members; return q; }
+        case State::Done: return p;
+        case State::Members: break;
+        }
+
+        if (!rootOpened) {                                    // 根对象的 '{'
+            if (!bomChecked) {
+                bomChecked = true;
+                if ((size_t)(end - p) >= 3 && (unsigned char)p[0] == 0xEF
+                    && (unsigned char)p[1] == 0xBB && (unsigned char)p[2] == 0xBF) p += 3;
+            }
+            while (p < end && jsonWs(*p)) ++p;
+            if (p >= end) { itemStart = p; return p; }
+            if (*p != '{') { fail(p, "actions 元素不是对象"); return p; }
+            rootOpened = true;
+            ++p;
+        }
+        for (;;) {
+            while (p < end && (jsonWs(*p) || *p == ',')) ++p;
+            if (p >= end) { itemStart = p; return p; }
+            if (*p == '}') { state = State::Done; return p + 1; }
+            if (*p != '"') { fail(p, "成员名不是字符串"); return p; }
+            itemStart = p;
+            const char* kEnd = scanStringEndExact(p, end);
+            if (!kEnd) return p;                              // 键跨窗
+            KeyRef key{p + 1, (size_t)(kEnd - p - 1)};
+            const char* q = skipWs(kEnd + 1, end);
+            if (q >= end || *q != ':') { if (q < end) fail(q, "成员名后不是 :"); return p; }
+            q = skipWs(q + 1, end);
+            if (q >= end) return p;                           // 值还没开始
+            if (keyIs(key, "angleData") && !seenAngles && *q == '[') {
+                seenAngles = true; state = State::InAngles; itemStart = q + 1; return q + 1;
+            }
+            if (keyIs(key, "settings") && !seenSettings && *q == '{') {
+                seenSettings = true; state = State::InSettings; itemStart = q; resetOnResume = true; return q;
+            }
+            if (keyIs(key, "pathData") && !seenPath && *q == '"') {
+                seenPath = true; state = State::InPath; itemStart = q; resetOnResume = true; started = false; return q;
+            }
+            if (keyIs(key, "actions") && !seenActions && *q == '[') {
+                seenActions = true; state = State::InActions; itemStart = q + 1; return q + 1;
+            }
+            state = State::InSkip; itemStart = q; resetOnResume = true; return q;
+        }
+    }
+
+    // 跑完整个流。1 = 完成；0 = 结构上搞不定（退回整份解压）；-1 = 解压失败
+    int run(ArchiveStream& stream) {
+        const bool dbg = std::getenv("ADOCAO_WINDOW_DBG") != nullptr;
+        if (!stream.next()) {
+            if (dbg) std::fprintf(stderr, "[win] 首块就失败 failed=%d err=%s\n", (int)stream.failed(), stream.error().c_str());
+            return stream.failed() ? -1 : 0;
+        }
+        const char* p = stream.data();
+        const char* end = p + stream.size();
+        for (;;) {
+            const char* q = step(p, end);
+            if (failed) {
+                if (dbg) std::fprintf(stderr, "[win] 放弃 state=%d 偏移=%td/%zu 位置=%td 原因=%s 字节=%.24s\n",
+                                      (int)state, p - stream.data(), stream.size(),
+                                      failAt ? failAt - stream.data() : -1, failWhy,
+                                      failAt ? failAt : "");
+                if (dbg && failA >= 0) std::fprintf(stderr, "[win]   对象长=%ld 窗口剩余=%ld\n", failA, failB);
+                return 0;
+            }
+            if (state == State::Done) {
+                stream.consume((size_t)(q - p));
+                return 1;
+            }
+            if (q < end) { p = q; continue; }
+            // 需要更多数据：把当前项起点之后的字节 carry 过去，下次从头重放该项
+            const size_t consumed = (size_t)(itemStart - p);   // itemStart >= p（step 开头保证）
+            if (dbg) std::fprintf(stderr, "[win] 换窗 state=%d 已提交=%zu carry=%zu 窗口=%zu\n",
+                                  (int)state, consumed, stream.size() - consumed, stream.size());
+            stream.consume(consumed);
+            if (!stream.next()) {
+                if (dbg) std::fprintf(stderr, "[win] 取下一块失败 state=%d stuck=%d failed=%d err=%s 已消费=%zu 块内=%zu\n",
+                                      (int)state, (int)stream.stuck(), (int)stream.failed(),
+                                      stream.error().c_str(), consumed, stream.size());
+                return stream.failed() ? -1 : 0;
+            }
+            if (stream.stuck()) {
+                if (dbg) std::fprintf(stderr, "[win] stuck（单个值大于半窗）state=%d\n", (int)state);
+                return 0;
+            }
+            p = stream.data();
+            end = p + stream.size();
+            resetOnResume = true;                              // 半成品丢掉，从头重放
+        }
+    }
+};
+
 // settings 的读取：新旧两条路共用，保证字段语义一致。
 static void readSettings(const rapidjson::Value& s, LevelData::Settings& out) {
     auto getF = [&](const char* k, float d) { return s.HasMember(k) ? s[k].GetFloat() : d; };
@@ -700,6 +952,60 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
     std::string decompressed;
     const LevelArchiveKind archive = sniffLevelArchive(data, len);
     if (archive != LevelArchiveKind::Plain) {
+        // 优先走窗口流水线：不把整份解压结果摊进内存（10 GB 文本那份匿名内存会被系统
+        // 压缩/换页，实测吞吐掉到 1/11）。任何搞不定的情况都退回下面的整份解压。
+        const bool forceWhole = std::getenv("ADOCAO_WHOLE_DECOMPRESS") != nullptr;   // 每次读：测试会在同一进程里切换
+        // 窗口流水线目前仍是 opt-in：它在 fixture（4 KB 半窗）上逐位一致，但在 GB 级谱面上
+        // 还有"窗口边界重复解析一小段"的 bug（实测 8 MB 半窗时多出 9 个角度值 / 11660 个
+        // action），更小的半窗会直接放弃。默认走原来的整份解压，避免任何正确性风险。
+        const bool useWindow = std::getenv("ADOCAO_WINDOW_KB") != nullptr
+                            || std::getenv("ADOCAO_WINDOW_STREAM") != nullptr;
+        // 测试用：要求必须走通窗口路径（不许静默回退），否则直接失败 —— 用来证明用例
+        // 真的覆盖了这条路径，而不是每次都在偷偷走整份解压。
+        const bool requireWindow = std::getenv("ADOCAO_WINDOW_REQUIRE") != nullptr;
+        if (!forceWhole && useWindow) {
+            size_t half = ArchiveStream::kDefaultHalf;
+            if (const char* env = std::getenv("ADOCAO_WINDOW_KB")) {   // 测试用：极小窗口
+                long kb = std::atol(env);
+                if (kb >= 4) half = (size_t)kb * 1024;
+            }
+            ArchiveStream stream;
+            if (stream.open(data, len, archive, half)) {
+                if (onProgress) onProgress(0.05f, "Decompressing level...");
+                WindowParser wp;
+                wp.settings = settings;         // 与整份路径一致：文件里没有的字段沿用旧值
+                const int rc = wp.run(stream);
+                if (rc < 0) {
+                    LOG_E("Cannot decompress level (%s): %s",
+                          archive == LevelArchiveKind::Xz ? "xz" : "zstd", stream.error().c_str());
+                    return false;
+                }
+                if (rc == 1) {
+                    if (wp.seenSettings) {
+                        std::string sub = cleanJson(wp.settingsText);
+                        rapidjson::Document sd;
+                        sd.Parse<rapidjson::kParseTrailingCommasFlag>(sub.c_str());
+                        if (sd.HasParseError() || !sd.IsObject()) { wp.failed = true; }
+                        else readSettings(sd, wp.settings);
+                    }
+                    if (!wp.failed) {
+                        if (onProgress) onProgress(0.15f, "Extracting level data...");
+                        angleData = std::move(wp.angles);
+                        settings = wp.settings;
+                        if (wp.seenPath) pathData = std::move(wp.pathText);
+                        if (actions.empty()) actions = std::move(wp.actions);
+                        else actions.insert(actions.end(), std::make_move_iterator(wp.actions.begin()),
+                                            std::make_move_iterator(wp.actions.end()));
+                        return finishLoad(onProgress, exportOnly);
+                    }
+                }
+                // rc == 0 或 settings 解析失败 -> 落到整份解压，行为与以前完全一致
+                if (requireWindow) {
+                    LOG_E("windowed parse declined the stream (test hook ADOCAO_WINDOW_REQUIRE)");
+                    return false;
+                }
+            }
+        }
         if (onProgress) onProgress(0.05f, "Decompressing level...");
         std::string reason;
         // 解压在这类谱面上约占 1/4 加载时间，进度条给它相应的一段（0.05 -> 0.20）
@@ -731,8 +1037,14 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
     const bool forceLegacy = (std::getenv("ADOCAO_FORCE_DOM_PARSE") != nullptr);
 
     try {
-        if (!forceLegacy && tryFastParse(data, len, onProgress)) {
-            return finishLoad(onProgress, exportOnly);
+        if (!forceLegacy) {
+            if (tryFastParse(data, len, onProgress)) return finishLoad(onProgress, exportOnly);
+            // 测试用：要求快路径必须能吃下这个文件（不许静默回退到 DOM），用来界定
+            // "窗口路径也必须能吃下"的范围。
+            if (std::getenv("ADOCAO_FAST_REQUIRE") != nullptr) {
+                LOG_E("fast parse declined the buffer (test hook ADOCAO_FAST_REQUIRE)");
+                return false;
+            }
         }
         if (onProgress) onProgress(0.10f, "Parsing angleData...");
         std::string content(data, len);

@@ -67,6 +67,7 @@ private:
     char* m_buf[2] = {nullptr, nullptr};
     size_t m_half = 0, m_len = 0, m_carry = 0, m_cur = 0;
     bool m_eof = false, m_failed = false, m_stuck = false, m_started = false;
+    bool m_finalDelivered = false;   // 只含 carry 的尾块是否已经交付过
     std::string m_error;
     const char* m_in = nullptr;
     size_t m_inLen = 0;
@@ -74,4 +75,5 @@ private:
     lzma_stream m_strm = LZMA_STREAM_INIT;
     ZSTD_DStream* m_ds = nullptr;
     ZSTD_inBuffer m_zin{nullptr, 0, 0};
+    bool m_frameDone = false;
 };

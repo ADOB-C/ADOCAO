@@ -261,6 +261,40 @@ std::string streamSelfTest() {
     return {};
 }
 
+
+Digest loadBuffer(const char* data, size_t length);   // 定义在后面
+
+// 窗口边界的压力用例：合成一张远大于窗口的谱（action 对象故意跨窗），走窗口路径加载，
+// 最终结果必须与整份解压逐位一致。fixture 都小于窗口、压不到边界，所以单独造一个。
+// 目前窗口路径在这个规模上会"放弃并回退"（放弃是安全失败），这条用例保证回退后的结果
+// 依然正确；等窗口路径自身修好，它会自动开始真正覆盖边界逻辑。
+std::string windowBoundarySelfTest() {
+    std::string text = "{\"angleData\":[";
+    for (int i = 0; i < 3000; i++) { if (i) text += ','; text += (i % 4 == 0) ? "90" : "180"; }
+    text += "],\"settings\":{\"bpm\":100},\"actions\":[";
+    char buf[256];
+    for (int i = 0; i < 2000; i++) {
+        if (i) text += ',';
+        int n = snprintf(buf, sizeof buf,
+            "{ \"floor\": %d, \"eventType\": \"SetHitsound\", \"hitsound\": \"Kick\", "
+            "\"hitsoundVolume\": 100, \"angleOffset\": 0, \"relativeTo\": [0,\"ThisTile\"] }", i);
+        text.append(buf, n);
+    }
+    text += "],\"decorations\":[]}";
+    std::string packed;
+    if (!compressXz(text, packed)) return "xz 压缩失败";
+    setEnv("ADOCAO_WINDOW_KB", "4");
+    const Digest win = loadBuffer(packed.data(), packed.size());
+    unsetEnv("ADOCAO_WINDOW_KB");
+    setEnv("ADOCAO_WHOLE_DECOMPRESS", "1");
+    const Digest whole = loadBuffer(packed.data(), packed.size());
+    unsetEnv("ADOCAO_WHOLE_DECOMPRESS");
+    if (!win.ok || !whole.ok) return "加载失败（win/whole）";
+    const std::string d = diffSections(whole, win);
+    if (!d.empty()) return "窗口路径与整份结果不一致: " + d;
+    return {};
+}
+
 Digest loadBuffer(const char* data, size_t length) {
     LevelData lv;
     bool ok = lv.loadFromBuffer(data, length);
@@ -275,18 +309,41 @@ std::string archiveRoundTrip(const std::string& file, const Digest& plain) {
     if (sniffLevelArchive(raw.data(), raw.size()) != LevelArchiveKind::Plain) return {};  // 本身就是容器
     if (raw.size() > (8u << 20)) return {};                                              // 太大，跳过
 
+    // 只有当"整份快路径"自己能吃下这个 fixture 时，才要求窗口路径也必须吃下
+    // （f17/f23/f31 这类本来就该回退旧路径的用例，两条路都可以放弃）
+    setEnv("ADOCAO_FAST_REQUIRE", "1");
+    LevelData probe;
+    const bool fastHandles = probe.loadFromBuffer(raw.data(), raw.size());
+    unsetEnv("ADOCAO_FAST_REQUIRE");
+
     std::string packed;
     if (compressXz(raw, packed)) {
         if (windowedCopy(packed, LevelArchiveKind::Xz, 1) != raw) return "xz 半窗流式解压与整份不一致";
+        if (fastHandles) setEnv("ADOCAO_WINDOW_REQUIRE", "1");   // 快路径能吃下 -> 窗口也必须能
+        setEnv("ADOCAO_WINDOW_KB", "4");                  // 强制走窗口路径，且窗口极小
         const std::string d = diffSections(plain, loadBuffer(packed.data(), packed.size()));
-        if (!d.empty()) return "xz 往返: " + d;
+        unsetEnv("ADOCAO_WINDOW_KB");
+        unsetEnv("ADOCAO_WINDOW_REQUIRE");
+        if (!d.empty()) return "xz 窗口路径: " + d;
+        setEnv("ADOCAO_WHOLE_DECOMPRESS", "1");            // 同一条流走整份解压做对照
+        const std::string d2 = diffSections(plain, loadBuffer(packed.data(), packed.size()));
+        unsetEnv("ADOCAO_WHOLE_DECOMPRESS");
+        if (!d2.empty()) return "xz 整份路径: " + d2;
         // 截断的 xz 必须干净地失败，而不是崩
         if (loadBuffer(packed.data(), packed.size() / 2).ok) return "截断的 xz 竟然加载成功";
     }
     if (compressZstd(raw, packed)) {
         if (windowedCopy(packed, LevelArchiveKind::Zstd, 1) != raw) return "zstd 半窗流式解压与整份不一致";
+        if (fastHandles) setEnv("ADOCAO_WINDOW_REQUIRE", "1");   // 快路径能吃下 -> 窗口也必须能
+        setEnv("ADOCAO_WINDOW_KB", "4");
         const std::string d = diffSections(plain, loadBuffer(packed.data(), packed.size()));
-        if (!d.empty()) return "zstd 往返: " + d;
+        unsetEnv("ADOCAO_WINDOW_KB");
+        unsetEnv("ADOCAO_WINDOW_REQUIRE");
+        if (!d.empty()) return "zstd 窗口路径: " + d;
+        setEnv("ADOCAO_WHOLE_DECOMPRESS", "1");
+        const std::string d2 = diffSections(plain, loadBuffer(packed.data(), packed.size()));
+        unsetEnv("ADOCAO_WHOLE_DECOMPRESS");
+        if (!d2.empty()) return "zstd 整份路径: " + d2;
         if (loadBuffer(packed.data(), packed.size() / 2).ok) return "截断的 zstd 竟然加载成功";
     }
     return {};
@@ -339,6 +396,12 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "usage: %s <level file|fixture dir> ...\n", argv[0]);
         return 2;
     }
+
+    if (const std::string e = windowBoundarySelfTest(); !e.empty()) {
+        std::printf("FAIL 窗口边界用例（284 KB 合成谱 / 4 KB 半窗）: %s\n", e.c_str());
+        return 1;
+    }
+    std::printf("ok   窗口边界用例（284 KB 合成谱 / 4 KB 半窗，2000 个跨窗 action）\n");
 
     if (const std::string e = streamSelfTest(); !e.empty()) {
         std::printf("FAIL 半窗流式解压自检: %s\n", e.c_str());

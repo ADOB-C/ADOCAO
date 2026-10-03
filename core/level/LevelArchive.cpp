@@ -220,6 +220,7 @@ bool ArchiveStream::open(const char* data, size_t length, LevelArchiveKind kind,
     m_inLen = length;
     m_len = m_carry = m_cur = 0;
     m_eof = m_failed = m_stuck = m_started = false;
+    m_finalDelivered = false;
 
     if (kind == LevelArchiveKind::Xz) {
         lzma_ret r = xzDecoderInit(&m_strm);
@@ -232,6 +233,7 @@ bool ArchiveStream::open(const char* data, size_t length, LevelArchiveKind kind,
         size_t zr = ZSTD_initDStream(m_ds);
         if (ZSTD_isError(zr)) { m_error = ZSTD_getErrorName(zr); m_failed = true; return false; }
         m_zin = ZSTD_inBuffer{m_in, m_inLen, 0};
+        m_frameDone = false;
     }
     m_started = true;
     return true;
@@ -262,18 +264,19 @@ bool ArchiveStream::pump(size_t carry) {
     }
 
     ZSTD_outBuffer ob{dst, space, 0};
-    size_t remaining = 1;
-    do {
-        remaining = ZSTD_decompressStream(m_ds, &ob, &m_zin);
+    for (;;) {
+        // 上一帧已经收尾、输入也吃完了：不要再喂（再喂会去读下一帧的帧头，被误判截断）
+        if (m_frameDone && m_zin.pos >= m_zin.size) { m_eof = true; break; }
+        const size_t remaining = ZSTD_decompressStream(m_ds, &ob, &m_zin);
         if (ZSTD_isError(remaining)) { m_error = ZSTD_getErrorName(remaining); m_failed = true; return false; }
-        if (ob.pos == ob.size) break;                        // 半窗满了
+        m_frameDone = (remaining == 0);                      // 0 = 当前帧结束（后面可能还有帧）
+        if (ob.pos == ob.size) break;                        // 半窗满，剩下的下次再解
         if (m_zin.pos >= m_zin.size) {                       // 输入吃完
-            if (remaining != 0) { m_error = "truncated zstd data"; m_failed = true; return false; }
+            if (!m_frameDone) { m_error = "truncated zstd data"; m_failed = true; return false; }
             m_eof = true;
             break;
         }
-    } while (remaining != 0);
-    if (m_zin.pos >= m_zin.size && remaining == 0) m_eof = true;
+    }
     m_len = carry + ob.pos;
     return true;
 }
@@ -301,9 +304,15 @@ bool ArchiveStream::next() {
     // （流刚好结束时也算：同样的字节再给一遍也还是吃不下，必须让调用方退回整份解压）
     if (m_len == carry) {
         // 一个新字节都没解出来，而消费者上次连一个完整值都没凑齐。
-        // 流还没结束 = 单个值比半窗还大 -> stuck，调用方退回整份解压；
-        // 流已结束 = 最后那几个字节凑不成完整值（JSON 有问题），也收摊。
-        if (!m_eof) m_stuck = true;
+        if (m_eof) {
+            // 流已经结束：这一块只含 carry。必须**交付一次**，否则这几个字节就永远丢了
+            // （典型场景：帧结束时半窗正好填满，eof 要等下一次调用才发现）。
+            if (m_finalDelivered) return false;
+            m_finalDelivered = true;
+            return true;
+        }
+        // 流还没结束 = 单个值比半窗还大 -> stuck，调用方退回整份解压
+        m_stuck = true;
         return false;
     }
     return true;

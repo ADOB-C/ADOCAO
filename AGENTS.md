@@ -227,11 +227,19 @@ What may change (and did):
   线程只是互相抢核；这也解释了为什么"解码与解析重叠"同样没有收益。压缩输入的并行空间已经被解码器
   用掉了，除非哪天把解码降到单线程再把核让给解析（那会先亏掉 534 ms → 2549 ms 的解码时间）。
 
-**每层结构（内存天花板在这里）**：实测 TNR 1.18 GB / 915 万层，窗口路径峰值 3.06 GB ≈ 350 B/层
-（含 xz 解码器的 1 GB 上限）；纯结构约 100~150 B/层：`FastAction` 9.12M x 48 B、`Tile` 9.15M x 32 B、
-angleData 8 B/层、timeline ~28 B/层。已经做掉的一块：`tileHitsoundVolumes` 从
-`unordered_map<int,float>` 改成**稠密 `vector<float>`**（NaN = 无覆盖，空 vector = 整谱无覆盖）。
-实测那张谱有 457 万条覆盖 ≈ 209 MB，稠密后 37 MB：**峰值 3.22 → 3.06 GB**（同一次运行 1912 → 1860 ms）。
+**每层结构（内存天花板在这里）**：实测 TNR 1.18 GB / 915 万层。已经做掉的两块：
+
+1. `tileHitsoundVolumes` 从 `unordered_map<int,float>` 改成**稠密 `vector<float>`**（NaN = 无覆盖，
+   空 vector = 整谱无覆盖）。实测那张谱有 457 万条覆盖 ≈ 209 MB，稠密后 37 MB：
+   **峰值 3.22 → 3.06 GB**（同一次运行 1912 → 1860 ms）。
+2. `FastAction` 里的 `std::string str`（内联 32 B）换成**16 位驻留 id**（`internLevelActionStr` /
+   `actionStr`，热路径走 thread-local 免锁，每次 load 重置）。那张谱 912 万 action **全部**带
+   hitsound 名（同一个值重复 912 万次），结构 **48 B → 16 B**、actions 本身 **417 → 139 MB**：
+   **峰值 3.06 → 2.76 GB**，加载 1860 → **1785 ms**（少了 912 万次内联字符串拷贝）。
+   对拍摘要改成按字符串**内容**哈希，所以 id 顺序不影响逐位比对。
+
+当前：**峰值 2.76 GB ≈ 324 B/层**（含 xz 解码器的 1 GB 上限）；剩下的结构是 `Tile` 9.15M x 32 B
+（`int index` + `float angle/direction` + 两个 `double` 位置）、angleData 8 B/层、timeline ~28 B/层。
 `tileHitsounds`（字符串覆盖）在那张谱上是 **0 条**，所以不需要驻留；普通谱上它们是几百条量级。
 `tilePositionOffsets` 同样稀疏（0.01 条/层）。
 

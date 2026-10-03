@@ -234,6 +234,13 @@ angleData 8 B/层、timeline ~28 B/层。已经做掉的一块：`tileHitsoundVo
 实测那张谱有 457 万条覆盖 ≈ 209 MB，稠密后 37 MB：**峰值 3.22 → 3.06 GB**（同一次运行 1912 → 1860 ms）。
 `tileHitsounds`（字符串覆盖）在那张谱上是 **0 条**，所以不需要驻留；普通谱上它们是几百条量级。
 `tilePositionOffsets` 同样稀疏（0.01 条/层）。
+- **试过、本地量到收益、但被 MSVC 挡住（已回退）**：把 `FastAction` 的内联 `std::string str`
+  （32 B）换成 **16 位驻留 id**（`internLevelActionStr`/`actionStr`，热路径用 thread-local 免锁）。
+  本地全绿且收益明确：`sizeof(FastAction)` 48 → 16 B、actions 数组 417 → 139 MB、
+  TNR 峰值 3.06 → **2.76 GB**、加载 1860 → **1785 ms**（fixture 39 个仍逐位一致；对拍摘要改成按
+  字符串内容哈希）。但 Windows 的 Build 挂了：MSVC 不喜欢类里的 `std::mutex` + `static inline
+  thread_local` 数据成员（而且 mutex 让 `LevelData` 不可拷贝）。重做时把**锁与 thread-local 缓存
+  放到 .cpp 文件作用域**、类里只留 `std::vector<std::string> actionStrTable` 与一个转调函数即可。
 
 **actions 分块并行解析**（`parseActionRegionParallel`）：actions 数组里每个对象彼此独立，
 所以先扫一遍找切分点（只做括号/字符串配对，不做字段提取，0.44 s/GB），再切 N 段并行解析，

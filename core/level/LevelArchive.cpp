@@ -194,3 +194,122 @@ bool decompressLevelArchive(const char* data, size_t length, LevelArchiveKind ki
     reason = "unknown container";
     return false;
 }
+
+// ---------------------------------------------------------------- 流式解压（乒乓半窗）
+ArchiveStream::~ArchiveStream() { release(); }
+
+void ArchiveStream::release() {
+    if (m_kind == LevelArchiveKind::Xz && m_started) lzma_end(&m_strm);
+    if (m_ds) { ZSTD_freeDStream(m_ds); m_ds = nullptr; }
+    m_started = false;
+}
+
+bool ArchiveStream::open(const char* data, size_t length, LevelArchiveKind kind, size_t halfSize) {
+    release();
+    if (kind == LevelArchiveKind::Plain || halfSize < 4096) {
+        m_error = "streaming requires a compressed container and halfSize >= 4 KiB";
+        m_failed = true;
+        return false;
+    }
+    m_kind = kind;
+    m_half = halfSize;
+    m_store.assign(m_half * 2, 0);          // 一次分配，两块半窗地址固定
+    m_buf[0] = m_store.data();
+    m_buf[1] = m_store.data() + m_half;
+    m_in = data;
+    m_inLen = length;
+    m_len = m_carry = m_cur = 0;
+    m_eof = m_failed = m_stuck = m_started = false;
+
+    if (kind == LevelArchiveKind::Xz) {
+        lzma_ret r = xzDecoderInit(&m_strm);
+        if (r != LZMA_OK) { m_error = lzmaReason(r); m_failed = true; return false; }
+        m_strm.next_in = reinterpret_cast<const uint8_t*>(m_in);
+        m_strm.avail_in = m_inLen;
+    } else {
+        m_ds = ZSTD_createDStream();
+        if (!m_ds) { m_error = "out of memory"; m_failed = true; return false; }
+        size_t zr = ZSTD_initDStream(m_ds);
+        if (ZSTD_isError(zr)) { m_error = ZSTD_getErrorName(zr); m_failed = true; return false; }
+        m_zin = ZSTD_inBuffer{m_in, m_inLen, 0};
+    }
+    m_started = true;
+    return true;
+}
+
+bool ArchiveStream::pump(size_t carry) {
+    const size_t space = m_half - carry;
+    if (space == 0) return false;
+    char* dst = m_buf[m_cur] + carry;
+
+    if (m_kind == LevelArchiveKind::Xz) {
+        m_strm.next_out = reinterpret_cast<uint8_t*>(dst);
+        m_strm.avail_out = space;
+        for (;;) {
+            const size_t outBefore = m_strm.avail_out;
+            const size_t inBefore = m_strm.avail_in;
+            lzma_ret r = lzma_code(&m_strm, LZMA_FINISH);
+            if (r == LZMA_STREAM_END) { m_eof = true; break; }
+            if (r != LZMA_OK) { m_error = lzmaReason(r); m_failed = true; return false; }
+            if (m_strm.avail_out == 0) break;                 // 半窗满，剩下的下次再解
+            // 输入吃完又没产出：流被截断了，别再空转
+            if (m_strm.avail_in == inBefore && m_strm.avail_out == outBefore) {
+                m_error = "truncated xz data"; m_failed = true; return false;
+            }
+        }
+        m_len = carry + (space - m_strm.avail_out);
+        return true;
+    }
+
+    ZSTD_outBuffer ob{dst, space, 0};
+    size_t remaining = 1;
+    do {
+        remaining = ZSTD_decompressStream(m_ds, &ob, &m_zin);
+        if (ZSTD_isError(remaining)) { m_error = ZSTD_getErrorName(remaining); m_failed = true; return false; }
+        if (ob.pos == ob.size) break;                        // 半窗满了
+        if (m_zin.pos >= m_zin.size) {                       // 输入吃完
+            if (remaining != 0) { m_error = "truncated zstd data"; m_failed = true; return false; }
+            m_eof = true;
+            break;
+        }
+    } while (remaining != 0);
+    if (m_zin.pos >= m_zin.size && remaining == 0) m_eof = true;
+    m_len = carry + ob.pos;
+    return true;
+}
+
+bool ArchiveStream::next() {
+    if (m_failed) return false;
+    if (m_failed || (m_eof && m_carry == 0)) return false;
+
+    const size_t carry = m_carry;
+    // 残缺值本身就把半窗占满了：消费者一点都吃不进去，再给也没用
+    if (carry >= m_half) {
+        if (!m_eof) m_stuck = true;
+        return false;
+    }
+    const size_t prev = m_cur;
+    m_cur = 1 - m_cur;                      // 换到另一半
+    if (carry > 0) {
+        // 上一块末尾那 carry 个字节是残缺值，拷到新块开头，再接着解压
+        if (carry > m_len) { m_error = "carry beyond window"; m_failed = true; return false; }
+        std::memmove(m_buf[m_cur], m_buf[prev] + (m_len - carry), carry);
+    }
+    m_carry = 0;
+    if (!pump(carry)) return false;
+    // 一个新字节都没解出来：消费者上次连一个完整值都凑不齐 -> 单个值比半窗还大
+    // （流刚好结束时也算：同样的字节再给一遍也还是吃不下，必须让调用方退回整份解压）
+    if (m_len == carry) {
+        // 一个新字节都没解出来，而消费者上次连一个完整值都没凑齐。
+        // 流还没结束 = 单个值比半窗还大 -> stuck，调用方退回整份解压；
+        // 流已结束 = 最后那几个字节凑不成完整值（JSON 有问题），也收摊。
+        if (!m_eof) m_stuck = true;
+        return false;
+    }
+    return true;
+}
+
+void ArchiveStream::consume(size_t completeBytes) {
+    if (completeBytes > m_len) completeBytes = m_len;
+    m_carry = m_len - completeBytes;
+}

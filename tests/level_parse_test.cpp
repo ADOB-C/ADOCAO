@@ -9,6 +9,7 @@
 //   * 数字/字符串/布尔/整数各变体、BOM、只有 pathData、空数组、最小文件 …
 //   * 压缩容器 .adofai.xz / .adofai.zst：明文 fixture 在内存里压一遍再加载，必须逐位一致
 //   * actions 分块并行解析（ADOCAO_PARSE_PIECES=4 强制）：与顺序解析必须逐位一致
+//   * 流式解压的乒乓半窗（4 KB）：按序拼回来必须与整份解压逐字节相同，超大单值要能报卡死
 //
 // 每个用例加载两遍：一遍强制走老路径（ADOCAO_FORCE_DOM_PARSE=1），一遍走快路径，
 // 然后按节比较 LevelData（angleData / actions / settings / tiles / 每条派生数组），
@@ -208,6 +209,58 @@ bool compressZstd(const std::string& in, std::string& out) {
     return true;
 }
 
+
+// 流式解压（乒乓半窗）的字节级校验：用 4 KB 的半窗读压缩流，消费方每块只吃 2/3、
+// 剩下 1/3 当"残缺值"留给下一块。把吃掉的字节按序拼起来，必须与整份解压逐字节相同。
+// leave: 每块故意留下的残字节数。realistic 消费方在流结束时会把剩下的全吃掉。
+std::string windowedCopy(const std::string& packed, LevelArchiveKind kind, size_t leaveTail) {
+    ArchiveStream st;
+    if (!st.open(packed.data(), packed.size(), kind, 4096)) return "<open-failed>";
+    std::string out;
+    while (st.next()) {
+        const size_t n = st.size();
+        const size_t complete = (st.eof() || n <= leaveTail) ? n : n - leaveTail;
+        out.append(st.data(), complete);
+        st.consume(complete);
+    }
+    if (st.failed()) return "<failed>";
+    if (st.stuck()) return "<stuck>";
+    return out;
+}
+
+// 半窗机制的整体自检：256 KB 伪数据（含 JSON 特殊字符）→ 压成 xz/zstd → 4 KB 半窗读回来。
+// 覆盖多块、carry、以及"单个值比窗口大"的卡死检测。返回空串表示通过。
+std::string streamSelfTest() {
+    std::string payload;
+    payload.reserve(256 * 1024);
+    uint32_t x = 0x12345678u;                    // xorshift：造不可压的伪随机字节
+    for (size_t i = 0; i < 256 * 1024; i++) {
+        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+        payload.push_back((char)(x >> 24));
+    }
+    for (int kind = 0; kind < 2; kind++) {
+        const LevelArchiveKind k = kind ? LevelArchiveKind::Zstd : LevelArchiveKind::Xz;
+        const char* name = kind ? "zstd" : "xz";
+        std::string packed;
+        const bool ok = kind ? compressZstd(payload, packed) : compressXz(payload, packed);
+        if (!ok) return std::string(name) + " 压缩失败";
+        if (packed.size() < 4096 * 4) return std::string(name) + " 测试数据不够跨多块";
+        // 每块全部吃掉（真实消费方在值边界上的极限情况）
+        if (windowedCopy(packed, k, 0) != payload) return std::string(name) + " 全吃模式下拼接不一致";
+        // 每块留 1 字节当残缺值（反复 carry）
+        if (windowedCopy(packed, k, 1) != payload) return std::string(name) + " 留 1 字节 carry 后拼接不一致";
+        // 每块留 1KB（跨多块才凑齐一个值）
+        if (windowedCopy(packed, k, 1024) != payload) return std::string(name) + " 留 1KB carry 后拼接不一致";
+        // 一点都吃不下 -> 必须报 stuck，而不是死循环
+        ArchiveStream st;
+        if (!st.open(packed.data(), packed.size(), k, 4096)) return std::string(name) + " 打开失败";
+        if (!st.next()) return std::string(name) + " 第一块就失败";
+        st.consume(0);
+        if (st.next() || !st.stuck()) return std::string(name) + " 超大单值没有报 stuck";
+    }
+    return {};
+}
+
 Digest loadBuffer(const char* data, size_t length) {
     LevelData lv;
     bool ok = lv.loadFromBuffer(data, length);
@@ -224,12 +277,14 @@ std::string archiveRoundTrip(const std::string& file, const Digest& plain) {
 
     std::string packed;
     if (compressXz(raw, packed)) {
+        if (windowedCopy(packed, LevelArchiveKind::Xz, 1) != raw) return "xz 半窗流式解压与整份不一致";
         const std::string d = diffSections(plain, loadBuffer(packed.data(), packed.size()));
         if (!d.empty()) return "xz 往返: " + d;
         // 截断的 xz 必须干净地失败，而不是崩
         if (loadBuffer(packed.data(), packed.size() / 2).ok) return "截断的 xz 竟然加载成功";
     }
     if (compressZstd(raw, packed)) {
+        if (windowedCopy(packed, LevelArchiveKind::Zstd, 1) != raw) return "zstd 半窗流式解压与整份不一致";
         const std::string d = diffSections(plain, loadBuffer(packed.data(), packed.size()));
         if (!d.empty()) return "zstd 往返: " + d;
         if (loadBuffer(packed.data(), packed.size() / 2).ok) return "截断的 zstd 竟然加载成功";
@@ -284,6 +339,12 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "usage: %s <level file|fixture dir> ...\n", argv[0]);
         return 2;
     }
+
+    if (const std::string e = streamSelfTest(); !e.empty()) {
+        std::printf("FAIL 半窗流式解压自检: %s\n", e.c_str());
+        return 1;
+    }
+    std::printf("ok   半窗流式解压自检（256 KB 伪数据 / 4 KB 半窗 / xz+zstd）\n");
 
     int failed = 0, rejected = 0;
     for (const std::string& f : files) {

@@ -559,8 +559,10 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
     auto tParse = now();
     std::vector<size_t> kept(n, 0);
     std::atomic<bool> failed{false};
+    unsigned poolThreads = 0;
     {
         ThreadPool pool((unsigned)n - 1);                // parallelFor 会让调用线程也干活
+        poolThreads = pool.threadCount() + 1;            // +1 = 调用线程也参与
         pool.parallelFor(0, n, [&](size_t lo, size_t hi) {
             for (size_t i = lo; i < hi && !failed.load(std::memory_order_relaxed); i++) {
                 size_t k = parseActionRangeInto(bounds[i], bounds[i + 1],
@@ -571,8 +573,8 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
         }, 1);
     }
     const double parseMs = msSince(tParse);
-    if (dbg) std::fprintf(stderr, "[parse] 找切分点 %.1f ms  并行解析 %.1f ms  failed=%d\n",
-                          scanMs, parseMs, (int)failed.load());
+    if (dbg) std::fprintf(stderr, "[parse] 找切分点 %.1f ms  并行解析 %.1f ms  段数=%zu 线程=%u  failed=%d\n",
+                          scanMs, parseMs, n, poolThreads, (int)failed.load());
     if (failed.load()) {
         out.resize(base);
         return parseActionRegion(b, fileEnd, out, outEnd);   // 只有切分不可信时才会走到

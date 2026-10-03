@@ -241,6 +241,11 @@ angleData 8 B/层、timeline ~28 B/层。已经做掉的一块：`tileHitsoundVo
   字符串内容哈希）。但 Windows 的 Build 挂了：MSVC 不喜欢类里的 `std::mutex` + `static inline
   thread_local` 数据成员（而且 mutex 让 `LevelData` 不可拷贝）。重做时把**锁与 thread-local 缓存
   放到 .cpp 文件作用域**、类里只留 `std::vector<std::string> actionStrTable` 与一个转调函数即可。
+  **别再试"局部静态 + 代次"的变体**：把 `static std::mutex` / `static thread_local` 缓存放进
+  `internActionStr` 函数体内、用 `(this, strGen)` 当缓存键（类里只多一个 `uint32_t strGen`）——
+  这样能编译过、fixtures 也过，但 **`windowBoundarySelfTest` 会报 actions 不一致**（窗口路径与
+  整份解压的结果对不上），说明缓存/代次的键控有问题。只有"文件作用域 + 按表地址做键"的那版
+  是本地全绿过的。
 
 **actions 分块并行解析**（`parseActionRegionParallel`）：actions 数组里每个对象彼此独立，
 所以先扫一遍找切分点（只做括号/字符串配对，不做字段提取，0.44 s/GB），再切 N 段并行解析，

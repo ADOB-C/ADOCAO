@@ -165,7 +165,15 @@ What may change (and did):
 `core/level/LevelArchive.cpp` 按 **magic** 识别（不看扩展名），在**内存里**解压后交给下面的解析路径，
 不写任何临时文件。xz 用 `lzma_stream_decoder_mt`（与 `../Song.adofai` 的 `xz.c` 同配置）：
 那些谱是多 block 压出来的，单线程只有 ~0.5 GB/s，MT 到 ~2.8 GB/s（1.18 GB 实测 2549 ms → 534 ms）。
-实测直接读 `.adofai.xz`：43 MB → 1.18 GB 谱面 2123 ms、50 MB → 1.40 GB 谱面 2499 ms（含解码）。
+实测直接读 `.adofai.xz`：43 MB → 1.18 GB 谱面 ~2.4 s、50 MB → 1.40 GB 谱面 ~2.9 s（含解码，跑动区间 ±0.15 s）。
+内存上有三处专门处理（都是量出来的，1.18 GB 输出 / 10 核 / 64 MiB 字典 / 19 blocks）：
+  * `mt.memlimit_threading` 给 1 GiB 上限（`../Song.adofai` 那边是 UINT64_MAX）：解码 475 → 585 ms，
+    解码器峰值 1.67 → 1.04 GB，+110 ms 换 0.6 GB；
+  * 解压前从 xz 流尾的 footer + index 反推出解压后总大小并一次 `reserve` 到位（zstd 用
+    `ZSTD_getFrameContentSize`）。靠 `std::string` 自己增长时新旧缓冲同时存在，峰值会白多 ~2.4 GB
+    （实测 1.67 → 4.06 GB）；多留一个 chunk 免得最后一次 resize 又触发全长拷贝；
+  * 于是"解码 + 1.18 GB 输出"峰值 4.06 → 2.19 GB；整份加载（含解析结构）峰值 5.32 → 3.20 GB
+    （1.40 GB 那张：5.92 → 4.41 GB）。明文路径不受影响。
 `tests/level_parse_test.cpp` 会把每个明文 fixture 在内存里压成 xz/zstd 再加载一遍，要求逐位一致，
 并检查截断的流是干净失败而不是崩。
 

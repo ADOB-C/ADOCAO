@@ -521,8 +521,9 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
     if (archive != LevelArchiveKind::Plain) {
         if (onProgress) onProgress(0.05f, "Decompressing level...");
         std::string reason;
+        // 解压在这类谱面上约占 1/4 加载时间，进度条给它相应的一段（0.05 -> 0.20）
         auto progress = [&](float p) {
-            if (onProgress) onProgress(0.05f + p * 0.05f, "Decompressing level...");
+            if (onProgress) onProgress(0.05f + p * 0.15f, "Decompressing level...");
         };
         if (!decompressLevelArchive(data, len, archive, decompressed, reason, progress)) {
             LOG_E("Cannot decompress level (%s): %s",

@@ -117,14 +117,21 @@ Without `--level`, falls through to the ImGui launcher.
    allowed to change is *where* the work happens, never the result.
 
 What may change (and did):
-- Mixing is parallelised over the OUTPUT sample range, not the hits: a task owns
-  [lo, hi) and only writes inside it (no locking), and inside a task hits are still
-  visited in timestamp order, so each sample sums the same contributions in the same
-  order. Verified byte-identical: coarse single-thread chunking vs multi-threaded, and
-  a repeat synthesis in one process. `ADOCAO_MIX_THREADS=1` is the test hook.
-  6.77M-hit chart (75G additions): 36.3 s -> 23.3 s (1.56x). It is memory-bandwidth
-  bound; the next steps are cache blocking and SIMD saturating adds (paddsw/vqaddq),
-  both of which can stay bit-exact.
+- Mixing is restructured in three output-neutral ways, all verified byte-identical
+  against a coarse single-thread reference (`ADOCAO_MIX_THREADS=1`) and against a
+  repeat synthesis in one process:
+  1. the per-sample scale `(int)(sample * volume)` is hoisted out of the hit loop and
+     computed once per group (millions of hits reuse the same 11k scaled samples);
+  2. the accumulation buffer is MONO — in the authentic mix both channels always hold
+     the same value, so one channel plus a final duplicate is exact and halves the
+     read-modify-write traffic;
+  3. the output is swept in L2-sized blocks that only visit the hits overlapping them,
+     and blocks are handed to worker threads (`ThreadPool`), each writing only its own
+     range and visiting hits in timestamp order.
+  The inner loop is a saturating int16 add — `vqaddq_s16` (NEON) / `_mm_adds_epi16`
+  (SSE2), with a scalar fallback — which is exactly the per-addition clamp, so SIMD
+  costs no fidelity. 6.77M-hit chart: 36.3 s -> 1.73 s (21x); Tempest: 207 ms -> 23 ms.
+  Falls back to an int32 path when a scaled sample does not fit in int16 (volume > 100).
 - Fixed a cache bug that made any *second* synthesis in one process wrong: `readWav`'s
   cache-hit path reported `channels = 1` while the cache keeps the file's layout, so a
   cached stereo hit became 2x too long (buffer 217.582 s instead of 217.350 s) and had

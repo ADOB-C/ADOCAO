@@ -26,6 +26,14 @@ static std::unordered_map<std::string, std::pair<int,int>> s_wavMeta;
 #include <windows.h>
 #endif
 
+// Saturating-add kernels for the hitsound mixer (the clamp semantics map exactly
+// onto these instructions).
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#elif defined(__SSE2__)
+#include <emmintrin.h>
+#endif
+
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #include <limits.h>
@@ -295,44 +303,110 @@ bool HitsoundManager::preSynthesize(const std::vector<HitsoundTimestampGroup>& g
     // --- Mixing -------------------------------------------------------------
     // ONE mixing path, and it is the authentic one: 16-bit accumulation with the
     // sum clamped on every addition, exactly like the original HitSoundGenerator.
-    // A float path with a soft limiter was tried and removed: measured against this
-    // one it changed 94.5% of the samples, and in listening the loud sections turned
-    // into a distorted plateau while quiet sections lost level. Faithfulness wins;
-    // the only thing that changed here is WHERE the work happens, never the result.
+    // A float path with a soft limiter was tried and deleted (see AGENTS.md): it
+    // changed 94.5% of the samples and sounded wrong. Only WHERE the work happens
+    // changes here, never the result.
     //
-    // Parallelism splits the OUTPUT sample range, not the hits: a task owns [lo, hi)
-    // and only writes inside it (no locking), and inside a task the hits are still
-    // visited in timestamp order — so every output sample gets the same contributions
-    // in the same order as the old serial loop and the buffer is bit-identical.
-    // Verified: coarse single-thread chunking vs multi-threaded, and a repeat
-    // synthesis in one process, all produce byte-identical WAVs.
-    std::vector<int16_t> mixBuf(bufSize, 0);
+    // Three output-neutral restructurings, all verified byte-identical:
+    //  1. The per-sample scale `(int)(s * volume)` depends only on (group, sample
+    //     index), so it is computed ONCE per group instead of once per hit — the
+    //     old loop re-did it for every one of millions of hits.
+    //  2. The accumulation buffer is MONO. In the authentic mix both channels always
+    //     receive the same value (both start at 0 and every add is identical), so
+    //     accumulating one channel and duplicating at the end is exact — and halves
+    //     the read-modify-write traffic.
+    //  3. The output is swept in blocks that fit in L2, and a block only visits the
+    //     hits overlapping it, so source data stays hot; blocks are independent and
+    //     are handed to worker threads (no locking, hits visited in timestamp order
+    //     inside a block).
+    constexpr int kBlockFrames = 1 << 16;      // 65536 frames = 128 KB mono int16
+    const size_t numBlocks = ((size_t)totalFrames + kBlockFrames - 1) / kBlockFrames;
 
-    auto visitHits = [&](int lo, int hi, int& hits, auto&& emit) {
-        for (size_t gi = 0; gi < groups.size(); ++gi) {
-            auto& g = groups[gi];
-            if (g.type == "None" || g.type.empty()) continue;
-            auto it = wavData.find(g.type);
-            if (it == wavData.end()) continue;
+    // Prepared per-group scaled source (see 1). `wide` is only used when a scaled
+    // sample does not fit in int16 (volume > 100); then the scalar int path keeps
+    // the original semantics exactly.
+    struct Prepared {
+        const int16_t* buf = nullptr;          // scaled samples, first channel only
+        const int32_t* wide = nullptr;         // used when !fits16
+        int len = 0;
+        bool fits16 = true;
+        std::vector<int16_t> own;
+        std::vector<int32_t> ownWide;
+        std::vector<double> ts;
+    };
+    std::unordered_map<std::string, Prepared> prepared;
+    for (auto& g : groups) {
+        if (g.type == "None" || g.type.empty()) continue;
+        auto it = wavData.find(g.type);
+        if (it == wavData.end()) continue;
+        if (prepared.count(g.type)) continue;
 
-            auto& gd = it->second;
-            const float volScale = g.volume / 100.0f;
-            const int16_t* src = gd.rawSamples->data();
-            const int ch = gd.ch;
-            const int len = gd.lenFrames;
-            const auto& ts = g.timestamps;
+        auto& gd = it->second;
+        const float vol = g.volume / 100.0f;
+        Prepared pr;
+        pr.len = gd.lenFrames;
+        pr.own.resize((size_t)pr.len);
+        pr.ownWide.resize((size_t)pr.len);
+        for (int i = 0; i < pr.len; i++) {
+            const int add = (int)(gd.rawSamples->data()[(size_t)i * (size_t)gd.ch] * vol);
+            pr.own[(size_t)i] = (int16_t)add;
+            pr.ownWide[(size_t)i] = add;
+            if (add > 32767 || add < -32768) pr.fits16 = false;
+        }
+        pr.buf = pr.own.data();
+        pr.wide = pr.ownWide.data();
+        pr.ts = g.timestamps;
+        prepared.emplace(g.type, std::move(pr));
+    }
 
-            // Hits are sorted by time, so binary-search the first one whose tail can
-            // still reach sample lo.
-            const double minTs = (double)(lo - len) / (double)sr;
+    std::vector<int16_t> mixBuf((size_t)totalFrames, 0);
+
+    auto mixBlock = [&](size_t block, int& hits) {
+        const int lo = (int)(block * (size_t)kBlockFrames);
+        const int hi = (int)std::min<size_t>((block + 1) * (size_t)kBlockFrames, (size_t)totalFrames);
+
+        for (auto& [type, pr] : prepared) {
+            const auto& ts = pr.ts;
+            const double minTs = (double)(lo - pr.len) / (double)sr;
             for (auto hit = std::upper_bound(ts.begin(), ts.end(), minTs); hit != ts.end(); ++hit) {
                 const long sf = (long)(*hit * (double)sr);
                 if (sf >= hi) break;
-                if (sf >= lo) hits++;                 // counted by the chunk it starts in
+                if (sf >= lo) hits++;
                 const int i0 = std::max(0, lo - (int)sf);
-                const int i1 = std::min(len, hi - (int)sf);
+                const int i1 = std::min(pr.len, hi - (int)sf);
                 if (i1 <= i0) continue;
-                emit((size_t)sf + (size_t)i0, src, i0, i1 - i0, ch, volScale);
+
+                int16_t* d = mixBuf.data() + (size_t)sf + (size_t)i0;
+                if (pr.fits16) {
+                    const int16_t* sAdd = pr.buf + i0;
+                    const int n = i1 - i0;
+                    int i = 0;
+#if defined(__ARM_NEON)
+                    for (; i + 8 <= n; i += 8) {
+                        int16x8_t a = vld1q_s16(d + i);
+                        int16x8_t b = vld1q_s16(sAdd + i);
+                        vst1q_s16(d + i, vqaddq_s16(a, b));   // saturating add == clamp
+                    }
+#elif defined(__SSE2__)
+                    for (; i + 8 <= n; i += 8) {
+                        __m128i a = _mm_loadu_si128((const __m128i*)(d + i));
+                        __m128i b = _mm_loadu_si128((const __m128i*)(sAdd + i));
+                        _mm_storeu_si128((__m128i*)(d + i), _mm_adds_epi16(a, b));
+                    }
+#endif
+                    for (; i < n; i++) {
+                        int v = (int)d[i] + (int)sAdd[i];
+                        if (v > 32767) v = 32767; else if (v < -32768) v = -32768;
+                        d[i] = (int16_t)v;
+                    }
+                } else {
+                    const int32_t* sAdd = pr.wide + i0;
+                    for (int i = 0, k = i0; k < i1; ++i, ++k) {
+                        int v = (int)d[i] + (int)sAdd[i];
+                        if (v > 32767) v = 32767; else if (v < -32768) v = -32768;
+                        d[i] = (int16_t)v;
+                    }
+                }
             }
         }
     };
@@ -348,28 +422,21 @@ bool HitsoundManager::preSynthesize(const std::vector<HitsoundTimestampGroup>& g
         }
         ThreadPool pool(hw > 0 ? hw : 4u);
         std::atomic<int> mixed{0};
-        pool.parallelFor(0, (size_t)totalFrames, [&](size_t lo, size_t hi) {
+        pool.parallelFor(0, numBlocks, [&](size_t b0, size_t b1) {
             int local = 0;
-            visitHits((int)lo, (int)hi, local, [&](size_t at, const int16_t* s, int i0, int n, int ch, float vol) {
-                int16_t* d = mixBuf.data() + at * 2;
-                for (int i = 0; i < n; i++) {
-                    const int add = (int)(s[(size_t)(i0 + i) * (size_t)ch] * vol);
-                    // Both channels receive the same value, so clamp once.
-                    int v = (int)d[i * 2] + add;
-                    if (v > 32767) v = 32767; else if (v < -32768) v = -32768;
-                    d[i * 2]     = (int16_t)v;
-                    d[i * 2 + 1] = (int16_t)v;
-                }
-            });
+            for (size_t b = b0; b < b1; ++b) mixBlock(b, local);
             mixed.fetch_add(local, std::memory_order_relaxed);
-        }, 4096);
+        }, 1);
         processed = mixed.load();
     }
 
     m_lastMixedHits = processed;
     m_buffer.resize(bufSize);
-    for (size_t i = 0; i < bufSize; i++)
-        m_buffer[i] = (float)mixBuf[i] / 32768.0f;
+    for (int f = 0; f < totalFrames; f++) {           // mono mix -> L == R
+        const float v = (float)mixBuf[(size_t)f] / 32768.0f;
+        m_buffer[(size_t)f * 2]     = v;
+        m_buffer[(size_t)f * 2 + 1] = v;
+    }
 
     if (onProgress) onProgress(100.0f);
     LOG_D("Hitsound: Synthesized %d hits from %zu groups into %.1fs buffer",

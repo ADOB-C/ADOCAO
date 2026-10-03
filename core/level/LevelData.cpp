@@ -508,8 +508,14 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
     }
     if (pieces < 2) {
         if (forced) return parseActionRegion(b, fileEnd, out, outEnd);
-        // 小文件不值得多扫一遍、也不值得开线程：直接用融合的单遍解析
-        if (remaining < (32u << 20))
+        // 小文件不值得多扫一遍、也不值得开线程：直接用融合的单遍解析。
+        //
+        // 上界同理：1.2 GB 以上的 actions 区间上，多线程读不同区段会把内存带宽/局域性
+        // 吃满，实测反而更慢（1.18 GB 谱面：2 段 900 ms、4 段 980 ms、8 段 1474 ms，
+        // 而 611 MB 的谱面 8 段只要 82 ms）。那里退回融合的单遍解析——找切分点那趟
+        // 扫描本身就要 0.5 s，与其白花不如省掉。真正的解法是让解析在小的常驻窗口上
+        // 做（见 TODO：滑窗流水线），那时并行分段是免费的。
+        if (remaining < (32u << 20) || remaining >= (768u << 20))
             return parseActionRegion(b, fileEnd, out, outEnd);
         pieces = std::thread::hardware_concurrency();
         if (pieces < 2) pieces = 2;

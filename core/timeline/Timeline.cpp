@@ -322,8 +322,7 @@ std::vector<HitsoundTimestampGroup> Timeline::getHitsoundTimestampGroups() const
         auto hsIt = m_level->tileHitsounds.find(i);
         std::string type = (hsIt != m_level->tileHitsounds.end()) ? hsIt->second : defaultType;
         if (!m_forceHitsoundType.empty()) type = m_forceHitsoundType;
-        auto volIt = m_level->tileHitsoundVolumes.find(i);
-        float vol = (volIt != m_level->tileHitsoundVolumes.end()) ? volIt->second : defaultVol;
+        float vol = m_level->hasHitsoundVolume(i) ? m_level->tileHitsoundVolumes[(size_t)i] : defaultVol;
 
         auto key = std::make_pair(type, vol);
         auto it = groupMap.find(key);

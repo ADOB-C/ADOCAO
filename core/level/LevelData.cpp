@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <cmath>
 #include <algorithm>
 #include <atomic>
@@ -1397,7 +1398,11 @@ void LevelData::processActions() {
                 curHS = hsChanges[ci].type; curVol = hsChanges[ci].volume; ci++;
             }
             if (curHS != settings.hitsound) tileHitsounds[i] = curHS;
-            if (curVol != settings.hitsoundVolume) tileHitsoundVolumes[i] = curVol;
+            if (curVol != settings.hitsoundVolume) {
+                if (tileHitsoundVolumes.size() != (size_t)n)
+                    tileHitsoundVolumes.assign((size_t)n, std::numeric_limits<float>::quiet_NaN());
+                tileHitsoundVolumes[(size_t)i] = curVol;
+            }
         }
     }
 
@@ -1438,7 +1443,7 @@ void LevelData::releaseMemory() {
     actions.clear(); actions.shrink_to_fit();
     tilePositionOffsets.clear();
     tileHitsounds.clear();
-    tileHitsoundVolumes.clear();
+    tileHitsoundVolumes.clear(); tileHitsoundVolumes.shrink_to_fit();
     std::string().swap(pathData);
     // angleData kept: needed by TileMesh::build() for midspin detection
     // tileBPMs kept: needed by buildIcons() for SetSpeed icon coloring

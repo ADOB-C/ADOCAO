@@ -186,7 +186,7 @@ What may change (and did):
   调半窗大小。半窗大小实测（TNR 1.18 GB）：2 MB 1894 ms、4 MB 1928 ms、8 MB 1944 ms、16 MB 1960 ms、
   96 MB 2062 ms——越小越贴缓存，取 **4 MB**（单个 JSON 值超过 4 MB 才会放弃，实际不可能；
   `angleData`/`decorations` 都是增量处理，不看单值大小）。
-- 已验证：38 个 fixture + 284 KB 合成谱（2000 个跨窗 action）在 **4 KB 半窗**下与整份解压逐位一致；
+- 已验证：39 个 fixture + 284 KB 合成谱（2000 个跨窗 action）在 **4 KB 半窗**下与整份解压逐位一致；
   256 KB 不可压伪数据的半窗拼接（0 / 1 B / 1 KB 三种 carry）逐字节一致；"单个值大于半窗"能报
   `stuck()` 而不是死循环；1.18 GB / 1.40 GB 两张真实 `.xz` 在 96 KB / 1 MB / 8 MB 半窗下与整份
   解压**逐位一致**（13 个节的 hash 全同）。`ADOCAO_WINDOW_REQUIRE=1` 把"窗口路径放弃"变成失败，
@@ -212,6 +212,14 @@ What may change (and did):
   xz 的 MT 解码本身就在吃内存带宽，和解析线程互相抢，重叠省不下时间，slack 还白削窗口容量。
   按"实测无收益就删"的规矩回退了，只留下真正的赢家（窗口本身）。
 - 下一步（如果还要）是窗口内分段并行：那时一个窗口只有几 MB、全在缓存里，分段才是免费的。
+
+**每层结构（内存天花板在这里）**：实测 TNR 1.18 GB / 915 万层，窗口路径峰值 3.06 GB ≈ 350 B/层
+（含 xz 解码器的 1 GB 上限）；纯结构约 100~150 B/层：`FastAction` 9.12M x 48 B、`Tile` 9.15M x 32 B、
+angleData 8 B/层、timeline ~28 B/层。已经做掉的一块：`tileHitsoundVolumes` 从
+`unordered_map<int,float>` 改成**稠密 `vector<float>`**（NaN = 无覆盖，空 vector = 整谱无覆盖）。
+实测那张谱有 457 万条覆盖 ≈ 209 MB，稠密后 37 MB：**峰值 3.22 → 3.06 GB**（同一次运行 1912 → 1860 ms）。
+`tileHitsounds`（字符串覆盖）在那张谱上是 **0 条**，所以不需要驻留；普通谱上它们是几百条量级。
+`tilePositionOffsets` 同样稀疏（0.01 条/层）。
 
 **actions 分块并行解析**（`parseActionRegionParallel`）：actions 数组里每个对象彼此独立，
 所以先扫一遍找切分点（只做括号/字符串配对，不做字段提取，0.44 s/GB），再切 N 段并行解析，
@@ -282,7 +290,7 @@ strtod 260 ms、DOM+抽取 438 ms、tile 位置 27 ms、`processActions` 50 ms�
 
 **回归测试**：`tests/level_parse_test.cpp` 对每个用例加载三遍（强制旧路径 / 快路径 / 快路径再
 一次），按 13 个节（angleData、actions、settings、tiles、tileBPMs、tileHasTwirl…）比对 FNV
-hash 与元素个数，逐位相同才通过；`ctest --test-dir build`。`tests/level_fixtures/` 里 38 个用例
+hash 与元素个数，逐位相同才通过；`ctest --test-dir build`。`tests/level_fixtures/` 里 39 个用例
 每个对应 cleanJson 的一条规则，另有"双方都应拒绝"的畸形用例。也可以直接喂真实谱面：
 
 ```

@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -102,7 +103,11 @@ Digest digest(const LevelData& lv, bool ok) {
     H ss; for (size_t i = 0; i < lv.tileHasSetSpeed.size(); i++) { unsigned char b = lv.tileHasSetSpeed[i]; ss.bytes(&b, 1); }
     H bm; for (int v : lv.bookmarkFloors) bm.i32(v);
     H hs; hashMap(lv.tileHitsounds, hs);
-    H hv; hashMap(lv.tileHitsoundVolumes, hv);
+    H hv; size_t hvCount = 0;
+    for (size_t i = 0; i < lv.tileHitsoundVolumes.size(); i++) {   // 稠密数组：NaN = 无覆盖
+        if (std::isnan(lv.tileHitsoundVolumes[i])) continue;
+        hv.u64(i); hv.f32(lv.tileHitsoundVolumes[i]); hvCount++;
+    }
     H po; hashMap(lv.tilePositionOffsets, po);
     H at;
     {
@@ -122,7 +127,7 @@ Digest digest(const LevelData& lv, bool ok) {
     d.settings = s(); d.bpm = bp(); d.twirl = tw(); d.setspeed = ss();
     d.bookmarks = bm(); d.bookmarkCount = lv.bookmarkFloors.size();
     d.hitsounds = hs(); d.hitsoundCount = lv.tileHitsounds.size();
-    d.hsVolumes = hv(); d.hsVolumeCount = lv.tileHitsoundVolumes.size();
+    d.hsVolumes = hv(); d.hsVolumeCount = hvCount;
     d.posOffsets = po(); d.posOffsetCount = lv.tilePositionOffsets.size();
     d.atStates = at();  d.atStateCount = lv.atStates.size();
     d.path = p();       d.pathLen = lv.pathData.size();

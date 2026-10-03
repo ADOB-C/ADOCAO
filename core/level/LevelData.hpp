@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -65,7 +66,15 @@ struct LevelData {
     std::vector<bool>  tileHasTwirl;  // true if tile has a Twirl event
     std::vector<bool>  tileHasSetSpeed; // true if tile has a SetSpeed event
     std::unordered_map<int, std::string> tileHitsounds;      // per-tile hitsound override (sparse)
-    std::unordered_map<int, float> tileHitsoundVolumes;      // per-tile hitsound volume (sparse)
+    // per-tile hitsound volume override. 稠密：有覆盖时长度 = 层数，"无覆盖"用 NaN 表示；
+    // 整张谱没有覆盖时为空 vector。以前是 unordered_map<int,float>：在"每层都有 SetHitsound"
+    // 的 audio-as-chart 谱上（实测 TNR 1.18 GB / 915 万层）有 457 万条 ≈ 209 MB，
+    // 稠密后只要 37 MB。
+    std::vector<float> tileHitsoundVolumes;
+    bool hasHitsoundVolume(int floor) const {
+        return floor >= 0 && (size_t)floor < tileHitsoundVolumes.size()
+               && !std::isnan(tileHitsoundVolumes[(size_t)floor]);
+    }
     std::unordered_map<int, TilePositionOffset> tilePositionOffsets; // sparse
     std::vector<int> bookmarkFloors;  // Bookmark event floors
 

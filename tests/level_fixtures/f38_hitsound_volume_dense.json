@@ -1,0 +1,8 @@
+{"angleData": [0, 90, 180, 0, 90],
+ "settings": {"bpm": 120, "hitsound": "Kick", "hitsoundVolume": 100},
+ "actions": [
+  { "floor": 1, "eventType": "SetHitsound", "hitsound": "Kick", "hitsoundVolume": 60 },
+  { "floor": 3, "eventType": "SetHitsound", "hitsound": "Kick", "hitsoundVolume": 30 },
+  { "floor": 4, "eventType": "SetHitsound", "hitsound": "Kick", "hitsoundVolume": 100 }
+ ],
+ "decorations": []}

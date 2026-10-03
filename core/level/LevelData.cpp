@@ -2,6 +2,7 @@
 #include "JsonCleaner.hpp"
 #include "LevelArchive.hpp"
 #include "core/util/Logger.hpp"
+#include "core/util/ThreadPool.hpp"
 #include <fstream>
 #include <sstream>
 #include <cstdio>
@@ -9,6 +10,9 @@
 #include <cstring>
 #include <cmath>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdio>
 #include <iterator>
 
 
@@ -140,6 +144,8 @@ struct Regions {
 // 前置声明：actions 在根扫描过程中就地解析（见 scanRootMembers）。
 inline bool parseActionRegion(const char* b, const char* end,
                               std::vector<LevelData::FastAction>& out, const char** outEnd);
+inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
+                                      std::vector<LevelData::FastAction>& out, const char** outEnd);
 
 // 只遍历根对象的直接成员。逗号允许缺失（cleanJson 会给漏写逗号的文件补上），
 // 未知成员和 decorations 整体跳过，全程不复制。
@@ -163,7 +169,7 @@ inline bool scanRootMembers(const char* s, const char* e, Regions& r,
         p = skipWs(p + 1, e);
         if (*p == '[' && keyIs(key, "actions") && !r.actions) {
             const char* aEnd = nullptr;
-            if (!parseActionRegion(p, e, actionsOut, &aEnd)) return false;
+            if (!parseActionRegionParallel(p, e, actionsOut, &aEnd)) return false;
             r.actions = p;
             r.actionsEnd = aEnd;
             p = aEnd;
@@ -413,6 +419,173 @@ inline bool parseActionRegion(const char* b, const char* end,
         if (keep) out.push_back(std::move(a));
         p = objEnd;
     }
+}
+
+// ---- 分块并行解析 actions ----------------------------------------------------
+//
+// 大谱面的时间几乎全花在这一段上（1.5 GB 明文实测 ~1.6 s，单线程），而数组里每个
+// action 对象彼此独立，所以可以切段并行、最后按序拼接。
+//
+// 切分点必须是"某个 action 对象的 '{'"，靠一趟只做括号/字符串配对的扫描找出来
+// （不做字段提取，比整段解析便宜 3-4 倍：1.18 GB / 9.1 M 对象实测 447 ms）。这一趟
+// 同时也能得到数组的结束位置，于是根扫描那边省掉了原先"融合"时多走的一遍。
+
+// 在 [begin, fileEnd) 里，从 begin（数组的 '['）开始，为每个 target 偏移找第一个
+// 落点之后的对象起点。找不到数组结尾、或没凑齐所有 target 就返回 false。
+inline bool findActionSplits(const char* begin, const char* fileEnd,
+                             const std::vector<size_t>& targets,
+                             std::vector<const char*>& splits, std::vector<size_t>& counts,
+                             const char** outRegionEnd) {
+    const char* p = begin + 1;
+    size_t ti = 0;
+    counts.assign(1, 0);
+    while (p < fileEnd) {
+        p = skipWs(p, fileEnd);
+        if (p >= fileEnd) return false;
+        if (*p == ']') {
+            *outRegionEnd = p + 1;
+            return true;          // 数组比目标还短时，能切几段就切几段
+        }
+        if (*p == ',') { ++p; continue; }
+        if (*p != '{') return false;
+        if (ti < targets.size() && (size_t)(p - begin) >= targets[ti]) {
+            splits.push_back(p);
+            counts.push_back(0);
+            ++ti;
+        }
+        counts.back()++;          // 这一段有几个 action 对象（即槽位大小上界）
+        const char* objEnd = skipContainer(p, fileEnd);
+        if (!objEnd) return false;
+        p = objEnd;
+    }
+    return false;
+}
+
+// 解析 [b, end) 里的 action 对象，写进 dst 的 slot 个槽位。end 要么是下一段的起点
+// （对象边界），要么是数组结尾之后。
+// 返回写入个数；返回 kFail 表示这段没有正好落在 end 上（切分点不可信）。
+// 写进预先分配好的槽位而不是各自 push_back：8 段各一个 vector 再合并，等于把整份
+// actions 写两遍，实测峰值 3.20 -> 5.18 GB，在内存紧张的机器上直接翻车。
+constexpr size_t kFail = (size_t)-1;
+inline size_t parseActionRangeInto(const char* b, const char* end,
+                                   LevelData::FastAction* dst, size_t slot) {
+    size_t n = 0;
+    const char* p = b;
+    for (;;) {
+        p = skipWs(p, end);
+        if (p >= end) return n;                          // 正好到切分点
+        if (*p == ']') return (p + 1 == end) ? n : kFail;// 最后一段：数组结尾必须正好是 end
+        if (*p == ',') { ++p; continue; }
+        if (*p != '{') return kFail;
+        const char* objEnd = skipContainer(p, end);
+        if (!objEnd) return kFail;
+        ActionFields f;
+        if (!parseActionObject(p + 1, objEnd, f)) return kFail;
+        LevelData::FastAction a;
+        bool keep = false;
+        if (!buildAction(f, a, keep)) return kFail;
+        if (keep) {
+            if (n >= slot) return kFail;                 // 槽位估算错了，别越界
+            dst[n++] = std::move(a);
+        }
+        p = objEnd;
+    }
+}
+
+inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
+                                      std::vector<LevelData::FastAction>& out, const char** outEnd) {
+    const size_t remaining = (size_t)(fileEnd - b);
+
+    // 测试钩子（同 ADOCAO_MIX_THREADS 的路子）：显式指定段数就照办，哪怕文件很小——
+    // 否则 fixture 全都低于下面的阈值，CI 上这条分块路径永远跑不到。
+    //   ADOCAO_PARSE_PIECES=1  退回单线程（对拍用）
+    //   ADOCAO_PARSE_PIECES=N  强制切 N 段
+    unsigned pieces = 0;
+    bool forced = false;
+    if (const char* env = std::getenv("ADOCAO_PARSE_PIECES")) {
+        int v = std::atoi(env);
+        if (v > 0) { pieces = (unsigned)v; forced = true; }
+    }
+    if (pieces < 2) {
+        if (forced) return parseActionRegion(b, fileEnd, out, outEnd);
+        // 小文件不值得多扫一遍、也不值得开线程：直接用融合的单遍解析
+        if (remaining < (32u << 20))
+            return parseActionRegion(b, fileEnd, out, outEnd);
+        pieces = std::thread::hardware_concurrency();
+        if (pieces < 2) pieces = 2;
+        if (pieces > 8) pieces = 8;                      // 再多边际收益很小
+    }
+
+    std::vector<size_t> targets;
+    targets.reserve(pieces - 1);
+    for (unsigned i = 1; i < pieces; i++) targets.push_back(remaining * i / pieces);
+    // 目标偏移可能落在同一个对象上（小文件），findActionSplits 会把它们合并成更少的段
+
+
+    const bool dbg = std::getenv("ADOCAO_PARSE_DBG") != nullptr;
+    auto now = [] { return std::chrono::steady_clock::now(); };
+    auto msSince = [](auto a) {
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - a).count();
+    };
+    auto tScan = now();
+    std::vector<const char*> splits;
+    splits.reserve(pieces - 1);
+    std::vector<size_t> counts;
+    const char* regionEnd = nullptr;
+    if (!findActionSplits(b, fileEnd, targets, splits, counts, &regionEnd) || splits.empty()) {
+        return parseActionRegion(b, fileEnd, out, outEnd);   // 结构不对/切不出两段
+    }
+
+    std::vector<const char*> bounds;
+    bounds.reserve(pieces + 1);
+    bounds.push_back(b + 1);          // b 是数组的 '['，分段解析器要的是对象起点
+    for (const char* sp : splits) bounds.push_back(sp);
+    bounds.push_back(regionEnd);
+    const size_t n = bounds.size() - 1;
+    if (n < 2) return parseActionRegion(b, fileEnd, out, outEnd);
+
+    const double scanMs = msSince(tScan);
+    const size_t base = out.size();
+    std::vector<size_t> slots(n + 1, 0);
+    for (size_t i = 0; i < n; i++) slots[i + 1] = slots[i] + counts[i];
+    out.resize(base + slots[n]);                         // 一次分配，之后不再增长
+
+    auto tParse = now();
+    std::vector<size_t> kept(n, 0);
+    std::atomic<bool> failed{false};
+    {
+        ThreadPool pool((unsigned)n - 1);                // parallelFor 会让调用线程也干活
+        pool.parallelFor(0, n, [&](size_t lo, size_t hi) {
+            for (size_t i = lo; i < hi && !failed.load(std::memory_order_relaxed); i++) {
+                size_t k = parseActionRangeInto(bounds[i], bounds[i + 1],
+                                                out.data() + base + slots[i], counts[i]);
+                if (k == kFail) failed.store(true, std::memory_order_relaxed);
+                else kept[i] = k;
+            }
+        }, 1);
+    }
+    const double parseMs = msSince(tParse);
+    if (dbg) std::fprintf(stderr, "[parse] 找切分点 %.1f ms  并行解析 %.1f ms  failed=%d\n",
+                          scanMs, parseMs, (int)failed.load());
+    if (failed.load()) {
+        out.resize(base);
+        return parseActionRegion(b, fileEnd, out, outEnd);   // 只有切分不可信时才会走到
+    }
+
+    // 压实：每段末尾的空槽（被丢弃的 action）移走。没有丢弃时位移为 0，直接零拷贝。
+    auto tMerge = now();
+    size_t write = base;
+    for (size_t i = 0; i < n; i++) {
+        const size_t from = base + slots[i];
+        if (kept[i] > 0 && from != write)
+            std::move(out.begin() + from, out.begin() + from + kept[i], out.begin() + write);
+        write += kept[i];
+    }
+    if (dbg) std::fprintf(stderr, "[parse] 压实 %.1f ms  合计 %.1f ms  pieces=%zu kept=%zu\n",
+                          msSince(tMerge), msSince(tScan), n, write - base);
+    out.resize(write);
+    *outEnd = regionEnd;
+    return true;
 }
 
 // settings 的读取：新旧两条路共用，保证字段语义一致。

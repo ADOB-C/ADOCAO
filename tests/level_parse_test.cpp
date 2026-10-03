@@ -8,6 +8,7 @@
 //   * CRLF 行尾、字符串里的裸 CR              （丢掉）
 //   * 数字/字符串/布尔/整数各变体、BOM、只有 pathData、空数组、最小文件 …
 //   * 压缩容器 .adofai.xz / .adofai.zst：明文 fixture 在内存里压一遍再加载，必须逐位一致
+//   * actions 分块并行解析（ADOCAO_PARSE_PIECES=4 强制）：与顺序解析必须逐位一致
 //
 // 每个用例加载两遍：一遍强制走老路径（ADOCAO_FORCE_DOM_PARSE=1），一遍走快路径，
 // 然后按节比较 LevelData（angleData / actions / settings / tiles / 每条派生数组），
@@ -245,6 +246,16 @@ Digest loadPath(const std::string& file, bool legacy) {
     return digest(lv, ok);
 }
 
+// 强制走 actions 分块并行解析。fixture 都小于自动阈值，不显式指定就永远跑不到
+// 这条路径（parseActionRange 是独立实现，必须被用例覆盖）。
+Digest loadForcedParallel(const std::string& file) {
+    setEnv("ADOCAO_PARSE_PIECES", "4");
+    LevelData lv;
+    bool ok = lv.loadFromFile(file);
+    unsetEnv("ADOCAO_PARSE_PIECES");
+    return digest(lv, ok);
+}
+
 std::vector<std::string> collect(int argc, char** argv) {
     std::vector<std::string> files;
     if (argc <= 1) return files;
@@ -283,12 +294,14 @@ int main(int argc, char** argv) {
         const std::string a = diffSections(legacy, fast);
         const std::string b = diffSections(fast, again);
         const std::string c = fast.ok ? archiveRoundTrip(f, fast) : std::string();
-        if (!a.empty() || !b.empty() || !c.empty()) {
+        const std::string d = fast.ok ? diffSections(fast, loadForcedParallel(f)) : std::string();
+        if (!a.empty() || !b.empty() || !c.empty() || !d.empty()) {
             failed++;
             std::printf("FAIL %s\n", f.c_str());
             if (!a.empty()) std::printf("     cleanJson+DOM vs 快路径: %s\n", a.c_str());
             if (!b.empty()) std::printf("     快路径两次加载不一致:   %s\n", b.c_str());
             if (!c.empty()) std::printf("     压缩容器往返:           %s\n", c.c_str());
+            if (!d.empty()) std::printf("     顺序 vs 强制分块:       %s\n", d.c_str());
             std::printf("     angle=%zu/%zu actions=%zu/%zu tiles=%zu/%zu settings=%016llx/%016llx\n",
                         legacy.angleCount, fast.angleCount, legacy.actionCount, fast.actionCount,
                         legacy.tileCount, fast.tileCount,

@@ -16,27 +16,6 @@ std::string cleanupWin32(std::string r, bool comInitialized) {
     return r;
 }
 
-// Parses "*.adofai\0*.json\0\0" into COMDLG_FILTERSPEC pairs
-std::vector<COMDLG_FILTERSPEC> parseFilters(const wchar_t* filters) {
-    std::vector<COMDLG_FILTERSPEC> specs;
-    std::vector<std::wstring> specStrs;
-    std::wstring filterStr(filters);
-    size_t start = 0;
-    while (start < filterStr.length()) {
-        size_t end = filterStr.find(L'\0', start);
-        if (end == std::wstring::npos) break;
-        std::wstring pat = filterStr.substr(start, end - start);
-        std::wstring desc = pat + L" files";
-        specStrs.push_back(desc);
-        specStrs.push_back(pat);
-        specs.push_back({specStrs[specStrs.size()-2].c_str(),
-                         specStrs[specStrs.size()-1].c_str()});
-        start = end + 1;
-        if (filterStr[start] == L'\0') break;
-    }
-    return specs;
-}
-
 std::string wideToUtf8(const wchar_t* rawPath) {
     int u8len = WideCharToMultiByte(CP_UTF8, 0, rawPath, -1, nullptr, 0, nullptr, nullptr);
     std::string result(u8len ? u8len - 1 : 0, '\0');
@@ -47,7 +26,8 @@ std::string wideToUtf8(const wchar_t* rawPath) {
 
 } // namespace
 
-std::string openFileDialog(const char* title, const char* filterStr) {
+std::string openFileDialog(const char* title, const std::vector<std::string>& patterns,
+                           const char* description) {
     bool comInitialized = (CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED) == S_OK);
 
     IFileOpenDialog* dlg = nullptr;
@@ -56,10 +36,17 @@ std::string openFileDialog(const char* title, const char* filterStr) {
         return cleanupWin32({}, comInitialized);
 
     std::wstring wtitle(title, title + strlen(title));
-    std::wstring wfilter(filterStr, filterStr + strlen(filterStr));
-    auto specs = parseFilters(wfilter.c_str());
-    if (!specs.empty())
-        dlg->SetFileTypes((UINT)specs.size(), specs.data());
+    // COMDLG accepts several patterns in one filter entry, separated by ';'
+    std::string joined;
+    for (size_t i = 0; i < patterns.size(); i++) {
+        if (i) joined += ';';
+        joined += patterns[i];
+    }
+    std::wstring wpatterns(joined.begin(), joined.end());
+    std::wstring wdesc(description, description + strlen(description));
+    COMDLG_FILTERSPEC spec{wdesc.c_str(), wpatterns.c_str()};
+    if (!patterns.empty())
+        dlg->SetFileTypes(1, &spec);
 
     dlg->SetTitle(wtitle.c_str());
 
@@ -125,8 +112,14 @@ std::string selectFolderDialog(const char* title, const std::string& initialDir)
 
 namespace wizard {
 
-std::string openFileDialog(const char* title, const char* filterStr) {
-    const char* path = tinyfd_openFileDialog(title, "", 0, nullptr, filterStr, 0);
+std::string openFileDialog(const char* title, const std::vector<std::string>& patterns,
+                           const char* description) {
+    std::vector<const char*> raw;
+    raw.reserve(patterns.size());
+    for (const std::string& p : patterns) raw.push_back(p.c_str());
+    const char* path = tinyfd_openFileDialog(title, "", (int)raw.size(),
+                                             raw.empty() ? nullptr : raw.data(),
+                                             description, 0);
     return path ? std::string(path) : std::string();
 }
 
@@ -147,6 +140,9 @@ std::string detectMusicFile(const std::string& levelPath) {
     fs::path dir = lvl.parent_path();
     if (dir.empty()) dir = ".";
     std::string stem = lvl.stem().string();
+    // "X.adofai.xz" -> stem "X.adofai" -> 再剥一层，音乐名才和谱面同名
+    if (stem.size() > 7 && stem.compare(stem.size() - 7, 7, ".adofai") == 0)
+        stem.resize(stem.size() - 7);
     for (const char* ext : {".ogg",".OGG",".mp3",".MP3",".wav",".WAV",".flac",".FLAC",".m4a",".M4A"}) {
         fs::path cand = dir / (stem + ext);
         if (fs::exists(cand)) return cand.string();

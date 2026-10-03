@@ -1,5 +1,6 @@
 #include "LevelData.hpp"
 #include "JsonCleaner.hpp"
+#include "LevelArchive.hpp"
 #include "core/util/Logger.hpp"
 #include <fstream>
 #include <sstream>
@@ -513,6 +514,25 @@ bool LevelData::loadFromString(const std::string& jsonStr, ProgressCb onProgress
 }
 
 bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgress, bool exportOnly) {
+    // 压缩容器（.adofai.xz / .adofai.zst，按 magic 判断）：先解开，再当明文解析。
+    // 解压后的缓冲区必须活到解析结束，所以放在这个作用域里。
+    std::string decompressed;
+    const LevelArchiveKind archive = sniffLevelArchive(data, len);
+    if (archive != LevelArchiveKind::Plain) {
+        if (onProgress) onProgress(0.05f, "Decompressing level...");
+        std::string reason;
+        auto progress = [&](float p) {
+            if (onProgress) onProgress(0.05f + p * 0.05f, "Decompressing level...");
+        };
+        if (!decompressLevelArchive(data, len, archive, decompressed, reason, progress)) {
+            LOG_E("Cannot decompress level (%s): %s",
+                  archive == LevelArchiveKind::Xz ? "xz" : "zstd", reason.c_str());
+            return false;
+        }
+        data = decompressed.data();
+        len = decompressed.size();
+    }
+
     // Skip UTF-8 BOM if present (RapidJSON rejects it at offset 0)
     if (len >= 3 && (unsigned char)data[0] == 0xEF
         && (unsigned char)data[1] == 0xBB && (unsigned char)data[2] == 0xBF) {

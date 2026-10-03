@@ -42,7 +42,9 @@ void drawWelcomePage(State& st, const Chrome& ch) {
     ImGui::InputText("##level", st.levelBuf, sizeof(st.levelBuf));
     ImGui::SameLine(0.0f, gap);
     if (ImGui::Button("Choose", ImVec2(chooseW, 0))) {
-        auto result = openFileDialog("Select level file", "*.adofai");
+        auto result = openFileDialog("Select level file",
+                                     {"*.adofai", "*.adofai.xz", "*.adofai.zst"},
+                                     "ADOFAI levels (plain / xz / zstd)");
         if (!result.empty()) {
             snprintf(st.levelBuf, sizeof(st.levelBuf), "%s", result.c_str());
             st.lastError.clear();

@@ -99,6 +99,8 @@ All dependencies are fetched automatically via CMake `FetchContent`:
 | miniaudio | 0.11.22 | Audio playback |
 | stb_vorbis | latest | OGG decoding |
 | miniz | 3.0.2 | Zip archive reading (DataFile) |
+| liblzma (xz) | 5.6.3 | `.adofai.xz` level containers (multi-threaded decode) |
+| libzstd | 1.5.6 | `.adofai.zst` level containers |
 | tinyfiledialogs | 2.9.3 | File open dialogs |
 
 ## CLI Usage

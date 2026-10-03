@@ -160,6 +160,15 @@ What may change (and did):
 
 一次加载分两步：解析 JSON → `Timeline::build()`。磁盘 I/O 与 JSON 解析占了几乎全部。
 
+**容器**：除明文 `.adofai`，还支持 `.adofai.xz`（xz/LZMA2）与 `.adofai.zst`（zstd）——
+`../Song.adofai`（audio-as-chart 编解码器）就用这两个格式存谱面（4 分钟谱 ~1.5 GB 文本 → 50–80 MB）。
+`core/level/LevelArchive.cpp` 按 **magic** 识别（不看扩展名），在**内存里**解压后交给下面的解析路径，
+不写任何临时文件。xz 用 `lzma_stream_decoder_mt`（与 `../Song.adofai` 的 `xz.c` 同配置）：
+那些谱是多 block 压出来的，单线程只有 ~0.5 GB/s，MT 到 ~2.8 GB/s（1.18 GB 实测 2549 ms → 534 ms）。
+实测直接读 `.adofai.xz`：43 MB → 1.18 GB 谱面 2123 ms、50 MB → 1.40 GB 谱面 2499 ms（含解码）。
+`tests/level_parse_test.cpp` 会把每个明文 fixture 在内存里压成 xz/zstd 再加载一遍，要求逐位一致，
+并检查截断的流是干净失败而不是崩。
+
 **两条解析路径，产出必须逐位一致**：
 
 | 路径 | 实现 | 何时用 |

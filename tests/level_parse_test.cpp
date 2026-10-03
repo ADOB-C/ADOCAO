@@ -7,6 +7,7 @@
 //   * 前置逗号 / 重复逗号 / 尾随逗号           （丢掉）
 //   * CRLF 行尾、字符串里的裸 CR              （丢掉）
 //   * 数字/字符串/布尔/整数各变体、BOM、只有 pathData、空数组、最小文件 …
+//   * 压缩容器 .adofai.xz / .adofai.zst：明文 fixture 在内存里压一遍再加载，必须逐位一致
 //
 // 每个用例加载两遍：一遍强制走老路径（ADOCAO_FORCE_DOM_PARSE=1），一遍走快路径，
 // 然后按节比较 LevelData（angleData / actions / settings / tiles / 每条派生数组），
@@ -17,7 +18,11 @@
 // 也可以直接喂真实谱面，例如：
 //   adocao_level_parse_test ~/Documents/Charts/**/*.adofai
 
+#include "core/level/LevelArchive.hpp"
 #include "core/level/LevelData.hpp"
+
+#include <lzma.h>
+#include <zstd.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -171,6 +176,66 @@ void unsetEnv(const char* name) {
 #endif
 }
 
+std::string readRawFile(const std::string& path) {
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return {};
+    std::fseek(f, 0, SEEK_END);
+    long n = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    std::string out(n > 0 ? (size_t)n : 0, '\0');
+    if (n > 0 && std::fread(&out[0], 1, (size_t)n, f) != (size_t)n) out.clear();
+    std::fclose(f);
+    return out;
+}
+
+bool compressXz(const std::string& in, std::string& out) {
+    out.resize(lzma_stream_buffer_bound(in.size()));
+    size_t pos = 0;
+    lzma_ret r = lzma_easy_buffer_encode(6, LZMA_CHECK_CRC64, nullptr,
+                                         (const uint8_t*)in.data(), in.size(),
+                                         (uint8_t*)out.data(), &pos, out.size());
+    if (r != LZMA_OK) return false;
+    out.resize(pos);
+    return true;
+}
+
+bool compressZstd(const std::string& in, std::string& out) {
+    out.resize(ZSTD_compressBound(in.size()));
+    size_t n = ZSTD_compress(out.data(), out.size(), in.data(), in.size(), 19);
+    if (ZSTD_isError(n)) return false;
+    out.resize(n);
+    return true;
+}
+
+Digest loadBuffer(const char* data, size_t length) {
+    LevelData lv;
+    bool ok = lv.loadFromBuffer(data, length);
+    return digest(lv, ok);
+}
+
+// 压缩容器往返：把明文谱在内存里压成 .xz / .zst 再喂回去，必须和明文加载
+// 逐位一致。全部在内存里做，不落任何临时文件（大字面量谱面跳过，压一轮太贵）。
+std::string archiveRoundTrip(const std::string& file, const Digest& plain) {
+    const std::string raw = readRawFile(file);
+    if (raw.empty()) return {};
+    if (sniffLevelArchive(raw.data(), raw.size()) != LevelArchiveKind::Plain) return {};  // 本身就是容器
+    if (raw.size() > (8u << 20)) return {};                                              // 太大，跳过
+
+    std::string packed;
+    if (compressXz(raw, packed)) {
+        const std::string d = diffSections(plain, loadBuffer(packed.data(), packed.size()));
+        if (!d.empty()) return "xz 往返: " + d;
+        // 截断的 xz 必须干净地失败，而不是崩
+        if (loadBuffer(packed.data(), packed.size() / 2).ok) return "截断的 xz 竟然加载成功";
+    }
+    if (compressZstd(raw, packed)) {
+        const std::string d = diffSections(plain, loadBuffer(packed.data(), packed.size()));
+        if (!d.empty()) return "zstd 往返: " + d;
+        if (loadBuffer(packed.data(), packed.size() / 2).ok) return "截断的 zstd 竟然加载成功";
+    }
+    return {};
+}
+
 Digest loadPath(const std::string& file, bool legacy) {
     if (legacy) setEnv("ADOCAO_FORCE_DOM_PARSE", "1");
     else        unsetEnv("ADOCAO_FORCE_DOM_PARSE");
@@ -217,11 +282,13 @@ int main(int argc, char** argv) {
 
         const std::string a = diffSections(legacy, fast);
         const std::string b = diffSections(fast, again);
-        if (!a.empty() || !b.empty()) {
+        const std::string c = fast.ok ? archiveRoundTrip(f, fast) : std::string();
+        if (!a.empty() || !b.empty() || !c.empty()) {
             failed++;
             std::printf("FAIL %s\n", f.c_str());
             if (!a.empty()) std::printf("     cleanJson+DOM vs 快路径: %s\n", a.c_str());
             if (!b.empty()) std::printf("     快路径两次加载不一致:   %s\n", b.c_str());
+            if (!c.empty()) std::printf("     压缩容器往返:           %s\n", c.c_str());
             std::printf("     angle=%zu/%zu actions=%zu/%zu tiles=%zu/%zu settings=%016llx/%016llx\n",
                         legacy.angleCount, fast.angleCount, legacy.actionCount, fast.actionCount,
                         legacy.tileCount, fast.tileCount,

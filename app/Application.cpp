@@ -169,6 +169,27 @@ static const std::string& logPath() {
     return path;
 }
 
+// 导出 WAV 的落盘路径：去掉压缩容器扩展名和 .adofai，只留谱面名。
+// X.adofai.xz -> <dir>/X_hitsounds.wav（不剥容器名就会写出 X.adofai_hitsounds.wav）
+static std::string hitsoundWavPath(const std::string& levelPath, const std::string& exportDir) {
+    auto stripExt = [](std::string s) {
+        for (const char* ext : {".xz", ".zst"}) {
+            size_t n = strlen(ext);
+            if (s.size() > n && s.compare(s.size() - n, n, ext) == 0) s.resize(s.size() - n);
+        }
+        auto dot = s.rfind('.');
+        auto slash = s.find_last_of("/\\");
+        if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
+            s = s.substr(0, dot);
+        return s;
+    };
+    if (!exportDir.empty()) {
+        std::string fname = levelPath.substr(levelPath.find_last_of("/\\") + 1);
+        return exportDir + "/" + stripExt(fname) + "_hitsounds.wav";
+    }
+    return stripExt(levelPath) + "_hitsounds.wav";
+}
+
 static void earlyLog(const char* msg) {
     // First call truncates old log, subsequent calls append
     FILE* f = fopen(logPath().c_str(), s_firstEarlyLog ? "w" : "a");
@@ -236,18 +257,7 @@ int runApplication(bool debugConsole) {
             return 1;
         }
         // Output: <exportDir>/<levelname>_hitsounds.wav (default: level dir)
-        std::string outPath;
-        if (!cfg.exportDir.empty()) {
-            std::string fname = cfg.levelPath.substr(cfg.levelPath.find_last_of("/\\") + 1);
-            auto dot = fname.rfind('.');
-            if (dot != std::string::npos) fname = fname.substr(0, dot);
-            outPath = cfg.exportDir + "/" + fname + "_hitsounds.wav";
-        } else {
-            outPath = cfg.levelPath;
-            auto dot = outPath.rfind('.');
-            if (dot != std::string::npos) outPath = outPath.substr(0, dot);
-            outPath += "_hitsounds.wav";
-        }
+        std::string outPath = hitsoundWavPath(cfg.levelPath, cfg.exportDir);
         hm.writeWav(outPath);
         LOG_I("Exported hitsounds to %s", outPath.c_str());
         glfwTerminate();
@@ -326,18 +336,7 @@ int runApplicationFromCLI(const LauncherConfig& cfg, bool debugConsole) {
             glfwTerminate();
             return 1;
         }
-        std::string outPath;
-        if (!config.exportDir.empty()) {
-            std::string fname = config.levelPath.substr(config.levelPath.find_last_of("/\\") + 1);
-            auto dot = fname.rfind('.');
-            if (dot != std::string::npos) fname = fname.substr(0, dot);
-            outPath = config.exportDir + "/" + fname + "_hitsounds.wav";
-        } else {
-            outPath = config.levelPath;
-            auto dot = outPath.rfind('.');
-            if (dot != std::string::npos) outPath = outPath.substr(0, dot);
-            outPath += "_hitsounds.wav";
-        }
+        std::string outPath = hitsoundWavPath(config.levelPath, config.exportDir);
         hm.writeWav(outPath);
         LOG_I("Exported hitsounds to %s", outPath.c_str());
         glfwTerminate();

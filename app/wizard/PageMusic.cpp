@@ -34,7 +34,9 @@ void drawMusicPage(State& st, const Chrome& ch) {
     ImGui::InputText("##music", st.musicBuf, sizeof(st.musicBuf));
     ImGui::SameLine();
     if (ImGui::Button("Choose##mus", ImVec2(chooseW, 0))) {
-        auto result = openFileDialog("Select music file", "*.ogg");
+        auto result = openFileDialog("Select music file",
+                                     {"*.ogg", "*.mp3", "*.wav", "*.flac", "*.m4a", "*.aiff"},
+                                     "Audio files");
         if (!result.empty())
             snprintf(st.musicBuf, sizeof(st.musicBuf), "%s", result.c_str());
     }

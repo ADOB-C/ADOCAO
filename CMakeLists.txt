@@ -158,6 +158,50 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(tinyfiledialogs)
 
+# xz / zstd containers: levels made by ../Song.adofai (audio-as-chart) are stored as
+# .adofai.xz or .adofai.zst, so ADOCAO decodes both. Built from source like the other
+# deps — the Windows portable build machine has no system liblzma/libzstd.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+# liblzma 自带一整套 ctest 用例（19 个）；我们只跑自己的对拍测试，
+# 否则 CI 会连带依赖第三方测试。
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(lzma
+    GIT_REPOSITORY https://github.com/tukaani-project/xz.git
+    GIT_TAG v5.6.3
+    GIT_SHALLOW TRUE
+)
+set(XZ_NLS OFF CACHE BOOL "" FORCE)          # no i18n / gettext
+set(XZ_TOOL_XZ OFF CACHE BOOL "" FORCE)
+set(XZ_TOOL_XZDEC OFF CACHE BOOL "" FORCE)
+set(XZ_TOOL_LZMADEC OFF CACHE BOOL "" FORCE)
+set(XZ_TOOL_LZMAINFO OFF CACHE BOOL "" FORCE)
+set(XZ_TOOL_SCRIPTS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(lzma)
+# liblzma 只给自己加了 PRIVATE include（它预设消费者用 find_package），作为子项目
+# 用要替它把公开头文件目录挂出来。
+target_include_directories(liblzma INTERFACE
+    $<BUILD_INTERFACE:${lzma_SOURCE_DIR}/src/liblzma/api>)
+
+# zstd keeps its CMakeLists in build/cmake/ (no root CMakeLists), so populate it and
+# add that directory by hand; target is libzstd_static / zstd::libzstd_static.
+FetchContent_Declare(zstd
+    GIT_REPOSITORY https://github.com/facebook/zstd.git
+    GIT_TAG v1.5.6
+    GIT_SHALLOW TRUE
+)
+set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(ZSTD_LEGACY_SUPPORT OFF CACHE BOOL "" FORCE)
+set(ZSTD_MULTITHREAD_SUPPORT OFF CACHE BOOL "" FORCE)
+FetchContent_GetProperties(zstd)
+if(NOT zstd_POPULATED)
+    FetchContent_Populate(zstd)
+    add_subdirectory(${zstd_SOURCE_DIR}/build/cmake ${zstd_BINARY_DIR})
+endif()
+
 # ---- Library/application targets (directory = library boundary) ----
 add_subdirectory(core)
 add_subdirectory(glad)

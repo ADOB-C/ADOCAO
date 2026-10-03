@@ -184,14 +184,23 @@ What may change (and did):
 
 - **默认启用**（压缩输入）；`ADOCAO_WHOLE_DECOMPRESS=1` 强制退回整份解压，`ADOCAO_WINDOW_KB`
   调半窗大小。半窗大小实测（TNR 1.18 GB）：2 MB 1894 ms、4 MB 1928 ms、8 MB 1944 ms、16 MB 1960 ms、
-  96 MB 2062 ms——越小越贴缓存，取 **4 MB**（单个 JSON 值超过 4 MB 才会放弃，实际不可能；
-  `angleData`/`decorations` 都是增量处理，不看单值大小）。
+  96 MB 2062 ms——越小越贴缓存，取 **4 MB**（纯速度/内存权衡：窗口大小不再受"单个值多大"限制，
+  `skip`/`settings`/`path` 都是可续扫描器，超长 `levelDesc`、超大 `decorations` 数组照样跨窗流过去）。
 - 已验证：39 个 fixture + 284 KB 合成谱（2000 个跨窗 action）在 **4 KB 半窗**下与整份解压逐位一致；
   256 KB 不可压伪数据的半窗拼接（0 / 1 B / 1 KB 三种 carry）逐字节一致；"单个值大于半窗"能报
   `stuck()` 而不是死循环；1.18 GB / 1.40 GB 两张真实 `.xz` 在 96 KB / 1 MB / 8 MB 半窗下与整份
   解压**逐位一致**（13 个节的 hash 全同）。`ADOCAO_WINDOW_REQUIRE=1` 把"窗口路径放弃"变成失败，
   用来证明用例真的覆盖到它（这个坑踩过一次：静默回退让测试全绿）；`ADOCAO_FAST_REQUIRE=1` 界定
   "哪些 fixture 本来快路径就吃不下、因此允许两条路都放弃"。
+- 覆盖范围：真有事件多样性的谱面也验过——6 张社区谱（Tempest 31.7 万事件、The Moon、Singularity、
+  Fledgling、DONE 等）与 641 MB / 618 万事件 / **7 种事件类型**的 MYC，都对每个文件在内存里压成
+  xz 与 zstd、再用 **4 KB 半窗 + 禁止回退**走窗口路径，与整份解压逐位一致；两张 `.xz` 巨谱
+  （1.18 / 1.40 GB）同样逐位一致。`archiveRoundTrip()` 就长在 `tests/level_parse_test.cpp` 里，
+  喂任何真实文件（含压缩谱）都会跑这套比对 —— 这一条正是被"你造的大谱只有一种事件"问出来的。
+- 第三个坑：`skip`/`settings`/`path` 明明带状态可续，驱动却按"从该项起点重放"处理，于是
+  **任何大于半窗的单个值都会放弃回退**（一个超大 `decorations` 元素、200 KB 的 `levelDesc` 都会）。
+  现在这三类扫描器整窗提交、跨窗续扫，`angleData`/`actions` 才按元素边界 carry。
+  永久用例：`windowHugeValueSelfTest()`（200 KB 字符串 + 500 个装饰物 / 4 KB 半窗）。
 - 踩过的两个坑（都是"只在窗口中途发生状态转移时才出现"，小 fixture 掩盖）：
   1. 驱动把"相对当前游标的已提交字节数"当成了 `ArchiveStream::consume()` 要的**窗口内偏移**；
      第一次调用两者恰好相等，所以只在 actions 数组不从窗口开头起时才暴露 → carry 退到已解析

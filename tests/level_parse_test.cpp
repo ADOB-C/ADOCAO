@@ -268,6 +268,36 @@ std::string streamSelfTest() {
 
 
 Digest loadBuffer(const char* data, size_t length);   // 定义在后面
+// 单个值远大于半窗：`levelDesc` 是 200 KB 的字符串、每个装饰物里还有 300 B 的字符串。
+// skip / settings / path 三个子扫描器带状态可续，必须能跨窗流过去，而不是"放弃并回退"。
+std::string windowHugeValueSelfTest() {
+    std::string text = "{\"angleData\":[0, 90, 180], \"levelDesc\":\"";
+    text.append(200 * 1024, 'x');
+    text += "\", \"settings\": {\"bpm\": 100}, \"decorations\": [";
+    for (int i = 0; i < 500; i++) {
+        if (i) text += ',';
+        text += "{\"floor\": " + std::to_string(i) + ", \"eventType\": \"AddDecoration\", \"decorationImage\": \"";
+        text.append(300, 'd');
+        text += "\"}";
+    }
+    text += "], \"actions\": [{ \"floor\": 1, \"eventType\": \"Twirl\" }]}";
+
+    std::string packed;
+    if (!compressXz(text, packed)) return "xz 压缩失败";
+    setEnv("ADOCAO_WINDOW_KB", "4");
+    setEnv("ADOCAO_WINDOW_REQUIRE", "1");
+    const Digest win = loadBuffer(packed.data(), packed.size());
+    unsetEnv("ADOCAO_WINDOW_REQUIRE");
+    unsetEnv("ADOCAO_WINDOW_KB");
+    setEnv("ADOCAO_WHOLE_DECOMPRESS", "1");
+    const Digest whole = loadBuffer(packed.data(), packed.size());
+    unsetEnv("ADOCAO_WHOLE_DECOMPRESS");
+    if (!win.ok || !whole.ok) return "加载失败（win/whole）";
+    const std::string d = diffSections(whole, win);
+    return d.empty() ? std::string() : ("超大单值跨窗不一致: " + d);
+}
+
+
 
 // 窗口边界的压力用例：合成一张远大于窗口的谱（action 对象故意跨窗），走窗口路径加载，
 // 最终结果必须与整份解压逐位一致。fixture 都小于窗口、压不到边界，所以单独造一个。
@@ -401,6 +431,12 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "usage: %s <level file|fixture dir> ...\n", argv[0]);
         return 2;
     }
+
+    if (const std::string e = windowHugeValueSelfTest(); !e.empty()) {
+        std::printf("FAIL 超大单值跨窗用例: %s\n", e.c_str());
+        return 1;
+    }
+    std::printf("ok   超大单值跨窗用例（200 KB 字符串 + 500 个装饰物 / 4 KB 半窗）\n");
 
     if (const std::string e = windowBoundarySelfTest(); !e.empty()) {
         std::printf("FAIL 窗口边界用例（284 KB 合成谱 / 4 KB 半窗）: %s\n", e.c_str());

@@ -834,13 +834,19 @@ struct WindowParser {
             }
             if (q < end) { p = q; continue; }
             // 需要更多数据：把当前项起点之后的字节 carry 过去，下次从头重放该项
-            const size_t consumed = (size_t)(itemStart - p);   // itemStart >= p（step 开头保证）
+            // 挂起时从哪里开始 carry：
+            //   * skip/settings/path 这三个子扫描器自己带着状态（括号深度、是否在字符串里、
+            //     已抄下的字节），可以从窗口末尾接着扫，所以整窗都算已提交 —— 于是单个值
+            //     无论多大都能跨窗（超大 decorations 数组、超长 levelDesc 都不会再放弃）。
+            //   * angleData/actions 只能停在元素边界，必须把它当前那个不完整的元素 carry 过去。
+            const bool resumable = state == State::InSettings || state == State::InPath || state == State::InSkip;
+            const char* carryFrom = resumable ? end : itemStart;
+            const size_t consumed = (size_t)(carryFrom - p);   // 诊断用：相对本次调用起点
             if (dbg) std::fprintf(stderr, "[win] 换窗 state=%d 已提交=%zu carry=%zu 窗口=%zu\n",
                                   (int)state, consumed, stream.size() - consumed, stream.size());
-            // consume() 要的是"窗口内偏移"，不是"相对本次调用起点的字节数"。第一次调用两者
-            // 恰好相等（游标就在窗口开头），所以这个错被掩盖过：窗口中途发生状态转移后，
-            // carry 会退到某个已解析对象中间，回放时就重复解析／错位。
-            stream.consume((size_t)(itemStart - stream.data()));
+            // consume() 要的是"窗口内偏移"，不是"相对本次调用起点的字节数"（第一次调用两者
+            // 恰好相等，所以这个错被掩盖过：窗口中途状态转移后 carry 会退到已解析对象中间）。
+            stream.consume((size_t)(carryFrom - stream.data()));
             if (!stream.next()) {
                 if (dbg) std::fprintf(stderr, "[win] 取下一块失败 state=%d stuck=%d failed=%d err=%s 已消费=%zu 块内=%zu\n",
                                       (int)state, (int)stream.stuck(), (int)stream.failed(),
@@ -853,7 +859,7 @@ struct WindowParser {
             }
             p = stream.data();
             end = p + stream.size();
-            resetOnResume = true;                              // 半成品丢掉，从头重放
+            // 不再无条件 resetOnResume：进入这些状态时已经初始化过，续扫必须保留状态
         }
     }
 };

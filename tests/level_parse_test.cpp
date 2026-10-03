@@ -84,7 +84,7 @@ Digest digest(const LevelData& lv, bool ok) {
     H a;  for (double v : lv.angleData) a.bytes(&v, 8);
     H ac; for (auto& x : lv.actions) {
         ac.i32(x.floor); ac.u64(x.type); ac.f32(x.val1); ac.f32(x.val2);
-        ac.bytes(&x.flag, 1); ac.str(lv.actionStr(x));
+        ac.bytes(&x.flag, 1); ac.str(x.str);
     }
     H t;  for (auto& x : lv.tiles) {
         t.i32(x.index); t.f32(x.angle); t.f32(x.direction); t.bytes(&x.position, sizeof(x.position));

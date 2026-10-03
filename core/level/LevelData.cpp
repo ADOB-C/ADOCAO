@@ -32,10 +32,6 @@
 // 快路径 mmap 文件，直接对着映射区扫描 angleData/actions，全程不复制。
 // ===========================================================================
 
-// 事件字符串驻留表的"当前属主"：buildAction 等自由函数拿不到 LevelData，用这个指针访问。
-// loadFromBuffer 开始时指向 this，于是表仍然是 per-LevelData 的。
-static LevelData* g_internOwner = nullptr;
-
 namespace {
 
 inline bool jsonWs(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
@@ -387,13 +383,13 @@ inline bool buildAction(const ActionFields& f, LevelData::FastAction& a, bool& k
         a.flag = f.justThisTile;
         break;
     case T::SetHitsound:
-        a.strId = g_internOwner ? g_internOwner->internActionStr(f.hitsound) : 0;
+        a.str = f.hitsound;
         a.val1 = f.hasHitsoundVolume ? f.hitsoundVolume : 0.0f;
         break;
     case T::AnimateTrack:
         a.val1 = f.hasBeatsBehind ? f.beatsBehind : -1.0f;
         a.val2 = f.hasBeatsAhead ? f.beatsAhead : -1.0f;
-        if (f.hasTrackDisappear) a.strId = g_internOwner ? g_internOwner->internActionStr(f.trackDisappear) : 0;
+        if (f.hasTrackDisappear) a.str = f.trackDisappear;
         a.flag = f.hasTrackAnimation;
         break;
     default:
@@ -967,9 +963,6 @@ bool LevelData::loadFromString(const std::string& jsonStr, ProgressCb onProgress
 }
 
 bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgress, bool exportOnly) {
-    g_internOwner = this;                                  // 事件字符串驻留表归本次加载所有
-    actionStrTable.resize(1);                              // id 0 = 空串
-    lastStrOwner = nullptr;                                // thread-local 缓存失效
     // 压缩容器（.adofai.xz / .adofai.zst，按 magic 判断）：先解开，再当明文解析。
     // 解压后的缓冲区必须活到解析结束，所以放在这个作用域里。
     std::string decompressed;
@@ -1215,11 +1208,11 @@ bool LevelData::parseLegacy(const std::string& jsonStr, ProgressCb onProgress, b
                     }
                 }
             } else if (act.type == FastAction::SetHitsound) {
-                act.strId = g_internOwner ? g_internOwner->internActionStr(a.HasMember("hitsound") ? std::string(a["hitsound"].GetString()) : std::string()) : 0;
+                act.str = a.HasMember("hitsound") ? a["hitsound"].GetString() : "";
                 act.val1 = a.HasMember("hitsoundVolume") ? a["hitsoundVolume"].GetFloat() : 0.0f;
             } else if (act.type == FastAction::AnimateTrack) {
                 act.val1 = -1.0f; act.val2 = -1.0f; // sentinel: not set
-                if (a.HasMember("trackDisappearAnimation")) act.strId = g_internOwner ? g_internOwner->internActionStr(a["trackDisappearAnimation"].GetString()) : 0;
+                if (a.HasMember("trackDisappearAnimation")) act.str = a["trackDisappearAnimation"].GetString();
                 if (a.HasMember("trackAnimation"))  act.flag = true; // flag2: has trackAnimation
                 if (a.HasMember("beatsBehind")) act.val1 = a["beatsBehind"].GetFloat();
                 if (a.HasMember("beatsAhead"))  act.val2 = a["beatsAhead"].GetFloat();
@@ -1380,12 +1373,12 @@ void LevelData::processActions() {
         case FastAction::PositionTrack:
             tilePositionOffsets[floor] = {a.val1, a.val2, a.flag}; break;
         case FastAction::SetHitsound:
-            hsChanges.push_back({floor, actionStr(a).empty() ? settings.hitsound : actionStr(a),
+            hsChanges.push_back({floor, a.str.empty() ? settings.hitsound : a.str,
                                  a.val1 > 0 ? a.val1 : settings.hitsoundVolume}); break;
         case FastAction::Bookmark:
             bookmarkFloors.push_back(floor); break;
         case FastAction::AnimateTrack:
-            atStates[floor] = {actionStr(a).empty() ? settings.trackDisappearAnimation : actionStr(a),
+            atStates[floor] = {a.str.empty() ? settings.trackDisappearAnimation : a.str,
                                settings.trackAnimation, // aa not parsed yet; use global
                                a.val1 >= 0 ? a.val1 : settings.beatsBehind,
                                a.val2 >= 0 ? a.val2 : settings.beatsAhead,

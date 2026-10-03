@@ -2,7 +2,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <mutex>
 #include <string>
 #include <vector>
 #include <map>
@@ -47,39 +46,14 @@ struct LevelData {
     std::string        pathData;       // raw pathData string (alternative to angleData)
     std::vector<Tile>  tiles;
     // Lightweight action (avoids nlohmann DOM allocation for millions of actions)
-    // 事件里的字符串（hitsound 名、trackDisappear 动画名）绝大多数是重复的少数几个值，
-    // 而又只有这两类事件用到。以前每个 action 内联一个 std::string（32 B）：1.18 GB / 912 万
-    // action 的谱面上"结构本身"就是 417 MB，其中 292 MB 是这个缓冲。现在只存 16 位 id，
-    // 字符串驻留到 actionStrTable，结构 48 B -> 16 B（417 MB -> 146 MB）。
     struct FastAction {
         int floor = 0;
-        uint16_t strId = 0;                 // 0 = 空串；索引进 actionStrTable
         enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, Other } type = Other;
-        bool flag = false;
         float val1 = 0, val2 = 0;
+        bool flag = false;
+        std::string str;
     };
     std::vector<FastAction> actions;
-    std::vector<std::string> actionStrTable{std::string()};   // 驻留表（id 0 = 空串）
-    // 事件字符串入表：按内容去重。热路径（同一类型重复几百万次）走 thread-local 缓存、不加锁；
-    // 未命中才加锁查/插，所以分块并行的 worker 也是安全的。
-    uint16_t internActionStr(const std::string& v) {
-        if (v.empty()) return 0;
-        if (lastStrOwner == this && lastStrValue == v) return lastStrId;
-        std::lock_guard<std::mutex> lk(strMtx);
-        for (size_t i = 1; i < actionStrTable.size(); i++) {
-            if (actionStrTable[i] == v) {
-                lastStrOwner = this; lastStrValue = v; lastStrId = (uint16_t)i;
-                return (uint16_t)i;
-            }
-        }
-        actionStrTable.push_back(v);
-        const uint16_t id = (uint16_t)(actionStrTable.size() - 1);
-        lastStrOwner = this; lastStrValue = v; lastStrId = id;
-        return id;
-    }
-    const std::string& actionStr(const FastAction& a) const {
-        return a.strId < actionStrTable.size() ? actionStrTable[a.strId] : actionStrTable[0];
-    }
 
     struct TilePositionOffset {
         float offsetX = 0.0f;
@@ -103,10 +77,6 @@ struct LevelData {
     }
     std::unordered_map<int, TilePositionOffset> tilePositionOffsets; // sparse
     std::vector<int> bookmarkFloors;  // Bookmark event floors
-    std::mutex strMtx;
-    static inline thread_local const void* lastStrOwner = nullptr;
-    static inline thread_local std::string lastStrValue;
-    static inline thread_local uint16_t lastStrId = 0;
 
     // AnimateTrack state overrides (sparse, floor → state)
     struct ATState { std::string da, aa; float bb=4, ba=3; bool hasAA=false; };

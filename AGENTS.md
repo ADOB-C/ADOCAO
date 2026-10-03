@@ -177,7 +177,7 @@ What may change (and did):
 `tests/level_parse_test.cpp` 会把每个明文 fixture 在内存里压成 xz/zstd 再加载一遍，要求逐位一致，
 并检查截断的流是干净失败而不是崩。
 
-**流式窗口（进行中，opt-in）**：`core/level/LevelArchive.hpp` 的 `ArchiveStream` 用两块**固定地址**的半窗
+**流式窗口（压缩输入默认路径）**：`core/level/LevelArchive.hpp` 的 `ArchiveStream` 用两块**固定地址**的半窗
 （默认 96 MB，`ADOCAO_WINDOW_KB` 可调）交替解压；消费方 `WindowParser`（同在 `LevelData.cpp`）按根成员
 逐个处理、把残缺的值 carry 到下一块开头，于是 10 GB 文本不再需要 10 GB 匿名内存——那 10 GB 匿名页装不下
 时会被系统压缩/写 swap，实测吞吐 1.35 GB/s → 0.12 GB/s，而且每次访问都要换回来。

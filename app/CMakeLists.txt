@@ -8,6 +8,7 @@ set(ADOCAO_APP_SOURCES
     LauncherWindow.hpp
     LoadingWindow.cpp
     LoadingWindow.hpp
+    FileMap.hpp
     LevelLoader.cpp
     LevelLoader.hpp
     GameWindow.cpp

@@ -1,6 +1,7 @@
 #include "Application.hpp"
 #include "LauncherWindow.hpp"
 #include "LoadingWindow.hpp"
+#include "FileMap.hpp"
 #include "LevelLoader.hpp"
 #include "GameWindow.hpp"
 #include "audio/HitsoundManager.hpp"
@@ -218,7 +219,9 @@ int runApplication(bool debugConsole) {
     // Export hitsounds to WAV and exit (no game window)
     if (cfg.exportHitsounds) {
         LevelData lvl;
-        if (!lvl.loadFromFile(cfg.levelPath, nullptr, true)) {
+        FileMap map;
+        if (!map.open(cfg.levelPath) ||
+            !lvl.loadFromBuffer(map.data(), map.size(), nullptr, true)) {
             LOG_E("Failed to load level for export");
             glfwTerminate();
             return 1;
@@ -306,7 +309,9 @@ int runApplicationFromCLI(const LauncherConfig& cfg, bool debugConsole) {
 
     if (config.exportHitsounds) {
         LevelData lvl;
-        if (!lvl.loadFromFile(config.levelPath, nullptr, true)) {
+        FileMap map;
+        if (!map.open(config.levelPath) ||
+            !lvl.loadFromBuffer(map.data(), map.size(), nullptr, true)) {
             LOG_E("Failed to load level for export");
             glfwTerminate();
             return 1;

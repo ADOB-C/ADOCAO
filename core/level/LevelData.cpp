@@ -4,16 +4,454 @@
 #include <fstream>
 #include <sstream>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
+#include <iterator>
 
-#ifdef _WIN32
-#include <windows.h>
-#endif
+
+// ===========================================================================
+// .adofai JSON 读取
+//
+// 文件格式取决于当年写它的编辑器/版本，而 cleanJson() 就是这些年攒下来的容错层：
+// 去掉 \r、去掉前置/重复/尾随逗号、给漏写逗号的旧文件补上逗号。这里面没有任何
+// 版本相关的分支，所以这里不去猜版本号，而是**逐条复现 cleanJson 的规则**；
+// 只要遇到复现不了的东西，就放弃并交回 cleanJson + RapidJSON 的老路。
+// 两条路共用同一段收尾处理（finishLoad）和同一个 settings 读取函数，因此同一个
+// 关卡无论走哪条路都会得到完全一样的 LevelData。
+//
+// 为什么：301 MB 的谱在 ifstream+stringstream 上花了 2.0 s、cleanJson 花 1.2 s，
+// 还没开始解析就已经过去了 3.2 s，随后 6.2 M 个 action 的 DOM 又要 0.44 s。
+// 快路径 mmap 文件，直接对着映射区扫描 angleData/actions，全程不复制。
+// ===========================================================================
+
+namespace {
+
+inline bool jsonWs(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+
+inline const char* skipWs(const char* p, const char* e) {
+    while (p < e && jsonWs(*p)) ++p;
+    return p;
+}
+
+// p 指向开引号；返回闭引号位置，失败返回 nullptr。
+inline const char* scanStringEnd(const char* p, const char* e) {
+    for (++p; p < e; ++p) {
+        if (*p == '\\') { if (p + 1 >= e) return nullptr; ++p; continue; }
+        if (*p == '"') return p;
+    }
+    return nullptr;
+}
+
+// 与 scanStringEnd 相同，但字符串里出现转义或裸 CR 就直接放弃：
+//   * RapidJSON 非 in-situ 模式同样会解转义（"x\\y" -> x\y），快路径不去猜它的
+//     转义表（\uXXXX / 代理对 / 非法转义都有各自的细节），遇到就交回旧路径；
+//   * cleanJson 连字符串里的裸 CR 也删，那是快路径不该自己糊弄的语义差异。
+// 我们真正取用的字符串（键名 / eventType / hitsound / trackDisappearAnimation …）
+// 在真实谱面里从不含转义，所以这条放弃分支实际上不会触发。
+inline const char* scanStringEndExact(const char* p, const char* e) {
+    for (++p; p < e; ++p) {
+        char c = *p;
+        if (c == '\\' || c == '\r') return nullptr;
+        if (c == '"') return p;
+    }
+    return nullptr;
+}
+
+// p 指向 '[' 或 '{'；返回配对的闭合符之后的位置。
+inline const char* skipContainer(const char* p, const char* e) {
+    int depth = 0;
+    while (p < e) {
+        char c = *p;
+        if (c == '"') { const char* q = scanStringEnd(p, e); if (!q) return nullptr; p = q + 1; continue; }
+        if (c == '[' || c == '{') ++depth;
+        else if (c == ']' || c == '}') { if (--depth == 0) return p + 1; }
+        ++p;
+    }
+    return nullptr;
+}
+
+// 跳过任意一个 JSON 值。不读的值也要挡住明显非法的 token（True / None / +1 / 裸词…）：
+// 那些文件 DOM 会拒绝，快路径不能反而把它放过去。
+inline const char* skipValue(const char* p, const char* e) {
+    if (p >= e) return nullptr;
+    if (*p == '"') { const char* q = scanStringEnd(p, e); return q ? q + 1 : nullptr; }
+    if (*p == '[' || *p == '{') return skipContainer(p, e);
+    char c = *p;
+    if (!(c == '-' || (c >= '0' && c <= '9') || c == 't' || c == 'f' || c == 'n')) return nullptr;
+    while (p < e && !jsonWs(*p) && *p != ',' && *p != ']' && *p != '}') ++p;
+    return p;
+}
+
+struct KeyRef { const char* p; size_t n; };
+
+inline bool keyIs(KeyRef k, const char* lit) {
+    size_t n = std::strlen(lit);
+    return k.n == n && std::memcmp(k.p, lit, n) == 0;
+}
+
+// 数字。整数走快路径（<=15 位十进制整数在 double 里精确）；带小数点/指数或超长
+// 的一律交给 strtod，和旧路径 parseAngleDataFast 完全同值。
+inline bool parseNumber(const char*& p, const char* e, double& out) {
+    const char* start = p;
+    if (p < e && (*p == '-' || *p == '+')) ++p;
+    if (p >= e || *p < '0' || *p > '9') { p = start; return false; }
+    uint64_t v = 0;
+    int digits = 0;
+    while (p < e && *p >= '0' && *p <= '9') { v = v * 10 + (uint64_t)(*p - '0'); ++digits; ++p; }
+    if (digits > 15 || (p < e && (*p == '.' || *p == 'e' || *p == 'E'))) {
+        char* endp = nullptr;
+        double d = std::strtod(start, &endp);
+        if (endp == start) { p = start; return false; }
+        p = endp;
+        out = d;
+        return true;
+    }
+    out = (start[0] == '-') ? -(double)v : (double)v;
+    return true;
+}
+
+// 整数 token（旧路径用 GetInt()，非整数会走 UB，所以这里直接放弃）。
+inline bool parseInt(const char*& p, const char* e, int& out) {
+    const char* start = p;
+    bool neg = false;
+    if (p < e && (*p == '-' || *p == '+')) { neg = (*p == '-'); ++p; }
+    if (p >= e || *p < '0' || *p > '9') { p = start; return false; }
+    int64_t v = 0;
+    while (p < e && *p >= '0' && *p <= '9') { v = v * 10 + (*p - '0'); ++p; }
+    if (p < e && (*p == '.' || *p == 'e' || *p == 'E')) { p = start; return false; }
+    out = (int)(neg ? -v : v);
+    return true;
+}
+
+struct Regions {
+    const char* angle = nullptr;       // '['
+    const char* angleEnd = nullptr;    // ']' 之后
+    const char* actions = nullptr;     // '['
+    const char* actionsEnd = nullptr;  // ']' 之后
+    const char* settings = nullptr;    // '{'
+    const char* settingsEnd = nullptr; // '}' 之后
+    const char* path = nullptr;        // 开引号
+    const char* pathEnd = nullptr;     // 闭引号
+};
+
+// 前置声明：actions 在根扫描过程中就地解析（见 scanRootMembers）。
+inline bool parseActionRegion(const char* b, const char* end,
+                              std::vector<LevelData::FastAction>& out, const char** outEnd);
+
+// 只遍历根对象的直接成员。逗号允许缺失（cleanJson 会给漏写逗号的文件补上），
+// 未知成员和 decorations 整体跳过，全程不复制。
+// actions 是边扫边解析的：解析器自己在配对的 ']' 处停下并回报结束位置，于是整段
+// actions 只被走一遍（1.5 GB 的谱上，多走一遍就是 840 ms）。
+inline bool scanRootMembers(const char* s, const char* e, Regions& r,
+                            std::vector<LevelData::FastAction>& actionsOut) {
+    const char* p = skipWs(s, e);
+    if (p >= e || *p != '{') return false;
+    for (++p;;) {
+        p = skipWs(p, e);
+        if (p >= e) return false;
+        if (*p == '}') return true;
+        if (*p == ',') { ++p; continue; }        // 前置/重复/尾随逗号
+        if (*p != '"') return false;             // 成员名必须是字符串
+        const char* kEnd = scanStringEndExact(p, e);
+        if (!kEnd) return false;
+        KeyRef key{p + 1, (size_t)(kEnd - p - 1)};
+        p = skipWs(kEnd + 1, e);
+        if (p >= e || *p != ':') return false;
+        p = skipWs(p + 1, e);
+        if (*p == '[' && keyIs(key, "actions") && !r.actions) {
+            const char* aEnd = nullptr;
+            if (!parseActionRegion(p, e, actionsOut, &aEnd)) return false;
+            r.actions = p;
+            r.actionsEnd = aEnd;
+            p = aEnd;
+            continue;
+        }
+        const char* vEnd = skipValue(p, e);
+        if (!vEnd) return false;
+        // 重复键取第一个（RapidJSON 的 FindMember 也是第一个）
+        if (keyIs(key, "angleData")) {
+            if (!r.angle && *p == '[') { r.angle = p; r.angleEnd = vEnd; }
+        } else if (keyIs(key, "settings")) {
+            if (!r.settings && *p == '{') { r.settings = p; r.settingsEnd = vEnd; }
+        } else if (keyIs(key, "pathData")) {
+            if (!r.path && *p == '"') { r.path = p; r.pathEnd = vEnd - 1; }
+        }
+        p = vEnd;
+    }
+}
+
+// angleData 区间 -> double 数组。遇到字符串/嵌套数组/乱字符一律放弃：旧路径的
+// strtod 循环会“跳过”这些字符继续读，行为不同，不能自作主张。
+inline bool parseAngleDataRegion(const char* b, const char* e, std::vector<double>& out) {
+    const char* p = b + 1;
+    for (;;) {
+        p = skipWs(p, e);
+        if (p >= e) return false;
+        if (*p == ']') return true;
+        if (*p == ',') { ++p; continue; }
+        double v;
+        if (!parseNumber(p, e, v)) return false;
+        out.push_back(v);
+    }
+}
+
+inline LevelData::FastAction::Type eventTypeOf(KeyRef k) {
+    using T = LevelData::FastAction;
+    if (keyIs(k, "Twirl"))         return T::Twirl;
+    if (keyIs(k, "SetSpeed"))      return T::SetSpeed;
+    if (keyIs(k, "PositionTrack")) return T::PositionTrack;
+    if (keyIs(k, "SetHitsound"))   return T::SetHitsound;
+    if (keyIs(k, "Bookmark"))      return T::Bookmark;
+    if (keyIs(k, "Pause"))         return T::Pause;
+    if (keyIs(k, "AnimateTrack"))  return T::AnimateTrack;
+    return T::Other;
+}
+
+// 一个 action 对象里收集到的原始字段。按字段收集、最后按类型组装，语义与旧路径
+// 逐个 eventType 分支读取的方式一致。
+struct ActionFields {
+    bool hasFloor = false, hasEvent = false;
+    int floor = 0;
+    LevelData::FastAction::Type type = LevelData::FastAction::Other;
+    bool isMultiplier = false;
+    bool hasBpmMultiplier = false, hasBeatsPerMinute = false, hasDuration = false;
+    bool hasHitsoundVolume = false, hasBeatsBehind = false, hasBeatsAhead = false;
+    bool hasOffset = false, hasJustThisTile = false;
+    bool hasTrackAnimation = false, hasTrackDisappear = false;
+    float bpmMultiplier = 1.0f, beatsPerMinute = 0.0f, duration = 0.0f;
+    float hitsoundVolume = 0.0f, beatsBehind = 0.0f, beatsAhead = 0.0f;
+    float offX = 0.0f, offY = 0.0f;
+    bool justThisTile = false;
+    std::string hitsound, trackDisappear;
+};
+
+// 取出字符串值。带转义或裸 CR 的一律交回旧路径（旧路径会解转义 / 删 CR）。
+inline bool stringValue(const char* p, const char* vEnd, std::string& out) {
+    if (*p != '"') return false;
+    for (const char* q = p; q < vEnd; ++q)
+        if (*q == '\\' || *q == '\r') return false;
+    out.assign(p + 1, vEnd - 1);
+    return true;
+}
+
+// p 指向 action 对象的 '{' 之后（调用方已经跳过 '{'）
+inline bool parseActionObject(const char* p, const char* e, ActionFields& f) {
+    for (;;) {
+        p = skipWs(p, e);
+        if (p >= e) return false;
+        if (*p == '}') return true;
+        if (*p == ',') { ++p; continue; }        // 前置/重复/尾随逗号
+        if (*p != '"') return false;
+        const char* kEnd = scanStringEndExact(p, e);
+        if (!kEnd) return false;
+        KeyRef key{p + 1, (size_t)(kEnd - p - 1)};
+        p = skipWs(kEnd + 1, e);
+        if (p >= e || *p != ':') return false;
+        p = skipWs(p + 1, e);
+        const char* v = p;
+        const char* vEnd = skipValue(v, e);
+        if (!vEnd) return false;
+
+        // 谱里 action 对象常常带一大堆我们不关心的键（scale/opacity/relativeTo…），
+        // 按首字符分派后每个未知键只花一次比较。
+        double d;
+        switch (*key.p) {
+        case 'f':
+            if (keyIs(key, "floor")) {
+                if (!parseInt(v, vEnd, f.floor)) return false;
+                f.hasFloor = true;
+            }
+            break;
+        case 'e':
+            if (keyIs(key, "eventType")) {
+                if (*v != '"') return false;
+                for (const char* q = v; q < vEnd; ++q)                 // 转义 / 裸 CR：交回旧路径
+                    if (*q == '\\' || *q == '\r') return false;
+                f.type = eventTypeOf(KeyRef{v + 1, (size_t)(vEnd - v - 2)});
+                f.hasEvent = true;
+            }
+            break;
+        case 's':
+            if (keyIs(key, "speedType")) {
+                std::string str;
+                if (!stringValue(v, vEnd, str)) return false;
+                f.isMultiplier = (str == "Multiplier");
+            }
+            break;
+        case 'b':
+            if (keyIs(key, "bpmMultiplier")) {
+                if (!parseNumber(v, vEnd, d)) return false;
+                f.bpmMultiplier = (float)d; f.hasBpmMultiplier = true;
+            } else if (keyIs(key, "beatsPerMinute")) {
+                if (!parseNumber(v, vEnd, d)) return false;
+                f.beatsPerMinute = (float)d; f.hasBeatsPerMinute = true;
+            } else if (keyIs(key, "beatsBehind")) {
+                if (!parseNumber(v, vEnd, d)) return false;
+                f.beatsBehind = (float)d; f.hasBeatsBehind = true;
+            } else if (keyIs(key, "beatsAhead")) {
+                if (!parseNumber(v, vEnd, d)) return false;
+                f.beatsAhead = (float)d; f.hasBeatsAhead = true;
+            }
+            break;
+        case 'd':
+            if (keyIs(key, "duration")) {
+                if (!parseNumber(v, vEnd, d)) return false;
+                f.duration = (float)d; f.hasDuration = true;
+            }
+            break;
+        case 'h':
+            if (keyIs(key, "hitsound")) {
+                if (!stringValue(v, vEnd, f.hitsound)) return false;
+            } else if (keyIs(key, "hitsoundVolume")) {
+                if (!parseNumber(v, vEnd, d)) return false;
+                f.hitsoundVolume = (float)d; f.hasHitsoundVolume = true;
+            }
+            break;
+        case 't':
+            if (keyIs(key, "trackDisappearAnimation")) {
+                if (!stringValue(v, vEnd, f.trackDisappear)) return false;
+                f.hasTrackDisappear = true;
+            } else if (keyIs(key, "trackAnimation")) {
+                if (*v != '"') return false;
+                f.hasTrackAnimation = true;
+            }
+            break;
+        case 'p':
+            if (keyIs(key, "positionOffset")) {
+                if (*v == '[') {                 // 非数组时旧路径直接忽略
+                    const char* q = skipWs(v + 1, vEnd);
+                    double x, y;
+                    if (q < vEnd && *q != ']' && parseNumber(q, vEnd, x)) {
+                        q = skipWs(q, vEnd);
+                        if (q < vEnd && *q == ',') q = skipWs(q + 1, vEnd);
+                        if (q < vEnd && *q != ']' && parseNumber(q, vEnd, y)) {
+                            f.offX = (float)x; f.offY = (float)y; f.hasOffset = true;
+                        }
+                    }
+                }
+            }
+            break;
+        case 'j':
+            if (keyIs(key, "justThisTile")) {
+                if (vEnd - v == 4 && std::memcmp(v, "true", 4) == 0) {
+                    f.justThisTile = true; f.hasJustThisTile = true;
+                } else if (vEnd - v == 5 && std::memcmp(v, "false", 5) == 0) {
+                    f.justThisTile = false; f.hasJustThisTile = true;
+                } else if (*v == '"') {
+                    std::string str;
+                    if (!stringValue(v, vEnd, str)) return false;
+                    f.justThisTile = (str == "Enabled" || str == "true" || str == "True");
+                    f.hasJustThisTile = true;
+                } else {
+                    int n;
+                    if (parseInt(v, vEnd, n)) { f.justThisTile = (n != 0); f.hasJustThisTile = true; }
+                    // 其它（如 1.0）旧路径三个 Is* 全不成立 -> 保持 false
+                }
+            }
+            break;
+        default:
+            break;
+        }
+        p = vEnd;
+    }
+}
+
+inline bool buildAction(const ActionFields& f, LevelData::FastAction& a, bool& keep) {
+    using T = LevelData::FastAction;
+    if (f.hasFloor) a.floor = f.floor;
+    a.type = f.type;
+    switch (f.type) {
+    case T::SetSpeed:
+        if (f.isMultiplier) { a.flag = true; a.val1 = f.hasBpmMultiplier ? f.bpmMultiplier : 1.0f; }
+        else                { a.val1 = f.hasBeatsPerMinute ? f.beatsPerMinute : 0.0f; }
+        break;
+    case T::Pause:
+        a.val1 = f.hasDuration ? f.duration : 0.0f;
+        break;
+    case T::PositionTrack:
+        if (f.hasOffset) { a.val1 = f.offX; a.val2 = f.offY; }
+        a.flag = f.justThisTile;
+        break;
+    case T::SetHitsound:
+        a.str = f.hitsound;
+        a.val1 = f.hasHitsoundVolume ? f.hitsoundVolume : 0.0f;
+        break;
+    case T::AnimateTrack:
+        a.val1 = f.hasBeatsBehind ? f.beatsBehind : -1.0f;
+        a.val2 = f.hasBeatsAhead ? f.beatsAhead : -1.0f;
+        if (f.hasTrackDisappear) a.str = f.trackDisappear;
+        a.flag = f.hasTrackAnimation;
+        break;
+    default:
+        break;
+    }
+    // 缺 floor 或缺 eventType、以及未知 eventType 的 action 旧路径直接丢弃
+    keep = f.hasFloor && f.hasEvent && f.type != T::Other;
+    return true;
+}
+
+// b 指向 '['，end 是整个缓冲区的末尾；遇到配对的 ']' 停下并回报其后的位置。
+inline bool parseActionRegion(const char* b, const char* end,
+                              std::vector<LevelData::FastAction>& out, const char** outEnd) {
+    const char* p = b + 1;
+    for (;;) {
+        p = skipWs(p, end);
+        if (p >= end) return false;
+        if (*p == ']') { *outEnd = p + 1; return true; }
+        if (*p == ',') { ++p; continue; }
+        if (*p != '{') return false;
+        const char* objEnd = skipContainer(p, end);
+        if (!objEnd) return false;
+        ActionFields f;
+        if (!parseActionObject(p + 1, objEnd, f)) return false;
+        LevelData::FastAction a;
+        bool keep = false;
+        if (!buildAction(f, a, keep)) return false;
+        if (keep) out.push_back(std::move(a));
+        p = objEnd;
+    }
+}
+
+// settings 的读取：新旧两条路共用，保证字段语义一致。
+static void readSettings(const rapidjson::Value& s, LevelData::Settings& out) {
+    auto getF = [&](const char* k, float d) { return s.HasMember(k) ? s[k].GetFloat() : d; };
+    auto getI = [&](const char* k, int d) { return s.HasMember(k) ? s[k].GetInt() : d; };
+    auto getS = [&](const char* k, const char* d) -> std::string {
+        return (s.HasMember(k) && s[k].IsString()) ? s[k].GetString() : d;
+    };
+    out.bpm             = getF("bpm", 100.0f);
+    out.offset          = getF("offset", 0.0f);
+    out.countdownTicks  = getI("countdownTicks", 4);
+    out.zoom            = getF("zoom", 100.0f);
+    out.rotation        = getF("rotation", 0.0f);
+    out.relativeTo      = getS("relativeTo", "Player");
+    out.hitsound        = getS("hitsound", "Kick");
+    out.hitsoundVolume  = getF("hitsoundVolume", 100.0f);
+    out.trackColor      = getS("trackColor", "debb7b");
+    out.secondaryTrackColor = getS("secondaryTrackColor", "ffffff");
+    out.backgroundColor = getS("backgroundColor", "000000");
+    out.planetEase      = getS("planetEase", "Linear");
+    out.trackDisappearAnimation = getS("trackDisappearAnimation", "None");
+    out.trackAnimation  = getS("trackAnimation", "None");
+    out.beatsBehind     = getF("beatsBehind", 4.0f);
+    out.beatsAhead      = getF("beatsAhead", 3.0f);
+    if (s.HasMember("stickToFloors")) {
+        if (s["stickToFloors"].IsBool()) out.stickToFloors = s["stickToFloors"].GetBool();
+        else if (s["stickToFloors"].IsString()) {
+            std::string v = s["stickToFloors"].GetString();
+            out.stickToFloors = (v == "Enabled" || v == "true" || v == "True");
+        }
+    }
+    if (s.HasMember("position") && s["position"].IsArray() && s["position"].Size() >= 2)
+        out.position = {s["position"][0].GetFloat(), s["position"][1].GetFloat()};
+}
+
+}  // namespace
 
 // Fast parser: extract angleData float array from JSON without DOM allocation.
-// Returns the parsed array and writes the end position (after ']') to `outArrayEnd`.
+// 保留：它是旧路径（也是回退路径）用的参考实现。
 static std::vector<double> parseAngleDataFast(const char* json, size_t len, size_t& outArrayEnd) {
     const char* key = "\"angleData\"";
     const char* pos = (const char*)std::memchr(json, '"', len);
@@ -49,243 +487,242 @@ static std::vector<double> parseAngleDataFast(const char* json, size_t len, size
     return result;
 }
 
-// Fast streaming parser for actions — avoids nlohmann DOM for huge action arrays.
-static std::string readFileUtf8(const std::string& filepath) {
-#ifdef _WIN32
-    // Convert UTF-8 path to wide for Windows API
-    int wlen = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
-                                   filepath.c_str(), -1, nullptr, 0);
-    std::wstring wpath;
-    if (wlen > 0) {
-        wpath.resize(wlen);
-        MultiByteToWideChar(CP_UTF8, 0, filepath.c_str(), -1, &wpath[0], wlen);
-    } else {
-        wlen = MultiByteToWideChar(CP_ACP, 0, filepath.c_str(), -1, nullptr, 0);
-        if (wlen <= 0) return {};
-        wpath.resize(wlen);
-        MultiByteToWideChar(CP_ACP, 0, filepath.c_str(), -1, &wpath[0], wlen);
-    }
-
-    // Memory-mapped file: avoids OS buffer copy for large files
-    HANDLE hFile = CreateFileW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ,
-                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (hFile == INVALID_HANDLE_VALUE) return {};
-
-    LARGE_INTEGER fileSize;
-    if (!GetFileSizeEx(hFile, &fileSize) || fileSize.QuadPart <= 0) {
-        CloseHandle(hFile); return {};
-    }
-
-    HANDLE hMapping = CreateFileMappingW(hFile, nullptr, PAGE_READONLY, 0, 0, nullptr);
-    if (!hMapping) { CloseHandle(hFile); return {}; }
-
-    const char* data = (const char*)MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, 0);
-    if (!data) { CloseHandle(hMapping); CloseHandle(hFile); return {}; }
-
-    size_t size = (size_t)fileSize.QuadPart;
-    // Skip UTF-8 BOM if present
-    size_t offset = (size >= 3 && (unsigned char)data[0] == 0xEF
-                     && (unsigned char)data[1] == 0xBB && (unsigned char)data[2] == 0xBF) ? 3 : 0;
-
-    std::string content(data + offset, size - offset);
-
-    UnmapViewOfFile(data);
-    CloseHandle(hMapping);
-    CloseHandle(hFile);
-    return content;
-#else
-    std::ifstream file(filepath, std::ios::binary);
-    if (!file.is_open()) return {};
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    std::string content = buffer.str();
-    // Skip UTF-8 BOM if present (RapidJSON rejects it at offset 0)
-    if (content.size() >= 3 && (unsigned char)content[0] == 0xEF
-        && (unsigned char)content[1] == 0xBB && (unsigned char)content[2] == 0xBF)
-        content.erase(0, 3);
-    return content;
-#endif
-}
-
+// 可移植读法（测试 / 嵌入方用）。app 走 FileMap + loadFromBuffer：1.5 GB 的谱
+// 用 ifstream 复制一份要多花 ~250 ms 和 1.5 GB 常驻内存，mmap 没有这份副本。
 bool LevelData::loadFromFile(const std::string& filepath, ProgressCb onProgress, bool exportOnly) {
     if (onProgress) onProgress(0.05f, "Reading file...");
-    std::string content = readFileUtf8(filepath);
-    if (content.empty()) {
+    std::ifstream file(filepath, std::ios::binary);
+    if (!file.is_open()) {
         LOG_E("Cannot open level file: %s", filepath.c_str());
         return false;
     }
-    return loadFromString(cleanJson(content), onProgress, exportOnly);
+    file.seekg(0, std::ios::end);
+    std::streamoff size = file.tellg();
+    if (size <= 0) {
+        LOG_E("Cannot open level file: %s", filepath.c_str());
+        return false;
+    }
+    file.seekg(0, std::ios::beg);
+    std::string content((size_t)size, '\0');
+    file.read(&content[0], size);
+    return loadFromBuffer(content.data(), content.size(), onProgress, exportOnly);
 }
 
 bool LevelData::loadFromString(const std::string& jsonStr, ProgressCb onProgress, bool exportOnly) {
+    return loadFromBuffer(jsonStr.data(), jsonStr.size(), onProgress, exportOnly);
+}
+
+bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgress, bool exportOnly) {
+    // Skip UTF-8 BOM if present (RapidJSON rejects it at offset 0)
+    if (len >= 3 && (unsigned char)data[0] == 0xEF
+        && (unsigned char)data[1] == 0xBB && (unsigned char)data[2] == 0xBF) {
+        data += 3;
+        len -= 3;
+    }
+    if (len == 0) {
+        LOG_E("Cannot open level file: empty");
+        return false;
+    }
+
+    // ADOCAO_FORCE_DOM_PARSE=1 强制走旧路径（对拍用，见 tests/level_parse_test.cpp）。
+    // 每次加载都读一遍环境变量，测试才能在同一个进程里对拍两条路径。
+    const bool forceLegacy = (std::getenv("ADOCAO_FORCE_DOM_PARSE") != nullptr);
+
     try {
+        if (!forceLegacy && tryFastParse(data, len, onProgress)) {
+            return finishLoad(onProgress, exportOnly);
+        }
         if (onProgress) onProgress(0.10f, "Parsing angleData...");
-
-        // Fast path: parse angleData directly without JSON DOM allocation
-        size_t angleDataEnd = 0;
-        angleData = parseAngleDataFast(jsonStr.c_str(), jsonStr.size(), angleDataEnd);
-
-        // Helper: strip a JSON array value from a string, replacing it with [].
-        // Returns the stripped string. Prevents nlohmann from parsing huge unused arrays.
-        auto stripArray = [](const std::string& src, const char* key) -> std::string {
-            const char* p = std::strstr(src.c_str(), key);
-            if (!p) return src;
-            size_t keyStart = p - src.c_str();
-            size_t arrStart = keyStart + strlen(key);
-            while (arrStart < src.size() && (src[arrStart] == ' ' || src[arrStart] == ':'
-                   || src[arrStart] == '\t' || src[arrStart] == '\n'))
-                arrStart++;
-            if (arrStart >= src.size() || src[arrStart] != '[') return src;
-            // Count brackets to find matching ]
-            int depth = 1;
-            size_t arrEnd = arrStart + 1;
-            bool inString = false;
-            for (; arrEnd < src.size() && depth > 0; arrEnd++) {
-                char c = src[arrEnd];
-                if (c == '"' && (arrEnd == 0 || src[arrEnd-1] != '\\')) inString = !inString;
-                if (inString) continue;
-                if (c == '[') depth++;
-                else if (c == ']') depth--;
-            }
-            std::string out;
-            out.reserve(keyStart + 2 + (src.size() - arrEnd));
-            out.append(src, 0, arrStart);
-            out += "[]";
-            out.append(src, arrEnd, std::string::npos);
-            return out;
-        };
-
-        // RapidJSON: parse full JSON (angleData + decorations stripped)
-        // This handles both actions and settings in one DOM
-        std::string stripped = jsonStr;
-        if (angleDataEnd > 0) {
-            stripped = stripArray(jsonStr, "\"angleData\"");
-        }
-        stripped = stripArray(stripped, "\"decorations\"");
-
-        if (onProgress) onProgress(0.12f, "Parsing JSON...");
-        rapidjson::Document root;
-        root.Parse<rapidjson::kParseTrailingCommasFlag>(stripped.c_str());
-        if (root.HasParseError()) {
-            LOG_E("RapidJSON parse error at offset %zu, code %d",
-                  root.GetErrorOffset(), (int)root.GetParseError());
-            return false;
-        }
-
-        if (onProgress) onProgress(0.15f, "Extracting level data...");
-
-        // Actions
-        if (root.HasMember("actions") && root["actions"].IsArray()) {
-            auto& arr = root["actions"];
-            for (rapidjson::SizeType i = 0; i < arr.Size(); i++) {
-                auto& a = arr[i];
-                if (!a.IsObject() || !a.HasMember("floor") || !a.HasMember("eventType")) continue;
-                FastAction act;
-                act.floor = a["floor"].GetInt();
-                std::string et = a["eventType"].GetString();
-                if (et == "Twirl") act.type = FastAction::Twirl;
-                else if (et == "SetSpeed") act.type = FastAction::SetSpeed;
-                else if (et == "PositionTrack") act.type = FastAction::PositionTrack;
-                else if (et == "SetHitsound") act.type = FastAction::SetHitsound;
-                else if (et == "Bookmark") act.type = FastAction::Bookmark;
-                else if (et == "Pause") act.type = FastAction::Pause;
-                else if (et == "AnimateTrack") act.type = FastAction::AnimateTrack;
-                else continue;
-                if (act.type == FastAction::SetSpeed) {
-                    if (a.HasMember("speedType") && std::string(a["speedType"].GetString()) == "Multiplier") {
-                        act.flag = true; act.val1 = a.HasMember("bpmMultiplier") ? a["bpmMultiplier"].GetFloat() : 1.0f;
-                    } else { act.val1 = a.HasMember("beatsPerMinute") ? a["beatsPerMinute"].GetFloat() : 0.0f; }
-                } else if (act.type == FastAction::Pause) {
-                    act.val1 = a.HasMember("duration") ? a["duration"].GetFloat() : 0.0f;
-                } else if (act.type == FastAction::PositionTrack) {
-                    if (a.HasMember("positionOffset") && a["positionOffset"].IsArray() && a["positionOffset"].Size() >= 2) {
-                        act.val1 = a["positionOffset"][0].GetFloat(); act.val2 = a["positionOffset"][1].GetFloat();
-                    }
-                    if (a.HasMember("justThisTile")) {
-                        if (a["justThisTile"].IsBool()) act.flag = a["justThisTile"].GetBool();
-                        else if (a["justThisTile"].IsInt()) act.flag = a["justThisTile"].GetInt() != 0;
-                        else if (a["justThisTile"].IsString()) {
-                            std::string v = a["justThisTile"].GetString();
-                            act.flag = (v == "Enabled" || v == "true" || v == "True");
-                        }
-                    }
-                } else if (act.type == FastAction::SetHitsound) {
-                    act.str = a.HasMember("hitsound") ? a["hitsound"].GetString() : "";
-                    act.val1 = a.HasMember("hitsoundVolume") ? a["hitsoundVolume"].GetFloat() : 0.0f;
-                } else if (act.type == FastAction::AnimateTrack) {
-                    act.val1 = -1.0f; act.val2 = -1.0f; // sentinel: not set
-                    if (a.HasMember("trackDisappearAnimation")) act.str = a["trackDisappearAnimation"].GetString();
-                    if (a.HasMember("trackAnimation"))  act.flag = true; // flag2: has trackAnimation
-                    if (a.HasMember("beatsBehind")) act.val1 = a["beatsBehind"].GetFloat();
-                    if (a.HasMember("beatsAhead"))  act.val2 = a["beatsAhead"].GetFloat();
-                }
-                actions.push_back(act);
-            }
-        }
-
-        // Settings
-        if (root.HasMember("settings") && root["settings"].IsObject()) {
-            auto& s = root["settings"];
-            auto getF = [&](const char* k, float d) { return s.HasMember(k) ? s[k].GetFloat() : d; };
-            auto getI = [&](const char* k, int d) { return s.HasMember(k) ? s[k].GetInt() : d; };
-            auto getS = [&](const char* k, const char* d) -> std::string {
-                return (s.HasMember(k) && s[k].IsString()) ? s[k].GetString() : d;
-            };
-            settings.bpm             = getF("bpm", 100.0f);
-            settings.offset          = getF("offset", 0.0f);
-            settings.countdownTicks  = getI("countdownTicks", 4);
-            settings.zoom            = getF("zoom", 100.0f);
-            settings.rotation        = getF("rotation", 0.0f);
-            settings.relativeTo      = getS("relativeTo", "Player");
-            settings.hitsound        = getS("hitsound", "Kick");
-            settings.hitsoundVolume  = getF("hitsoundVolume", 100.0f);
-            settings.trackColor      = getS("trackColor", "debb7b");
-            settings.secondaryTrackColor = getS("secondaryTrackColor", "ffffff");
-            settings.backgroundColor = getS("backgroundColor", "000000");
-            settings.planetEase      = getS("planetEase", "Linear");
-            settings.trackDisappearAnimation = getS("trackDisappearAnimation", "None");
-            settings.trackAnimation  = getS("trackAnimation", "None");
-            settings.beatsBehind     = getF("beatsBehind", 4.0f);
-            settings.beatsAhead      = getF("beatsAhead", 3.0f);
-            if (s.HasMember("stickToFloors")) {
-                if (s["stickToFloors"].IsBool()) settings.stickToFloors = s["stickToFloors"].GetBool();
-                else if (s["stickToFloors"].IsString()) {
-                    std::string v = s["stickToFloors"].GetString();
-                    settings.stickToFloors = (v == "Enabled" || v == "true" || v == "True");
-                }
-            }
-            if (s.HasMember("position") && s["position"].IsArray() && s["position"].Size() >= 2)
-                settings.position = {s["position"][0].GetFloat(), s["position"][1].GetFloat()};
-        }
-
-        // pathData
-        if (root.HasMember("pathData") && root["pathData"].IsString())
-            pathData = root["pathData"].GetString();
-
-        // actions already parsed via fast path above (with nlohmann fallback)
-        // decorations: not used, skip parsing entirely
-
-        if (onProgress) onProgress(0.20f, "Processing level data...");
-
-        // Convert pathData → angleData if needed
-        if (!pathData.empty() && angleData.empty()) {
-            convertPathToAngles();
-        }
-
-        if (!exportOnly) {
-            if (onProgress) onProgress(0.30f, "Calculating tile positions...");
-            calculateTilePositions();
-        }
-        if (onProgress) onProgress(0.40f, "Processing actions...");
-        processActions();
-        if (!exportOnly) {
-            applyPositionTrackOffsets();
-        }
-        return true;
+        std::string content(data, len);
+        return parseLegacy(cleanJson(content), onProgress, exportOnly);
     } catch (const std::exception& e) {
         LOG_E("JSON parse error: %s", e.what());
         return false;
     }
+}
+
+// 快路径：mmap 出来的原文直接扫。任何一步复现不了 cleanJson 的语义就返回 false，
+// 此时 this 还没有被改动过，调用方会走旧路径。
+bool LevelData::tryFastParse(const char* data, size_t len, ProgressCb onProgress) {
+    if (onProgress) onProgress(0.10f, "Parsing angleData...");
+    std::vector<FastAction> newActions;   // actions 在根扫描里就地解析
+    Regions r;
+    if (!scanRootMembers(data, data + len, r, newActions)) return false;
+
+    if (onProgress) onProgress(0.12f, "Parsing JSON...");
+
+    std::vector<double> newAngles;
+    if (r.angle) {
+        // angleData 只有几十 MB，加上整数快路径后 6.77 M 个值只要 ~25 ms
+        newAngles.reserve((size_t)(r.angleEnd - r.angle) / 3);
+        if (!parseAngleDataRegion(r.angle, r.angleEnd, newAngles)) return false;
+    }
+
+    Settings newSettings = settings;   // 与旧路径一致：只覆盖文件里出现的字段
+    std::string newPath = pathData;
+    if (r.settings) {
+        // settings 对象很小，交给 cleanJson + RapidJSON 处理，省得再写一个解析器
+        std::string sub = cleanJson(std::string(r.settings, (size_t)(r.settingsEnd - r.settings)));
+        rapidjson::Document s;
+        s.Parse<rapidjson::kParseTrailingCommasFlag>(sub.c_str());
+        if (s.HasParseError() || !s.IsObject()) return false;
+        readSettings(s, newSettings);
+    }
+    if (r.path && r.pathEnd > r.path + 1) {
+        // 旧路径用 GetString()（会解转义），带反斜杠就交回旧路径；裸 CR 则照 cleanJson 删掉
+        if (std::memchr(r.path, '\\', (size_t)(r.pathEnd - r.path))) return false;
+        newPath.assign(r.path + 1, (size_t)(r.pathEnd - r.path - 1));
+        newPath.erase(std::remove(newPath.begin(), newPath.end(), '\r'), newPath.end());
+    }
+
+    if (onProgress) onProgress(0.15f, "Extracting level data...");
+
+    angleData = std::move(newAngles);
+    if (actions.empty()) actions = std::move(newActions);
+    else actions.insert(actions.end(), std::make_move_iterator(newActions.begin()),
+                        std::make_move_iterator(newActions.end()));
+    settings = newSettings;
+    pathData = std::move(newPath);
+    return true;
+}
+
+// 旧路径：cleanJson + RapidJSON DOM。保持原样，是回退路径也是对拍基准。
+bool LevelData::parseLegacy(const std::string& jsonStr, ProgressCb onProgress, bool exportOnly) {
+    // Fast path: parse angleData directly without JSON DOM allocation
+    size_t angleDataEnd = 0;
+    angleData = parseAngleDataFast(jsonStr.c_str(), jsonStr.size(), angleDataEnd);
+
+    // Helper: strip a JSON array value from a string, replacing it with [].
+    // Returns the stripped string. Prevents nlohmann from parsing huge unused arrays.
+    auto stripArray = [](const std::string& src, const char* key) -> std::string {
+        const char* p = std::strstr(src.c_str(), key);
+        if (!p) return src;
+        size_t keyStart = p - src.c_str();
+        size_t arrStart = keyStart + strlen(key);
+        while (arrStart < src.size() && (src[arrStart] == ' ' || src[arrStart] == ':'
+               || src[arrStart] == '\t' || src[arrStart] == '\n'))
+            arrStart++;
+        if (arrStart >= src.size() || src[arrStart] != '[') return src;
+        // Count brackets to find matching ]
+        int depth = 1;
+        size_t arrEnd = arrStart + 1;
+        bool inString = false;
+        for (; arrEnd < src.size() && depth > 0; arrEnd++) {
+            char c = src[arrEnd];
+            if (c == '"' && (arrEnd == 0 || src[arrEnd-1] != '\\')) inString = !inString;
+            if (inString) continue;
+            if (c == '[') depth++;
+            else if (c == ']') depth--;
+        }
+        std::string out;
+        out.reserve(keyStart + 2 + (src.size() - arrEnd));
+        out.append(src, 0, arrStart);
+        out += "[]";
+        out.append(src, arrEnd, std::string::npos);
+        return out;
+    };
+
+    // RapidJSON: parse full JSON (angleData + decorations stripped)
+    // This handles both actions and settings in one DOM
+    std::string stripped = jsonStr;
+    if (angleDataEnd > 0) {
+        stripped = stripArray(jsonStr, "\"angleData\"");
+    }
+    stripped = stripArray(stripped, "\"decorations\"");
+
+    if (onProgress) onProgress(0.12f, "Parsing JSON...");
+    rapidjson::Document root;
+    root.Parse<rapidjson::kParseTrailingCommasFlag>(stripped.c_str());
+    if (root.HasParseError()) {
+        LOG_E("RapidJSON parse error at offset %zu, code %d",
+              root.GetErrorOffset(), (int)root.GetParseError());
+        return false;
+    }
+
+    if (onProgress) onProgress(0.15f, "Extracting level data...");
+
+    // Actions
+    if (root.HasMember("actions") && root["actions"].IsArray()) {
+        auto& arr = root["actions"];
+        for (rapidjson::SizeType i = 0; i < arr.Size(); i++) {
+            auto& a = arr[i];
+            if (!a.IsObject() || !a.HasMember("floor") || !a.HasMember("eventType")) continue;
+            FastAction act;
+            act.floor = a["floor"].GetInt();
+            std::string et = a["eventType"].GetString();
+            if (et == "Twirl") act.type = FastAction::Twirl;
+            else if (et == "SetSpeed") act.type = FastAction::SetSpeed;
+            else if (et == "PositionTrack") act.type = FastAction::PositionTrack;
+            else if (et == "SetHitsound") act.type = FastAction::SetHitsound;
+            else if (et == "Bookmark") act.type = FastAction::Bookmark;
+            else if (et == "Pause") act.type = FastAction::Pause;
+            else if (et == "AnimateTrack") act.type = FastAction::AnimateTrack;
+            else continue;
+            if (act.type == FastAction::SetSpeed) {
+                if (a.HasMember("speedType") && std::string(a["speedType"].GetString()) == "Multiplier") {
+                    act.flag = true; act.val1 = a.HasMember("bpmMultiplier") ? a["bpmMultiplier"].GetFloat() : 1.0f;
+                } else { act.val1 = a.HasMember("beatsPerMinute") ? a["beatsPerMinute"].GetFloat() : 0.0f; }
+            } else if (act.type == FastAction::Pause) {
+                act.val1 = a.HasMember("duration") ? a["duration"].GetFloat() : 0.0f;
+            } else if (act.type == FastAction::PositionTrack) {
+                if (a.HasMember("positionOffset") && a["positionOffset"].IsArray() && a["positionOffset"].Size() >= 2) {
+                    act.val1 = a["positionOffset"][0].GetFloat(); act.val2 = a["positionOffset"][1].GetFloat();
+                }
+                if (a.HasMember("justThisTile")) {
+                    if (a["justThisTile"].IsBool()) act.flag = a["justThisTile"].GetBool();
+                    else if (a["justThisTile"].IsInt()) act.flag = a["justThisTile"].GetInt() != 0;
+                    else if (a["justThisTile"].IsString()) {
+                        std::string v = a["justThisTile"].GetString();
+                        act.flag = (v == "Enabled" || v == "true" || v == "True");
+                    }
+                }
+            } else if (act.type == FastAction::SetHitsound) {
+                act.str = a.HasMember("hitsound") ? a["hitsound"].GetString() : "";
+                act.val1 = a.HasMember("hitsoundVolume") ? a["hitsoundVolume"].GetFloat() : 0.0f;
+            } else if (act.type == FastAction::AnimateTrack) {
+                act.val1 = -1.0f; act.val2 = -1.0f; // sentinel: not set
+                if (a.HasMember("trackDisappearAnimation")) act.str = a["trackDisappearAnimation"].GetString();
+                if (a.HasMember("trackAnimation"))  act.flag = true; // flag2: has trackAnimation
+                if (a.HasMember("beatsBehind")) act.val1 = a["beatsBehind"].GetFloat();
+                if (a.HasMember("beatsAhead"))  act.val2 = a["beatsAhead"].GetFloat();
+            }
+            actions.push_back(act);
+        }
+    }
+
+    // Settings
+    if (root.HasMember("settings") && root["settings"].IsObject()) {
+        readSettings(root["settings"], settings);
+    }
+
+    // pathData
+    if (root.HasMember("pathData") && root["pathData"].IsString())
+        pathData = root["pathData"].GetString();
+
+    // actions already parsed above
+    // decorations: not used, skip parsing entirely
+
+    return finishLoad(onProgress, exportOnly);
+}
+
+bool LevelData::finishLoad(ProgressCb onProgress, bool exportOnly) {
+    if (onProgress) onProgress(0.20f, "Processing level data...");
+
+    // Convert pathData → angleData if needed
+    if (!pathData.empty() && angleData.empty()) {
+        convertPathToAngles();
+    }
+
+    if (!exportOnly) {
+        if (onProgress) onProgress(0.30f, "Calculating tile positions...");
+        calculateTilePositions();
+    }
+    if (onProgress) onProgress(0.40f, "Processing actions...");
+    processActions();
+    if (!exportOnly) {
+        applyPositionTrackOffsets();
+    }
+    return true;
 }
 
 void LevelData::calculateTilePositions() {

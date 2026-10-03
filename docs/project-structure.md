@@ -28,7 +28,7 @@
 | `game/`      | PlaybackEngine(660)、Planet(**含 glad/GL**)                                | ~1000 | 否               |
 | `glad/`      | OpenGL loader（生成代码）                                                      | —     | 否               |
 | `hitsounds/` | 27 个 WAV 资产                                                              | —     | 资产              |
-| `level/`     | LevelData(489)、JsonCleaner                                               | ~670  | **是**           |
+| `level/`     | LevelData(934：含流式快解析)、JsonCleaner                                               | ~670  | **是**           |
 | `render/`    | Shader、Shaders.hpp(回退 GLSL)、PlanetTrail、CullSIMD                         | ~500  | 否               |
 | `shaders/`   | 运行时 GLSL 资产                                                              | —     | 资产              |
 | `track/`     | TileGeometry(**纯几何**)、TileMesh(456, GL)                                  | ~740  | 部分              |
@@ -51,7 +51,7 @@ CMake：单一根 `CMakeLists.txt`（352 行），一个 `add_executable(adocao)
    - `app/LauncherWindow.cpp` 772 行（6 页向导全在一文件）
    - `game/PlaybackEngine.cpp` 660 行（预计算 + 运行态 + 行星位置 + 轨迹采样混在一起）
    - `app/GameWindow.cpp` 607 行（输入、相机控制、音乐同步、渲染编排全在一文件）
-   - `level/LevelData.cpp` 489 行、`track/TileMesh.cpp` 456 行
+   - `level/LevelData.cpp` 934 行（其中 ~450 行是流式快解析 + 回退旧路径）、`track/TileMesh.cpp` 456 行
 5. **头文件膨胀 / include 卫生差**：
    - `app/GameWindow.hpp` include `LauncherWindow.hpp` + `LevelLoader.hpp`；
      `app/LevelLoader.hpp` 又 include `LoadingWindow.hpp` + `LauncherWindow.hpp`——应改为前置声明，把重 include 挪进 .cpp。
@@ -281,7 +281,7 @@ app/wizard/
 
 | 文件                          | 行数  | 建议                                                                                                   |
 | --------------------------- | --- | ---------------------------------------------------------------------------------------------------- |
-| `level/LevelData.cpp`       | 489 | 暂不拆。若继续膨胀，按 `LevelParser`(DOM→模型) / `LevelActions`(processActions+逐 tile 事件) / `LevelData`(容器+API) 拆 |
+| `level/LevelData.cpp`       | 934 | 暂不拆。解析前端（`tryFastParse`/`parseLegacy` + 扫描器，~450 行）已足以独立成 `LevelParser`，剩下 `LevelActions`(processActions+逐 tile 事件) / `LevelData`(容器+API) |
 | `track/TileMesh.cpp`        | 456 | 暂不拆（类内职责已分区）。可选按 build/draw/cull 拆多个 .cpp 共享类                                                        |
 | `audio/HitsoundManager.cpp` | 291 | 暂不拆。可选把"纯合成（16-bit 混音）"与"资产加载/游标管理"分开                                                                |
 

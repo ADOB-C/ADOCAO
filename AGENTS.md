@@ -9,6 +9,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   app 拆分（P4：GameWindow → `app/CameraController`/`app/LevelScene`，LauncherWindow → `app/wizard/` 分页）
   → 资产并入 `assets/` + g_sc 清理 + 文档/CI 同步（P5）
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
+- 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
+  `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`
 - 待办（已筛选）：`TODO.md`（未完成 9 条 + 遥远的未来：MoveTrack）
 - 已彻底删除：GPU compute culling（2.0.0 起不需要，勿再引入）
 - 脚本：`scripts/push-ci.sh`（push → gh run watch；`--watch` 默认输出平台耗时/产物）
@@ -153,6 +155,67 @@ What may change (and did):
 - Per-group WAV loading with volume scaling, cached in `s_wavCache` + `s_wavRawCache`
 - `preSynthesize()` → stereo float buffer → streamed via `attachExternal()`
 - Export: launcher Export button or `--export` CLI writes `<level>_hitsounds.wav`
+
+## 关卡加载（Level loading）
+
+一次加载分两步：解析 JSON → `Timeline::build()`。磁盘 I/O 与 JSON 解析占了几乎全部。
+
+**两条解析路径，产出必须逐位一致**：
+
+| 路径 | 实现 | 何时用 |
+|---|---|---|
+| 快路径 | `LevelData::tryFastParse()`：在原文上流式扫描，不建 DOM、不复制 | 默认 |
+| 旧路径 | `LevelData::parseLegacy()`：`cleanJson()` + RapidJSON DOM | 快路径复现不了时回退；也是 A/B 基准 |
+
+`cleanJson()`（`core/level/JsonCleaner.cpp`）就是这些年攒下来的**事实格式规范**：删 `\r`、
+删前置/重复/尾随逗号、给漏写逗号的老文件补逗号。里面没有任何版本分支，所以快路径**逐条复现
+这些规则**而不是去猜版本号；只要遇到复现不了的东西就返回 false、交回旧路径（此时对象还没被改
+动过）。已知会回退的情况：字符串里的转义或裸 CR（RapidJSON 非 in-situ 也会解转义）、
+`angleData` 里的嵌套数组/非数字、非整数 `floor`、DOM 会拒绝的 token（`True`/裸词/`+1`）等。
+`ADOCAO_FORCE_DOM_PARSE=1` 强制走旧路径（对拍用）。
+
+快路径的层次（顺序即数据流）：
+
+1. `app/FileMap.hpp` —— **mmap** 只读映射（app 层：`core/` 禁平台头，见 purity 脚本）。
+   `LevelData::loadFromFile()` 仍保留可移植的 `ifstream` 读法给测试/嵌入方。
+2. `scanRootMembers()` —— 只遍历根对象直接成员：`angleData` / `settings` / `pathData` 记下
+   区间，`decorations` 和其它未知成员整体跳过，**`actions` 边扫边解析**（解析器自己在配对的
+   `]` 处停下并回报结束位置），于是整段 actions 只走一遍。
+3. `parseAngleDataRegion()` —— 整数走快路径（≤15 位十进制整数在 double 里精确），带小数点/
+   指数/超长的一律 `strtod`，与旧路径 `parseAngleDataFast` 同值。
+4. `parseActionRegion()` / `parseActionObject()` —— 按 key 首字符分派（谱里 action 对象常带
+   一堆不关心的键），字段先收集、最后按 eventType 组装，语义等同旧路径的逐分支读取。
+5. `settings` 只有几 KB，仍交给 `cleanJson` + RapidJSON；两条路径共用 `readSettings()`，
+   `finishLoad()` 也是共用的收尾（pathData→angleData、tile 位置、processActions、位置偏移）。
+
+实测（同一台机器，双方都 `-O3 -march=native`，只算 `loadFromFile`，不含 `Timeline::build`）：
+
+| 谱面 | 大小 | 旧 | 新 | 提升 | 旧 RSS | 新 RSS |
+|---|---|---|---|---|---|---|
+| Tempest | 25 MB | 253 ms | 43 ms | 5.9x | 0.25 GB | 0.06 GB |
+| Won't You Make a Song with Me | 301 MB | 2733 ms | 461 ms | 5.9x | 2.85 GB | 1.43 GB |
+| …MYC（fat actions，89 B/个） | 611 MB | 4772 ms | 695 ms | 6.8x | 5.08 GB | 1.71 GB |
+| Thousand Nights Remembered | 1181 MB | 12845 ms | 1838 ms | 6.9x | 8.12 GB | 3.34 GB |
+| Unity (SoundCloud) | 1403 MB | 14795 ms | 2764 ms | 5.3x | 8.30 GB | 3.82 GB |
+| Unity.wav_rate | 1503 MB | 15639 ms | 2798 ms | 5.5x | 8.80 GB | 4.14 GB |
+
+旧路径的耗时构成（301 MB）：`ifstream+stringstream` 723 ms、`cleanJson` 1250 ms、`angleData`
+strtod 260 ms、DOM+抽取 438 ms、tile 位置 27 ms、`processActions` 50 ms。所以真正的大头是
+**字符串复制 + cleanJson + DOM 分配**，不是"解析和算时间线没重叠"：`Timeline::build` 只有
+160~300 ms，快路径已经把 actions 和 angleData 合成一遍扫描，无须"增量算前缀时间线 + 回头重算"。
+
+**回归测试**：`tests/level_parse_test.cpp` 对每个用例加载三遍（强制旧路径 / 快路径 / 快路径再
+一次），按 13 个节（angleData、actions、settings、tiles、tileBPMs、tileHasTwirl…）比对 FNV
+hash 与元素个数，逐位相同才通过；`ctest --test-dir build`。`tests/level_fixtures/` 里 38 个用例
+每个对应 cleanJson 的一条规则，另有"双方都应拒绝"的畸形用例。也可以直接喂真实谱面：
+
+```
+./build/tests/adocao_level_parse_test ~/Documents/Charts/*/*.adofai
+```
+
+改动解析器后**必须**跑它；负向对照（故意丢 action）应当报 14 处不一致，否则说明用例没走到快路径
+（这个坑真踩过：fixture 写成 `{"floor":...}` 而真实谱面是 `{ "floor": ...}`，一个多余的 `++p`
+因此只在 fixture 上暴露）。
 
 ## Playback Engine
 

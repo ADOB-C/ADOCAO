@@ -1,0 +1,1 @@
+{"angleData": [0, 180, 90], "settings": {"version": 15, "bpm": 100, "offset": 0, "hitsound": "Kick", "hitsoundVolume": 100}, "actions": [{"floor": 1, "eventType": "Twirl"}, {"floor": 2, "eventType": "SetSpeed", "speedType": "Multiplier", "bpmMultiplier": 1.5}], "decorations": []}

@@ -164,3 +164,7 @@ add_subdirectory(glad)
 add_subdirectory(render)
 add_subdirectory(audio)
 add_subdirectory(app)
+
+# ---- Tests ----
+enable_testing()
+add_subdirectory(tests)

@@ -1,0 +1,8 @@
+{"angleData": [0, 180, 90],
+"settings": {"bpm": 100},
+"actions": [
+  {"floor": 1, "eventType": "SetSpeed", "speedType": "Multiplier"},
+  {"floor": 2, "eventType": "SetSpeed"},
+  {"floor": 3, "eventType": "SetSpeed", "speedType": "BPM", "beatsPerMinute": 0}
+],
+"decorations": []}

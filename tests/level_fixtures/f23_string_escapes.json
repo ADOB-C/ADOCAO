@@ -1,0 +1,1 @@
+{"angleData": [0, 180], "settings": {"bpm": 100, "hitsound": "a\"b", "levelDesc": "\u0041\n"}, "actions": [{"floor": 1, "eventType": "SetHitsound", "hitsound": "x\\y"}], "decorations": []}

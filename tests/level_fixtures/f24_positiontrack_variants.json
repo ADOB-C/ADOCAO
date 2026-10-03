@@ -1,0 +1,9 @@
+{"angleData": [0, 180, 90, 270],
+"settings": {"bpm": 100},
+"actions": [
+  {"floor": 1, "eventType": "PositionTrack", "justThisTile": "Enabled"},
+  {"floor": 2, "eventType": "PositionTrack", "justThisTile": "true", "positionOffset": [1, 1]},
+  {"floor": 3, "eventType": "PositionTrack", "justThisTile": 1, "positionOffset": [-1, -1]},
+  {"floor": 4, "eventType": "PositionTrack", "justThisTile": "Disabled"}
+],
+"decorations": []}

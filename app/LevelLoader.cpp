@@ -2,6 +2,7 @@
 
 #include "LauncherWindow.hpp"
 #include "LoadingWindow.hpp"
+#include "FileMap.hpp"
 #include "core/level/LevelData.hpp"
 #include "core/timeline/Timeline.hpp"
 #include "core/timeline/PlaybackClock.hpp"
@@ -32,7 +33,9 @@ void runLevelPreload(const LauncherConfig& cfg, LoadingProgress& progress,
     auto onParseProgress = [&](float pct, const char* stage) {
         report(progress, 0.05f + pct * 0.60f, stage);
     };
-    if (!outLevel->loadFromFile(cfg.levelPath, onParseProgress)) {
+    FileMap map;
+    if (!map.open(cfg.levelPath) ||
+        !outLevel->loadFromBuffer(map.data(), map.size(), onParseProgress)) {
         report(progress, 0.0f, "Error: Failed to parse level");
         outLevel.reset();
         return;
@@ -66,7 +69,9 @@ void runLevelLoading(const LauncherConfig& cfg, LoadingProgress& progress, LoadR
         auto onParseProgress = [&](float pct, const char* stage) {
             report(progress, 0.05f + pct * 0.40f, stage);
         };
-        if (!result.level->loadFromFile(cfg.levelPath, onParseProgress)) {
+        FileMap map;
+        if (!map.open(cfg.levelPath) ||
+            !result.level->loadFromBuffer(map.data(), map.size(), onParseProgress)) {
             report(progress, 0.0f, "Error: Failed to parse level");
             result.level.reset();
             return;

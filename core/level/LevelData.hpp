@@ -79,8 +79,20 @@ struct LevelData {
 
     bool loadFromFile(const std::string& filepath, ProgressCb onProgress = nullptr, bool exportOnly = false);
     bool loadFromString(const std::string& jsonStr, ProgressCb onProgress = nullptr, bool exportOnly = false);
+    // Same thing on a raw buffer (used by loadFromFile's mmap and by tests)
+    bool loadFromBuffer(const char* data, size_t length, ProgressCb onProgress = nullptr, bool exportOnly = false);
 
 private:
+    // Fast path: scan angleData/actions straight out of the buffer, reproducing what
+    // cleanJson() does to the file. Returns false (and leaves the object untouched) as
+    // soon as it meets something it cannot reproduce, so the caller can fall back to
+    // parseLegacy(). Set ADOCAO_FORCE_DOM_PARSE=1 to force the legacy path (A/B tests).
+    bool tryFastParse(const char* data, size_t length, ProgressCb onProgress);
+    // Legacy path: cleanJson + RapidJSON DOM. Also the fallback and the A/B reference.
+    bool parseLegacy(const std::string& cleanedJson, ProgressCb onProgress, bool exportOnly);
+    // Shared tail: pathData → angleData, tile positions, actions, position offsets
+    bool finishLoad(ProgressCb onProgress, bool exportOnly);
+
     void calculateTilePositions();
     void convertPathToAngles();
     void processActions();

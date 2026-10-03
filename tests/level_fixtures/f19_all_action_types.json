@@ -1,0 +1,14 @@
+{"angleData": [0, 180, 90, 270, 45, 135, 225, 315],
+"settings": {"bpm": 150},
+"actions": [
+  {"floor": 1, "eventType": "Twirl"},
+  {"eventType": "SetSpeed", "floor": 2, "speedType": "Multiplier", "bpmMultiplier": 2.0},
+  {"floor": 3, "eventType": "SetSpeed", "beatsPerMinute": 400},
+  {"floor": 4, "eventType": "PositionTrack", "positionOffset": [3.5, -2.25], "justThisTile": true},
+  {"floor": 5, "eventType": "SetHitsound", "hitsound": "Snare", "hitsoundVolume": 55},
+  {"floor": 6, "eventType": "Bookmark"},
+  {"floor": 7, "eventType": "Pause", "duration": 2.5},
+  {"floor": 8, "eventType": "AnimateTrack", "trackDisappearAnimation": "Scatter", "trackAnimation": "Fade", "beatsBehind": 1.5, "beatsAhead": 6.0},
+  {"floor": 3, "eventType": "UnknownType", "x": 1}
+],
+"decorations": []}

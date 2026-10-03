@@ -13,7 +13,7 @@
 // 逐位相同才算通过。快路径还会再加载一遍，确认自身可重复（并行/缓存不得引入抖动）。
 //
 // 用法：
-//   adocao_level_parse_test [<目录或文件> ...]     不带参数时用 level_fixtures/
+//   adocao_level_parse_test <目录或文件> ...        目录会展开成其中的 *.json
 // 也可以直接喂真实谱面，例如：
 //   adocao_level_parse_test ~/Documents/Charts/**/*.adofai
 
@@ -153,12 +153,30 @@ std::string diffSections(const Digest& x, const Digest& y) {
     return out;
 }
 
+// setenv/unsetenv 是 POSIX 的，Windows（MinGW）只有 _putenv_s（它才会更新 CRT 自己的
+// environ，SetEnvironmentVariable 不会）
+void setEnv(const char* name, const char* value) {
+#ifdef _WIN32
+    _putenv_s(name, value);
+#else
+    setenv(name, value, 1);
+#endif
+}
+
+void unsetEnv(const char* name) {
+#ifdef _WIN32
+    _putenv_s(name, "");
+#else
+    unsetenv(name);
+#endif
+}
+
 Digest loadPath(const std::string& file, bool legacy) {
-    if (legacy) setenv("ADOCAO_FORCE_DOM_PARSE", "1", 1);
-    else        unsetenv("ADOCAO_FORCE_DOM_PARSE");
+    if (legacy) setEnv("ADOCAO_FORCE_DOM_PARSE", "1");
+    else        unsetEnv("ADOCAO_FORCE_DOM_PARSE");
     LevelData lv;
     bool ok = lv.loadFromFile(file);
-    unsetenv("ADOCAO_FORCE_DOM_PARSE");
+    unsetEnv("ADOCAO_FORCE_DOM_PARSE");
     return digest(lv, ok);
 }
 

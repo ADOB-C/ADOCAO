@@ -130,8 +130,17 @@ What may change (and did):
      range and visiting hits in timestamp order.
   The inner loop is a saturating int16 add — `vqaddq_s16` (NEON) / `_mm_adds_epi16`
   (SSE2), with a scalar fallback — which is exactly the per-addition clamp, so SIMD
-  costs no fidelity. 6.77M-hit chart: 36.3 s -> 1.73 s (21x); Tempest: 207 ms -> 23 ms.
+  costs no fidelity. Blocks are scheduled by a local `std::thread` loop, not by
+  `core/util/ThreadPool`, so `adocao_audio` stays free of that dependency and external
+  harnesses that compile this file alone (HitSoundBench's `adocao_gen`) keep working.
   Falls back to an int32 path when a scaled sample does not fit in int16 (volume > 100).
+  Measured synthesis: 6.77M-hit chart 36.3 s -> 0.74 s (49x), Tempest 207 ms -> 18 ms.
+  HitSoundBench, same machine, 3 runs, both sides -O2:
+    Tempest  total 263.4 ms vs ref 404.6 ms  -> we are 1.54x FASTER (synth 17.9 vs 286.6)
+    level    total 3669 ms  vs ref 2192 ms   -> we are 1.67x slower, and the whole gap
+             is now the PARSER (2580 vs 1385 ms) plus timeline (251 ms): our synthesis
+             is already faster than the reference's (738 vs 807 ms) while mixing 11.8x
+             more hits. Next lever if wanted: the level JSON parse.
 - Fixed a cache bug that made any *second* synthesis in one process wrong: `readWav`'s
   cache-hit path reported `channels = 1` while the cache keeps the file's layout, so a
   cached stereo hit became 2x too long (buffer 217.582 s instead of 217.350 s) and had

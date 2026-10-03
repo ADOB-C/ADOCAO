@@ -2,7 +2,6 @@
 #include "AudioEngine.hpp"
 #include "core/util/Logger.hpp"
 #include "core/util/DataFile.hpp"
-#include "core/util/ThreadPool.hpp"
 
 #include <cmath>
 #include <algorithm>
@@ -411,23 +410,43 @@ bool HitsoundManager::preSynthesize(const std::vector<HitsoundTimestampGroup>& g
         }
     };
 
+    // Block scheduler: std::thread only, on purpose. adocao_audio must not need
+    // core/util/ThreadPool so that external harnesses compiling this file alone
+    // (e.g. HitSoundBench's adocao_gen) keep working without extra sources.
     int processed = 0;
     {
-        // ADOCAO_MIX_THREADS is a test hook: a small value makes the chunking coarse
-        // so the parallel result can be diffed against the multi-chunk one.
-        unsigned hw = std::thread::hardware_concurrency();
+        // ADOCAO_MIX_THREADS is a test hook: 1 makes the chunking coarse so the
+        // parallel result can be diffed against it (the buffers must be identical).
+        unsigned threads = std::thread::hardware_concurrency();
         if (const char* env = std::getenv("ADOCAO_MIX_THREADS")) {
             const int n = std::atoi(env);
-            if (n > 0) hw = (unsigned)n;
+            if (n > 0) threads = (unsigned)n;
         }
-        ThreadPool pool(hw > 0 ? hw : 4u);
-        std::atomic<int> mixed{0};
-        pool.parallelFor(0, numBlocks, [&](size_t b0, size_t b1) {
+        if (threads == 0) threads = 4;
+
+        if (threads == 1 || numBlocks <= 1) {
             int local = 0;
-            for (size_t b = b0; b < b1; ++b) mixBlock(b, local);
-            mixed.fetch_add(local, std::memory_order_relaxed);
-        }, 1);
-        processed = mixed.load();
+            for (size_t b = 0; b < numBlocks; ++b) mixBlock(b, local);
+            processed = local;
+        } else {
+            std::atomic<size_t> next{0};
+            std::atomic<int> total{0};
+            std::vector<std::thread> workers;
+            workers.reserve(threads);
+            for (unsigned t = 0; t < threads; ++t) {
+                workers.emplace_back([&]() {
+                    int local = 0;
+                    for (;;) {
+                        const size_t b = next.fetch_add(1, std::memory_order_relaxed);
+                        if (b >= numBlocks) break;
+                        mixBlock(b, local);
+                    }
+                    total.fetch_add(local, std::memory_order_relaxed);
+                });
+            }
+            for (auto& w : workers) w.join();
+            processed = total.load();
+        }
     }
 
     m_lastMixedHits = processed;

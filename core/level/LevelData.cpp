@@ -811,8 +811,14 @@ struct WindowParser {
         }
         const char* p = stream.data();
         const char* end = p + stream.size();
+        static const char* const kStateName[] = {"Members", "InAngles", "InActions", "InSettings", "InPath", "InSkip", "Done"};
         for (;;) {
+            const State before = state;
             const char* q = step(p, end);
+            if (dbg && state != before)
+                std::fprintf(stderr, "[win] 转移 窗内%td/%zu %s -> %s (q=%td item=%td carry=%zu)\n",
+                             p - stream.data(), stream.size(), kStateName[(int)before], kStateName[(int)state],
+                             q - stream.data(), itemStart - stream.data(), (size_t)(itemStart - p));
             if (failed) {
                 if (dbg) std::fprintf(stderr, "[win] 放弃 state=%d 偏移=%td/%zu 位置=%td 原因=%s 字节=%.24s\n",
                                       (int)state, p - stream.data(), stream.size(),
@@ -830,7 +836,10 @@ struct WindowParser {
             const size_t consumed = (size_t)(itemStart - p);   // itemStart >= p（step 开头保证）
             if (dbg) std::fprintf(stderr, "[win] 换窗 state=%d 已提交=%zu carry=%zu 窗口=%zu\n",
                                   (int)state, consumed, stream.size() - consumed, stream.size());
-            stream.consume(consumed);
+            // consume() 要的是"窗口内偏移"，不是"相对本次调用起点的字节数"。第一次调用两者
+            // 恰好相等（游标就在窗口开头），所以这个错被掩盖过：窗口中途发生状态转移后，
+            // carry 会退到某个已解析对象中间，回放时就重复解析／错位。
+            stream.consume((size_t)(itemStart - stream.data()));
             if (!stream.next()) {
                 if (dbg) std::fprintf(stderr, "[win] 取下一块失败 state=%d stuck=%d failed=%d err=%s 已消费=%zu 块内=%zu\n",
                                       (int)state, (int)stream.stuck(), (int)stream.failed(),
@@ -955,15 +964,14 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
         // 优先走窗口流水线：不把整份解压结果摊进内存（10 GB 文本那份匿名内存会被系统
         // 压缩/换页，实测吞吐掉到 1/11）。任何搞不定的情况都退回下面的整份解压。
         const bool forceWhole = std::getenv("ADOCAO_WHOLE_DECOMPRESS") != nullptr;   // 每次读：测试会在同一进程里切换
-        // 窗口流水线目前仍是 opt-in：它在 fixture（4 KB 半窗）上逐位一致，但在 GB 级谱面上
-        // 还有"窗口边界重复解析一小段"的 bug（实测 8 MB 半窗时多出 9 个角度值 / 11660 个
-        // action），更小的半窗会直接放弃。默认走原来的整份解压，避免任何正确性风险。
-        const bool useWindow = std::getenv("ADOCAO_WINDOW_KB") != nullptr
-                            || std::getenv("ADOCAO_WINDOW_STREAM") != nullptr;
+        // 压缩输入默认走窗口流水线：逐位一致（fixture 用 4 KB 半窗、1.18 / 1.40 GB 真实谱用
+        // 96 KB / 1 MB / 8 MB 半窗都核对过 13 个节的 hash），而且比整份解压省掉"整份文本"
+        // 的分配与二次扫描。搞不定的情况一律放弃并落到下面的整份解压，所以默认开启无风险。
+        // ADOCAO_WINDOW_KB 调半窗大小；ADOCAO_WHOLE_DECOMPRESS=1 强制退回整份解压。
         // 测试用：要求必须走通窗口路径（不许静默回退），否则直接失败 —— 用来证明用例
         // 真的覆盖了这条路径，而不是每次都在偷偷走整份解压。
         const bool requireWindow = std::getenv("ADOCAO_WINDOW_REQUIRE") != nullptr;
-        if (!forceWhole && useWindow) {
+        if (!forceWhole) {
             size_t half = ArchiveStream::kDefaultHalf;
             if (const char* env = std::getenv("ADOCAO_WINDOW_KB")) {   // 测试用：极小窗口
                 long kb = std::atol(env);

@@ -227,24 +227,28 @@ What may change (and did):
   线程只是互相抢核；这也解释了为什么"解码与解析重叠"同样没有收益。压缩输入的并行空间已经被解码器
   用掉了，除非哪天把解码降到单线程再把核让给解析（那会先亏掉 534 ms → 2549 ms 的解码时间）。
 
-**每层结构（内存天花板在这里）**：实测 TNR 1.18 GB / 915 万层，窗口路径峰值 3.06 GB ≈ 350 B/层
-（含 xz 解码器的 1 GB 上限）；纯结构约 100~150 B/层：`FastAction` 9.12M x 48 B、`Tile` 9.15M x 32 B、
-angleData 8 B/层、timeline ~28 B/层。已经做掉的一块：`tileHitsoundVolumes` 从
-`unordered_map<int,float>` 改成**稠密 `vector<float>`**（NaN = 无覆盖，空 vector = 整谱无覆盖）。
-实测那张谱有 457 万条覆盖 ≈ 209 MB，稠密后 37 MB：**峰值 3.22 → 3.06 GB**（同一次运行 1912 → 1860 ms）。
-`tileHitsounds`（字符串覆盖）在那张谱上是 **0 条**，所以不需要驻留；普通谱上它们是几百条量级。
-`tilePositionOffsets` 同样稀疏（0.01 条/层）。
-- **已落地**：`FastAction` 的内联 `std::string str`（32 B）换成 **16 位驻留 id**（`internActionStrIn` /
-  `actionStr`）。那张谱 912 万 action **全部**带 hitsound 名（同一个值重复 912 万次），结构
-  **48 B → 16 B**、actions 本身 **417 → 139 MB**、**峰值 3.06 → 2.76 GB**、加载 1860 → **1809 ms**。
-  实现要点（两次踩坑换来的）：
-  * 锁与 thread-local 缓存放在 **.cpp 文件作用域**、按**驻留表地址**做缓存键 —— 类里不能有
-    `std::mutex` / `static inline thread_local` **数据成员**（MSVC 不接受，而且 mutex 让类不可拷贝）。
-    本轮最初那版正是把二者当成员，Linux/macOS 全绿、Windows Build 挂。
-  * 也别用"函数内局部静态 + `(this, strGen)` 代次"当键的变体：能编译、fixtures 全过，但
-    `windowBoundarySelfTest` 会报窗口路径与整份解压的 actions 不一致（缓存键不严）。
-  * 类要按 `struct LevelData` 找（不是 `class`）——两次补丁失败都栽在这个字眼上。
-  * 对拍摘要按字符串**内容**哈希，所以驻留 id 的顺序不影响逐位比对。
+**每层结构（内存天花板在这里）**：TNR 1.18 GB / 915 万层，窗口路径峰值 **2.76 GB ≈ 300 B/层**
+（含 xz 解码器的 1 GB 上限）。做掉的三块、以及各自的折算规则：
+
+1. `tileHitsoundVolumes`：`unordered_map<int,float>` → 稠密 `vector<float>`（NaN = 无覆盖，空
+   vector = 整谱无覆盖）。那张谱 457 万条覆盖 ≈ 209 MB → 37 MB：**峰值 3.22 → 3.06 GB**
+   （1912 → 1860 ms）。折算 **44 B/条覆盖** —— 普通社区谱 0~2 条，等于没收益。
+2. `FastAction`：内联 `std::string str`（**32 B，空的时候也占**）→ 16 位驻留 id
+   （`internActionStrIn`/`actionStr`）。结构 48 → 16 B、actions 417 → 139 MB：
+   **峰值 3.06 → 2.76 GB**、1860 → **1809 ms**。折算 **32 B/条 action**，所以普通谱也有收益：
+   MYC 明文 618 万条 ≈ −198 MB（实测峰值 1.40 → 1.25 GB）、Tempest 31.7 万条 ≈ −10 MB
+   （0.06 → 0.05 GB）、音频谱 912 万条 −292 MB。
+   实现要点（两次踩坑换来的）：锁与 thread-local 缓存放 **.cpp 文件作用域**、按**驻留表地址**做
+   缓存键 —— 类里不能有 `std::mutex` / `static inline thread_local` **数据成员**（MSVC 不接受，
+   而且 mutex 让类不可拷贝）；别用"函数内局部静态 + `(this,strGen)` 代次"的变体（能编译、
+   fixtures 全过，但 `windowBoundarySelfTest` 会报窗口路径与整份解压的 actions 不一致）；
+   类名是 **`struct LevelData`** 而不是 `class`（改文件前先打印要改的确切文本）。
+3. 流式窗口本身只服务压缩输入 → 对明文 0。
+
+明文加载时间在这轮改动前后**无可测变化**（Tempest 35 ms、MYC 613 ms，3 次跑 ±几 ms）。
+剩下的结构：`Tile` 32 B x 915 万 = 293 MB（`index` 可由在 vector 里的位置隐含 → 可省 37 MB；
+angle/direction 是 float、位置是 double，精度规则不允许再压）、angleData 8 B/层 = 73 MB
+（只在加载后用于 midspin 检测 → 可压成 1 bit/层）、timeline ~28 B/层。
 
 **actions 分块并行解析**（`parseActionRegionParallel`）：actions 数组里每个对象彼此独立，
 所以先扫一遍找切分点（只做括号/字符串配对，不做字段提取，0.44 s/GB），再切 N 段并行解析，

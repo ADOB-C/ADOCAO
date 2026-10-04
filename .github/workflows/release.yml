@@ -40,12 +40,16 @@ jobs:
         shell: msys2 {0}
         run: cmake --build build --parallel
 
+      - name: Package (historical release name)
+        shell: msys2 {0}
+        run: cp build/ADOCAO.exe ADOCAO-Windows.exe
+
       - name: Upload assets
         uses: softprops/action-gh-release@v2
         with:
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
           files: |
-            build/ADOCAO.exe
+            ADOCAO-Windows.exe
 
   linux:
     runs-on: ubuntu-latest
@@ -77,11 +81,14 @@ jobs:
         run: |
           cd build && zip -r ADOCAO-data.zip ../assets
 
+      - name: Package (historical release name)
+        run: cp build/ADOCAO ADOCAO-Linux
+
       - name: Upload assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            build/ADOCAO
+            ADOCAO-Linux
             build/ADOCAO-data.zip
 
   macOS:
@@ -110,8 +117,11 @@ jobs:
       - name: Package .app bundle (binary + assets, ad-hoc signed)
         run: scripts/make-app.sh
 
+      - name: Zip .app bundle (gh-release cannot upload a directory)
+        run: ditto -c -k --sequesterRsrc --keepParent build/ADOCAO.app ADOCAO-macOS.zip
+
       - name: Upload assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            build/ADOCAO.app
+            ADOCAO-macOS.zip

@@ -11,6 +11,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`
+- 几何自测：`tests/tile_geometry_test.cpp`（中旋砖五边形不变量 + `TileMesh.cpp` 调用点护栏，都带负向对照）；
+  要"实际看"形状用 `tools/tile-geometry-lab/`（`dump.sh` → `json2svg.mjs` → `svgshot.cjs`）
 - 待办（已筛选）：`TODO.md`（未完成清单 + 遥远的未来：MoveTrack）
 - 已彻底删除：GPU compute culling（2.0.0 起不需要，勿再引入）
 - 脚本：`scripts/push-ci.sh`（push → gh run watch；`--watch` 默认输出平台耗时/产物）
@@ -480,8 +482,18 @@ Twirl (purple), SetSpeed up (red), SetSpeed down (blue). Per-tile icon instances
 - 谱面里中旋是 `angleData` 里的**数字 999**（不是 `"!"`；`"!"` 只是编辑器的显示/`LevelData` 字符映射）。
   本地实测：The Moon - Coal 1307 个、Singularity 442、Won't You Make a Song with Me 11、Fledgling 9。
 
+**机械护栏**：`tests/tile_geometry_test.cpp`（`ctest --test-dir build`；CI 的 Linux job 现在跑**全部** ctest）——
+五边形三条不变量（7+7 顶点 / 尖角朝来路 / 面积 3w²，7 个入砖方向都查；注意顶点表顺序**不是**边界序，
+边界序是 `0,1,2,4,3`，直接对 0..4 求 shoelace 会得到 `3w²/2`）；描边顶点必须整段排在填充顶点前
+（`TileMesh.cpp` 靠扫 types 前缀算 `strokeVertCount`，两层一交错是**静默**画错）；**负向对照**：旧几何
+`createTileMesh(a,a)` 必须过不了这套断言；**调用点护栏**（源码级，和 `scripts/check-cli-help.sh` 一个路子）：
+`TileMesh.cpp` 必须出现 `createMidSpinMesh(sA` 且不许出现 `createTileMesh(eA,eA` —— 几何单测管不到
+"谁来调它"，把调用退回去上面几条会全绿。看图工具在 `tools/tile-geometry-lab/`（README 有三条路子 + 坑表）。
+
 **怎么"实际看"**（本轮就是这么验的，别再靠脑补）：
-1. 几何层：`clang++ -std=c++20 -I render /tmp/…/dump.cpp render/TileGeometry.cpp` → 顶点 JSON → SVG → 无头 Chromium 截图读图；
+1. 几何层：`tools/tile-geometry-lab/dump.sh`（编的就是 `render/TileGeometry.cpp` 本人）→ 顶点 JSON →
+   `json2svg.mjs` → `svgshot.cjs`（Playwright + **系统无头 Chromium**）→ 看图。三条路子和坑表都在
+   `tools/tile-geometry-lab/README.md`；
 2. 渲染层：`./build/ADOCAO <谱> --auto-play --fullscreen` + `screencapture -x`；最省事的验证谱是几层里放一个中旋，
    下面这段可以**直接存成 .adofai**（第 2 层中旋，合法 JSON，别再加省略号）：
    ```json

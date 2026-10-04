@@ -117,9 +117,18 @@ std::string openFileDialog(const char* title, const std::vector<std::string>& pa
     std::vector<const char*> raw;
     raw.reserve(patterns.size());
     for (const std::string& p : patterns) raw.push_back(p.c_str());
+#ifdef __APPLE__
+    // macOS：tinyfd 走 osascript 的 `choose file`，**一旦给了类型表**，名字与类型匹配的
+    // 文件夹就会被当成文件 —— 选得中、但进不去。本工程的谱恰恰都放在 `<名字>.adofai/`
+    // 这种文件夹里（如 Charts/Song.adofai/），所以这里不传过滤器，保证文件夹永远能进去。
+    // 选错路径由 resolveLevelPath() + 加载失败提示兜底。
+    (void)raw;
+    const char* path = tinyfd_openFileDialog(title, "", 0, nullptr, description, 0);
+#else
     const char* path = tinyfd_openFileDialog(title, "", (int)raw.size(),
                                              raw.empty() ? nullptr : raw.data(),
                                              description, 0);
+#endif
     return path ? std::string(path) : std::string();
 }
 

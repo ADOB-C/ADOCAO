@@ -3,17 +3,24 @@ name: Build
 on:
   push:
     branches: [master, pre-synth-v1]
+    paths-ignore:            # 纯文档不可能弄坏构建，别为它跑三平台
+      - '**.md'
+      - 'docs/**'
+      - 'TODO.md'
   pull_request:
     branches: [master]
   workflow_dispatch:
 
+# 同一分支连续推送时，旧的 run 已经没人看了 —— 直接取消
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows:
-    strategy:
-      matrix:
-        portable: [true]  # portable (static) only
-        zoom: [Ultra, Unimaginable]  # test default + extreme
-    name: windows-${{ matrix.zoom }}-portable
+    # 只留一份：zoom 只是编译期的 ADOCAO_MIN_ZOOM 常量，与平台无关，
+    # 那个矩阵放到便宜的 linux 上跑（见下）
+    name: windows-portable
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,8 +45,7 @@ jobs:
         shell: msys2 {0}
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DADOCAO_PORTABLE=${{ matrix.portable == true && 'ON' || 'OFF' }} \
-            -DADOCAO_ZOOM_LEVEL=${{ matrix.zoom }}
+            -DADOCAO_PORTABLE=ON
 
       - name: Build
         shell: msys2 {0}
@@ -47,10 +53,14 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-${{ matrix.zoom }}${{ matrix.portable && '-portable' || '' }}
+          name: windows-portable
           path: build/ADOCAO.exe
 
   linux:
+    strategy:
+      matrix:
+        zoom: [Ultra, Unimaginable]   # 默认 + 极端值（便宜的平台上多验一个编译常量）
+    name: linux-${{ matrix.zoom }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -73,7 +83,8 @@ jobs:
 
       - name: Configure
         run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DADOCAO_ZOOM_LEVEL=${{ matrix.zoom }}
 
       - name: Build
         run: cmake --build build --parallel
@@ -83,7 +94,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: linux
+          name: linux-${{ matrix.zoom }}
           path: build/ADOCAO
 
   macOS:

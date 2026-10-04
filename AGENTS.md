@@ -365,7 +365,7 @@ Vertex shader: `aType` (0=stroke, 1=fill) mixes `iColor`/`iBgColor` per-instance
 - Instance color VBO: `[fillR,fillG,fillB, strokeR,strokeG,strokeB, opacity]` — 7 floats, static
 
 ### Visibility cache
-`draw()` caches visible instance indices per shape group. Rebuilt when frustum bounds change (position or zoom). Camera-relative offsets recomputed each frame on cached set. Multithreaded CPU culling via `std::async` for >= 64 groups.
+`draw()` caches visible instance indices per shape group. Rebuilt when frustum bounds change (position or zoom). Camera-relative offsets recomputed each frame on cached set. Multithreaded CPU culling through a **persistent** `ThreadPool` (`render/TileMesh.cpp` 的 `getPool()`，Meyers 静态：首次 cull 时创建、活到进程退出；worker 数 = `hardware_concurrency()`）for >= 64 groups (每组一个任务)；`cullAndOffsetGroups` 每帧都跑，但只有缓存的视锥范围不再包含当前视野时才重新 SIMD culling，否则只按 (dx,dy) 平移相机相对偏移。
 
 ### Memory management
 `LevelData::releaseMemory()` frees angleData, actions/decorations JSON, tilePositionOffsets after loading. `tileBPMs` kept — needed by `buildIcons()` for SetSpeed icon coloring.

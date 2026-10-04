@@ -32,7 +32,8 @@ Reference implementations:
   `../ADOFAI/dnSpy/dnSpy.Console.exe -o ../ADOFAI/decomp_game "../ADOFAI/A Dance of Fire and Ice/A Dance of Fire and Ice_Data/Managed/Assembly-CSharp.dll"`
 - `../ADOFAI_HitSound/` — Maicy0609's C++ hitsound generator (RapidJSON, Nyquist filter, equal-power pre-scaling, double mixing). Reference for loading performance and hitsound synthesis.
 
-A WinUI 3 C# launcher is in a separate repo at `../ADOCAO_WinUI3_Launcher/`.
+A WinUI 3 C# launcher lived in a separate repo at `../ADOCAO_WinUI3_Launcher/` —— **已废弃，
+不要再为它保留 CLI 兼容性**（历史原因：早期命令行语法是它的调用约定）。
 
 ## Branches
 
@@ -60,15 +61,43 @@ Minimum CMake 3.20. C++20. OpenGL 4.3+ required. Dependencies via FetchContent (
 ## CLI Usage
 
 ```
-adocao.exe --level <file> --music <file> [--width N] [--height N]
-           [--fullscreen] [--fill HEX] [--stroke HEX] [--bg HEX]
-           [--no-auto-stroke] [--no-hitsound] [--no-trail] [--debug]
-           [--force-hitsound [TYPE]] [--auto-play] [--export] [--legacy-culling]
-           [--msaa N] [--exclusive | --no-exclusive]
-           [--trail-duration SEC] [--trail-sample-rate N]
-           [--trail-target-fps N] [--trail-rate-min N] [--trail-rate-max N]
-           [--trail-samples-per-tile N] [--trail-tiles N]
+adocao                                  向导（不带 --level）
+adocao <谱.adofai> [播放选项]            直接播放
+adocao export --level <谱>              导出 hitsound WAV
+adocao image  <out.png>    --level <谱>   导出一张图：默认矢量全景，--1px 走 1px=1tile
+                                        [--size WxH] [--bg HEX|transparent] [--time-color]
+                                        [--padding F] [--thickness N] [--range A-B] [--native]
+                                        [--1px [--scale N] [--1bit]] [--keep-tiles <dir>]
+adocao tiles  <dir>        --level <谱> [--block N] [--threads N] [--time-color]
+adocao stitch <dir> <out.png>           [--scale N] [--threads N]
+
+播放选项（不带子命令时）：
+  --level <file> --music <file> --width N --height N --fullscreen
+  --fill HEX --stroke HEX --bg HEX --no-auto-stroke --no-hitsound --no-trail
+  --force-hitsound [TYPE] --auto-play --legacy-culling --msaa N --no-exclusive
+  --trail-duration SEC | --trail-tiles N
+  --trail-sample-rate N | --trail-target-fps N
+  --trail-rate-min N --trail-rate-max N --trail-samples-per-tile N
+  --debug（开发）
+
+  adocao --help [--all]
 ```
+
+**子命令只是把语法分层**：播放路径（含 `--level/--music/--width/...`）保持老语法 ——
+它本来就只有十几个开关、也够干净，没必要为对称再加一层；而且 WinUI3 launcher 已废弃，
+**没有外部调用方需要兼容**，所以这一族以后也可以随意改。无头族折进了
+`image`/`tiles`/`stitch`（模式内去掉冗余的 `--map-` 前缀：`--map-size` → `image --size`），
+`--map-native-all <dir>` → `image … --1px`（或 `tiles <dir>`），`--map-stitch <dir> <out>` → `stitch <dir> <out>`，
+`--map-tiles` → `image --range`；而 `--map`/`--map-mono` 就是 `image` / `image --1px --1bit`。
+撞到旧开关名会**直接打印新写法**再退出（码 2），不会让你去猜。
+
+**`adocao --help`（`-h`）是开关清单的唯一权威**：分组、约 30 行（默认不列开发开关，`--help --all` 才列
+`--debug`/`--legacy-culling` 与环境变量钩子）。`scripts/check-cli-help.sh` 机械校验"main.cpp 解析的每个
+`--flag` 都出现在 printHelp 里"，防止帮助漂移。未知的 `--flag` 现在**直接报错退出（码 2）**而不是像以前
+那样静默忽略（打错字会悄悄开 GUI）；单横线参数（macOS 的 `-psn_...`）与单独的 `--` 仍然忽略。
+已删掉纯 no-op 的 `--exclusive`（`LauncherConfig::exclusiveFullscreen` 默认就是 true，只有 `--no-exclusive`
+有意义），把 `--export` 并入 `export` 子命令，`--stitch-scale` 先是改名 `--map-stitch-scale`、
+现在随子命令简化成 `stitch --scale`。
 
 Trail sampling — two independent axes, both optional and **off by default** (wizard
 Visuals page / CLI):
@@ -176,7 +205,7 @@ What may change (and did):
 - `--force-hitsound`: override "None" type → "Kick" (GUI: "Force HS" checkbox)
 - Per-group WAV loading with volume scaling, cached in `s_wavCache` + `s_wavRawCache`
 - `preSynthesize()` → stereo float buffer → streamed via `attachExternal()`
-- Export: launcher Export button or `--export` CLI writes `<level>_hitsounds.wav`
+- Export: 向导的 Export 按钮，或 `adocao export --level <谱>`（写出 `<level>_hitsounds.wav`）
 
 ## 关卡加载（Level loading）
 
@@ -352,20 +381,44 @@ hash 与元素个数，逐位相同才通过；`ctest --test-dir build`。`tests
 （这个坑真踩过：fixture 写成 `{"floor":...}` 而真实谱面是 `{ "floor": ...}`，一个多余的 `++p`
 因此只在 fixture 上暴露）。
 
-## 地图全景导出（`--map`，真无头）
+## 图像导出（`adocao image`，真无头）
 
-`adocao --map out.png [--map-size WxH] [--map-bg HEX|transparent] --level <谱>` 把整条路径
+`adocao image out.png --level <谱> [--size WxH] [--bg HEX|transparent] [--time-color]
+[--padding F] [--thickness N]` 把整条路径
 （红/蓝两星 ✓）按世界坐标包围盒**等比**铺进一张 PNG ✓ —— **不碰 GL、不开窗口、不需要 ffmpeg** ✓，
 所以在没有显示的机器上也能出图 ✓，CI 里也不用 Xvfb ✓。
 
 - 位置取自 `PositionSolver::positionAtTile` ✓（和游戏里同一套解算 ✓），颜色用渲染器默认那对
-  `fill`/`stroke` ✓，起点绿点、终点红点 ✓，沿进度从 stroke 渐变到 fill 便于看走向 ✓。
+  `fill`/`stroke` ✓，起点绿点、终点红点 ✓，沿进度从 stroke 渐变到 fill 便于看走向 ✓；
+  `--time-color` 改成按**谱面时间**六档彩虹（`timeColorAt`，与 1px=1tile 瓦片同一函数 ✓）。
+- **`--padding F`**：画布留白比例（默认 0.02 = 四边各留 2%，是"看得见的黑边"的来源；
+  `--padding 0` = 内容**贴边**）。实测四边留白与 `padding` 精确对应（16K 上 2% → 左右 327 px、
+  上下 131 px；`--padding 0` → 墨包围盒 `x[0,16383] y[0,6615]`，四边 0.00%）。
+- **线宽 / `--thickness N`**：默认 `halfW = clamp(scale x thicknessScale x 0.5, 0.5, 6.0)`。
+  注意 `thicknessScale` 只在 native 1px=1unit 下才起效；普通分辨率下永远撞 **0.5 px 下限**，
+  即名义上是 1 px 的线，实际整条线只有抗锯齿渗出 —— 16K 实测宽度在 **2~3 px 之间抖**
+  （亮度阈值 50%：2 px x 2810 行 / 3 px x 3791 行）。
+  **想更细只能关 AA**：`blend()` 是 alpha 叠加，而一个像素会被 ~382 段路径穿过 → 邻像素
+  （覆盖率 0.5）被反复叠加到饱和，于是**名义 1 px 的 AA 线，实心部分量出来是 3.6 px**。
+  所以 **`--thickness 1`（或任何 ≤1）= 无 AA 的 1 px 硬线**（`drawSegmentHard`：DDA 沿长轴
+  每步点亮一个像素，直接写满色）：16K 实测墨点 **27,331**（AA 版 62,293，**2.3x 少**），
+  水平游程 1-3 px（AA 版 4-7 px）。代价是高倍放大有锯齿 —— 1 px 线的固有性质。
+  `--thickness N>1` 仍走 AA 加粗（N=2 → 核心 3.6 px，N=8 → 9.3 px；渲染出来比名义宽约 1 px，
+  同为重叠饱和所致）。
+  对照：瓦片拼接那条路（`stitch --scale 120` 的最大值降采样）是**均匀 2 px**（6536/6543 行），
+  但由 120 px 源块量化而来 → 高倍看是阶梯。
 - 为巨谱设计：**两遍扫描**（先包围盒、再逐段画 ✓）不保存点位 ✓；逐段解析式抗锯齿 ✓，
   亚像素的段落也能正确堆叠 ✓。实测 **6,770,913 层 → 4096² 6.3 s / 685 KB** ✓、
-  Singularity 997,665 层 → 2048² 0.9 s ✓。内存护栏 `maxPixels`（默认 96 MPix ✓）。
+  **16384x6616（108 MPix）5.0 s / 4.2 MB** ✓、Singularity 997,665 层 → 2048² 0.9 s ✓。
+  内存护栏 `maxPixels`（默认 **256 MPix**：16K 是 108 MPix = 434 MB 缓冲的正当请求；1px=1unit 的
+  1.5 Tpix 仍会被挡 ✓）。
 - 实现：`core/map/LevelMap.{hpp,cpp}`（纯 core ✓，只有 RGBA8 缓冲 ✓）+ `app/MapExport.cpp`
   （stb 写 PNG ✓）；CLI 分支在 `app/main.cpp`，**在任何 GL 初始化之前**返回 ✓。
-- 已知可续：按 tile 区间取景（`--map-tiles A-B` ✓）用来看密集"结"的内部结构 ✓。
+- **一条命令覆盖两条路线**：默认矢量（5 秒出 16K）；`--1px` 内部自己出瓦片→拼接→**清掉中间产物**
+  （`--keep-tiles <dir>` 保留、`--scale N` 降采样、`--1bit` 单色谱写索引色）。`map`/`mono` 两个
+  子命令已并入 `image`（撞到会打印新写法）；`tiles`/`stitch` 保留为进阶零件（只出瓦片 / 只拼瓦片，
+  便于检视或复用已有瓦片）。
+- 已知可续：按 tile 区间取景（`--range A-B` ✓）用来看密集"结"的内部结构 ✓。
 
 ## Playback Engine
 

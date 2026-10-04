@@ -47,6 +47,17 @@ std::vector<fs::path> levelFilesIn(const fs::path& dir, bool descend) {
 
 }  // namespace
 
+std::vector<std::string> listLevelCandidates(const std::string& dir) {
+    std::vector<std::string> out;
+    if (dir.empty()) return out;
+    std::error_code ec;
+    const fs::path p(dir);
+    if (!fs::is_directory(p, ec)) return out;
+    for (const fs::path& f : levelFilesIn(p, true)) out.push_back(f.string());
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
 std::string resolveLevelPath(const std::string& path) {
     if (path.empty()) return path;
     std::error_code ec;

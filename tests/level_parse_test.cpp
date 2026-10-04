@@ -298,6 +298,11 @@ std::string levelPathResolveSelfTest() {
         if (got != c.want.string())
             return std::string(c.what) + "：期望 " + c.want.string() + "，得到 " + got;
     }
+    // 候选列表：多个要能列全（供 UI 提示用）
+    const auto many = listLevelCandidates((root / "many").string());
+    if (many.size() != 2) return "候选列表：期望 2 个，得到 " + std::to_string(many.size());
+    if (listLevelCandidates((root / "one").string()).size() != 1) return "候选列表：单谱目录应为 1";
+    if (!listLevelCandidates((root / "plain.adofai").string()).empty()) return "候选列表：文件应为空";
     fs::remove_all(root, ec);
     return {};
 }

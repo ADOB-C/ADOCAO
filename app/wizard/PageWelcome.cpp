@@ -1,3 +1,4 @@
+#include <filesystem>
 #include "core/level/LevelPath.hpp"
 #include "WizardState.hpp"
 #include "WizardChrome.hpp"
@@ -70,10 +71,23 @@ void drawWelcomePage(State& st, const Chrome& ch) {
     if (ImGui::Button("Next", ImVec2(btnW, btnH))) {
         if (levelOk) {
             st.cfg.levelPath = resolveLevelPath(st.levelBuf);
-            // 选中的是文件夹时，把解析出来的谱文件回填到输入框 —— 让用户看得见"到底选了哪个谱"
-            if (st.cfg.levelPath != st.levelBuf)
+            if (st.cfg.levelPath != st.levelBuf) {
+                // 选中的是文件夹时，把解析出来的谱文件回填到输入框 —— 让用户看得见"到底选了哪个谱"
                 snprintf(st.levelBuf, sizeof(st.levelBuf), "%s", st.cfg.levelPath.c_str());
-            st.lastError.clear();
+                st.lastError.clear();
+            } else if (const auto cands = listLevelCandidates(st.levelBuf); cands.size() > 1) {
+                // 文件夹里有多个谱：说清楚，别只报"加载失败"
+                std::string msg = "This folder holds " + std::to_string(cands.size()) + " charts - pick one: ";
+                for (size_t i = 0; i < cands.size() && i < 3; i++) {
+                    if (i) msg += ", ";
+                    msg += std::filesystem::path(cands[i]).filename().string();
+                }
+                if (cands.size() > 3) msg += ", ...";
+                st.lastError = msg;
+                return;                                   // 不启动 preload
+            } else {
+                st.lastError.clear();
+            }
             if (st.preloadEnabled) {
                 // Start background preload (parse + timeline)
                 st.preloadProgress.percent.store(0.0f);
@@ -111,8 +125,13 @@ void drawWelcomePage(State& st, const Chrome& ch) {
             std::string dir = selectFolderDialog("Select export folder", defDir);
             if (!dir.empty()) {
                 st.cfg.levelPath = resolveLevelPath(st.levelBuf);
-                if (st.cfg.levelPath != st.levelBuf)
+                if (st.cfg.levelPath != st.levelBuf) {
                     snprintf(st.levelBuf, sizeof(st.levelBuf), "%s", st.cfg.levelPath.c_str());
+                } else if (const auto cands = listLevelCandidates(st.levelBuf); cands.size() > 1) {
+                    st.lastError = "This folder holds " + std::to_string(cands.size())
+                                 + " charts - pick one inside it.";
+                    return;                               // 不进入导出
+                }
                 st.cfg.exportDir = dir;
                 st.cfg.enableHitsounds = true;
                 st.cfg.exportHitsounds = true;

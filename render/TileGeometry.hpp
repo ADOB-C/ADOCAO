@@ -28,3 +28,6 @@ void pushType(std::vector<float>& c, float type, int n);
 // Geometry generators (local-space, origin-centered)
 void createCircle(float cx, float cy, float radius, float type, Scratch& sc, int res = 32);
 void createTileMesh(float startAngle, float endAngle, Scratch& sc);
+// 中旋砖（angleData=999）：五边形——“方块身体 + 朝来路的尖角”，沿入砖方向 a1 摆放。
+// 不是 createTileMesh(a,a)（那是圆+方块，像发卡弯）。
+void createMidSpinMesh(float a1, Scratch& sc);

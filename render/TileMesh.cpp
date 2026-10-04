@@ -172,7 +172,7 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex, co
 
         CachedGeo ng;
         if(!cached){
-            sc.clear(); mid?createTileMesh(eA,eA,sc):createTileMesh(sA,eA,sc);
+            sc.clear(); mid?createMidSpinMesh(sA,sc):createTileMesh(sA,eA,sc);
             size_t vc=sc.verts.size()/3; ng.interleaved.reserve(vc*4);
             for(size_t vi=0;vi<vc;vi++){ng.interleaved.push_back(sc.verts[vi*3]);ng.interleaved.push_back(sc.verts[vi*3+1]);
             ng.interleaved.push_back(sc.verts[vi*3+2]);ng.interleaved.push_back(sc.types[vi]);}

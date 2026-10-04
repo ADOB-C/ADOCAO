@@ -20,6 +20,38 @@ void createCircle(float cx, float cy, float radius, float type,
     sc.indices.insert(sc.indices.end(), {ci, ci+(unsigned)res, ci+1});
 }
 
+// 中旋砖（angleData=999）的网格：**五边形**。
+//
+// 参考实现三处一致（同一支代码的传承，不是三方独立验证）：
+//   StArray/A4GDX      Tile.java          CreateMidSpinMesh(a1)
+//   adofaiex/AdoCpp    Tile.cpp           createMidSpinMesh(width, a1, …)  — 注释写明 "Thanks for StArray's code"
+//   adofaiex/Re_ADOJAS mesh_reserve.ts    createMidSpinMesh(angle)         — 同上，TS 版
+// 形状：以 a1（入砖方向 = 上一砖 direction-180）为轴，0..length 是宽 2*width 的方块，
+// 再向来路伸出一个 depth = width 的尖角，整体沿 -a1 平移 0.04。
+// 注意 length 的**起点等于 width**（半长 0.275，不是普通砖的 0.5）：三家参考里中旋砖都比普通砖短。
+// 7 顶点 / 3 三角形的顺序三家一致；描边层是整体各加 OUTLINE 的同形状。
+void createMidSpinMesh(float a1, Scratch& sc) {
+    float width = TILE_WIDTH, length = TILE_WIDTH;
+    const float rad = a1 * 3.14159265f / 180.0f;
+    const float m1 = std::cos(rad), m2 = std::sin(rad);
+    const float mx = -m1 * 0.04f, my = -m2 * 0.04f;
+
+    auto emit = [&](float w, float l, float type) {
+        unsigned c = (unsigned)sc.verts.size() / 3;
+        const float px[7] = { l*m1 + w*m2, l*m1 - w*m2, -w*m2,  w*m2, -w*m1,  w*m2, -w*m2 };
+        const float py[7] = { l*m2 - w*m1, l*m2 + w*m1,  w*m1, -w*m1, -w*m2, -w*m1,  w*m1 };
+        for (int i = 0; i < 7; i++)
+            sc.verts.insert(sc.verts.end(), {mx + px[i], my + py[i], 0.0f});
+        pushType(sc.types, type, 7);
+        sc.indices.insert(sc.indices.end(), {c, c+1, c+2, c+2, c+3, c, c+4, c+5, c+6});
+    };
+
+    width += OUTLINE; length += OUTLINE;
+    emit(width, length, 0.0f);          // 描边（黑）
+    width -= OUTLINE * 2; length -= OUTLINE * 2;
+    emit(width, length, 1.0f);          // 填充（白）
+}
+
 void createTileMesh(float startAngle, float endAngle, Scratch& sc) {
     float width = TILE_WIDTH, length = TILE_LENGTH;
     float m11=std::cos(startAngle*3.14159265f/180), m12=std::sin(startAngle*3.14159265f/180);

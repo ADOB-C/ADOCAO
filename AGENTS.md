@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`
-- 待办（已筛选）：`TODO.md`（未完成 9 条 + 遥远的未来：MoveTrack）
+- 待办（已筛选）：`TODO.md`（未完成清单 + 遥远的未来：MoveTrack）
 - 已彻底删除：GPU compute culling（2.0.0 起不需要，勿再引入）
 - 脚本：`scripts/push-ci.sh`（push → gh run watch；`--watch` 默认输出平台耗时/产物）
   `scripts/run.sh --debugger` | `scripts/release.sh`（支持 x.y.z-AlphaN/-BetaN/-RcN）
@@ -465,6 +465,32 @@ Sleep-based: `sleep_for(remaining - 1ms)` + spin last 1ms for precision. 320 FPS
 
 ### Event icons
 Twirl (purple), SetSpeed up (red), SetSpeed down (blue). Per-tile icon instances with depth-sorted Z.
+
+### 砖块几何 / 中旋砖（angleData=999）
+砖块 mesh 在 `render/TileGeometry.cpp`（`createTileMesh(sa, ea, sc)` 普通砖、`createMidSpinMesh(a1, sc)` 中旋砖），
+分批/缓存/实例化在 `render/TileMesh.cpp`（`GeoKey(round(sa*100), round(ea*100), mid)` → shape group）。
+角度约定：`sa = 上一砖 direction − 180`（= Re_ADOJAS 的 `pred`），`ea = 本砖 direction`；中旋砖的网格**只依赖 sa**。
+
+中旋砖 = **五边形**：以 `a1 = sa` 为轴，`0..0.275` 是宽 0.55 的方块（半长 = 半宽 = `TILE_WIDTH`，比普通砖的 0.5 短），
+再向来路伸出 depth = 0.275 的**尖角**，整体沿 −a1 平移 0.04；7 顶点 / 3 三角形；描边层 = 各 +OUTLINE。
+- **尖角是正确的**（2026-10 确认），别去找"圆角五边形 / 原版 curvaturePoints=3"版本：全站 `gh search code "curvaturePoints"` 0 命中，
+  AdoCpp 的 `m_interpolationLevel` 传进 `createMidSpinMesh` 后根本没用。
+- 参考实现三家一致但**同源**（不是三方独立验证）：`StArray/A4GDX` Java → `adofaiex/AdoCpp` C++（注释 "Thanks for StArray's code"）→ `adofaiex/Re_ADOJAS` TS。
+- 旧实现是 `mid ? createTileMesh(eA,eA,sc)`（`ang == 0` 分支 = 圆 r=0.30 + 方块，看着像"大圆+菱形/发卡弯"），已删除。
+- 谱面里中旋是 `angleData` 里的**数字 999**（不是 `"!"`；`"!"` 只是编辑器的显示/`LevelData` 字符映射）。
+  本地实测：The Moon - Coal 1307 个、Singularity 442、Won't You Make a Song with Me 11、Fledgling 9。
+
+**怎么"实际看"**（本轮就是这么验的，别再靠脑补）：
+1. 几何层：`clang++ -std=c++20 -I render /tmp/…/dump.cpp render/TileGeometry.cpp` → 顶点 JSON → SVG → 无头 Chromium 截图读图；
+2. 渲染层：`./build/ADOCAO <谱> --auto-play --fullscreen` + `screencapture -x`；最省事的验证谱是几层里放一个中旋，
+   下面这段可以**直接存成 .adofai**（第 2 层中旋，合法 JSON，别再加省略号）：
+   ```json
+   {"angleData":[0,999,0,0,0,0],"settings":{"version":15,"bpm":60,"offset":0,"trackColor":"debb7b","backgroundColor":"000000"}}
+   ```
+   （文档里的示例谱也是代码：改完必须过 `json.loads` + `./build/tests/adocao_level_parse_test <file>`。
+   本轮真踩过——先写成带 `…` 的假 JSON，谁复制谁中招。）
+3. 对拍：同一张谱用 Playwright 喂给 Re_ADOJAS 编辑器首页的 `input[type=file]`（`.adofai`），两边画出来应当一致。
+   注意 Re_ADOJAS 前端是 **HashRouter**：`http://127.0.0.1:3144/#/editor`，`/editor` 只会给你首页。
 
 ### Highlight
 Selected tile drawn with inverted colors via dedicated highlight shader (`1.0 - vColor` in fragment shader). Same vertex layout as tile shader, reads per-instance colors.

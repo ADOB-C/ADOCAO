@@ -10,8 +10,7 @@
   - 蓝图决策 8/9：只做静态；颜色逻辑归 render；几十万事件走 GPU/GLSL。
 
 ### 渲染
-- [ ] 中旋（angleData=999）渲染：应为圆角五边形（原版 curvaturePoints=3），当前大圆+菱形像发卡弯
-  - 小改；随几何 GLSL 化处理（蓝图决策 10）。
+（无 —— 中旋砖已完成，见文末）
 
 ### 功能
 - [x] 无头出图（地图全景）：`--map out.png [--map-size WxH] [--map-bg HEX|transparent]`
@@ -58,6 +57,11 @@
 - [x] depthWrite + renderOrder (Z-depth: far=200, tile Z 0~9, 755K depth steps)
 - [x] `setPoints` trail: buffer under-allocation fixed (segsPerPoint=4 factor)
 - [x] Multithreaded CPU culling (>= 64 groups → std::async parallel)
+- [x] 中旋砖（angleData=999）：五边形（0..0.275 的方块 + 朝来路 0.275 的**尖角**，沿 −a1 平移 0.04）
+      —— `render/TileGeometry.cpp::createMidSpinMesh(a1, sc)`，a1 = 上一砖 direction−180；
+      参考 A4GDX → AdoCpp → Re_ADOJAS 的 `createMidSpinMesh`（同源）；**尖角是对的**（已确认，别去找"圆角/curvaturePoints"版本）。
+      旧实现 `createTileMesh(eA,eA)`（ang==0 分支 = 圆 r=0.30 + 方块，"大圆+菱形像发卡弯"）已删除。
+      注意：本地谱的中旋是**数字 999**（The Moon - Coal 1307 个、Singularity 442 个），不是 `"!"`
 
 ### 功能
 - [x] JSON cleaner: Python literals, missing commas

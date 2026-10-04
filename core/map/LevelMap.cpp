@@ -58,6 +58,22 @@ void drawSegment(std::vector<uint8_t>& img, int W, int H,
     }
 }
 
+void drawSegmentHard(std::vector<uint8_t>& img, int W, int H,
+                     double x0, double y0, double x1, double y1, const Rgba& c) {
+    // 无 AA 的 1 px 线：沿长轴每步点亮**一个**像素（这里不能走 blend —— 见 hardLine 的注释）
+    const double dx = x1 - x0, dy = y1 - y0;
+    const int n = (int)std::ceil(std::max(std::abs(dx), std::abs(dy)));
+    const uint8_t cr = (uint8_t)std::lround(c.r * 255.0f), cg = (uint8_t)std::lround(c.g * 255.0f);
+    const uint8_t cb = (uint8_t)std::lround(c.b * 255.0f);
+    for (int k = 0; k <= n; ++k) {
+        const double t = n ? (double)k / (double)n : 0.0;
+        const int x = (int)std::floor(x0 + dx * t), y = (int)std::floor(y0 + dy * t);
+        if (x < 0 || y < 0 || x >= W || y >= H) continue;
+        uint8_t* p = &img[((size_t)y * W + x) * 4];
+        p[0] = cr; p[1] = cg; p[2] = cb; p[3] = 255;
+    }
+}
+
 void drawDisc(std::vector<uint8_t>& img, int W, int H, double cx, double cy,
               double r, const Rgba& c) {
     int ix0 = std::max(0, (int)std::floor(cx - r - 1)), ix1 = std::min(W - 1, (int)std::ceil(cx + r + 1));
@@ -144,7 +160,9 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
     }
     const Rgba fill   = unpack(opts.fillRgba);
     const Rgba stroke = unpack(opts.strokeRgba);
-    const double halfW = std::max(0.5, std::min(6.0, scale * opts.thicknessScale * 0.5));
+    const double halfW = opts.lineWidthPx > 0.0f
+        ? std::max(0.5, std::min(64.0, (double)opts.lineWidthPx * 0.5))            // 显式指定线宽
+        : std::max(0.5, std::min(6.0, scale * opts.thicknessScale * 0.5));         // 按 scale 推（下限 0.5）
 
     // ── 第二遍：逐段画（红蓝各一条，顺序即进度 → 渐变）
     glm::dvec2 prevRed, prevBlue, cur;
@@ -152,24 +170,29 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
     for (int i = i0; i <= i1; ++i) {
         PositionSolver::positionAtTile(tl, times[i], i, red, blue);
         if (havePrev) {
-            const double t = (double)(i - i0) / (double)std::max(1, i1 - i0);
             Rgba c = fill;
-            if (opts.gradient) {
+            if (opts.timeColor) {
+                const double tot = std::max(1e-9, tl.totalDuration());
+                c = unpack(timeColorAt(times[(size_t)i] / tot));   // 六档彩虹，按真实谱面时间
+            } else if (opts.gradient) {
+                const double t = (double)(i - i0) / (double)std::max(1, i1 - i0);
                 c.r = stroke.r + (fill.r - stroke.r) * (float)t;
                 c.g = stroke.g + (fill.g - stroke.g) * (float)t;
                 c.b = stroke.b + (fill.b - stroke.b) * (float)t;
             }
             const glm::dvec2 a = toPx(prevRed), b = toPx(red);
-            drawSegment(out, (int)W, (int)H, a.x, a.y, b.x, b.y, halfW, c);
+            if (opts.hardLine) drawSegmentHard(out, (int)W, (int)H, a.x, a.y, b.x, b.y, c);
+            else               drawSegment(out, (int)W, (int)H, a.x, a.y, b.x, b.y, halfW, c);
             if (opts.drawBlue) {
                 const glm::dvec2 ab = toPx(prevBlue), bb = toPx(blue);
-                drawSegment(out, (int)W, (int)H, ab.x, ab.y, bb.x, bb.y, halfW, c);
+                if (opts.hardLine) drawSegmentHard(out, (int)W, (int)H, ab.x, ab.y, bb.x, bb.y, c);
+                else               drawSegment(out, (int)W, (int)H, ab.x, ab.y, bb.x, bb.y, halfW, c);
             }
         }
         prevRed = red; prevBlue = blue; havePrev = true;
     }
 
-    if (opts.markers) {
+    if (opts.markers && !opts.timeColor) {   // 彩虹已用颜色表达时间 → 起止点多余
         glm::dvec2 r0, b0, r1, b1;
         PositionSolver::positionAtTile(tl, times[(size_t)i0], i0, r0, b0);
         PositionSolver::positionAtTile(tl, times[(size_t)i1], i1, r1, b1);

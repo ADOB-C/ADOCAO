@@ -10,6 +10,7 @@ add_library(adocao_core STATIC
     timeline/PositionSolver.cpp
     timeline/PlaybackClock.cpp
     map/LevelMap.cpp
+    map/PngStream.cpp
 )
 
 target_include_directories(adocao_core PUBLIC ${CMAKE_SOURCE_DIR})

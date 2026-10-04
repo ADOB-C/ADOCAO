@@ -8,7 +8,9 @@
 
 int main(int argc, char* argv[]) {
     bool debug = false;
-    std::string mapOut, mapSize, mapBg;
+    std::string mapOut, mapSize, mapBg, mapTiles, mapNativeAll, mapStitchDir, mapStitchOut;
+    bool mapNative = false;
+    int mapBlock = 4096, mapThreads = 0, stitchScale = 1;
     LauncherConfig cli;
 
     // Parse CLI arguments
@@ -59,11 +61,27 @@ int main(int argc, char* argv[]) {
         else if (strcmp(argv[i], "--map") == 0 && i+1<argc)       mapOut = argv[++i];
         else if (strcmp(argv[i], "--map-size") == 0 && i+1<argc)  mapSize = argv[++i];
         else if (strcmp(argv[i], "--map-bg") == 0 && i+1<argc)    mapBg = argv[++i];
+        else if (strcmp(argv[i], "--map-tiles") == 0 && i+1<argc) mapTiles = argv[++i];
+        else if (strcmp(argv[i], "--map-native") == 0)            mapNative = true;
+        else if (strcmp(argv[i], "--map-native-all") == 0 && i+1<argc) mapNativeAll = argv[++i];
+        else if (strcmp(argv[i], "--map-stitch") == 0 && i+1<argc) { mapStitchDir = argv[++i];
+            if (i+1<argc && argv[i+1][0] != '-') mapStitchOut = argv[++i]; }
+        else if (strcmp(argv[i], "--stitch-scale") == 0 && i+1<argc) stitchScale = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--map-block") == 0 && i+1<argc) mapBlock = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--map-threads") == 0 && i+1<argc) mapThreads = atoi(argv[++i]);
     }
 
+    if (!mapStitchDir.empty()) {
+        if (mapStitchOut.empty()) { std::fprintf(stderr, "--map-stitch 需要 <目录> <输出.png>\n"); return 1; }
+        return stitchLevelMapTiles(mapStitchDir, mapStitchOut, stitchScale);
+    }
+    if (!mapNativeAll.empty()) {
+        if (cli.levelPath.empty()) { std::fprintf(stderr, "--map-native-all 需要 --level\n"); return 1; }
+        return exportLevelMapNativeAll(cli.levelPath, mapNativeAll, mapTiles, mapBlock, mapThreads);
+    }
     if (!mapOut.empty()) {
         if (cli.levelPath.empty()) { std::fprintf(stderr, "--map 需要 --level\n"); return 1; }
-        return exportLevelMap(cli.levelPath, mapOut, mapSize, mapBg);   // 不初始化 GL，直接出图
+        return exportLevelMap(cli.levelPath, mapOut, mapSize, mapBg, mapTiles, mapNative);   // 不初始化 GL，直接出图
     }
 
     if (cli.exportHitsounds && !cli.levelPath.empty()) {

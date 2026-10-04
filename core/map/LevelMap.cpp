@@ -50,7 +50,8 @@ void drawSegment(std::vector<uint8_t>& img, int W, int H,
             if (len2 > 1e-12) t = ((px - x0) * dx + (py - y0) * dy) / len2;
             t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
             const double cx = x0 + dx * t, cy = y0 + dy * t;
-            const double d = std::hypot(px - cx, py - cy);
+            const double ddx = px - cx, ddy = py - cy;
+            const double d = std::sqrt(ddx * ddx + ddy * ddy);
             const float cov = (float)(halfW + 0.5 - d);
             if (cov > 0.0f) blend(&img[((size_t)y * W + x) * 4], c, cov);
         }
@@ -63,7 +64,8 @@ void drawDisc(std::vector<uint8_t>& img, int W, int H, double cx, double cy,
     int iy0 = std::max(0, (int)std::floor(cy - r - 1)), iy1 = std::min(H - 1, (int)std::ceil(cy + r + 1));
     for (int y = iy0; y <= iy1; ++y)
         for (int x = ix0; x <= ix1; ++x) {
-            const double d = std::hypot((double)x + 0.5 - cx, (double)y + 0.5 - cy);
+            const double ddx = (double)x + 0.5 - cx, ddy = (double)y + 0.5 - cy;
+            const double d = std::sqrt(ddx * ddx + ddy * ddy);
             const float cov = (float)(r + 0.5 - d);
             if (cov > 0.0f) blend(&img[((size_t)y * W + x) * 4], c, cov);
         }
@@ -86,10 +88,14 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
         return false;
     }
 
+    int i0 = (int)std::max<long long>(0, opts.firstTile);
+    int i1 = opts.lastTile < 0 ? n - 1 : (int)std::min<long long>(n - 1, opts.lastTile);
+    if (i1 <= i0) { LOG_E("Map: 层区间为空（%d..%d）", i0, i1); return false; }
+
     // ── 第一遍：红/蓝两星的世界坐标包围盒（不存点，677 万 tile 也只占常数内存）
     double minX = 1e300, minY = 1e300, maxX = -1e300, maxY = -1e300;
     glm::dvec2 red, blue;
-    for (int i = 0; i < n; ++i) {
+    for (int i = i0; i <= i1; ++i) {
         PositionSolver::positionAtTile(tl, times[i], i, red, blue);
         const double xs[2] = { red.x, blue.x }, ys[2] = { red.y, blue.y };
         const int cnt = opts.drawBlue ? 2 : 1;
@@ -99,15 +105,32 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
         }
     }
     const double bw = std::max(maxX - minX, 1e-9), bh = std::max(maxY - minY, 1e-9);
+    if (opts.nativeScale) {
+        // 1 像素 = 1 世界单位：画布由包围盒决定，放不下就明说需要多大
+        const long long needW = (long long)std::ceil(bw) + 3, needH = (long long)std::ceil(bh) + 3;
+        if (needW <= 0 || needH <= 0 ||
+            (size_t)needW * (size_t)needH > opts.maxPixels) {
+            LOG_E("Map: native 需要 %lld x %lld 像素（%.2f GB 缓冲），超过 maxPixels=%zu —— "
+                  "改用 --map-tiles A-B 缩小层区间", needW, needH,
+                  (double)needW * (double)needH * 4.0 / 1073741824.0, opts.maxPixels);
+            return false;
+        }
+        LOG_I("Map: native 画布 %lld x %lld 像素（1 像素 = 1 单位）", needW, needH);
+    }
     const double padX = opts.width * opts.padding, padY = opts.height * opts.padding;
-    const double scale = std::min((opts.width - 2 * padX) / bw, (opts.height - 2 * padY) / bh);
+    const double scale = opts.nativeScale ? 1.0
+        : std::min((opts.width - 2 * padX) / bw, (opts.height - 2 * padY) / bh);
     const double offX = (opts.width  - bw * scale) * 0.5 - minX * scale;
     const double offY = (opts.height - bh * scale) * 0.5 + maxY * scale;   // 世界 Y 向上 → 图像 Y 向下
     auto toPx = [&](const glm::dvec2& p) {
         return glm::dvec2{ p.x * scale + offX, offY - p.y * scale };
     };
 
-    // ── 画布
+    // ── 画布（native 模式由包围盒定尺寸）
+    if (opts.nativeScale) {
+        const_cast<LevelMapOptions&>(opts).width  = (int)std::ceil(bw) + 3;
+        const_cast<LevelMapOptions&>(opts).height = (int)std::ceil(bh) + 3;
+    }
     const size_t W = (size_t)opts.width, H = (size_t)opts.height;
     out.assign(W * H * 4, 0);
     const Rgba bg = unpack(opts.bgRgba);
@@ -126,10 +149,10 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
     // ── 第二遍：逐段画（红蓝各一条，顺序即进度 → 渐变）
     glm::dvec2 prevRed, prevBlue, cur;
     bool havePrev = false;
-    for (int i = 0; i < n; ++i) {
+    for (int i = i0; i <= i1; ++i) {
         PositionSolver::positionAtTile(tl, times[i], i, red, blue);
         if (havePrev) {
-            const double t = (double)i / (double)(n - 1);
+            const double t = (double)(i - i0) / (double)std::max(1, i1 - i0);
             Rgba c = fill;
             if (opts.gradient) {
                 c.r = stroke.r + (fill.r - stroke.r) * (float)t;
@@ -148,8 +171,8 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
 
     if (opts.markers) {
         glm::dvec2 r0, b0, r1, b1;
-        PositionSolver::positionAtTile(tl, times[0], 0, r0, b0);
-        PositionSolver::positionAtTile(tl, times[(size_t)n - 1], n - 1, r1, b1);
+        PositionSolver::positionAtTile(tl, times[(size_t)i0], i0, r0, b0);
+        PositionSolver::positionAtTile(tl, times[(size_t)i1], i1, r1, b1);
         const double rad = std::max(3.0, std::min(14.0, scale * 1.5));
         const glm::dvec2 s0 = toPx(r0), s1 = toPx(r1);
         drawDisc(out, (int)W, (int)H, s0.x, s0.y, rad, Rgba{0.30f, 0.85f, 0.40f, 1.0f});  // 绿 = 起点

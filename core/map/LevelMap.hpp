@@ -22,6 +22,10 @@ struct LevelMapOptions {
     bool  markers  = true;              // 起点/终点小圆点
     float thicknessScale = 0.6f;        // 线宽 = 每 tile 像素数 * 该系数
     size_t maxPixels = 96ull * 1024 * 1024;  // 内存护栏（宽*高）
+    long long firstTile = 0;            // 只画 [firstTile, lastTile]（含），用来看密集"结"的内部
+    long long lastTile  = -1;           // -1 = 画到最后一层
+    bool  nativeScale = false;          // true = 强制 1 像素 = 1 世界单位（即 1 层 ≈ 1 像素）
+                                        //        放不下就按 maxPixels 失败并说明需要多大
 };
 
 // 成功时 out 为 width*height*4 的 RGBA8（自上而下），返回 true。

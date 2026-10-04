@@ -29,7 +29,7 @@ int main(int argc, char* argv[]) {
                     "Hat","HatHouse","Chuck","Hammer","Shaker","ShakerLoud",
                     "Sidestick","Stick","ReverbClack","ReverbClap","Squareshot",
                     "FireTile","IceTile","PowerUp","PowerDown","VehiclePositive",
-                    "VehicleNegative","Sizzle",nullptr};
+                    "VehicleNegative","Sizzle","raw-pcm",nullptr};
                 bool ok = false;
                 for (int j = 0; valid[j]; j++) if (cli.forceHitsoundType == valid[j]) { ok = true; break; }
                 if (!ok) { LOG_W("Unknown hitsound type '%s', defaulting to Kick", cli.forceHitsoundType.c_str()); cli.forceHitsoundType = "Kick"; }

@@ -32,6 +32,11 @@ public:
     bool preSynthesize(const std::vector<HitsoundTimestampGroup>& groups, float totalDuration,
                        HitsoundProgressCb onProgress = nullptr);
 
+    // raw-PCM 直通（audio-as-chart）：不做 hitsound 混音，把逐采样值线性重采样到设备采样率
+    // 并复制成双声道。sampleRate 来自谱面（bpm/60），通常 44.1k / 48k / 96k / 192k。
+    bool preSynthesizeRawPcm(const std::vector<float>& samples, double sourceRate,
+                             HitsoundProgressCb onProgress = nullptr);
+
     // Read-only access for mixer
     const float* buffer() const { return m_buffer.data(); }
     size_t totalFrames() const { return m_buffer.size() / 2; }

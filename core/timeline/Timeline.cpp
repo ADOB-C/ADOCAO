@@ -296,6 +296,38 @@ double Timeline::totalDuration() const {
     return m_tileStartTimes[n - 1] + 10.0;
 }
 
+bool Timeline::buildRawPcm(std::vector<float>& out, double& sampleRateOut) const {
+    if (!m_level) return false;
+    const LevelData& lv = *m_level;
+    const size_t n = lv.tiles.size();
+    if (n < 2) return false;
+    // 逐层音量必须齐（audio-as-chart 是"每个采样一个覆盖"），否则这不是那种谱
+    if (lv.tileHitsoundVolumes.size() < n) return false;
+    // 1 层 = 1 采样 要求时长严格 60/bpm，所以 BPM 必须恒定（容 0.1%）
+    const double bpm = m_tileBPM.size() > 1 ? (double)m_tileBPM[1] : (double)lv.settings.bpm;
+    if (bpm <= 1.0) return false;
+    for (size_t i = 1; i < m_tileBPM.size(); i++)
+        if (std::fabs((double)m_tileBPM[i] - bpm) > bpm * 1e-3) return false;
+    const double rate = bpm / 60.0;
+    if (rate < 1000.0 || rate > 400000.0) return false;
+
+    out.resize(n);
+    size_t atFullScale = 0;
+    for (size_t i = 0; i < n; i++) {
+        const float v = lv.hasHitsoundVolume((int)i) ? lv.tileHitsoundVolumes[i]
+                                                     : lv.settings.hitsoundVolume;
+        float smp = v * 655.36f / 32768.0f;            // 编码 int16/655.36 的逆映射
+        if (smp > 1.0f) { smp = 1.0f; atFullScale++; }
+        else if (smp < -1.0f) { smp = -1.0f; atFullScale++; }
+        out[i] = smp;
+    }
+    if (atFullScale * 20 > n)                           // >5% 顶满 = 数据可疑，记一笔便于排查
+        LOG_W("raw-pcm: %zu/%zu 个采样顶着满刻度（多半是缺失覆盖落到了默认音量 %.2f）",
+              atFullScale, n, (double)lv.settings.hitsoundVolume);
+    sampleRateOut = rate;
+    return true;
+}
+
 std::vector<double> Timeline::getHitsoundTimestamps() const {
     std::vector<double> timestamps;
     int n = (int)m_tileStartTimes.size();

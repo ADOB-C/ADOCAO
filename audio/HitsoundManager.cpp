@@ -464,6 +464,34 @@ bool HitsoundManager::preSynthesize(const std::vector<HitsoundTimestampGroup>& g
     return true;
 }
 
+bool HitsoundManager::preSynthesizeRawPcm(const std::vector<float>& samples, double sourceRate,
+                                         HitsoundProgressCb onProgress) {
+    // 注意：这条路径不查 m_enabled —— raw-PCM 是"音频本身"，不是打拍音，
+    // 不该被 --no-hitsound 关掉（那种谱没有单独的 music 文件）。
+    if (samples.size() < 2 || sourceRate < 1000.0) return false;
+    const int sr = AUDIO_SAMPLE_RATE;
+    m_sampleRate = sr;
+    const double ratio = (double)sr / sourceRate;              // 源采样率 → 设备采样率
+    const size_t frames = (size_t)((double)samples.size() * ratio);
+    m_buffer.assign(frames * 2, 0.0f);
+    const size_t last = samples.size() - 1;
+    for (size_t f = 0; f < frames; f++) {
+        const double pos = (double)f / ratio;
+        size_t i0 = (size_t)pos; if (i0 > last) i0 = last;
+        const size_t i1 = (i0 < last) ? i0 + 1 : last;
+        const float frac = (float)(pos - (double)i0);
+        const float v = samples[i0] + (samples[i1] - samples[i0]) * frac;
+        m_buffer[f * 2] = v;
+        m_buffer[f * 2 + 1] = v;                               // 源是单声道 → L == R
+    }
+    if (onProgress) onProgress(100.0f);
+    LOG_I("Hitsound: raw-PCM %.0f Hz x %zu 采样 → %d Hz x %zu 帧 (%.1f s)",
+          sourceRate, samples.size(), sr, frames, (double)frames / sr);
+    m_lastMixedHits = 0;
+    m_synthesized = true;
+    return true;
+}
+
 void HitsoundManager::reset() {
     m_readCursor = 0;
     m_playing = true;

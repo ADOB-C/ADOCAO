@@ -268,6 +268,40 @@ std::string streamSelfTest() {
 
 
 Digest loadBuffer(const char* data, size_t length);   // 定义在后面
+
+// 直接语义断言（不是两路对拍）：负音量/零音量必须原样落到 tileHitsoundVolumes。
+// 这条正是被 Unity.wav_rate 暴露的盲区 —— 当时两条解析路径都把负值当成"没写音量"，
+// 于是对拍摘要永远一致，而声音全错。
+std::string rawVolumeSemanticsSelfTest() {
+    const char* text =
+        "{\"angleData\": [0, 90, 180, 0], \"settings\": {\"bpm\": 120, \"hitsoundVolume\": 100}, "
+        "\"actions\": ["
+        "{ \"floor\": 1, \"eventType\": \"SetHitsound\", \"hitsoundVolume\": -33.5 }, "
+        "{ \"floor\": 2, \"eventType\": \"SetHitsound\", \"hitsoundVolume\": -0.5 }, "
+        "{ \"floor\": 3, \"eventType\": \"SetHitsound\", \"hitsoundVolume\": 0 }, "
+        "{ \"floor\": 4, \"eventType\": \"SetHitsound\", \"hitsoundVolume\": 12.25 }, "
+        "{ \"floor\": 5, \"eventType\": \"SetHitsound\" }], \"decorations\": []}";
+    const char* expectFile = "负音量语义";
+    for (int legacy = 0; legacy < 2; legacy++) {
+        if (legacy) setEnv("ADOCAO_FORCE_DOM_PARSE", "1");
+        LevelData lv;
+        const bool ok = lv.loadFromBuffer(text, std::strlen(text));
+        if (legacy) unsetEnv("ADOCAO_FORCE_DOM_PARSE");
+        if (!ok) return std::string(expectFile) + (legacy ? "（旧路径）加载失败" : "（快路径）加载失败");
+        const float want[6] = {0.f, -33.5f, -0.5f, 0.f, 12.25f, 100.f};
+        for (int f = 1; f <= 5; f++) {
+            const float got = lv.hasHitsoundVolume(f) ? lv.tileHitsoundVolumes[(size_t)f] : 100.0f;
+            if (std::fabs(got - want[f]) > 1e-4f) {
+                char buf[160];
+                snprintf(buf, sizeof buf, "%s floor %d: 期望 %.2f，实际 %.2f（%s）",
+                         expectFile, f, want[f], got, legacy ? "旧路径" : "快路径");
+                return buf;
+            }
+        }
+    }
+    return {};
+}
+
 // 单个值远大于半窗：`levelDesc` 是 200 KB 的字符串、每个装饰物里还有 300 B 的字符串。
 // skip / settings / path 三个子扫描器带状态可续，必须能跨窗流过去，而不是"放弃并回退"。
 std::string windowHugeValueSelfTest() {
@@ -431,6 +465,12 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "usage: %s <level file|fixture dir> ...\n", argv[0]);
         return 2;
     }
+
+    if (const std::string e = rawVolumeSemanticsSelfTest(); !e.empty()) {
+        std::printf("FAIL 音量语义断言: %s\n", e.c_str());
+        return 1;
+    }
+    std::printf("ok   音量语义断言（负/零音量原样保留，两条路径都查）\n");
 
     if (const std::string e = windowHugeValueSelfTest(); !e.empty()) {
         std::printf("FAIL 超大单值跨窗用例: %s\n", e.c_str());

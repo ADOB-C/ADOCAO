@@ -1,5 +1,7 @@
 #include "LevelLoader.hpp"
 
+#include "core/util/Logger.hpp"
+
 #include "LauncherWindow.hpp"
 #include "LoadingWindow.hpp"
 #include "FileMap.hpp"
@@ -102,8 +104,16 @@ void runLevelLoading(const LauncherConfig& cfg, LoadingProgress& progress, LoadR
     report(progress, 0.80f, "Synthesizing hitsounds...");
     if (cfg.enableHitsounds) {
         result.hitsounds.init();
-        result.hitsounds.preSynthesize(result.timeline->getHitsoundTimestampGroups(),
-                                       result.timeline->totalDuration());
+        if (isRawPcmType(cfg.forceHitsoundType)) {                 // audio-as-chart：直通，不混音
+            std::vector<float> pcm; double rate = 0.0;
+            if (result.timeline->buildRawPcm(pcm, rate))
+                result.hitsounds.preSynthesizeRawPcm(pcm, rate);
+            else
+                LOG_W("raw-pcm：这张谱没有逐层音量/BPM 不恒定，回退 hitsound 混音");
+        }
+        if (!result.hitsounds.isSynthesized())
+            result.hitsounds.preSynthesize(result.timeline->getHitsoundTimestampGroups(),
+                                           result.timeline->totalDuration());
     }
 
     // Release data no longer needed (angleData, actions, position offsets)

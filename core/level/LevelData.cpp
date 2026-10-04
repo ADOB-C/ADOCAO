@@ -414,6 +414,7 @@ inline bool buildAction(const ActionFields& f, LevelData::FastAction& a, bool& k
     case T::SetHitsound:
         a.strId = g_internOwner ? g_internOwner->internActionStr(f.hitsound) : 0;
         a.val1 = f.hasHitsoundVolume ? f.hitsoundVolume : 0.0f;
+        a.flag = f.hasHitsoundVolume;      // 是否写了音量：负值/0 都是合法值，不能拿 val1>0 猜
         break;
     case T::AnimateTrack:
         a.val1 = f.hasBeatsBehind ? f.beatsBehind : -1.0f;
@@ -1242,6 +1243,7 @@ bool LevelData::parseLegacy(const std::string& jsonStr, ProgressCb onProgress, b
             } else if (act.type == FastAction::SetHitsound) {
                 act.strId = g_internOwner ? g_internOwner->internActionStr(a.HasMember("hitsound") ? std::string(a["hitsound"].GetString()) : std::string()) : 0;
                 act.val1 = a.HasMember("hitsoundVolume") ? a["hitsoundVolume"].GetFloat() : 0.0f;
+                act.flag = a.HasMember("hitsoundVolume");
             } else if (act.type == FastAction::AnimateTrack) {
                 act.val1 = -1.0f; act.val2 = -1.0f; // sentinel: not set
                 if (a.HasMember("trackDisappearAnimation")) act.strId = g_internOwner ? g_internOwner->internActionStr(a["trackDisappearAnimation"].GetString()) : 0;
@@ -1406,7 +1408,7 @@ void LevelData::processActions() {
             tilePositionOffsets[floor] = {a.val1, a.val2, a.flag}; break;
         case FastAction::SetHitsound:
             hsChanges.push_back({floor, actionStr(a).empty() ? settings.hitsound : actionStr(a),
-                                 a.val1 > 0 ? a.val1 : settings.hitsoundVolume}); break;
+                                 a.flag ? a.val1 : settings.hitsoundVolume}); break;
         case FastAction::Bookmark:
             bookmarkFloors.push_back(floor); break;
         case FastAction::AnimateTrack:

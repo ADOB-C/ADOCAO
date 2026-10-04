@@ -251,7 +251,12 @@ int runApplication(bool debugConsole) {
         timeline.build(lvl, true);
         HitsoundManager hm;
         hm.init();
-        if (!hm.preSynthesize(timeline.getHitsoundTimestampGroups(), timeline.totalDuration())) {
+        bool rawOk = false;
+        if (isRawPcmType(cfg.forceHitsoundType)) {
+            std::vector<float> pcm; double rate = 0.0;
+            if (timeline.buildRawPcm(pcm, rate)) rawOk = hm.preSynthesizeRawPcm(pcm, rate);
+        }
+        if (!rawOk && !hm.preSynthesize(timeline.getHitsoundTimestampGroups(), timeline.totalDuration())) {
             LOG_E("Export: pre-synthesis failed");
             glfwTerminate();
             return 1;
@@ -330,8 +335,13 @@ int runApplicationFromCLI(const LauncherConfig& cfg, bool debugConsole) {
         timeline.build(lvl, true);
         HitsoundManager hm;
         hm.init();
+        bool rawOk2 = false;
+        if (isRawPcmType(config.forceHitsoundType)) {
+            std::vector<float> pcm; double rate = 0.0;
+            if (timeline.buildRawPcm(pcm, rate)) rawOk2 = hm.preSynthesizeRawPcm(pcm, rate);
+        }
         auto groups = timeline.getHitsoundTimestampGroups();
-        if (!hm.preSynthesize(groups, timeline.totalDuration())) {
+        if (!rawOk2 && !hm.preSynthesize(groups, timeline.totalDuration())) {
             LOG_E("Export: pre-synthesis failed");
             glfwTerminate();
             return 1;

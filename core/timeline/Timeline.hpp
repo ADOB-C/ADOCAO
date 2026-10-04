@@ -5,6 +5,17 @@
 #include <string>
 #include <vector>
 
+// `--force-hitsound raw-pcm`：命中它时不做 hitsound 混音，直接把逐层音量当 PCM 播。
+inline bool isRawPcmType(const std::string& t) {
+    if (t.size() != 7) return false;
+    const char* k = "raw-pcm";
+    for (size_t i = 0; i < 7; i++) {
+        char c = t[i]; if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        if (c != k[i]) return false;
+    }
+    return true;
+}
+
 // Pure timeline data + precalculation for an .adofai level. This type has no
 // GL/audio/window dependencies and is the part that may be exported/reused by
 // other engines (ADOCAV etc).
@@ -35,6 +46,11 @@ public:
 
     int findTileIndex(double timeInLevel) const;
     double totalDuration() const;
+
+    // audio-as-chart 直通：把"每层音量"当 PCM 采样值导出（1 层 = 1 采样，采样率 = bpm/60）。
+    // 映射与 Song.adofai 的编码严格互逆：编码是 volume = int16 / 655.36 → 采样 = volume * 655.36。
+    // 返回 false = 这张谱不适合直通（没有逐层音量 / BPM 不恒定），调用方应回退到 hitsound 混音。
+    bool buildRawPcm(std::vector<float>& out, double& sampleRateOut) const;
 
     std::vector<double> getHitsoundTimestamps() const;
     std::vector<HitsoundTimestampGroup> getHitsoundTimestampGroups() const;

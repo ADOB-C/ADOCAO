@@ -1,3 +1,4 @@
+#include "app/HitsoundTypes.hpp"
 #include "WizardState.hpp"
 #include "WizardChrome.hpp"
 #include "FileDialogs.hpp"

@@ -107,15 +107,8 @@ inline constexpr std::array<int, 4>         kMsaaSamples = {0, 2, 4, 8};
 inline constexpr std::array<const char*, 5> kResoNames   = {"960x540", "1280x720", "1920x1080", "2560x1440", "3840x2160"};
 inline constexpr std::array<int, 5>         kResoW       = {960, 1280, 1920, 2560, 3840};
 inline constexpr std::array<int, 5>         kResoH       = {540, 720, 1080, 1440, 2160};
-inline constexpr std::array<const char*, 29> kHitsoundTypes = {
-    "Kick","KickHouse","KickChroma","KickRupture",
-    "Snare","SnareHouse","SnareVapor","Clap","ClapHit","ClapHitEcho",
-    "Hat","HatHouse","Chuck","Hammer","Shaker","ShakerLoud",
-    "Sidestick","Stick","ReverbClack","ReverbClap","Squareshot",
-    "FireTile","IceTile","PowerUp","PowerDown","VehiclePositive",
-    "VehicleNegative","Sizzle"
-    "raw-pcm",   // 直通：把逐层音量当 PCM 播（audio-as-chart 谱面）
-};
+// 打拍音类型表在 app/HitsoundTypes.hpp（CLI 与向导共用一份，带编译期元素数守卫）
+
 
 // ---- Page entry points (implemented in app/wizard/Page*.cpp) ----
 void drawWelcomePage(State& st, const Chrome& ch);

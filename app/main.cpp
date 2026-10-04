@@ -1,3 +1,4 @@
+#include "app/HitsoundTypes.hpp"
 #include "Application.hpp"
 #include "LauncherWindow.hpp"
 #include "core/util/Logger.hpp"
@@ -24,14 +25,10 @@ int main(int argc, char* argv[]) {
             if (i+1 < argc && argv[i+1][0] != '-') {
                 cli.forceHitsoundType = argv[++i];
                 // Validate type
-                static const char* valid[] = {"Kick","KickHouse","KickChroma","KickRupture",
-                    "Snare","SnareHouse","SnareVapor","Clap","ClapHit","ClapHitEcho",
-                    "Hat","HatHouse","Chuck","Hammer","Shaker","ShakerLoud",
-                    "Sidestick","Stick","ReverbClack","ReverbClap","Squareshot",
-                    "FireTile","IceTile","PowerUp","PowerDown","VehiclePositive",
-                    "VehicleNegative","Sizzle","raw-pcm",nullptr};
+                // 类型表与向导共用（app/HitsoundTypes.hpp），避免两份清单漂移
+
                 bool ok = false;
-                for (int j = 0; valid[j]; j++) if (cli.forceHitsoundType == valid[j]) { ok = true; break; }
+                for (const char* t : kHitsoundTypes) if (cli.forceHitsoundType == t) { ok = true; break; }
                 if (!ok) { LOG_W("Unknown hitsound type '%s', defaulting to Kick", cli.forceHitsoundType.c_str()); cli.forceHitsoundType = "Kick"; }
             } else {
                 cli.forceHitsoundType = "Kick";

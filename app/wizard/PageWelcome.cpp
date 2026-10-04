@@ -70,6 +70,9 @@ void drawWelcomePage(State& st, const Chrome& ch) {
     if (ImGui::Button("Next", ImVec2(btnW, btnH))) {
         if (levelOk) {
             st.cfg.levelPath = resolveLevelPath(st.levelBuf);
+            // 选中的是文件夹时，把解析出来的谱文件回填到输入框 —— 让用户看得见"到底选了哪个谱"
+            if (st.cfg.levelPath != st.levelBuf)
+                snprintf(st.levelBuf, sizeof(st.levelBuf), "%s", st.cfg.levelPath.c_str());
             st.lastError.clear();
             if (st.preloadEnabled) {
                 // Start background preload (parse + timeline)
@@ -108,6 +111,8 @@ void drawWelcomePage(State& st, const Chrome& ch) {
             std::string dir = selectFolderDialog("Select export folder", defDir);
             if (!dir.empty()) {
                 st.cfg.levelPath = resolveLevelPath(st.levelBuf);
+                if (st.cfg.levelPath != st.levelBuf)
+                    snprintf(st.levelBuf, sizeof(st.levelBuf), "%s", st.cfg.levelPath.c_str());
                 st.cfg.exportDir = dir;
                 st.cfg.enableHitsounds = true;
                 st.cfg.exportHitsounds = true;

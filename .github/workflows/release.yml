@@ -17,7 +17,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+          key: deps-${{ runner.os }}-release-${{ hashFiles('CMakeLists.txt') }}
 
       - uses: msys2/setup-msys2@v2
         with:
@@ -25,14 +25,14 @@ jobs:
           install: >-
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-make
+            mingw-w64-x86_64-ninja
             mingw-w64-x86_64-pkgconf
             git
 
       - name: Configure
         shell: msys2 {0}
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DADOCAO_PORTABLE=ON \
             -DADOCAO_ZOOM_LEVEL=Hyper
 
@@ -56,18 +56,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+          key: deps-${{ runner.os }}-release-${{ hashFiles('CMakeLists.txt') }}
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake make pkg-config \
+          sudo apt-get install -y cmake ninja-build pkg-config \
             libwayland-dev libxkbcommon-dev libgl-dev \
             libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
 
       - name: Configure
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DADOCAO_ZOOM_LEVEL=Hyper
 
       - name: Build
@@ -93,15 +93,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+          key: deps-${{ runner.os }}-release-${{ hashFiles('CMakeLists.txt') }}
 
       - name: Install dependencies
         run: |
-          brew install cmake
+          brew install cmake ninja
 
       - name: Configure
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DADOCAO_ZOOM_LEVEL=Hyper
 
       - name: Build

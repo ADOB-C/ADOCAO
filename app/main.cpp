@@ -1,4 +1,5 @@
 #include "app/HitsoundTypes.hpp"
+#include "core/level/LevelPath.hpp"
 #include "Application.hpp"
 #include "LauncherWindow.hpp"
 #include "core/util/Logger.hpp"
@@ -11,7 +12,7 @@ int main(int argc, char* argv[]) {
     // Parse CLI arguments
     for (int i = 1; i < argc; i++) {
              if (strcmp(argv[i], "--debug") == 0)          debug = true;
-        else if (strcmp(argv[i], "--level") == 0     && i+1<argc) cli.levelPath = argv[++i];
+        else if (strcmp(argv[i], "--level") == 0     && i+1<argc) cli.levelPath = resolveLevelPath(argv[++i]);
         else if (strcmp(argv[i], "--music") == 0     && i+1<argc) cli.musicPath = argv[++i];
         else if (strcmp(argv[i], "--width") == 0     && i+1<argc) cli.resolutionW = atoi(argv[++i]);
         else if (strcmp(argv[i], "--height") == 0    && i+1<argc) cli.resolutionH = atoi(argv[++i]);

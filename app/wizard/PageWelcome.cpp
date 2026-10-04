@@ -1,3 +1,4 @@
+#include "core/level/LevelPath.hpp"
 #include "WizardState.hpp"
 #include "WizardChrome.hpp"
 #include "FileDialogs.hpp"
@@ -68,7 +69,7 @@ void drawWelcomePage(State& st, const Chrome& ch) {
     if (!levelOk) ImGui::BeginDisabled();
     if (ImGui::Button("Next", ImVec2(btnW, btnH))) {
         if (levelOk) {
-            st.cfg.levelPath = st.levelBuf;
+            st.cfg.levelPath = resolveLevelPath(st.levelBuf);
             st.lastError.clear();
             if (st.preloadEnabled) {
                 // Start background preload (parse + timeline)
@@ -106,7 +107,7 @@ void drawWelcomePage(State& st, const Chrome& ch) {
             }
             std::string dir = selectFolderDialog("Select export folder", defDir);
             if (!dir.empty()) {
-                st.cfg.levelPath = st.levelBuf;
+                st.cfg.levelPath = resolveLevelPath(st.levelBuf);
                 st.cfg.exportDir = dir;
                 st.cfg.enableHitsounds = true;
                 st.cfg.exportHitsounds = true;

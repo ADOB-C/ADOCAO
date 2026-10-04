@@ -20,6 +20,8 @@
 // 也可以直接喂真实谱面，例如：
 //   adocao_level_parse_test ~/Documents/Charts/**/*.adofai
 
+#include <fstream>
+#include "core/level/LevelPath.hpp"
 #include "core/level/LevelArchive.hpp"
 #include "core/level/LevelData.hpp"
 
@@ -269,6 +271,38 @@ std::string streamSelfTest() {
 
 Digest loadBuffer(const char* data, size_t length);   // 定义在后面
 
+// 「选中文件夹也能加载」的解析规则：唯一命中才生效，含糊（0 个/多个）必须原样返回。
+std::string levelPathResolveSelfTest() {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path root = fs::temp_directory_path() / "adocao_levelpath_selftest";
+    fs::remove_all(root, ec);
+    fs::create_directories(root / "one", ec);
+    fs::create_directories(root / "many", ec);
+    fs::create_directories(root / "nested" / "chart", ec);
+    std::ofstream(root / "plain.adofai").put('x');
+    std::ofstream(root / "one" / "a.adofai").put('x');
+    std::ofstream(root / "many" / "a.adofai").put('x');
+    std::ofstream(root / "many" / "b.adofai.xz").put('x');
+    std::ofstream(root / "nested" / "chart" / "c.adofai.zst").put('x');
+    struct Case { fs::path in; fs::path want; const char* what; };
+    const Case cases[] = {
+        { root / "plain.adofai", root / "plain.adofai",                      "文件原样返回" },
+        { root / "one",          root / "one" / "a.adofai",                  "目录里唯一的谱" },
+        { root / "nested",       root / "nested" / "chart" / "c.adofai.zst", "往下看一层子目录" },
+        { root / "many",         root / "many",                              "多个命中不猜" },
+        { root / "missing",      root / "missing",                           "不存在原样返回" },
+    };
+    for (const auto& c : cases) {
+        const std::string got = resolveLevelPath(c.in.string());
+        if (got != c.want.string())
+            return std::string(c.what) + "：期望 " + c.want.string() + "，得到 " + got;
+    }
+    fs::remove_all(root, ec);
+    return {};
+}
+
+
 // 直接语义断言（不是两路对拍）：负音量/零音量必须原样落到 tileHitsoundVolumes。
 // 这条正是被 Unity.wav_rate 暴露的盲区 —— 当时两条解析路径都把负值当成"没写音量"，
 // 于是对拍摘要永远一致，而声音全错。
@@ -465,6 +499,12 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "usage: %s <level file|fixture dir> ...\n", argv[0]);
         return 2;
     }
+
+    if (const std::string e = levelPathResolveSelfTest(); !e.empty()) {
+        std::printf("FAIL 路径解析自检: %s\n", e.c_str());
+        return 1;
+    }
+    std::printf("ok   路径解析自检（文件夹→唯一谱；多个/不存在原样返回）\n");
 
     if (const std::string e = rawVolumeSemanticsSelfTest(); !e.empty()) {
         std::printf("FAIL 音量语义断言: %s\n", e.c_str());

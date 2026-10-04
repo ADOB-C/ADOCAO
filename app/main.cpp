@@ -1,12 +1,14 @@
 #include "app/HitsoundTypes.hpp"
 #include "core/level/LevelPath.hpp"
 #include "Application.hpp"
+#include "app/MapExport.hpp"
 #include "LauncherWindow.hpp"
 #include "core/util/Logger.hpp"
 #include <cstring>
 
 int main(int argc, char* argv[]) {
     bool debug = false;
+    std::string mapOut, mapSize, mapBg;
     LauncherConfig cli;
 
     // Parse CLI arguments
@@ -53,6 +55,15 @@ int main(int argc, char* argv[]) {
         // is tens of thousands of tiles on charts that speed up by 1000x).
         else if (strcmp(argv[i], "--trail-tiles") == 0 && i+1<argc) { cli.trailTiles = (float)atof(argv[++i]); cli.trailLengthInTiles = true; }
         else if (strcmp(argv[i], "--export") == 0)                cli.exportHitsounds = true;
+        // 地图全景（真无头）：--map out.png [--map-size WxH] [--map-bg HEX|transparent]
+        else if (strcmp(argv[i], "--map") == 0 && i+1<argc)       mapOut = argv[++i];
+        else if (strcmp(argv[i], "--map-size") == 0 && i+1<argc)  mapSize = argv[++i];
+        else if (strcmp(argv[i], "--map-bg") == 0 && i+1<argc)    mapBg = argv[++i];
+    }
+
+    if (!mapOut.empty()) {
+        if (cli.levelPath.empty()) { std::fprintf(stderr, "--map 需要 --level\n"); return 1; }
+        return exportLevelMap(cli.levelPath, mapOut, mapSize, mapBg);   // 不初始化 GL，直接出图
     }
 
     if (cli.exportHitsounds && !cli.levelPath.empty()) {

@@ -10,6 +10,7 @@ set(ADOCAO_APP_SOURCES
     LoadingWindow.hpp
     FileMap.hpp
     LevelLoader.cpp
+    MapExport.cpp
     LevelLoader.hpp
     GameWindow.cpp
     GameWindow.hpp
@@ -59,7 +60,7 @@ else()
     set_target_properties(adocao PROPERTIES OUTPUT_NAME "ADOCAO")
 endif()
 
-target_include_directories(adocao PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(adocao PRIVATE ${CMAKE_SOURCE_DIR} ${stb_SOURCE_DIR})
 target_link_libraries(adocao PRIVATE
     adocao_core
     adocao_render

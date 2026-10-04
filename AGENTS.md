@@ -352,6 +352,21 @@ hash 与元素个数，逐位相同才通过；`ctest --test-dir build`。`tests
 （这个坑真踩过：fixture 写成 `{"floor":...}` 而真实谱面是 `{ "floor": ...}`，一个多余的 `++p`
 因此只在 fixture 上暴露）。
 
+## 地图全景导出（`--map`，真无头）
+
+`adocao --map out.png [--map-size WxH] [--map-bg HEX|transparent] --level <谱>` 把整条路径
+（红/蓝两星 ✓）按世界坐标包围盒**等比**铺进一张 PNG ✓ —— **不碰 GL、不开窗口、不需要 ffmpeg** ✓，
+所以在没有显示的机器上也能出图 ✓，CI 里也不用 Xvfb ✓。
+
+- 位置取自 `PositionSolver::positionAtTile` ✓（和游戏里同一套解算 ✓），颜色用渲染器默认那对
+  `fill`/`stroke` ✓，起点绿点、终点红点 ✓，沿进度从 stroke 渐变到 fill 便于看走向 ✓。
+- 为巨谱设计：**两遍扫描**（先包围盒、再逐段画 ✓）不保存点位 ✓；逐段解析式抗锯齿 ✓，
+  亚像素的段落也能正确堆叠 ✓。实测 **6,770,913 层 → 4096² 6.3 s / 685 KB** ✓、
+  Singularity 997,665 层 → 2048² 0.9 s ✓。内存护栏 `maxPixels`（默认 96 MPix ✓）。
+- 实现：`core/map/LevelMap.{hpp,cpp}`（纯 core ✓，只有 RGBA8 缓冲 ✓）+ `app/MapExport.cpp`
+  （stb 写 PNG ✓）；CLI 分支在 `app/main.cpp`，**在任何 GL 初始化之前**返回 ✓。
+- 已知可续：按 tile 区间取景（`--map-tiles A-B` ✓）用来看密集"结"的内部结构 ✓。
+
 ## Playback Engine
 
 Direction-based angle algorithm matching ADOFAI-JS `_parseAngle`. BPM propagation via pre-indexed SetSpeed events (O(n+m)). Twirl toggles `isCW` before computing angle — affects current tile. Full rotation only when `delta < 0.0001`. Double precision throughout.

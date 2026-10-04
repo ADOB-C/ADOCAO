@@ -14,7 +14,9 @@
   - 小改；随几何 GLSL 化处理（蓝图决策 10）。
 
 ### 功能
-- [ ] 无头模式渲染关卡（构想）：不弹窗离线把谱面渲染成图/视频（预览图、自动录屏）
+- [x] 无头出图（地图全景）：`--map out.png [--map-size WxH] [--map-bg HEX|transparent]`
+      真无头（不碰 GL/窗口），整条路径等比铺满 —— 6.77M 层的 MYC 出 4096² 只要 6.3 s
+- [ ] 无头视频（构想）：那个 fork `rech114/ADOCAO` 用离屏 FBO + ffmpeg 管道做过（Apache-2.0，可参考）
   - core 侧已有先例：headless 探针直接跑 PositionSolver/sampleTrail（见拖尾调研用的 trailprobe）；缺口在离屏 GL 上下文（headless GLFW / EGL）+ 渲染循环的时间源——无音频设备时不能依赖音频回调推进 m_readCursor，需固定步长驱动
 - [ ] MoveCamera（5 种 relativeTo 模式）——Easing 唯一规划使用方（Camera 缓动）
 - [ ] PositionTrack：relativeTo、rotation、scale、opacity、stickToFloors

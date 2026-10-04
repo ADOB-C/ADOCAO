@@ -26,7 +26,8 @@
   #define MZ_CRC32_INIT           crc32(0L, Z_NULL, 0)
   #define MZ_DEFAULT_WINDOW_BITS  15
 #else
-  #include "miniz.h"
+  #error "分带并行 PNG 写出需要系统 zlib（core/CMakeLists.txt 在找不到时会 FetchContent 取一份）。\
+ miniz 的 mz_deflate/mz_inflate 在这条用法下会吞行、也解不开自己写的流 —— 硬错误好过静默写坏 PNG。"
 #endif
 
 #include <atomic>

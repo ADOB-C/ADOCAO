@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 几何测试（三层，2026-10 起）：`tests/tile_geometry_test.cpp`（中旋五边形不变量 + 调用点护栏）→
   `tests/tile_expansion_test.cpp`（**CPU 逐位**：形状表展开 vs 参考实现，168491 形状 / 3.3e7 坐标）→
   `tests/geom_probe_test.cpp`（**GPU 逐位**：真跑 `assets/shaders/tile.vert`，4.7e7 坐标；无显示时 SKIP）
-  → `scripts/capture-gate.sh store|check`（**像素逐字节**，34 个状态，基线存 /tmp、不入库）
+  → `scripts/capture-gate.sh store|check`（**像素逐字节**，50 个状态，基线存 /tmp、不入库）
 - shader 一致性：`scripts/check-shader-fallback.sh`（`render/Shaders.hpp` 的内嵌回退 GLSL 必须与
   `assets/shaders/*` 逐字相同）
 - 待办（已筛选）：`TODO.md`（未完成清单 + 遥远的未来：MoveTrack）
@@ -328,17 +328,18 @@ What may change (and did):
   （`Timeline.cpp` 的 `delta < 0.0001 → 整圈` 是语义阈值；`Unity.wav_rate` 实测 20 位小数、最小非零角差 4.5e-13°）。
 
 
-**实例流那一条线已经做完了（2026-10）**：1 实例 = 1 砖、几何在 VS 展开、图标并入实例流，
+**实例流那一条线已经做完了（2026-10）**：1 实例 = 1 砖、几何在 VS 展开、图标并入实例流
+（与砖同一次 draw → 整条轨道 1 次 draw），
 常驻从"每实例 ≈ 57 B × 12.93M（砖 6.77M + 图标 6.16M）"变成"**每砖 ≈ 17 B**"：
 形状号 4 + 世界坐标 8 + 图标位 1 + 绘制序 4（`m_drawOrder`，见下）+ 可见位 1（TrackVis 才分配），
 每形状约 130 B（`Shape` 的 12 条记录 + 包围盒）。`--capture` 进程 peak RSS 实测：
 
 | 验收状态 | 形状数 | draw 次数 | peak RSS |
 |---|---|---|---|
-| angles360 fixture | 4838 | 4838 → **2** | 665 → **437 MB**（−34%）|
-| Singularity | 8192 | 8192 → **2** | 1049 → **553 MB**（−47%）|
-| The Moon | 196 | 196 → 2 | 513 → 513 MB |
-| MYC（677 万砖）| 294 | 294 → 2 | 2073 → 1988 MB（−4%）|
+| angles360 fixture | 4838 | 4838 → **1** | 665 → **437 MB**（−34%）|
+| Singularity | 8192 | 8192 → **1** | 1049 → **553 MB**（−47%）|
+| The Moon | 196 | 196 → 1 | 513 → 513 MB |
+| MYC（677 万砖）| 294 | 294 → 1 | 2073 → 1988 MB（−4%）|
 
 **MYC 只降 4% 是这一轮最有价值的信息**：同一个谱面走真无头 `adocao image`（只加载 + 解算、
 完全不建 mesh）时 peak RSS 就是 **1560 MB** —— 也就是说"加载期常驻结构"占了那一帧的 3/4，
@@ -510,11 +511,12 @@ SIMD 剔除（按绘制序切块并行，`render/TileMesh.cpp` 的 `getPool()`�
 否则只按 (dx,dy) 平移相机相对偏移。世界 AABB = 形状局部包围盒（`Shape::localMin/Max`，double）+
 砖位置 —— 与改造前 `cullAndOffsetGroups` 同一条表达式（逐位相同）。
 
-**绘制顺序必须与改造前逐字相同**（`unordered_map<GeoKey>` 迭代序 + 组内下标降序），
+**砖之间的绘制顺序必须与改造前逐字相同**（`unordered_map<GeoKey>` 迭代序 + 组内下标降序），
 因为深度 24 bit 下相邻砖会量化到同一个深度，重叠处谁赢由先后决定：实测反转组内顺序，
 MYC t=30s 那一帧有 102 个像素不同（maxdelta 111）；而给形状表 `reserve()` 改了桶增长序列、
 形状顺序变了，会让 278 个像素从 stroke 变 fill。所以这里**不要**为了"看起来更整洁"去改容器、
 加 reserve、或换排序 —— 门槛会红，而且红的理由不直观。
+（**例外**：图标与拖尾的先后是**故意**改过的 —— 旧行为是 bug，见下面 Event icons 段。）
 
 ### 剔除边距 / TrackVis
 `draw()` 的视锥外扩 20 单位（与改造前相同）。TrackVis 的可见位是**每砖 1 字节**（首次
@@ -533,9 +535,14 @@ bit1 ssUp / bit2 ssDown，判据 = 改造前 `buildIcons()` 的 `tileBPMs[i]/til
 阈值），Z 由 VS 按 part 算：twirl `砖Z+0.002`、SetSpeed `砖Z+0.002+(有twirl?0.003:0.001)`。
 - **独立图标实例集已删除**（改造前 MYC 有 616 万个图标实例，外加 CSR 索引 / 独立可见位 /
   独立颜色 VBO）。现在图标 part 在不亮的砖上塌成一个点 → 零面积 → 不产生片元。
-- **但图标仍然单独一次 draw**（`drawIcons()`），用的是**同一份实例缓冲**：改造前的 pass 顺序是
-  "砖 → 拖尾 → 行星 → 图标"，而拖尾是半透明混合 —— 图标并进砖那次 draw 会被拖尾盖上
-  （实测 The Moon t=1s 有 97 个像素的 alpha 从 255 变 194）。数据是并进来的，draw 分两次。
+- **和砖在同一次 draw 里**（索引表顺序：砖描边 → 砖填充 → 三个图标 part），整条轨道 **1 次 draw**。
+  这里有一个**故意的行为修复**：改造前是"砖 → 拖尾 → 行星 → 图标"，图标画在拖尾**之后** ——
+  图标不透明、拖尾是半透明混合，于是图标会把拖尾擦掉一块（The Moon t=1s 实测 97 个像素的 alpha
+  从 255 变 154~194）。那是 bug（用户 2026-10 指出），所以图标必须**在拖尾之前**画：
+  这个修复让"图标与拖尾重叠"的像素与旧版不同，是**预期内**的差异，基线已按新行为重存。
+  永久覆盖：`tests/capture_states.txt` 里每个图标用例都有 `*_under_trail`（锚在图标砖之后 2 砖
+  + `--trail-tiles 8`，否则默认 0.4 s 的拖尾在 BPM 60 的谱面上扫不到一砖）与 `*_under_planet`；
+  把顺序改回老行为，这 8 个状态会红 13700~29241 个像素（maxdelta ~220）。
 
 ### 砖块几何 / 中旋砖（angleData=999）
 **几何在 GPU 上按"形状表"展开**（2026-10 改造，决策 10 落地）：`render/TileShape.{hpp,cpp}` 把每个
@@ -572,14 +579,14 @@ bit1 ssUp / bit2 ssDown，判据 = 改造前 `buildIcons()` 的 `tileBPMs[i]/til
   `tests/tile_expansion_test.cpp`（CPU 逐位）、`tests/geom_probe_test.cpp`（**GPU 逐位**，读的就是
   生产 `tile.vert`，画点进 RGBA32F FBO 再读回来比）、`scripts/capture-gate.sh`（像素）。
 - `fma()` 要 GLSL 4.00+ → 上下文请求是 **4.1**（`app/GameWindow.cpp`；macOS 上限也是 4.1）。
-  实测 3.3 ↔ 4.1 **像素中性**（34 个验收状态逐字节相同）。不想要 4.1 的退路见 TODO.md。
+  实测 3.3 ↔ 4.1 **像素中性**（当时的 34 个验收状态逐字节相同）。不想要 4.1 的退路见 TODO.md。
 - 跨平台备注：这套镜像结构是**对同一台机器/同一编译器**钉的；换编译器时 1 ULP 级差异在 8-bit
   输出上看不出来（见下），但 CPU/GPU 逐位对拍会红。
 
 **机械护栏**：`tests/tile_geometry_test.cpp`（五边形三条不变量；注意顶点表顺序**不是**边界序，
 边界序是 `0,1,2,4,3`，直接对 0..4 求 shoelace 会得到 `3w²/2`）+ 负向对照（旧几何 `createTileMesh(a,a)`
 必须过不了）+ **调用点护栏**（源码级：`TileMesh.cpp` 必须出现 `TileShape::buildShape`，不许出现
-`createTileMesh(`/`createMidSpinMesh(`、不许出现独立图标实例集；`drawIcons()` 本身不算违规）。
+`createTileMesh(`/`createMidSpinMesh(`、不许出现独立图标实例集，不许出现单独的 `drawIcons()`）。
 看图工具在 `tools/tile-geometry-lab/`（注意它是针对旧的 CPU `TileGeometry` 的，别指望它画新管线）。
 
 **像素门槛怎么用**（改渲染前先存基线，改完 check）：
@@ -589,13 +596,15 @@ scripts/capture-gate.sh store --out /tmp/adocao-capture-baseline   # 改动前
 scripts/capture-gate.sh check --against /tmp/adocao-capture-baseline
 ```
 清单在 `tests/capture_states.txt`（由 `tests/gen_render_fixtures.py` 生成，别手改）：
-`<name>|<chart>|<tile|time>|<值>|<zoom>|<WxH>`。按**砖号**抓帧（`--capture-tile`）而不是按秒 ——
+`<name>|<chart>|<tile|time>|<值>|<zoom>|<WxH>|[额外开关]`。按**砖号**抓帧（`--capture-tile`）而不是按秒 ——
 6 千砖的谱面上按秒给的时刻会随砖时长累积漂移。脚本会断言日志里的 `tile=` 与清单一致（防"抓错时刻"
 这种静默失败），并记录 RSS / `unique shapes` / draw 次数。差异像素统计要 Pillow：
 `ADOCAO_GATE_PY=<带 Pillow 的 python3>`。**基线不入库**（驱动相关），`store` 一次、`check` 多次。
-两条已标定过的灵敏度：反转绘制顺序 → MYC 那帧 278 个像素变（抓得住）；把一处融合拆成 1 ULP 级扰动
-→ **7/7 状态完全相同**（8-bit 输出看不出来）—— 所以 ULP 级的正确性由上面那两个逐位测试负责，
-别指望 PNG。
+三条已标定过的灵敏度：砖的绘制顺序反转 → MYC 那帧 278 个像素变；**图标放回拖尾之后**
+（旧 bug 行为）→ 8 个 `*_under_trail` 状态红 13700~29241 个像素（maxdelta ~220）；
+而把一处融合拆成 1 ULP 级扰动 → **7/7 状态完全相同**（8-bit 输出看不出来）—— 所以 ULP 级的
+正确性由上面那两个逐位测试负责，别指望 PNG。清单支持第 7 个可选字段传额外开关
+（例如 `--trail-tiles 8`，用来让拖尾真的扫到图标）。
 
 **怎么"实际看"**（本轮就是这么验的，别再靠脑补）：
 1. 几何层：`tools/tile-geometry-lab/dump.sh`（编的就是 `render/TileGeometry.cpp` 本人）→ 顶点 JSON →

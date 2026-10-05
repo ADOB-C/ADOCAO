@@ -35,12 +35,14 @@ public:
     void build(const LevelData& level,
                const std::string& fillColorHex = "FFFFFF",
                const std::string& strokeColorHex = "000000");
-    // 两次 draw、**同一份实例流**：砖一次、图标一次。为什么不合成一次：改造前的 pass 顺序是
-    // "砖 → 拖尾 → 行星 → 图标"，图标在拖尾/行星**之后** —— 拖尾是半透明混合，图标挪到前面会
-    // 让拖尾盖在图标上（实测 The Moon t=1s 有 97 个像素的 alpha 从 255 变 194）。
-    // 几何/数据是并进来的（同一个 VAO、同一个实例缓冲、同一张形状表），只是 draw 分两次。
+    // **一次 draw** 画完砖与图标（图标 part 紧跟在自己那块砖的填充之后）—— 指数的索引表
+    // 顺序就是"描边 → 填充 → 三个图标 part"。
+    //
+    // 顺序上的一个**故意修复**：改造前是"砖 → 拖尾 → 行星 → 图标"，图标画在拖尾之后。图标是
+    // 不透明的、拖尾是半透明混合，于是图标会把拖尾"擦"掉一块 —— 那是 bug（用户 2026-10 指出）。
+    // 现在图标跟着砖走，在拖尾之前，拖尾正常盖在图标上。这个修复会让"图标与拖尾重叠"的像素
+    // 与旧版不同（The Moon t=1s / MYC t=30s 等），是**预期内**的差异，基线已按新行为重存。
     void draw(float viewL, float viewR, float viewB, float viewT, double camX, double camY) const;
-    void drawIcons() const;
     void drawHighlightedTile(int tileIdx, double camX, double camY) const;
     void setVisibleThreshold(int lastVisible);
     void updateVisibleRange(int startTile, int endTile, bool visible);

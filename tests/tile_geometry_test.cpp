@@ -158,13 +158,15 @@ std::string callSiteSelfTest(const char* tileMeshCpp) {
     if (src.find("createMidSpinMesh(") != std::string::npos ||
         src.find("createTileMesh(") != std::string::npos)
         return "TileMesh.cpp 里又出现了 CPU 顶点汤（createTileMesh/createMidSpinMesh）";
-    // 图标必须是"跟着砖"的：每砖一个 iconBits + 图标 part 进 canonical 表。
-    // 注意 `drawIcons()` 本身不算违规 —— 它只是同一份实例缓冲上的第二个 draw，
-    // 用来保住改造前的 pass 顺序（砖 → 拖尾 → 行星 → 图标，拖尾是半透明混合）。
+    // 图标必须是"跟着砖"的：每砖一个 iconBits + 图标 part 进 canonical 表，
+    // 而且**和砖在同一次 draw** 里（图标在拖尾之前；拖尾是半透明混合，
+    // 改造前"砖 → 拖尾 → 行星 → 图标"让不透明的图标把拖尾擦掉一块，那是 bug）。
     if (src.find("m_iconGroup") != std::string::npos || src.find("m_iconEntries") != std::string::npos)
         return "TileMesh.cpp 里又出现了独立的图标实例集（m_iconGroups/m_iconEntries）";
     if (src.find("m_iconBits") == std::string::npos)
         return "TileMesh.cpp 里没有 m_iconBits —— 图标没有跟着砖走";
+    if (src.find("drawIcons") != std::string::npos)
+        return "TileMesh.cpp 里又出现了单独的图标 draw 了 —— 图标必须跟砖同一次 draw（在拖尾之前）";
     return {};
 }
 

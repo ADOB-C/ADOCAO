@@ -6,7 +6,7 @@
 #
 # 为什么需要它：`--capture` 是确定性抓帧（不走 wall clock / 音频 / 帧时间反馈），同一组参数
 # 两次跑必须逐字节相同。清单在 tests/capture_states.txt（由 tests/gen_render_fixtures.py 生成）：
-#     <name>|<chart|ABS>|<tile|time>|<值>|<zoom>|<WxH>
+#     <name>|<chart|ABS>|<tile|time>|<值>|<zoom>|<WxH>|[额外开关]
 #   用 `|` 分隔是因为谱面路径里有空格（"The Moon - Coal" 会被空白分隔切碎）。
 # `tile` 走 --capture-tile（按砖，谱面再长也不漂），`time` 是既有的历史基线口径。
 #
@@ -64,9 +64,12 @@ run_capture() {   # name chart mode value zoom WxH → 写 $CAPDIR/$name.png；�
     local W="${size%x*}" H="${size#*x}"
     local chart_abs; chart_abs=$(abs "$chart")
     [ -f "$chart_abs" ] || { echo "SKIP|$name|谱面不存在（机器本地谱面？）"; return 0; }
-    local running; running=$(pgrep -f "build/ADOCAO" | wc -l | tr -d ' ')
+    # 只关心**写同一个日志**的进程（= 直接跑 build/ADOCAO 的那个）。macOS 的
+    # build/ADOCAO.app 是另一条日志路径（~/Library/Logs/ADOCAO/，见 AGENTS），
+    # 而且可能是用户自己开着的，所以不拦它 —— 正则也顺带避开"匹配到自己命令行"。
+    local running; running=$(pgrep -f '(^|/)build/ADOCAO( |$)' | wc -l | tr -d ' ')
     if [ "$running" != "0" ]; then
-        echo "FAIL|$name|跑之前有 $running 个 ADOCAO 进程（日志共享，先收干净）"; return 1
+        echo "FAIL|$name|跑之前有 $running 个 build/ADOCAO 进程（日志共享，先收干净）"; return 1
     fi
     local flag
     case "$mode" in
@@ -75,8 +78,10 @@ run_capture() {   # name chart mode value zoom WxH → 写 $CAPDIR/$name.png；�
         *) echo "FAIL|$name|未知模式 $mode"; return 1 ;;
     esac
     local t0; t0=$(date +%s)
+    local extra_args=()
+    [ -n "$extra" ] && read -r -a extra_args <<< "$extra"
     /usr/bin/time "$TIME_FLAG" "$BIN" "$chart_abs" --capture "$CAPDIR/$name.png" "${flag[@]}" \
-        --capture-zoom "$zoom" --width "$W" --height "$H" --no-hitsound \
+        --capture-zoom "$zoom" --width "$W" --height "$H" --no-hitsound "${extra_args[@]}" \
         >/dev/null 2>"$CAPDIR/$name.time"
     local rc=$?
     local t1; t1=$(date +%s)
@@ -131,10 +136,10 @@ PYEOF
 }
 
 fails=0; oks=0; skips=0
-while IFS='|' read -r name chart mode value zoom size; do
+while IFS='|' read -r name chart mode value zoom size extra; do
     case "$name" in ''|'#'*) continue ;; esac
     if [ -n "$ONLY" ] && ! echo "$name" | grep -qE "$ONLY"; then continue; fi
-    line=$(run_capture "$name" "$chart" "$mode" "$value" "$zoom" "$size")
+    line=$(run_capture "$name" "$chart" "$mode" "$value" "$zoom" "$size" "$extra")
     case "${line%%|*}" in
         SKIP) skips=$((skips + 1)); echo "SKIP $name  ${line#*|*|}"; continue ;;
         FAIL) fails=$((fails + 1)); echo "${line//|/  }"; continue ;;

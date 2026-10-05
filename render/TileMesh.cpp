@@ -168,7 +168,7 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     buildStaticGL();
     m_listValid = false;
     m_listUploaded = false;
-    LOG_D("TileMesh::build: draws=2 (tiles+icons), shapes=%zu, tiles=%d", m_shapes.size(), n);
+    LOG_D("TileMesh::build: draws=1 (tiles+icons 同一次), shapes=%zu, tiles=%d", m_shapes.size(), n);
 }
 
 void TileMesh::buildStaticGL() {
@@ -352,21 +352,8 @@ void TileMesh::draw(float viewL, float viewR, float viewB, float viewT,
     // 形状表绑到纹理单元 0；`uShapeTex` 的默认值就是 0，所以不用设 uniform
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_shapeTex);
-    glDrawElementsInstanced(GL_TRIANGLES, TileShape::kTileIndexCount, GL_UNSIGNED_SHORT, nullptr,
-                            (GLsizei)count);
-    glBindVertexArray(0);
-}
-
-void TileMesh::drawIcons() const {
-    const size_t count = m_listTiles.size();
-    if (count == 0 || !m_vao) return;
-    uploadIfNeeded();
-    glBindVertexArray(m_vao);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_shapeTex);
-    // 索引表中图标三角形紧跟在砖三角形之后（偏移以字节给）
-    glDrawElementsInstanced(GL_TRIANGLES, TileShape::kIconTris * 3, GL_UNSIGNED_SHORT,
-                            (const void*)(size_t)(TileShape::kTileIndexCount * sizeof(uint16_t)),
+    // 一次画完：砖三角形 + 紧跟着的图标三角形（索引表布局，kIndexCount = 426）
+    glDrawElementsInstanced(GL_TRIANGLES, TileShape::kIndexCount, GL_UNSIGNED_SHORT, nullptr,
                             (GLsizei)count);
     glBindVertexArray(0);
 }

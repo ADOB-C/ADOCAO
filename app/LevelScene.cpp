@@ -332,8 +332,7 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     m_tileShader->setVec3("uFillColor", m_fillRGB[0], m_fillRGB[1], m_fillRGB[2]);
     m_tileShader->setVec3("uStrokeColor", m_strokeRGB[0], m_strokeRGB[1], m_strokeRGB[2]);
     m_tileShader->setFloat("uOpacity", 1.0f);
-    m_tileMesh->draw(vl, vr, vb, vt, camera.targetX(), camera.targetY());
-    // （图标在下面：拖尾/行星之后）
+    m_tileMesh->draw(vl, vr, vb, vt, camera.targetX(), camera.targetY());   // 砖 + 图标一次画完
 
     // Trails
     if (m_showTrail && playing && m_redPlanet && m_redPlanet->trail) {
@@ -346,11 +345,6 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
         m_redPlanet->draw(*m_planetShader, camera, camera.targetX(), camera.targetY());
         m_bluePlanet->draw(*m_planetShader, camera, camera.targetX(), camera.targetY());
     }
-
-    // 图标：与砖同一份实例流，但 pass 顺序必须和改造前一致（在拖尾/行星之后，
-    // 因为拖尾是半透明混合 —— 挪到前面会被拖尾盖上）
-    m_tileShader->use();
-    m_tileMesh->drawIcons();
 
     // Highlight
     if (!playing && highlightTile >= 0) {

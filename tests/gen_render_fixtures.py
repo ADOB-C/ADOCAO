@@ -300,13 +300,20 @@ def main():
             return a.marks[mark]
         return a.marks[mark + "_start"] + offset
 
-    def state(name, chart, mode, value, zoom):
-        lines.append("%s|%s|%s|%s|%.1f|1280x720" % (name, chart, mode, value, zoom))
+    def state(name, chart, mode, value, zoom, extra=""):
+        lines.append("%s|%s|%s|%s|%.1f|1280x720|%s" % (name, chart, mode, value, zoom, extra))
 
     FIXTURE = "tests/charts/angles360.adofai"
     for name, mark, off, zoom in fixture_states:
         state(name, FIXTURE, "tile", str(tile_of(mark, off)), zoom)
     for name, mark in icon_states:
+        # 锚在图标砖**之后 2 砖**（zoom 120）：行星在图标前方，拖尾正好从行星往回扫过图标 ——
+        # 专门覆盖"图标不许盖住拖尾"这条。老顺序是"砖 → 拖尾 → 行星 → 图标"，图标不透明、
+        # 会把拖尾擦掉一块（The Moon t=1s 实测 97 个像素的 alpha 从 255 变 154~194），那是 bug。
+        #   `--trail-tiles 8` 是必须的：默认拖尾是 0.4 s，BPM 60 的谱面上不到一砖，扫不到图标
+        state(name + "_under_trail", FIXTURE, "tile", str(a.marks[mark] + 2), 120.0, "--trail-tiles 8")
+        # 锚在图标砖本身：行星（Z=9.5）盖住图标 —— 覆盖另一个方向（近处的东西必须赢）
+        state(name + "_under_planet", FIXTURE, "tile", str(a.marks[mark]), 250.0)
         state(name, FIXTURE, "tile", str(a.marks[mark] - 1), 250.0)
         state(name + "_wide", FIXTURE, "tile", str(a.marks[mark] - 2), 90.0)
     lines.append("")

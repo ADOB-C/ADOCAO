@@ -7,6 +7,12 @@
 #if defined(__APPLE__)
 #include <OpenGL/gl3.h>
 #else
+// glcorearb.h 把 GL 1.0/1.1 的**函数原型**藏在 GL_GLEXT_PROTOTYPES 后面（typedef 不受影响）。
+// 苹果的 gl3.h 是无条件声明的，所以在 macOS 上写 glFinish/glReadPixels 能编过、到 Linux/Windows
+// 就"未声明"。这里显式打开，凡是绕过 glad_ 指针直接用系统符号的地方都能编。
+#ifndef GL_GLEXT_PROTOTYPES
+#define GL_GLEXT_PROTOTYPES 1
+#endif
 #include <GL/glcorearb.h>
 #endif
 
@@ -82,6 +88,11 @@ extern PFNGLDEPTHFUNCPROC    glad_DepthFunc;
 extern PFNGLGETSTRINGPROC glad_GetString;
 extern PFNGLGETERRORPROC  glad_GetError;
 
+// 同步 / 像素回读（GL 1.0/1.1：Windows 的 wglGetProcAddress 拿不到 1.1，GLFW 会兜住）
+extern PFNGLFINISHPROC      glad_Finish;
+extern PFNGLPIXELSTOREIPROC glad_PixelStorei;
+extern PFNGLREADPIXELSPROC  glad_ReadPixels;
+
 bool loadGLCore();
 
 // Map standard GL names to glad_ prefixed pointers
@@ -149,3 +160,7 @@ bool loadGLCore();
 
 #define glGetString             glad_GetString
 #define glGetError              glad_GetError
+
+#define glFinish                glad_Finish
+#define glPixelStorei           glad_PixelStorei
+#define glReadPixels            glad_ReadPixels

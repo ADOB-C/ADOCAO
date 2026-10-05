@@ -68,6 +68,10 @@ PFNGLDEPTHFUNCPROC    glad_DepthFunc;
 PFNGLGETSTRINGPROC glad_GetString;
 PFNGLGETERRORPROC  glad_GetError;
 
+PFNGLFINISHPROC      glad_Finish;
+PFNGLPIXELSTOREIPROC glad_PixelStorei;
+PFNGLREADPIXELSPROC  glad_ReadPixels;
+
 namespace {
 
 bool failed = false;
@@ -154,6 +158,11 @@ bool loadGLCore() {
     // Misc
     loadGL(glad_GetString, "glGetString");
     loadGL(glad_GetError,  "glGetError");
+
+    // 同步 / 像素回读（--capture 用；GL 1.0/1.1，GLFW 的 getProcAddress 在三个平台都能取到）
+    loadGL(glad_Finish,      "glFinish");
+    loadGL(glad_PixelStorei, "glPixelStorei");
+    loadGL(glad_ReadPixels,  "glReadPixels");
 
     return !failed;
 }

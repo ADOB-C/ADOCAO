@@ -10,6 +10,7 @@
 #include "core/util/Logger.hpp"
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -497,8 +498,33 @@ void GameWindow::captureAndExit() {
     int fbW = 0, fbH = 0;
     glfwGetFramebufferSize(m_window, &fbW, &fbH);
     m_camCtrl.update(fbW, fbH, m_targetAspect, true);   // 与主循环同一条相机路径（不播放 → pan 分支，但无输入）
+    // 帧时间：glFinish 前后计时（只统计"这一帧的命令 + 等 GPU 做完"，不含加载/建 mesh）。
+    // 第一帧自带一次性开销（形状表纹理上传、VAO/pipeline 首次绑定），所以想看**稳态**
+    // 帧时间就设 `ADOCAO_CAPTURE_FRAMES=N`：多渲染 N-1 次，取重复帧的中位数当 render_ms，
+    // 第一帧单独报成 first_ms。像素只取最后一次（同一状态重复渲染，逐位相同）。
+    int frames = 1;
+    if (const char* e = std::getenv("ADOCAO_CAPTURE_FRAMES")) { frames = std::atoi(e); }
+    if (frames < 1) frames = 1;
+    if (frames > 200) frames = 200;
+    const auto tRender0 = std::chrono::steady_clock::now();
     render();
     glFinish();
+    const auto tRender1 = std::chrono::steady_clock::now();
+    const double firstMs = std::chrono::duration<double, std::milli>(tRender1 - tRender0).count();
+    std::vector<double> reps;
+    for (int f = 1; f < frames; f++) {
+        const auto a = std::chrono::steady_clock::now();
+        render();
+        glFinish();
+        const auto b = std::chrono::steady_clock::now();
+        reps.push_back(std::chrono::duration<double, std::milli>(b - a).count());
+    }
+    double renderMs = firstMs;
+    if (!reps.empty()) {
+        std::sort(reps.begin(), reps.end());
+        renderMs = reps[reps.size() / 2];
+    }
+    const int dragged = m_scene->drawnInstances();
 
     // 3) 读像素 + 写 PNG（OpenGL 原点在左下，PNG 在左上 → 翻一次）
     const size_t rowBytes = (size_t)fbW * 4;
@@ -509,8 +535,9 @@ void GameWindow::captureAndExit() {
         std::memcpy(&flip[(size_t)y * rowBytes], &px[(size_t)(fbH - 1 - y) * rowBytes], rowBytes);
 
     if (stbi_write_png(m_cfg->capturePath.c_str(), fbW, fbH, 4, flip.data(), (int)rowBytes))
-        LOG_I("capture: %s %dx%d t=%.4fs zoom=%.1f tile=%d req=%d", m_cfg->capturePath.c_str(),
-              fbW, fbH, targetTime, m_cfg->captureZoom, tileIdx, m_cfg->captureTile);
+        LOG_I("capture: %s %dx%d t=%.4fs zoom=%.1f tile=%d req=%d render_ms=%.3f first_ms=%.2f frames=%d drawn=%d",
+              m_cfg->capturePath.c_str(), fbW, fbH, targetTime, m_cfg->captureZoom, tileIdx,
+              m_cfg->captureTile, renderMs, firstMs, frames, dragged);
     else
         LOG_W("capture: 写 PNG 失败 %s", m_cfg->capturePath.c_str());
 }

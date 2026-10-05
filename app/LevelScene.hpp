@@ -48,6 +48,7 @@ public:
     bool pollAsyncBuild();
 
     bool meshReady() const { return m_meshReady; }
+    int drawnInstances() const;   // 开发/诊断：上一次 draw 画了多少个实例
 
     // Apply the latest playback frame to planet positions and trail samples
     // (call only while playing).

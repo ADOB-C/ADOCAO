@@ -173,6 +173,8 @@ bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level) {
     return true;
 }
 
+int LevelScene::drawnInstances() const { return m_tileMesh ? m_tileMesh->lastDrawnInstances() : 0; }
+
 void LevelScene::buildSync(const LevelData& level) {
     m_tileMesh->build(level, m_fillColor, m_strokeColor);
     if (m_redPlanet) {

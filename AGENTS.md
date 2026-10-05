@@ -341,6 +341,11 @@ What may change (and did):
 | The Moon | 196 | 196 → 1 | 513 → 513 MB |
 | MYC（677 万砖）| 294 | 294 → 1 | 2073 → 1988 MB（−4%）|
 
+**帧时间**（`--capture` 的 `render_ms`，30 帧取中位；`ADOCAO_CAPTURE_FRAMES=30`）：
+145 可见实例 0.37 ms → 2509 0.67 ms → 5564 0.95 ms → **17569 1.09 ms**，而 320 fps 的预算是 3.13 ms；
+第一帧另有约 35 ms 的一次性开销（形状表纹理上传 + VAO/pipeline 首次绑定），稳态里没有。
+所以 canonical 表"取并集、白跑不活动 part"这个代价**实测不值得优化**（见 TODO）。
+
 **MYC 只降 4% 是这一轮最有价值的信息**：同一个谱面走真无头 `adocao image`（只加载 + 解算、
 完全不建 mesh）时 peak RSS 就是 **1560 MB** —— 也就是说"加载期常驻结构"占了那一帧的 3/4，
 mesh 只占 ~430 MB。所以"十亿层"的下一仗在**加载路径**（`Tile`/`tileBPMs`/`FastAction`/timeline），

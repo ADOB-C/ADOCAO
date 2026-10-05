@@ -116,6 +116,8 @@ void printHelp(Mode mode, bool all) {
             "\n开发:\n"
             "  --debug                                  调试控制台 + 默认关 hitsounds\n"
             "  --legacy-culling                         暴力 AoS 剔除路径（对拍/性能用）\n"
+            "  --capture <out.png> [--capture-time SEC] [--capture-zoom Z]\n"
+            "                                           确定性抓一帧写 PNG 后退出（像素 diff 用）\n"
             "\n环境变量（测试/调参钩子，正常不用）:\n"
             "  ADOCAO_MIX_THREADS  ADOCAO_FORCE_DOM_PARSE  ADOCAO_PARSE_PIECES  ADOCAO_WINDOW_KB\n"
             "  ADOCAO_WINDOW_REQUIRE  ADOCAO_FAST_REQUIRE  ADOCAO_WHOLE_DECOMPRESS  ADOCAO_STITCH_*\n");
@@ -229,6 +231,9 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--msaa") == 0 && i+1<argc)      cli.msaaSamples = atoi(argv[++i]);
             else if (std::strcmp(a, "--no-exclusive") == 0)          cli.exclusiveFullscreen = false;   // 默认独占全屏
             else if (std::strcmp(a, "--no-trail") == 0)              cli.showTrail = false;
+            else if (std::strcmp(a, "--capture") == 0 && i+1<argc)      cli.capturePath = argv[++i];
+            else if (std::strcmp(a, "--capture-time") == 0 && i+1<argc) cli.captureTime = (float)atof(argv[++i]);
+            else if (std::strcmp(a, "--capture-zoom") == 0 && i+1<argc) cli.captureZoom = (float)atof(argv[++i]);
             else if (std::strcmp(a, "--trail-duration") == 0 && i+1<argc) cli.trailDuration = (float)atof(argv[++i]);
             else if (std::strcmp(a, "--trail-sample-rate") == 0 && i+1<argc) { cli.trailSampleRate = (float)atof(argv[++i]); cli.trailAdaptive = false; }
             else if (std::strcmp(a, "--trail-target-fps") == 0 && i+1<argc) { cli.trailTargetFps = (float)atof(argv[++i]); cli.trailAdaptive = true; }

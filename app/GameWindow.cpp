@@ -13,8 +13,12 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <thread>
 #include <vector>
+
+// 实现（STB_IMAGE_WRITE_IMPLEMENTATION）在 app/MapExport.cpp —— 同一个二进制里只留一份。
+#include "stb_image_write.h"
 
 namespace {
 
@@ -441,7 +445,68 @@ void GameWindow::releaseMeshTemporaries() {
     m_level->tileHasSetSpeed.clear(); m_level->tileHasSetSpeed.shrink_to_fit();
 }
 
+// 确定性抓帧：固定"关卡时刻 + 相机 + 缩放"渲染**一帧**，写 PNG 后退出。
+//
+// 为什么不能用主循环：主循环里 update() 会 `m_playback->updateWallClock(glfwGetTime())`
+// 把时刻重新锚到墙上时钟，还会 `setMeasuredFrameMs()` 喂拖尾自适应 → 两次跑不可能逐字节相同。
+// 这里绕开这一切：直接 startAt 一个绝对时刻，之后**不再调用** update()，只手动做
+// "给场景一帧 + 相机 snap + 抓像素"。所以同一组参数两次跑必须 byte-identical —— 这是
+// `--capture` 存在的唯一理由（给"GPU 实例滑窗"这类改动当像素级验收）。
+void GameWindow::captureAndExit() {
+    // 1) 等网格建好（macOS 同步建；Windows/Linux 可能是共享上下文异步建）
+    for (int i = 0; i < 120000 && !m_scene->meshReady(); i++) {
+        glfwPollEvents();
+        if (m_sharedWindow && m_scene->pollAsyncBuild()) {
+            glfwDestroyWindow(m_sharedWindow);
+            m_sharedWindow = nullptr;
+            releaseMeshTemporaries();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (!m_scene->meshReady()) { LOG_W("capture: 网格没建好，放弃"); return; }
+
+    // 2) 摆到目标时刻：timeInLevel = elapsed/1000 - preRoll，elapsed = (audioPos + audioStartOffset)*1000
+    //    → audioPos = T + preRoll - audioStartOffset。wallClock 传 0：之后不再有 wall clock 参与。
+    const float audioPos = m_cfg->captureTime + m_playback->preRoll() - m_playback->audioStartOffset();
+    m_playback->startAt(0.0, audioPos, 0.0f);
+    m_scene->applyFrame(m_playback->frame(), *m_timeline);
+
+    int tileIdx = m_playback->currentTileIndex();
+    if (tileIdx >= 0 && tileIdx < (int)m_level->tiles.size())
+        m_camCtrl.snapTo(m_level->tiles[tileIdx].position[0], m_level->tiles[tileIdx].position[1]);
+    m_camera.setZoom(m_cfg->captureZoom);
+
+    int fbW = 0, fbH = 0;
+    glfwGetFramebufferSize(m_window, &fbW, &fbH);
+    m_camCtrl.update(fbW, fbH, m_targetAspect, true);   // 与主循环同一条相机路径（不播放 → pan 分支，但无输入）
+    render();
+    glFinish();
+
+    // 3) 读像素 + 写 PNG（OpenGL 原点在左下，PNG 在左上 → 翻一次）
+    const size_t rowBytes = (size_t)fbW * 4;
+    std::vector<unsigned char> px(rowBytes * (size_t)fbH), flip(rowBytes * (size_t)fbH);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, fbW, fbH, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    for (int y = 0; y < fbH; y++)
+        std::memcpy(&flip[(size_t)y * rowBytes], &px[(size_t)(fbH - 1 - y) * rowBytes], rowBytes);
+
+    if (stbi_write_png(m_cfg->capturePath.c_str(), fbW, fbH, 4, flip.data(), (int)rowBytes))
+        LOG_I("capture: %s %dx%d t=%.4fs zoom=%.1f tile=%d", m_cfg->capturePath.c_str(),
+              fbW, fbH, m_cfg->captureTime, m_cfg->captureZoom, tileIdx);
+    else
+        LOG_W("capture: 写 PNG 失败 %s", m_cfg->capturePath.c_str());
+}
+
 void GameWindow::run() {
+    // 开发：确定性抓帧优先于主循环（--capture）
+    if (!m_cfg->capturePath.empty()) {
+        captureAndExit();
+        m_audioEngine->shutdown();
+        m_scene.reset();
+        glfwDestroyWindow(m_window);
+        return;
+    }
+
     double targetFrameTime = 1.0 / 320.0;
 
     while (!glfwWindowShouldClose(m_window)) {

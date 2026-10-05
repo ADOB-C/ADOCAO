@@ -39,6 +39,13 @@ struct LauncherConfig {
     std::string exportDir;         // hitsound export directory (defaults to level dir)
     bool cancelled = false;
 
+    // 开发：确定性抓帧（给"像素 diff"当验收工具）—— 跑到 `--capture-time` 这一个时刻、
+    // 固定相机与缩放，渲染一帧、写 PNG，然后退出。这条路**不走** wall clock / 音频 /
+    // 帧时间反馈，所以同一组参数两次跑出来应当逐字节相同（AGENTS.md 里那条验收要求）。
+    std::string capturePath;       // 空 = 正常进主循环
+    float  captureTime = 0.0f;     // 关卡时间（秒）
+    float  captureZoom = 100.0f;   // 相机缩放（100 = 视野高 12 单位）
+
     // Wizard (5.0.0): result of the "Next" preload step (parse + timeline).
     // Hitsound synthesis + audio are finished after Start in runLevelLoading.
     std::shared_ptr<LevelData> preloadedLevel;

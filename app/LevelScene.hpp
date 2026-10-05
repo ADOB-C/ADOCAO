@@ -81,7 +81,7 @@ private:
     // async build thread must not touch it).
     std::string m_fillColor = "FFFFFF";
     std::string m_strokeColor = "000000";
-    bool m_legacyCulling = false;
+    float m_fillRGB[3] = {1, 1, 1}, m_strokeRGB[3] = {0, 0, 0};
     bool m_showTrail = true;
     float m_trailDuration = 0.4f;
     float m_trailSampleRate = 200.0f;

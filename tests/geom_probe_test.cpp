@@ -1,4 +1,4 @@
-// L2：**GPU 端**逐位对拍 —— 真正跑 `assets/shaders/tile_v2.vert`，把每个 (形状, canonical 槽位)
+// L2：**GPU 端**逐位对拍 —— 真正跑 `assets/shaders/tile.vert`，把每个 (形状, canonical 槽位)
 // 的局部坐标写进 RGBA32F 的 FBO，再 `glReadPixels(GL_FLOAT)` 读回来，与 CPU 的 expand() 逐位比。
 //
 // 为什么 CPU 端（tests/tile_expansion_test.cpp）不够：那边证明的是"算式结构在我这边一致"，
@@ -67,7 +67,7 @@ std::string shaderDir(int argc, char** argv) {
                                       "../assets/shaders/", "../../assets/shaders/"};
     (void)argc; (void)argv;
     for (const auto& c : cands)
-        if (!readFile(c + "tile_v2.vert").empty()) return c;
+        if (!readFile(c + "tile.vert").empty()) return c;
     return "assets/shaders/";
 }
 
@@ -193,10 +193,10 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // ---- 着色器：tile_v2.vert 前面塞 GEOM_PROBE ----
+    // ---- 着色器：tile.vert 前面塞 GEOM_PROBE ----
     const std::string dir = shaderDir(argc, argv);
-    std::string vs = readFile(dir + "tile_v2.vert");
-    if (vs.empty()) { std::printf("✗ 读不到 %stile_v2.vert\n", dir.c_str()); return 1; }
+    std::string vs = readFile(dir + "tile.vert");
+    if (vs.empty()) { std::printf("✗ 读不到 %stile.vert\n", dir.c_str()); return 1; }
     // `#version` 必须是第一行，所以 define 插在它后面
     size_t nl = vs.find('\n');
     vs = vs.substr(0, nl + 1) + "#define GEOM_PROBE 1\n" + vs.substr(nl + 1);

@@ -144,18 +144,27 @@ std::string oldShapeInvariants(const Scratch& sc) {
     return {};
 }
 
-// 调用点护栏（源码级，和 scripts/check-cli-help.sh 一个路子）：几何单测管不到"谁来调它" ——
-// 把 TileMesh.cpp 里的调用退回旧的 `createTileMesh(eA,eA)`，上面三条断言会全绿而游戏照旧画错。
-// 所以这里按禁用串扫一遍源码。要求显式传路径（不许静默跳过：静默回退让测试全绿这个坑踩过）。
+// 调用点护栏（源码级，和 scripts/check-cli-help.sh 一个路子）：几何单测管不到"谁来调它"。
+// 2026-10 起 TileMesh 走 `TileShape::buildShape()`（几何在 GPU 展开），**不再**调用这个文件里的
+// `createTileMesh/createMidSpinMesh` —— 所以护栏改成：TileMesh 必须建形状表，且不许退回 CPU 顶点汤。
+// 要求显式传路径（不许静默跳过：静默回退让测试全绿这个坑踩过）。
 std::string callSiteSelfTest(const char* tileMeshCpp) {
     std::ifstream f(tileMeshCpp);
     if (!f) return std::string("读不到 ") + tileMeshCpp;
     std::string src((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
 
-    if (src.find("createMidSpinMesh(sA") == std::string::npos)
-        return "TileMesh.cpp 里没有 `createMidSpinMesh(sA` —— 中旋砖没有走五边形几何";
-    if (src.find("createTileMesh(eA,eA") != std::string::npos)
-        return "TileMesh.cpp 里又出现了旧的 `createTileMesh(eA,eA`（圆+方块）";
+    if (src.find("TileShape::buildShape") == std::string::npos)
+        return "TileMesh.cpp 里没有 `TileShape::buildShape` —— 砖没有走「形状表 + GPU 展开」";
+    if (src.find("createMidSpinMesh(") != std::string::npos ||
+        src.find("createTileMesh(") != std::string::npos)
+        return "TileMesh.cpp 里又出现了 CPU 顶点汤（createTileMesh/createMidSpinMesh）";
+    // 图标必须是"跟着砖"的：每砖一个 iconBits + 图标 part 进 canonical 表。
+    // 注意 `drawIcons()` 本身不算违规 —— 它只是同一份实例缓冲上的第二个 draw，
+    // 用来保住改造前的 pass 顺序（砖 → 拖尾 → 行星 → 图标，拖尾是半透明混合）。
+    if (src.find("m_iconGroup") != std::string::npos || src.find("m_iconEntries") != std::string::npos)
+        return "TileMesh.cpp 里又出现了独立的图标实例集（m_iconGroups/m_iconEntries）";
+    if (src.find("m_iconBits") == std::string::npos)
+        return "TileMesh.cpp 里没有 m_iconBits —— 图标没有跟着砖走";
     return {};
 }
 
@@ -213,7 +222,7 @@ int main(int argc, char** argv) {
         failed++;
     } else {
         report(callSiteSelfTest(argv[1]),
-               "调用点护栏：TileMesh.cpp 必须调 createMidSpinMesh，且不许退回 createTileMesh(eA,eA)");
+               "调用点护栏：TileMesh.cpp 必须走 TileShape::buildShape，且不许退回 CPU 顶点汤");
     }
 
     std::printf("\n%s\n", failed ? "有失败用例" : "全部通过");

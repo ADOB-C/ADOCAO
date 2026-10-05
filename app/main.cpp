@@ -115,7 +115,6 @@ void printHelp(Mode mode, bool all) {
         std::fprintf(stderr,
             "\n开发:\n"
             "  --debug                                  调试控制台 + 默认关 hitsounds\n"
-            "  --legacy-culling                         暴力 AoS 剔除路径（对拍/性能用）\n"
             "  --capture <out.png> [--capture-time SEC | --capture-tile N] [--capture-zoom Z]\n"
             "                                           确定性抓一帧写 PNG 后退出（像素 diff 用）\n"
             "\n环境变量（测试/调参钩子，正常不用）:\n"
@@ -227,7 +226,6 @@ int main(int argc, char* argv[]) {
                 }
             }
             else if (std::strcmp(a, "--auto-play") == 0)             cli.autoPlay = true;
-            else if (std::strcmp(a, "--legacy-culling") == 0)        cli.legacyCulling = true;
             else if (std::strcmp(a, "--msaa") == 0 && i+1<argc)      cli.msaaSamples = atoi(argv[++i]);
             else if (std::strcmp(a, "--no-exclusive") == 0)          cli.exclusiveFullscreen = false;   // 默认独占全屏
             else if (std::strcmp(a, "--no-trail") == 0)              cli.showTrail = false;

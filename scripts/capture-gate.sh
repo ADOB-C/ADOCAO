@@ -93,6 +93,7 @@ run_capture() {   # name chart mode value zoom WxH → 写 $CAPDIR/$name.png；�
     req=$(echo "$tline" | grep -oE "req=[-0-9]+" | cut -d= -f2)
     shapes=$(grep -oE "[0-9]+ unique shapes" "$LOG" | tail -1 | grep -oE "^[0-9]+")
     groups=$(grep -oE "\-> [0-9]+ shape groups" "$LOG" | tail -1 | grep -oE "[0-9]+")
+    [ -n "${groups:-}" ] || groups=$(grep -oE "draws=[0-9]+" "$LOG" | tail -1 | grep -oE "[0-9]+")
     if [ -z "${tline:-}" ] || [ "$(echo "$tline" | grep -c "$name.png")" = "0" ]; then
         echo "FAIL|$name|日志里没有本次 capture 行（拿到的是: ${tline:-空}）"; return 1
     fi

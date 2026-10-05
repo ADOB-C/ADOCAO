@@ -122,7 +122,8 @@ bool LevelScene::compileShaders() {
     if (!compileShader(*m_tileShader, assetPath("assets/shaders/tile.vert").c_str(), assetPath("assets/shaders/tile.frag").c_str(), Shaders::kTileVertSrc, Shaders::kTileFragSrc)
      || !compileShader(*m_planetShader, assetPath("assets/shaders/planet.vert").c_str(), assetPath("assets/shaders/planet.frag").c_str(), Shaders::kPlanetVertSrc, Shaders::kPlanetFragSrc)
      || !compileShader(*m_trailShader, assetPath("assets/shaders/trail.vert").c_str(), assetPath("assets/shaders/trail.frag").c_str(), Shaders::kTrailVertSrc, Shaders::kTrailFragSrc)
-     || !compileShader(*m_highlightShader, assetPath("assets/shaders/highlight.vert").c_str(), assetPath("assets/shaders/highlight.frag").c_str(), Shaders::kHighlightVertSrc, Shaders::kHighlightFragSrc)) {
+     // 高亮与砖共用同一个 VS（几何展开只有一份实现在 tile.vert 里），只有 FS 不同
+     || !compileShader(*m_highlightShader, assetPath("assets/shaders/tile.vert").c_str(), assetPath("assets/shaders/highlight.frag").c_str(), Shaders::kTileVertSrc, Shaders::kHighlightFragSrc)) {
         LOG_E("Shader compilation failed");
         return false;
     }
@@ -132,7 +133,8 @@ bool LevelScene::compileShaders() {
 bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level) {
     m_fillColor = cfg.trackFillColor;
     m_strokeColor = cfg.trackStrokeColor;
-    m_legacyCulling = cfg.legacyCulling;
+    TileMesh::hexToColor3(m_fillColor, m_fillRGB);
+    TileMesh::hexToColor3(m_strokeColor, m_strokeRGB);
     m_showTrail = cfg.showTrail;
     m_trailDuration = cfg.trailDuration;
     m_trailSampleRate = cfg.trailSampleRate;
@@ -172,7 +174,7 @@ bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level) {
 }
 
 void LevelScene::buildSync(const LevelData& level) {
-    m_tileMesh->build(level, m_fillColor, m_strokeColor, m_legacyCulling);
+    m_tileMesh->build(level, m_fillColor, m_strokeColor);
     if (m_redPlanet) {
         m_redPlanet->buildGPU();
         m_bluePlanet->buildGPU();
@@ -184,7 +186,7 @@ bool LevelScene::beginAsyncBuild(const LevelData& level, GLFWwindow* sharedWindo
     if (!sharedWindow) return false;
     m_buildFuture = std::async(std::launch::async, [this, &level, sharedWindow]() {
         glfwMakeContextCurrent(sharedWindow);
-        m_tileMesh->build(level, m_fillColor, m_strokeColor, m_legacyCulling);
+        m_tileMesh->build(level, m_fillColor, m_strokeColor);
         if (m_redPlanet) {
             m_redPlanet->buildGPU();
             m_bluePlanet->buildGPU();
@@ -324,10 +326,14 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     float vl, vr, vb, vt;
     camera.frustumBounds(vl, vr, vb, vt);
 
-    // Tiles
+    // 轨道（砖 + 图标，一次 draw；颜色走 uniform —— 改造前是逐实例颜色 VBO，28 B/实例）
     m_tileShader->use();
     m_tileShader->setMat4("uVP", glm::value_ptr(camera.viewProj()));
+    m_tileShader->setVec3("uFillColor", m_fillRGB[0], m_fillRGB[1], m_fillRGB[2]);
+    m_tileShader->setVec3("uStrokeColor", m_strokeRGB[0], m_strokeRGB[1], m_strokeRGB[2]);
+    m_tileShader->setFloat("uOpacity", 1.0f);
     m_tileMesh->draw(vl, vr, vb, vt, camera.targetX(), camera.targetY());
+    // （图标在下面：拖尾/行星之后）
 
     // Trails
     if (m_showTrail && playing && m_redPlanet && m_redPlanet->trail) {
@@ -341,15 +347,18 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
         m_bluePlanet->draw(*m_planetShader, camera, camera.targetX(), camera.targetY());
     }
 
-    // Icons
+    // 图标：与砖同一份实例流，但 pass 顺序必须和改造前一致（在拖尾/行星之后，
+    // 因为拖尾是半透明混合 —— 挪到前面会被拖尾盖上）
     m_tileShader->use();
-    m_tileMesh->drawIcons(vl, vr, vb, vt, camera.targetX(), camera.targetY());
+    m_tileMesh->drawIcons();
 
     // Highlight
     if (!playing && highlightTile >= 0) {
         glDisable(GL_DEPTH_TEST);
         m_highlightShader->use();
         m_highlightShader->setMat4("uVP", glm::value_ptr(camera.viewProj()));
+        m_highlightShader->setVec3("uFillColor", m_fillRGB[0], m_fillRGB[1], m_fillRGB[2]);
+        m_highlightShader->setVec3("uStrokeColor", m_strokeRGB[0], m_strokeRGB[1], m_strokeRGB[2]);
         m_tileMesh->drawHighlightedTile(highlightTile, camera.targetX(), camera.targetY());
         glEnable(GL_DEPTH_TEST);
     }

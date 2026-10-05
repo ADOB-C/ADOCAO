@@ -29,7 +29,6 @@ void drawGraphicsPage(State& st, const Chrome& ch) {
     ImGui::SetNextItemWidth(contentW - (ctrlX - padX) - 24.0f * S);
     ImGui::Combo("##msaa", &st.msaaIdx, kMsaaNames.data(), (int)kMsaaNames.size());
     ImGui::Spacing();
-    ImGui::SetCursorPosX(colX); ImGui::Checkbox("Legacy Culling", &st.legacyCulling);
 
     if (drawNavButton(ch, false, true)) {
         st.page = Page::Visuals;

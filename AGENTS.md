@@ -305,10 +305,19 @@ What may change (and did):
 
 **逐层常驻预算（这是"十亿层"目标的真正战场）**：实测 MYC = 1.69 GB / 6.77M 层 ≈ **250 B/层**，
 其中大头按可动性分三类：
-- ✅ **结构性安全（已做 −24 B/层）**：`Tile::index` 删除（−8 B）+ TrackVis 的 16 B/层改成**按需分配**
-  （判据与消费方 `app/LevelScene.cpp` 的 `m_tileVisEnabled` **逐字相同**，那边 `if (!m_tileVisEnabled) return;`
-  之后才读；`tests/level_parse_test.cpp::trackVisAllocationSelfTest()` 把"数组非空 ⟺ 消费方判据"钉死，
-  改判据必须两处一起改）。验证方式：无头 `adocao image` 导出在 4 张谱上**逐字节相同** + peak RSS 下降。
+- ✅ **结构性安全（已做）**：
+  * `Tile::index` 删除（−8 B/层）；
+  * TrackVis 的 16 B/层改成**按需分配**（判据与消费方 `app/LevelScene.cpp` 的 `m_tileVisEnabled` **逐字相同**，
+    那边 `if (!m_tileVisEnabled) return;` 之后才读；`tests/level_parse_test.cpp::trackVisAllocationSelfTest()`
+    把"数组非空 ⟺ 消费方判据"钉死，改判据必须两处一起改）；
+  * **逐实例 AABB（4×double = 32 B/实例）删除**：世界 AABB = 砖位置（`level.tiles[i].position`）+ 组内几何
+    的局部包围盒（每组一份），本来就是**可推导的缓存**；现在剔除时按 SIMD 批现算进 scratch，表达式逐字相同
+    （同样的 double 加法、同样喂 `CullSIMD::test4`）→ 剔除结果与像素**逐位不变**。
+    实测（MYC，`--capture` 进程 peak RSS，同一二进制重复 ±0.6 MB）：**2466.3 → 2062.7 MB（−403.5 MB / −16.4%）**；
+    结构推算 394.5 MB = 12.93M 个实例 × 32 B，差 ~9 MB 是分配器页开销 ✓ 对得上。
+    **注意实例数 ≈ 砖 + 图标**：MYC 是 6.77M 砖 + 6.16M 图标，所以逐实例的那几块（pos/cull/可见/tileIdx/
+    instVbo/colorVbo ≈ 89 B/实例）主要是**图标**在占 —— 下一步窗口化时别只盯砖。
+    验收方式：`--capture` 在 3 个状态（The Moon t=1s zoom=100 / zoom=25、MYC t=30s）与改动前**逐字节相同**。
 - ⚠️ **可证安全（要配套验证）**：timeline → checkpoint+重算（~28–48 B）、actions 只物化窗口内（15–70 B）、
   `Tile.angle/direction` 定点化。验收必须"整条下游逐位/逐样本对拍"（`tileStartTimes`、durations、打拍音波形）。
 - ⛔ **禁止**：`Tile::position` 量化（精度规则 + 巨谱坐标范围），`angleData` 量化到 ≥1e-4 的格子

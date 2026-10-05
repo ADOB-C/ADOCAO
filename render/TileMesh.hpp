@@ -19,10 +19,12 @@ struct ShapeGroup {
     unsigned strokeIndexCount = 0, fillIndexCount = 0, fillIndexByteOffset = 0;
 
     size_t instanceCount = 0;
-    double* cullMinX = nullptr;
-    double* cullMaxX = nullptr;
-    double* cullMinY = nullptr;
-    double* cullMaxY = nullptr;
+    // 逐实例 AABB（原来的 cullMinX/… 四个 double，32 B/实例）是**可推导的缓存**：
+    // 世界 AABB = 砖位置（`level.tiles[i].position`，double）+ 组内几何的局部包围盒
+    // （每组只有一份）。所以只留每组这一份，剔除时按 SIMD 批现算进 scratch —— 同样的
+    // double 加法、同样喂给 `CullSIMD::test4`，因此剔除结果与像素**逐位不变**，
+    // 省下 32 B/实例（677 万层 ≈ 217 MB）。`posX/Y/Z` 是每帧上传用的，保留。
+    double localMinX = 0, localMinY = 0, localMaxX = 0, localMaxY = 0;
     float* posX = nullptr;
     float* posY = nullptr;
     float* posZ = nullptr;
@@ -75,6 +77,9 @@ private:
     mutable std::vector<VisibilityCache> m_visCaches;
     mutable std::vector<VisibilityCache> m_iconVisCaches;
     std::vector<int> m_tileToShape, m_tileToInstance;
+    // 剔除时要现算世界 AABB，所以留一个砖位置数组的指针（build 时取，随关卡存活；
+    // tiles 在加载后不会再被 resize，releaseMemory() 也不动它）。
+    const LevelData::Tile* m_tilePtr = nullptr;
 
     bool m_legacyCulling = false;
     mutable int m_visibleThreshold = 0x7fffffff;

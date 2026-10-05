@@ -23,31 +23,17 @@ static std::unordered_map<GeoKey,CachedGeo,std::hash<GeoKey>> s_geoCache;
 static constexpr size_t MAX_INSTANCES_PER_GROUP = 1000000;
 
 void TileMesh::freeSoA(ShapeGroup& sg) {
-    std::free(sg.cullMinX); sg.cullMinX = nullptr;
-    sg.cullMaxX = sg.cullMinY = sg.cullMaxY = nullptr;
     std::free(sg.posX); sg.posX = nullptr;
     sg.posY = sg.posZ = nullptr;
     sg.instanceCount = 0;
 }
 void TileMesh::allocSoA(ShapeGroup& sg, size_t n) {
     sg.instanceCount = n;
-    size_t cullBytes = n*sizeof(double)*4;
-    size_t posBytes = n*sizeof(float)*3;
-    LOG_D("allocSoA: n=%zu, cull=%.1fMB pos=%.1fMB", n, cullBytes/1048576.0, posBytes/1048576.0);
-    sg.cullMinX = (double*)std::malloc(cullBytes);
-    if (!sg.cullMinX) {
-        LOG_E("allocSoA: FAILED to allocate cullMinX (%.1fMB), n=%zu", cullBytes/1048576.0, n);
-        sg.instanceCount = 0;
-        return;
-    }
-    sg.cullMaxX = sg.cullMinX + n;
-    sg.cullMinY = sg.cullMaxX + n;
-    sg.cullMaxY = sg.cullMinY + n;
+    size_t posBytes = n*sizeof(float)*3;   // 只有每帧上传用的位置；AABB 现算（见 ShapeGroup 注释）
+    LOG_D("allocSoA: n=%zu, pos=%.1fMB", n, posBytes/1048576.0);
     sg.posX = (float*)std::malloc(posBytes);
     if (!sg.posX) {
         LOG_E("allocSoA: FAILED to allocate posX (%.1fMB), n=%zu", posBytes/1048576.0, n);
-        std::free(sg.cullMinX);
-        sg.cullMinX = nullptr; sg.cullMaxX = sg.cullMinY = sg.cullMaxY = nullptr;
         sg.instanceCount = 0;
         return;
     }
@@ -74,6 +60,7 @@ void TileMesh::destroy() {
     if(s.ebo)glDeleteBuffers(1,&s.ebo);if(s.vbo)glDeleteBuffers(1,&s.vbo);if(s.vao)glDeleteVertexArrays(1,&s.vao);freeSoA(s);}
     m_iconGroups.clear(); m_sgIconTileIndices.clear();
     m_iconEntryFirst.clear(); m_iconEntries.clear();
+    m_tilePtr = nullptr;
 }
 bool TileMesh::empty() const { return m_shapes.empty(); }
 
@@ -132,6 +119,7 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex, co
     const auto& tiles = level.tiles;
     if(tiles.size()<2) return;
     int n = (int)tiles.size()-1;
+    m_tilePtr = tiles.data();   // 剔除时现算世界 AABB 要用（tiles 加载后不再变，releaseMemory 也不动它）
     LOG_D("TileMesh::build start: %d tiles, legacyCulling=%d", n, legacyCulling);
 
     auto hexToColor=[](const std::string& hex)->std::tuple<float,float,float>{
@@ -209,6 +197,7 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex, co
                 sg.instances.reserve(cnt);
             } else {
                 allocSoA(sg,cnt);
+                sg.localMinX=lmx;sg.localMinY=lmy;sg.localMaxX=lMx;sg.localMaxY=lMy;   // 每组的局部包围盒（AABB 现算用）
             }
             std::vector<float> po; po.reserve(cnt*3);
             std::vector<float> co; co.reserve(cnt*7);
@@ -223,7 +212,6 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex, co
                 if (legacyCulling) {
                     sg.instances.push_back({wx,wy,wz,fillR,fillG,fillB,outR,outG,outB,1.0f,mx,my,Mx,My});
                 } else {
-                    sg.cullMinX[local]=mx;sg.cullMaxX[local]=Mx;sg.cullMinY[local]=my;sg.cullMaxY[local]=My;
                     sg.posX[local]=(float)wx;sg.posY[local]=(float)wy;sg.posZ[local]=wz;
                 }
                 if(mx<gmx)gmx=mx;if(Mx>gMx)gMx=Mx;if(my<gmy)gmy=my;if(My>gMy)gMy=My;
@@ -259,20 +247,32 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex, co
 
 
 // Culling loop: tests AABBs in batches of CullSIMD::WIDTH.
+// 世界 AABB 不再逐实例常驻（那是 32 B/实例的可推导缓存）：这里按批从"砖位置 + 组内局部
+// 包围盒"现算进 scratch，再喂给 `CullSIMD::test4`。表达式与原实现逐字相同
+// （`local + position`，double），所以剔除结果、绘制像素逐位不变。
 // When C++26 std::simd lands, update CullSIMD::test4 — no changes needed here.
-static void simdCullGroup(const ShapeGroup& sg, double vl, double vr, double vb, double vt, std::vector<int>& out) {
+static void simdCullGroup(const ShapeGroup& sg, const std::vector<int>& groupTiles,
+                          const LevelData::Tile* tiles, double vl, double vr, double vb, double vt,
+                          std::vector<int>& out) {
     size_t n = sg.instanceCount; if (!n) return; out.reserve(n);
+    const double lmX=sg.localMinX, lmY=sg.localMinY, lMX=sg.localMaxX, lMY=sg.localMaxY;
     size_t i = 0;
     constexpr size_t W = CullSIMD::WIDTH;
+    alignas(32) double sMinX[W], sMaxX[W], sMinY[W], sMaxY[W];
     for (; i + (W-1) < n; i += W) {
-        int mask = CullSIMD::test4(sg.cullMinX + i, sg.cullMaxX + i,
-                                    sg.cullMinY + i, sg.cullMaxY + i,
-                                    vl, vr, vb, vt);
+        for (size_t b = 0; b < W; b++) {
+            const auto& p = tiles[(size_t)groupTiles[i + b]].position;
+            sMinX[b] = lmX + p[0]; sMaxX[b] = lMX + p[0];
+            sMinY[b] = lmY + p[1]; sMaxY[b] = lMY + p[1];
+        }
+        int mask = CullSIMD::test4(sMinX, sMaxX, sMinY, sMaxY, vl, vr, vb, vt);
         for (size_t b = 0; b < W; b++)
             if (mask & (1 << (int)b)) out.push_back((int)(i + b));
     }
     for (; i < n; i++) {
-        if (sg.cullMaxX[i] < vl || sg.cullMinX[i] > vr || sg.cullMaxY[i] < vb || sg.cullMinY[i] > vt) continue;
+        const auto& p = tiles[(size_t)groupTiles[i]].position;
+        double mnX = lmX + p[0], mxX = lMX + p[0], mnY = lmY + p[1], mxY = lMY + p[1];
+        if (mxX < vl || mnX > vr || mxY < vb || mnY > vt) continue;
         out.push_back((int)i);
     }
 }
@@ -309,6 +309,7 @@ static void cullAndOffsetGroupsLegacy(const std::vector<ShapeGroup>& groups,
 }
 
 static void cullAndOffsetGroups(const std::vector<ShapeGroup>& groups,
+    const std::vector<std::vector<int>>& groupTiles, const LevelData::Tile* tiles,
     std::vector<TileMesh::VisibilityCache>& caches, size_t start, size_t end,
     double vl, double vr, double vb, double vt, double camX, double camY,
     const std::vector<std::vector<uint8_t>>* visible = nullptr) {
@@ -316,7 +317,7 @@ static void cullAndOffsetGroups(const std::vector<ShapeGroup>& groups,
         const auto& sg=groups[si]; auto& ca=caches[si];
         if(sg.groupMaxX<vl||sg.groupMinX>vr||sg.groupMaxY<vb||sg.groupMinY>vt){ca.indices.clear();ca.offsets.clear();ca.valid=false;continue;}
         bool re=!ca.valid||TileMesh::frustumCheck(ca,(float)vl,(float)vr,(float)vb,(float)vt);
-        if(re){ca.indices.clear();simdCullGroup(sg,vl,vr,vb,vt,ca.indices);ca.vl=vl;ca.vr=vr;ca.vb=vb;ca.vt=vt;ca.valid=true;ca.offsetsValid=false;}
+        if(re){ca.indices.clear();simdCullGroup(sg,groupTiles[si],tiles,vl,vr,vb,vt,ca.indices);ca.vl=vl;ca.vr=vr;ca.vb=vb;ca.vt=vt;ca.valid=true;ca.offsetsValid=false;}
         if (visible && si < visible->size()) {
             const auto& vis = (*visible)[si];
             if (!vis.empty()) {
@@ -346,8 +347,8 @@ void TileMesh::draw(float vL, float vR, float vB, float vT, double cX, double cY
         else cullAndOffsetGroupsLegacy(m_shapes,m_visCaches,0,n,vl,vr,vb,vt,cX,cY,&m_sgVisible);
     } else {
         constexpr size_t PT=64;
-        if(n>=PT){auto& p=getPool();p.parallelFor(0,n,[&](size_t s,size_t e){cullAndOffsetGroups(m_shapes,m_visCaches,s,e,vl,vr,vb,vt,cX,cY,&m_sgVisible);},1);}
-        else cullAndOffsetGroups(m_shapes,m_visCaches,0,n,vl,vr,vb,vt,cX,cY,&m_sgVisible);
+        if(n>=PT){auto& p=getPool();p.parallelFor(0,n,[&](size_t s,size_t e){cullAndOffsetGroups(m_shapes,m_sgTileIndices,m_tilePtr,m_visCaches,s,e,vl,vr,vb,vt,cX,cY,&m_sgVisible);},1);}
+        else cullAndOffsetGroups(m_shapes,m_sgTileIndices,m_tilePtr,m_visCaches,0,n,vl,vr,vb,vt,cX,cY,&m_sgVisible);
     }
     for(size_t si=0;si<n;si++){const auto& sg=m_shapes[si];auto& ca=m_visCaches[si];if(ca.indices.empty())continue;
         glBindVertexArray(sg.vao);glBindBuffer(GL_ARRAY_BUFFER,sg.instVbo);
@@ -386,7 +387,7 @@ void TileMesh::buildIcons(const LevelData& level) {
             size_t cnt=subEnd-subStart;
             uint32_t g = (uint32_t)m_iconGroups.size();   // final index of this subgroup
             ShapeGroup sg; sg.indexCount=sic; sg.fillIndexCount=sic;
-            if (!m_legacyCulling) allocSoA(sg,cnt);
+            if (!m_legacyCulling) { allocSoA(sg,cnt); sg.localMinX=il;sg.localMinY=il;sg.localMaxX=iL;sg.localMaxY=iL; }
             if (m_legacyCulling) sg.instances.reserve(cnt);
             std::vector<float> ip;ip.reserve(cnt*3);std::vector<float> ic;ic.reserve(cnt*7);
             double gmx=1e99,gmy=1e99,gMx=-1e99,gMy=-1e99;
@@ -400,7 +401,6 @@ void TileMesh::buildIcons(const LevelData& level) {
                 if (m_legacyCulling) {
                     sg.instances.push_back({wx,wy,wz,cr,cgv,cb,cr,cgv,cb,1.0f,mx,my,Mx,My});
                 } else {
-                    sg.cullMinX[local]=mx;sg.cullMaxX[local]=Mx;sg.cullMinY[local]=my;sg.cullMaxY[local]=My;
                     sg.posX[local]=(float)wx;sg.posY[local]=(float)wy;sg.posZ[local]=wz;
                 }
                 if(mx<gmx)gmx=mx;if(Mx>gMx)gMx=Mx;if(my<gmy)gmy=my;if(My>gMy)gMy=My;
@@ -452,7 +452,7 @@ void TileMesh::drawIcons(float vL,float vR,float vB,float vT,double cX,double cY
     for(size_t si=0;si<m_iconGroups.size();si++){const auto& sg=m_iconGroups[si];auto& ca=m_iconVisCaches[si];
         if(sg.groupMaxX<vl||sg.groupMinX>vr||sg.groupMaxY<vb||sg.groupMinY>vt){ca.indices.clear();ca.offsets.clear();ca.valid=false;continue;}
         bool re=!ca.valid||frustumCheck(ca,(float)vl,(float)vr,(float)vb,(float)vt);
-        if(re){ca.indices.clear();simdCullGroup(sg,vl,vr,vb,vt,ca.indices);ca.vl=vl;ca.vr=vr;ca.vb=vb;ca.vt=vt;ca.valid=true;ca.offsetsValid=false;}
+        if(re){ca.indices.clear();simdCullGroup(sg,m_sgIconTileIndices[si],m_tilePtr,vl,vr,vb,vt,ca.indices);ca.vl=vl;ca.vr=vr;ca.vb=vb;ca.vt=vt;ca.valid=true;ca.offsetsValid=false;}
         if (si < m_sgIconVisible.size()) {
             const auto& vis = m_sgIconVisible[si];
             if (!vis.empty()) {

@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **库侧公共 API 都在 `adofai::` 里**（2026-10 起，为抽出 ADOFAI.Lib 做准备）：core/audio/render 的
   头文件与实现都包在 `namespace adofai { … }` 里；app/tests 侧的文件用
   `using namespace adofai;`（消费方当然也直接写 `adofai::X`）。两条相关规矩：
-  * 在 app 头里**别在全局前置声明库类型**（会和 `using` 打架变成"ambigous"）——写 `namespace adofai { class X; }`；
+  * 在 app 头里**别在全局前置声明库类型**（会和 `using` 打架变成 "ambiguous"）——写 `namespace adofai { class X; }`；
   * 系统/第三方类型（`ma_device`/`ma_decoder` 之类）的**前置声明必须留在 adofai 之外**，否则声明出来的是
     `adofai::ma_device`，跟真类型成两个东西。
 - 资产查找走 `adofai::assetOptions()`（`core/util/AssetPaths.{hpp,cpp}`）：库默认只认"相对当前目录"、

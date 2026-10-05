@@ -340,6 +340,7 @@ adofai::PositionSolver::positionAt(tl, 12.34, rx, ry, bx, by);  // 任意时刻�
 ```cmake
 # core/CMakeLists.txt（示意）
 add_library(adocao_core STATIC
+    # 2026-10 P1：公共 API 都在 adofai:: 里；资产查找走 core/util/AssetPaths（产品名在 app/AssetSetup.cpp）
     level/LevelData.cpp level/JsonCleaner.cpp
     timeline/Timeline.cpp timeline/PositionSolver.cpp timeline/PlaybackClock.cpp
     util/Logger.cpp util/ThreadPool.cpp util/DataFile.cpp)

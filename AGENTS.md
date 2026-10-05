@@ -299,9 +299,21 @@ What may change (and did):
 3. 流式窗口本身只服务压缩输入 → 对明文 0。
 
 明文加载时间在这轮改动前后**无可测变化**（Tempest 35 ms、MYC 613 ms，3 次跑 ±几 ms）。
-剩下的结构：`Tile` 32 B x 915 万 = 293 MB（`index` 可由在 vector 里的位置隐含 → 可省 37 MB；
-angle/direction 是 float、位置是 double，精度规则不允许再压）、angleData 8 B/层 = 73 MB
-（只在加载后用于 midspin 检测 → 可压成 1 bit/层）、timeline ~28 B/层。
+剩下的结构：`Tile` **24 B**（`index` 已删——它只被写入、没有任何读者，层号就是 `tiles` 里的位置；
+`static_assert(sizeof(Tile) == 24)` 是护栏：1e9 层时每 8 B = 8 GB）、angleData 8 B/层（只在加载后
+用于 midspin 检测）、timeline ~28 B/层。
+
+**逐层常驻预算（这是"十亿层"目标的真正战场）**：实测 MYC = 1.69 GB / 6.77M 层 ≈ **250 B/层**，
+其中大头按可动性分三类：
+- ✅ **结构性安全（已做 −24 B/层）**：`Tile::index` 删除（−8 B）+ TrackVis 的 16 B/层改成**按需分配**
+  （判据与消费方 `app/LevelScene.cpp` 的 `m_tileVisEnabled` **逐字相同**，那边 `if (!m_tileVisEnabled) return;`
+  之后才读；`tests/level_parse_test.cpp::trackVisAllocationSelfTest()` 把"数组非空 ⟺ 消费方判据"钉死，
+  改判据必须两处一起改）。验证方式：无头 `adocao image` 导出在 4 张谱上**逐字节相同** + peak RSS 下降。
+- ⚠️ **可证安全（要配套验证）**：timeline → checkpoint+重算（~28–48 B）、actions 只物化窗口内（15–70 B）、
+  `Tile.angle/direction` 定点化。验收必须"整条下游逐位/逐样本对拍"（`tileStartTimes`、durations、打拍音波形）。
+- ⛔ **禁止**：`Tile::position` 量化（精度规则 + 巨谱坐标范围），`angleData` 量化到 ≥1e-4 的格子
+  （`Timeline.cpp` 的 `delta < 0.0001 → 整圈` 是语义阈值；`Unity.wav_rate` 实测 20 位小数、最小非零角差 4.5e-13°）。
+
 
 **actions 分块并行解析**（`parseActionRegionParallel`）：actions 数组里每个对象彼此独立，
 所以先扫一遍找切分点（只做括号/字符串配对，不做字段提取，0.44 s/GB），再切 N 段并行解析，

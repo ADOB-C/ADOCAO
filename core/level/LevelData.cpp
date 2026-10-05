@@ -1310,7 +1310,6 @@ void LevelData::calculateTilePositions() {
     double curX = 0.0, curY = 0.0;  // double for precision
 
     for (int i = 0; i < n; i++) {
-        tiles[i].index = i;
         tiles[i].position = {curX, curY};
         tiles[i].direction = floats[i];
 
@@ -1322,7 +1321,6 @@ void LevelData::calculateTilePositions() {
     // Append extra tile (infinite rotation reference)
     if (n > 0) {
         Tile extra;
-        extra.index = n;
         double dir = 0.0, length = 1.0;
         if (n > 1) {
             double dx = (double)tiles[n-1].position[0] - (double)tiles[n-2].position[0];

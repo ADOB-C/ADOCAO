@@ -39,12 +39,14 @@ struct LevelData {
         // ... more fields as needed
     };
 
+    // 32 B → 24 B：`index` 从来只被写入（`= i`），没有任何读者 —— 层号就是它在 `tiles` 里的位置。
     struct Tile {
-        int   index = 0;
         float angle = 180.0f;
         float direction = 0.0f;
         std::array<double, 2> position = {0.0, 0.0};
     };
+    // 内存预算护栏：1e9 层时每 8 B 就是 8 GB。加字段前先问"这个值能不能推导/能不能窗口化"。
+    static_assert(sizeof(Tile) == 24, "Tile 膨胀了：先确认这 8 B/层（1e9 层 = 8 GB）是必要的");
 
     Settings settings;
     std::vector<double> angleData;

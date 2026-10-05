@@ -253,6 +253,15 @@ void Timeline::precalculateTiming() {
 
     // Phase 5: Per-tile visibility windows (trackDisappearAnimation)
     // Uses C# ApplyEventsToFloors num5/num6/flag2 speed ratio system
+    //
+    // 只有"这张谱真的用到"才分配这两个数组（16 B/层，1e9 层就是 16 GB）。判据与消费方
+    // app/LevelScene.cpp 的 m_tileVisEnabled **逐字相同**，而那边在 `if (!m_tileVisEnabled) return;`
+    // 之后才读它们 —— 所以这是行为等价的省略：判据为假时旧代码填的是全 ±inf、消费方判定 disabled；
+    // 现在留空，判定同样是 disabled。判据一旦改动，两处必须一起改。
+    const bool needsTrackVis = (m_level->settings.trackDisappearAnimation != "None" ||
+                               m_level->settings.trackAnimation != "None" ||
+                               !m_level->atStates.empty());
+    if (needsTrackVis)
     {
         m_tileDisappearTimes.assign(n, std::numeric_limits<double>::infinity());
         m_tileAppearTimes.assign(n, -std::numeric_limits<double>::infinity());

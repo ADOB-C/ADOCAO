@@ -24,6 +24,7 @@
 #include "core/level/LevelPath.hpp"
 #include "core/level/LevelArchive.hpp"
 #include "core/level/LevelData.hpp"
+#include "core/timeline/Timeline.hpp"
 
 #include <lzma.h>
 #include <zstd.h>
@@ -89,7 +90,8 @@ Digest digest(const LevelData& lv, bool ok) {
         ac.bytes(&x.flag, 1); ac.str(lv.actionStr(x));
     }
     H t;  for (auto& x : lv.tiles) {
-        t.i32(x.index); t.f32(x.angle); t.f32(x.direction); t.bytes(&x.position, sizeof(x.position));
+        // Tile::index 已删（层号 = tiles 里的位置，从来没有读者）—— 摘要里也不再哈希它
+        t.f32(x.angle); t.f32(x.direction); t.bytes(&x.position, sizeof(x.position));
     }
     H s;
     s.i32(lv.settings.version); s.f32(lv.settings.bpm); s.f32(lv.settings.offset);
@@ -341,6 +343,55 @@ std::string rawVolumeSemanticsSelfTest() {
     return {};
 }
 
+// TrackVis（trackDisappearAnimation / AnimateTrack）：Timeline 里那两个 16 B/层的数组现在按需分配。
+// 判据必须与消费方 app/LevelScene.cpp 的 `m_tileVisEnabled` **逐字相同** —— 否则要么"数组空但消费方
+// 以为启用"（越界读），要么"数组在但消费方不用"（白占 16 B/层，1e9 层就是 16 GB）。
+// 这个用例把等价性钉死：`数组非空` ⟺ `消费方判据`，三种谱各查一遍，两条解析路径都查。
+std::string trackVisAllocationSelfTest() {
+    struct Case { const char* name; const char* text; bool want; };
+    const Case cases[] = {
+        {"无动画事件", "{\"angleData\":[0,90,180,0],\"settings\":{\"bpm\":120},\"actions\":[],\"decorations\":[]}", false},
+        {"有 AnimateTrack",
+         "{\"angleData\":[0,90,180,0],\"settings\":{\"bpm\":120},\"actions\":["
+         "{\"floor\":1,\"eventType\":\"AnimateTrack\",\"trackDisappearAnimation\":\"Disappear\"}],\"decorations\":[]}", true},
+        {"settings 开了动画",
+         "{\"angleData\":[0,90,180,0],\"settings\":{\"bpm\":120,\"trackDisappearAnimation\":\"Disappear\"},"
+         "\"actions\":[],\"decorations\":[]}", true},
+    };
+    for (const auto& c : cases) {
+        for (int legacy = 0; legacy < 2; legacy++) {
+            if (legacy) setEnv("ADOCAO_FORCE_DOM_PARSE", "1");
+            LevelData lv;
+            const bool ok = lv.loadFromBuffer(c.text, std::strlen(c.text));
+            if (legacy) unsetEnv("ADOCAO_FORCE_DOM_PARSE");
+            const char* which = legacy ? "（旧路径）" : "（快路径）";
+            if (!ok) return std::string(c.name) + which + "加载失败";
+
+            Timeline tl;
+            tl.build(lv);
+            const bool allocated = !tl.tileDisappearTimes().empty() || !tl.tileAppearTimes().empty();
+            // 逐字复制 app/LevelScene.cpp 的 m_tileVisEnabled
+            const bool consumerEnabled = (lv.settings.trackDisappearAnimation != "None" ||
+                                          lv.settings.trackAnimation != "None" ||
+                                          !lv.atStates.empty());
+            if (allocated != consumerEnabled) {
+                char buf[224];
+                std::snprintf(buf, sizeof buf,
+                              "TrackVis 分配判据与消费方不一致（%s）：数组%s但消费方认为%s",
+                              c.name, allocated ? "已分配" : "为空", consumerEnabled ? "启用" : "禁用");
+                return std::string(buf) + which;
+            }
+            if (consumerEnabled != c.want) {   // 顺带证明用例本身有牙（预期写错就会红）
+                char buf[224];
+                std::snprintf(buf, sizeof buf, "用例预期与消费方判据不符（%s）：预期 %s，实际 %s",
+                              c.name, c.want ? "启用" : "禁用", consumerEnabled ? "启用" : "禁用");
+                return std::string(buf) + which;
+            }
+        }
+    }
+    return {};
+}
+
 // 单个值远大于半窗：`levelDesc` 是 200 KB 的字符串、每个装饰物里还有 300 B 的字符串。
 // skip / settings / path 三个子扫描器带状态可续，必须能跨窗流过去，而不是"放弃并回退"。
 std::string windowHugeValueSelfTest() {
@@ -510,6 +561,12 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::printf("ok   路径解析自检（文件夹→唯一谱；多个/不存在原样返回）\n");
+
+    if (const std::string e = trackVisAllocationSelfTest(); !e.empty()) {
+        std::printf("FAIL TrackVis 按需分配断言: %s\n", e.c_str());
+        return 1;
+    }
+    std::printf("ok   TrackVis 按需分配（数组非空 ⟺ 消费方判据，三种谱 x 两条路径）\n");
 
     if (const std::string e = rawVolumeSemanticsSelfTest(); !e.empty()) {
         std::printf("FAIL 音量语义断言: %s\n", e.c_str());

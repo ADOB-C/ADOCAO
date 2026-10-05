@@ -26,6 +26,7 @@
 #include "TileGeometry.hpp"   // TILE_WIDTH / TILE_LENGTH / OUTLINE / fmodWrap / lerp
 #include "core/level/LevelData.hpp"
 #include <cstdint>
+#include <vector>
 
 namespace TileShape {
 
@@ -49,7 +50,10 @@ constexpr int kTileSlots = kTileSlotsPerLayer * kLayers;     // 124
 constexpr int kIconSlots = 17;                               // 圆心 + 16 环
 constexpr int kTotalSlots = kTileSlots + 3 * kIconSlots;     // 175
 constexpr int kIndexCount = (47 * kLayers + 3 * 16) * 3;     // 426
-constexpr int kTexelsPerShape = kTileParts * kLayers * 2;    // 每条记录 8 float = 2 texel → 24
+constexpr int kTexelsPerShape = kTileParts * kLayers * 2 + 1;   // 12 条记录 × 2 texel + 1 条标志
+// 最后那个 texel = (活动位掩码, mode, 0, 0)：`p[7]` 放不下标志 —— WEDGE 的记录 8 个 float
+// 全用满（s1/c1 在 p[6]/p[7]），所以标志单独给一个 texel。掩码的 bit i = P_CIRCLE+i 是否活动。
+constexpr int kFlagTexel = kTexelsPerShape - 1;
 
 // 图标（`TileMesh.cpp` 的 IR / IS / 三种颜色）
 constexpr float kIconRadius = 0.11f;
@@ -67,9 +71,11 @@ const Recipe*  recipeTable();     // kTotalSlots 项
 const uint16_t* indexTable();     // kIndexCount 项
 
 // 每 (shape, part, 层) 一条 8 float 记录，布局按 part 固定（见 TileShape.cpp 的注释）。
+// `p[7]` 是**活动标志**（1 = 该 part 在这个模式下存在）：VS 拿它决定"展开"还是"塌成一点"，
+// 于是 shader 不需要知道 mode —— 与 `partActive()` 同源（buildShape 里由它填）。
 struct PartRecord { float p[8]; };
 
-// 某一层里某个 part 在给定模式下是否活动（VS 里同一张表；定义在 TileShape.cpp）
+// 某一层里某个 part 在给定模式下是否活动（定义在 TileShape.cpp；记录里的 p[7] 由它填）
 bool partActive(int mode, int part);
 
 // 每个 part 在同一层里占的槽位数，以及它在层内的起点（层内顺序：CIRCLE WEDGE BIGQ CAPS EXT4 PENT）
@@ -118,6 +124,13 @@ inline int quantizeAngle(float deg) { return (int)std::round(deg * 100.0f); }
 
 // 建一个形状：参数、part 记录、局部包围盒（double，逐字同今天的组包围盒算法）。
 Shape buildShape(float sa, float ea, bool mid);
+
+// ---- 形状表（GPU 端 = RGBA32F 纹理，texelFetch 读） --------------------
+// 布局：一行 kTexW 个 texel，每个形状 kTexelsPerShape 个 texel，第 (layer*kTileParts + part)
+// 条记录占 2 个 texel（8 float）—— 与 shader 里的索引算式必须一致。
+constexpr int kTexW = 1024;
+// 打包成 texel 流；返回需要的行数 H（纹理尺寸 kTexW × H）。out 会被 resize。
+int packShapeTable(const Shape* shapes, int count, std::vector<float>& out);
 
 // CPU 模型（与 `assets/shaders/tile.vert` 的展开逐字同结构；L1 用它和参考实现逐位对拍）。
 struct Expanded {

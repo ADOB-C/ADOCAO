@@ -35,8 +35,10 @@ static void buildTablesOnce() {
             int n = partSlotCount(part);
             for (int i = 0; i < n; i++) {
                 Recipe r;
-                r.part = (float)(layer * kTileParts + part);
-                r.slot = (float)i;
+                // 编码（与 tile_v2.vert / geom_probe 一致）：part = part id（0..5 砖，6..8 图标），
+                // slot 字段装 layer*64 + 槽号 —— 因为砖 part 的"层"必须跟着槽位走。
+                r.part = (float)part;
+                r.slot = (float)(layer * 64 + i);
                 r.k0 = r.k1 = 0.0f;
                 if (part == P_CIRCLE && i > 0) {
                     float a = (2.0f * 3.14159265f * (float)(i - 1)) / 32.0f;
@@ -368,6 +370,33 @@ void expand(const Shape& s, Expanded& out) {
             out.type[base + i] = 1.0f;
         }
     }
+}
+
+int packShapeTable(const Shape* shapes, int count, std::vector<float>& out) {
+    // 注意单位：`out` 是**float** 流，一个 RGBA32F texel 占 4 个 float —— 所以每个
+    // texel 下标都要 ×4（这个坑踩过一次：按 texel 下标写进 float 流，等于整体挪了 4 倍）。
+    size_t texels = (size_t)count * kTexelsPerShape;
+    size_t rows = (texels + kTexW - 1) / kTexW;
+    out.assign(rows * kTexW * 4, 0.0f);
+    for (int s = 0; s < count; s++) {
+        for (int part = P_CIRCLE; part <= P_PENT; part++) {
+            for (int layer = 0; layer < kLayers; layer++) {
+                const PartRecord& r = shapes[s].rec[part * kLayers + layer];
+                size_t base = ((size_t)s * kTexelsPerShape +
+                               (size_t)(layer * kTileParts + part) * 2) * 4;
+                for (int i = 0; i < 4; i++) out[base + (size_t)i] = r.p[i];
+                for (int i = 0; i < 4; i++) out[base + 4 + (size_t)i] = r.p[4 + i];
+            }
+        }
+        // 标志 texel：活动位掩码 + mode（VS 用它决定展开还是塌陷；与 partActive() 同源）
+        float mask = 0.0f;
+        for (int part = P_CIRCLE; part <= P_PENT; part++)
+            if (partActive(shapes[s].mode, part)) mask += (float)(1 << part);
+        size_t fb = ((size_t)s * kTexelsPerShape + kFlagTexel) * 4;
+        out[fb] = mask;
+        out[fb + 1] = (float)shapes[s].mode;
+    }
+    return (int)rows;
 }
 
 } // namespace TileShape

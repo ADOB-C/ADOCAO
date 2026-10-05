@@ -30,3 +30,26 @@ add_test(NAME tile_expansion
          COMMAND adocao_tile_expansion_test
                  "${CMAKE_CURRENT_SOURCE_DIR}/charts/angles360.adofai"
                  "${CMAKE_CURRENT_SOURCE_DIR}/charts/shapes_exhaustive.adofai")
+
+# L2 GPU 逐位对拍：真正跑 assets/shaders/tile_v2.vert，把局部坐标读回来与 CPU 的 expand() 比。
+# 需要 GL 上下文；没有显示/驱动时测试自己 SKIP 退 0（CI 的 headless Linux 就不会红）。
+add_executable(adocao_geom_probe_test
+               geom_probe_test.cpp
+               ${CMAKE_SOURCE_DIR}/render/TileShape.cpp)
+target_include_directories(adocao_geom_probe_test PRIVATE ${CMAKE_SOURCE_DIR}/render)
+target_link_libraries(adocao_geom_probe_test PRIVATE adocao_core adocao_glad)
+# glad 是手写的最小加载器（只列项目用到的入口），没有 glReadPixels/glFinish —— 探针直接用
+# 平台 GL（和 app/CMakeLists.txt 同一个写法）。平时渲染路径不需要这些。
+if(WIN32)
+    target_link_libraries(adocao_geom_probe_test PRIVATE opengl32)
+elseif(APPLE)
+    target_link_libraries(adocao_geom_probe_test PRIVATE "-framework OpenGL")
+else()
+    find_package(OpenGL REQUIRED)
+    target_link_libraries(adocao_geom_probe_test PRIVATE OpenGL::GL ${CMAKE_DL_LIBS})
+endif()
+
+add_test(NAME geom_probe
+         COMMAND adocao_geom_probe_test
+                 "${CMAKE_CURRENT_SOURCE_DIR}/charts/angles360.adofai"
+                 "${CMAKE_CURRENT_SOURCE_DIR}/charts/shapes_exhaustive.adofai")

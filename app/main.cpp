@@ -64,7 +64,7 @@ void printHelp(Mode mode, bool all) {
             "  --threads N         线程数（默认硬件并发；stitch 默认 4 = 2P+2E）\n"
             "  --time-color        瓦片按谱面时间彩虹着色\n"
             "\n"
-            "  瓦片名自带绝对坐标 x%07lld_y%07lld_w%lld_h%lld.png，拼接时不需要清单。\n"
+            "  瓦片名自带绝对坐标 x%%07lld_y%%07lld_w%%lld_h%%lld.png，拼接时不需要清单。\n"
             "  衔接：adocao stitch <dir> <out.png> / adocao mono <dir> <out.png>\n");
         return;
     case Mode::Stitch:
@@ -116,7 +116,7 @@ void printHelp(Mode mode, bool all) {
             "\n开发:\n"
             "  --debug                                  调试控制台 + 默认关 hitsounds\n"
             "  --legacy-culling                         暴力 AoS 剔除路径（对拍/性能用）\n"
-            "  --capture <out.png> [--capture-time SEC] [--capture-zoom Z]\n"
+            "  --capture <out.png> [--capture-time SEC | --capture-tile N] [--capture-zoom Z]\n"
             "                                           确定性抓一帧写 PNG 后退出（像素 diff 用）\n"
             "\n环境变量（测试/调参钩子，正常不用）:\n"
             "  ADOCAO_MIX_THREADS  ADOCAO_FORCE_DOM_PARSE  ADOCAO_PARSE_PIECES  ADOCAO_WINDOW_KB\n"
@@ -233,6 +233,7 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--no-trail") == 0)              cli.showTrail = false;
             else if (std::strcmp(a, "--capture") == 0 && i+1<argc)      cli.capturePath = argv[++i];
             else if (std::strcmp(a, "--capture-time") == 0 && i+1<argc) cli.captureTime = (float)atof(argv[++i]);
+            else if (std::strcmp(a, "--capture-tile") == 0 && i+1<argc) cli.captureTile = atoi(argv[++i]);
             else if (std::strcmp(a, "--capture-zoom") == 0 && i+1<argc) cli.captureZoom = (float)atof(argv[++i]);
             else if (std::strcmp(a, "--trail-duration") == 0 && i+1<argc) cli.trailDuration = (float)atof(argv[++i]);
             else if (std::strcmp(a, "--trail-sample-rate") == 0 && i+1<argc) { cli.trailSampleRate = (float)atof(argv[++i]); cli.trailAdaptive = false; }

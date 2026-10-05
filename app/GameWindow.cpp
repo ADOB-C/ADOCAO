@@ -467,7 +467,23 @@ void GameWindow::captureAndExit() {
 
     // 2) 摆到目标时刻：timeInLevel = elapsed/1000 - preRoll，elapsed = (audioPos + audioStartOffset)*1000
     //    → audioPos = T + preRoll - audioStartOffset。wallClock 传 0：之后不再有 wall clock 参与。
-    const float audioPos = m_cfg->captureTime + m_playback->preRoll() - m_playback->audioStartOffset();
+    //    `--capture-tile N` 把 T 换成第 N 砖的起始时刻：6 万砖的验收谱面上，按秒给的时刻会随
+    //    砖时长累积漂移，按砖给则永远落在同一砖（相机会 snap 到它），门槛不受时间轴数学影响。
+    float targetTime = m_cfg->captureTime;
+    if (m_cfg->captureTile >= 0) {
+        const auto& st = m_timeline->tileStartTimes();
+        size_t N = (size_t)m_cfg->captureTile;
+        if (N < st.size()) {
+            // 取这一砖区间的**中点**（用 st[N+1]-st[N]，不要用 tileDurations —— 中旋砖的
+            // 时长与实际区间不是一回事，会落到隔壁砖）。audioPos 是 float（千秒量级只有
+            // ~1e-4 s 分辨率），落在区间起点上会被舍到上一砖，currentTileIndex() 就变成 N-1。
+            double span = (N + 1 < st.size()) ? (st[N + 1] - st[N]) : 0.0;
+            targetTime = (float)(st[N] + 0.5 * span);
+        } else {
+            LOG_W("capture: --capture-tile %d 超出 %zu 砖，退回 --capture-time", m_cfg->captureTile, st.size());
+        }
+    }
+    const float audioPos = targetTime + m_playback->preRoll() - m_playback->audioStartOffset();
     m_playback->startAt(0.0, audioPos, 0.0f);
     m_scene->applyFrame(m_playback->frame(), *m_timeline);
 
@@ -491,8 +507,8 @@ void GameWindow::captureAndExit() {
         std::memcpy(&flip[(size_t)y * rowBytes], &px[(size_t)(fbH - 1 - y) * rowBytes], rowBytes);
 
     if (stbi_write_png(m_cfg->capturePath.c_str(), fbW, fbH, 4, flip.data(), (int)rowBytes))
-        LOG_I("capture: %s %dx%d t=%.4fs zoom=%.1f tile=%d", m_cfg->capturePath.c_str(),
-              fbW, fbH, m_cfg->captureTime, m_cfg->captureZoom, tileIdx);
+        LOG_I("capture: %s %dx%d t=%.4fs zoom=%.1f tile=%d req=%d", m_cfg->capturePath.c_str(),
+              fbW, fbH, targetTime, m_cfg->captureZoom, tileIdx, m_cfg->captureTile);
     else
         LOG_W("capture: 写 PNG 失败 %s", m_cfg->capturePath.c_str());
 }

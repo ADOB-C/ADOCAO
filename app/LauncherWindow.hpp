@@ -44,6 +44,7 @@ struct LauncherConfig {
     // 帧时间反馈，所以同一组参数两次跑出来应当逐字节相同（AGENTS.md 里那条验收要求）。
     std::string capturePath;       // 空 = 正常进主循环
     float  captureTime = 0.0f;     // 关卡时间（秒）
+    int    captureTile = -1;       // ≥0 = 用该砖的起始时刻（谱面再长也不会漂；与 captureTime 二选一）
     float  captureZoom = 100.0f;   // 相机缩放（100 = 视野高 12 单位）
 
     // Wizard (5.0.0): result of the "Next" preload step (parse + timeline).

@@ -1,0 +1,42 @@
+# 抓帧清单（tests/gen_render_fixtures.py 生成，勿手改）
+# 格式: <name>|<chart|ABS>|<tile|time>|<值>|<zoom>|<WxH>
+#   tile → --capture-tile（按砖，谱面再长也不漂）；time → --capture-time（历史基线口径）
+# fixtures（仓库内，提交）
+overview_big_fan|tests/charts/angles360.adofai|tile|359|6.0|1280x720
+overview_arc_zone|tests/charts/angles360.adofai|tile|1476|12.0|1280x720
+arc90_a|tests/charts/angles360.adofai|tile|1315|260.0|1280x720
+arc90_b|tests/charts/angles360.adofai|tile|1457|260.0|1280x720
+arc90_c|tests/charts/angles360.adofai|tile|1761|260.0|1280x720
+arc70|tests/charts/angles360.adofai|tile|1907|260.0|1280x720
+arc119|tests/charts/angles360.adofai|tile|2053|260.0|1280x720
+big45|tests/charts/angles360.adofai|tile|1065|260.0|1280x720
+zero_uturn_a|tests/charts/angles360.adofai|tile|2125|260.0|1280x720
+zero_uturn_b|tests/charts/angles360.adofai|tile|2525|260.0|1280x720
+midspin_a|tests/charts/angles360.adofai|tile|3562|200.0|1280x720
+midspin_b|tests/charts/angles360.adofai|tile|3162|200.0|1280x720
+random_overlap_a|tests/charts/angles360.adofai|tile|4464|200.0|1280x720
+random_overlap_b|tests/charts/angles360.adofai|tile|5064|200.0|1280x720
+icon_twirl|tests/charts/angles360.adofai|tile|1156|250.0|1280x720
+icon_twirl_wide|tests/charts/angles360.adofai|tile|1155|90.0|1280x720
+icon_ssup|tests/charts/angles360.adofai|tile|1416|250.0|1280x720
+icon_ssup_wide|tests/charts/angles360.adofai|tile|1415|90.0|1280x720
+icon_ssdown|tests/charts/angles360.adofai|tile|1516|250.0|1280x720
+icon_ssdown_wide|tests/charts/angles360.adofai|tile|1515|90.0|1280x720
+icon_both_up|tests/charts/angles360.adofai|tile|1616|250.0|1280x720
+icon_both_up_wide|tests/charts/angles360.adofai|tile|1615|90.0|1280x720
+icon_both_down|tests/charts/angles360.adofai|tile|1716|250.0|1280x720
+icon_both_down_wide|tests/charts/angles360.adofai|tile|1715|90.0|1280x720
+icon_subthreshold|tests/charts/angles360.adofai|tile|1816|250.0|1280x720
+icon_subthreshold_wide|tests/charts/angles360.adofai|tile|1815|90.0|1280x720
+icon_random_both|tests/charts/angles360.adofai|tile|4364|250.0|1280x720
+icon_random_both_wide|tests/charts/angles360.adofai|tile|4363|90.0|1280x720
+icon_random_down|tests/charts/angles360.adofai|tile|4764|250.0|1280x720
+icon_random_down_wide|tests/charts/angles360.adofai|tile|4763|90.0|1280x720
+
+# 既有 3 个状态（历史基线：The Moon / MYC，机器本地谱面；文件不在就跳过）
+moon_t1_z100|~/Documents/Charts/The Moon - Coal/level.adofai|time|1.0|100.0|1280x720
+moon_t1_z25|~/Documents/Charts/The Moon - Coal/level.adofai|time|1.0|25.0|1280x720
+myc_t30_z25|~/Documents/Charts/Seedbean - Won't You Make a Song with Me (Final_Fix)/Won't you make a chart with me_MYC.adofai|time|30.0|25.0|1280x720
+
+# 形状压力：形状数最多的本地谱面（今天每形状一次 draw → 这里最糟）
+singularity_mid|~/Documents/Charts/15. Singularity at 2.64e+6 BPM/15. Singularity at 2.64e+6 BPM.adofai|tile|500000|25.0|1280x720

@@ -1,3 +1,10 @@
+// 砖块几何的**参考实现**（改造前的 CPU 顶点汤）。
+//
+// 2026-10：渲染不再用它的输出 —— `render/TileShape.*` 把每个形状解析成"canonical part 记录"，
+// 由 `assets/shaders/tile.vert` 在 GPU 上展开（每帧 draw 从"每形状一次"变成 1 次）。
+// 这个 .cpp 现在**只编进测试**（`TileGeometryReference.cpp`，A/B 基准，和 `parseLegacy` 一个路子）：
+// `tests/tile_expansion_test.cpp` 拿它逐位钉住新实现在我这边算出来的每个顶点。
+// 所以：**不要改这个文件的算式**（改了参考基准就不对了），要改几何请改 TileShape。
 #pragma once
 
 #include <vector>

@@ -2,6 +2,9 @@
 
 > 状态：**定稿 v4**——§9 全部决策已拍板并回填正文。本版修订（决策 10）：Easing 与 Camera 同目录、
 > TileGeometry CPU 版废弃改 GLSL、`core/geometry` 取消。
+> **2026-10 补记：决策 10 已落地** —— `render/TileShape.*`（形状表）+ `assets/shaders/tile.vert`（VS 展开）+
+> 图标并入实例流；旧的 CPU 几何改名 `TileGeometryReference.cpp` 只当测试基准。验收口径见 AGENTS.md
+> 的"砖块几何"段（CPU/GPU 逐位 + 像素逐字节三层）。
 > 代码进度：**P1–P5 全部完成** —— P1+P2（目录搬迁 + CMake 拆库）、P3（PlaybackEngine → `core/timeline`）、
 > P4（app 拆分：GameWindow → CameraController/LevelScene；LauncherWindow → `app/wizard/` 分页，见 §4.2/4.3）、
 > P5（资产并入 `assets/` + `g_sc` 清理 + 文档/CI 同步，见 §7）。
@@ -117,7 +120,9 @@ ADOCAO/
 │   ├── CMakeLists.txt
 │   ├── Camera.hpp/.cpp                 # ← camera/（纯数学，无 GL）
 │   ├── Easing.hpp                      # ← util/Easing.hpp（唯一使用方：Camera 的缓动动画，见决策 10）
-│   ├── TileGeometry.hpp/.cpp           # ← track/TileGeometry（**过渡**：几何 GLSL 化前 TileMesh 仍需它；之后删除）
+│   ├── TileGeometry.hpp                # 常量 + **参考实现**的声明（A/B 基准，与 parseLegacy 一个路子）
+│   ├── TileGeometryReference.cpp       # ← track/TileGeometry.cpp（改名：只编进测试，渲染路径不再依赖）
+│   ├── TileShape.hpp/.cpp              # 形状表：canonical 布局 + 参数推导 + CPU 镜像展开（决策 10 的落点）
 │   ├── Shader.hpp/.cpp                 # 现状不变
 │   ├── Shaders.hpp                     # 内嵌回退 GLSL，不变
 │   ├── TileMesh.hpp/.cpp               # ← track/TileMesh（GL 实例化/剔除）
@@ -206,7 +211,7 @@ ADOCAO/
 | `game/PlaybackEngine.*`     | **拆** → `core/timeline/Timeline.*`、`PositionSolver.*`、`PlaybackClock.*` | 行为保持，见 §4                     |
 | `game/Planet.*`             | `render/Planet.*`                                                       | git mv（GL 对象归 render）         |
 | `camera/Camera.*`           | `render/Camera.*`                                                       | git mv                        |
-| `track/TileGeometry.*`      | `render/TileGeometry.*`（过渡）                                             | git mv；几何 GLSL 化后删除（见决策 10）   |
+| `track/TileGeometry.*`      | `render/TileGeometryReference.*`（A/B 基准，只进测试）                          | git mv + 改名；几何 GLSL 化后不再是渲染路径（2026-10 完成） |
 | `track/TileMesh.*`          | `render/TileMesh.*`                                                     | git mv（GL 网格入 render）         |
 | `render/Shader.*`           | `render/Shader.*`                                                       | 保留                            |
 | `render/Shaders.hpp`        | `render/Shaders.hpp`                                                    | 保留                            |
@@ -323,8 +328,8 @@ adofai::PositionSolver::positionAt(tl, 12.34, rx, ry, bx, by);  // 任意时刻�
   | PositionTrack / AnimateTrack 时间线            | `core/timeline` 扩展 + `render` 消费                                                                                                      |
   | MoveTrack（**遥远的未来**，仅记录）                    | 届时 `core/timeline` 扩展 + `render` 消费；现不排期                                                                                              |
   | ColorTrack / RecolorTrack（**只做静态**，见决策 8/9） | `core/level` 只解析事件数据；事件→每-tile 颜色由 render/TrackColor 承担（默认 CPU 静态；几十万事件走 GPU/GLSL 求值）                                                 |
-  | 中旋渲染（curvaturePoints）                       | render：GLSL 程序化形状 + TileMesh 实例化（CPU TileGeometry 已废弃）                                                                                |
-  | 轨道几何生成（替代 CPU TileGeometry）                 | render/GLSL：每实例带角度属性，VS 程序化生成弧/圆/五边形（无 CPU 顶点汤，见决策 10）；事件图标并入 tile 实例属性/本地子几何，随 tile 变换（AnimateTrack/PositionTrack 自动带上，省独立 icon 实例集） |
+  | 中旋渲染（curvaturePoints）                       | ✅ **2026-10 完成**：中旋 = 五边形，part `PENT`（`render/TileShape.cpp` + `assets/shaders/tile.vert`）                                                  |
+  | 轨道几何生成（替代 CPU TileGeometry）                 | ✅ **2026-10 完成**：每实例（=每砖）带形状号，VS 按形状表程序化生成弧/圆/五边形（**无 CPU 顶点汤**）；事件图标并入实例流（每砖 1 字节 iconBits + 图标 part），整条轨道 2 次 draw。逐位验收：CPU 3.3e7 坐标 / GPU 4.7e7 坐标 / 34 个像素状态逐字节一致 |
 
 ---
 
@@ -346,8 +351,9 @@ target_link_libraries(adocao_core PUBLIC glm::glm)
 ```cmake
 # render/CMakeLists.txt（示意）
 add_library(adocao_render STATIC
-    Camera.cpp Shader.cpp TileGeometry.cpp TileMesh.cpp Planet.cpp PlanetTrail.cpp)
-# TileGeometry.cpp 为过渡（几何 GLSL 化后删除）；Easing.hpp 仅头文件不参与编译，随 Camera 使用
+    Camera.cpp Shader.cpp TileShape.cpp TileMesh.cpp Planet.cpp PlanetTrail.cpp)
+# TileGeometryReference.cpp 只编进测试（tests/tile_expansion_test.cpp 拿它逐位对拍）；
+# Easing.hpp 仅头文件不参与编译，随 Camera 使用
 target_include_directories(adocao_render PUBLIC ${CMAKE_SOURCE_DIR} PRIVATE ${glad_SOURCE_DIR})
 target_link_libraries(adocao_render PUBLIC adocao_core PRIVATE adocao_glad OpenGL::GL)
 ```

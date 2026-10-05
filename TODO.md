@@ -10,7 +10,15 @@
   - 蓝图决策 8/9：只做静态；颜色逻辑归 render；几十万事件走 GPU/GLSL。
 
 ### 渲染
-（无 —— 中旋砖已完成，见文末）
+- [x] **TileMesh 改 GLSL 几何 + 图标并入**（2026-10 完成，蓝图决策 10）：
+      1 实例 = 1 砖、几何在 VS 按形状表展开、图标并入实例流；draw 次数 4838/8192/294 → **2**。
+      三层验收：`tests/tile_expansion_test.cpp`（CPU 逐位 3.3e7 坐标）、
+      `tests/geom_probe_test.cpp`（GPU 逐位 4.7e7 坐标）、`scripts/capture-gate.sh`（34 状态逐字节）
+- [ ] 备选：形状表改成"每槽位直接存顶点"（fetch 模式）—— 只有"不想把 GL 上下文提到 4.1（`fma()` 需要
+      GLSL 4.00+）"或"换编译器后 CPU/GPU 逐位对拍对不上"时才需要；架构（实例流/canonical 表/图标并入/
+      剔除/测试）都不变，只换 `packShapeTable` 的内容与 VS 主体
+- [ ] 备选：按 mode 分 4 次 draw（每次只带该模式的 part）—— 现在所有模式共用一份 175 槽的 canonical 表，
+      直身（BIG）占多数时会白跑不活动的 part。**先量帧时间**再决定是不是值得（代价是绘制顺序要重新对拍）
 
 ### 功能
 - [x] 无头出图（地图全景）：`--map out.png [--map-size WxH] [--map-bg HEX|transparent]`
@@ -22,6 +30,9 @@
 - [ ] Bloom / Flash 特效
 
 ### 架构
+- [ ] **加载期常驻内存**（"十亿层"的真正瓶颈，2026-10 实测）：MYC 走真无头 `adocao image`
+      （只加载 + 解算、不建 mesh）峰值就是 **1560 MB**，而 mesh 只占 ~430 MB —— 下一仗在
+      `Tile`/`tileBPMs`/`FastAction`/timeline 的窗口化与 checkpoint
 - [ ] 帧率上限从编译期常量改为运行时配置（LauncherConfig 选项）
 - [ ] 缩放范围可配置（min/max zoom）
 - [ ] 剔除边距可配置

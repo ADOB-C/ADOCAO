@@ -11,8 +11,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`
-- 几何自测：`tests/tile_geometry_test.cpp`（中旋砖五边形不变量 + `TileMesh.cpp` 调用点护栏，都带负向对照）；
-  要"实际看"形状用 `tools/tile-geometry-lab/`（`dump.sh` → `json2svg.mjs` → `svgshot.cjs`）
+- 几何测试（三层，2026-10 起）：`tests/tile_geometry_test.cpp`（中旋五边形不变量 + 调用点护栏）→
+  `tests/tile_expansion_test.cpp`（**CPU 逐位**：形状表展开 vs 参考实现，168491 形状 / 3.3e7 坐标）→
+  `tests/geom_probe_test.cpp`（**GPU 逐位**：真跑 `assets/shaders/tile.vert`，4.7e7 坐标；无显示时 SKIP）
+  → `scripts/capture-gate.sh store|check`（**像素逐字节**，34 个状态，基线存 /tmp、不入库）
+- shader 一致性：`scripts/check-shader-fallback.sh`（`render/Shaders.hpp` 的内嵌回退 GLSL 必须与
+  `assets/shaders/*` 逐字相同）
 - 待办（已筛选）：`TODO.md`（未完成清单 + 遥远的未来：MoveTrack）
 - 已彻底删除：GPU compute culling（2.0.0 起不需要，勿再引入）
 - 脚本：`scripts/push-ci.sh`（push → gh run watch；`--watch` 默认输出平台耗时/产物）
@@ -76,7 +80,7 @@ adocao stitch <dir> <out.png>           [--scale N] [--threads N]
 播放选项（不带子命令时）：
   --level <file> --music <file> --width N --height N --fullscreen
   --fill HEX --stroke HEX --bg HEX --no-auto-stroke --no-hitsound --no-trail
-  --force-hitsound [TYPE] --auto-play --legacy-culling --msaa N --no-exclusive
+  --force-hitsound [TYPE] --auto-play --msaa N --no-exclusive
   --trail-duration SEC | --trail-tiles N
   --trail-sample-rate N | --trail-target-fps N
   --trail-rate-min N --trail-rate-max N --trail-samples-per-tile N
@@ -94,7 +98,7 @@ adocao stitch <dir> <out.png>           [--scale N] [--threads N]
 撞到旧开关名会**直接打印新写法**再退出（码 2），不会让你去猜。
 
 **`adocao --help`（`-h`）是开关清单的唯一权威**：分组、约 30 行（默认不列开发开关，`--help --all` 才列
-`--debug`/`--legacy-culling` 与环境变量钩子）。`scripts/check-cli-help.sh` 机械校验"main.cpp 解析的每个
+`--debug`/`--capture*` 与环境变量钩子）。`scripts/check-cli-help.sh` 机械校验"main.cpp 解析的每个
 `--flag` 都出现在 printHelp 里"，防止帮助漂移。未知的 `--flag` 现在**直接报错退出（码 2）**而不是像以前
 那样静默忽略（打错字会悄悄开 GUI）；单横线参数（macOS 的 `-psn_...`）与单独的 `--` 仍然忽略。
 已删掉纯 no-op 的 `--exclusive`（`LauncherConfig::exclusiveFullscreen` 默认就是 true，只有 `--no-exclusive`
@@ -324,6 +328,25 @@ What may change (and did):
   （`Timeline.cpp` 的 `delta < 0.0001 → 整圈` 是语义阈值；`Unity.wav_rate` 实测 20 位小数、最小非零角差 4.5e-13°）。
 
 
+**实例流那一条线已经做完了（2026-10）**：1 实例 = 1 砖、几何在 VS 展开、图标并入实例流，
+常驻从"每实例 ≈ 57 B × 12.93M（砖 6.77M + 图标 6.16M）"变成"**每砖 ≈ 17 B**"：
+形状号 4 + 世界坐标 8 + 图标位 1 + 绘制序 4（`m_drawOrder`，见下）+ 可见位 1（TrackVis 才分配），
+每形状约 130 B（`Shape` 的 12 条记录 + 包围盒）。`--capture` 进程 peak RSS 实测：
+
+| 验收状态 | 形状数 | draw 次数 | peak RSS |
+|---|---|---|---|
+| angles360 fixture | 4838 | 4838 → **2** | 665 → **437 MB**（−34%）|
+| Singularity | 8192 | 8192 → **2** | 1049 → **553 MB**（−47%）|
+| The Moon | 196 | 196 → 2 | 513 → 513 MB |
+| MYC（677 万砖）| 294 | 294 → 2 | 2073 → 1988 MB（−4%）|
+
+**MYC 只降 4% 是这一轮最有价值的信息**：同一个谱面走真无头 `adocao image`（只加载 + 解算、
+完全不建 mesh）时 peak RSS 就是 **1560 MB** —— 也就是说"加载期常驻结构"占了那一帧的 3/4，
+mesh 只占 ~430 MB。所以"十亿层"的下一仗在**加载路径**（`Tile`/`tileBPMs`/`FastAction`/timeline），
+不在实例流；实例流这条线的天花板已经摸到（缺口见上面那条 ⚠️/⛔ 清单）。
+`m_drawOrder` 那 4 B **不能省**：它复刻的是改造前的绘制顺序（`unordered_map` 迭代序 + 组内降序），
+而深度 24 bit 下相邻砖会量化到同一个深度，顺序变了重叠处的赢家就变（实测 102 / 278 个像素）。
+
 **actions 分块并行解析**（`parseActionRegionParallel`）：actions 数组里每个对象彼此独立，
 所以先扫一遍找切分点（只做括号/字符串配对，不做字段提取，0.44 s/GB），再切 N 段并行解析，
 写进**同一块缓冲的各自槽位**（先按扫描时数出的对象数一次 `resize`，末尾再由各段实际
@@ -464,21 +487,39 @@ GLSL source in `assets/shaders/` — loaded from files at runtime via `Shader::c
 
 ### Z-depth render order
 Tiles and icons use depth test ON with per-instance Z values encoding far-to-near order. Ortho far plane reduced to 200 for depth precision (~755K steps, supports 7M-tile levels). Z allocation:
-- Tile fill: `tileZ(i, n)` (0.0 far → 9.0 near), vertex Z +0.001
-- Tile stroke: `tileZ(i, n)`, vertex Z 0.0
-- Icons: `tileZ + 0.002` (twirl) / `+0.003~0.005` (SetSpeed)
+- 砖（描边与填充都）: 局部 z = 0，实例偏移的 z = `tileZ(i, n)`（0.0 far → 9.0 near）——
+  同砖的两层**共面**，靠 `glDepthFunc(GL_LEQUAL)` + "描边先、填充后"的索引序让填充盖住描边
+  （这也是绘制顺序敏感的原因，见上）
+- 图标: 局部 z = 砖 Z + 0.002（twirl）/ +0.002+0.003 或 +0.002+0.001（SetSpeed，看同砖有没有 twirl）
 - Planets: Z = 9.5 (always in front)
 - Trails: depth test OFF, always visible
 - Highlight: depth test OFF, always visible
 
-### Per-instance color attributes
-Vertex shader: `aType` (0=stroke, 1=fill) mixes `iColor`/`iBgColor` per-instance.
-- Vertex VBO: `[x, y, z, type]` — 4 floats per vertex
-- Instance pos VBO: `[offX, offY, offZ]` — 3 floats, uploaded per-frame
-- Instance color VBO: `[fillR,fillG,fillB, strokeR,strokeG,strokeB, opacity]` — 7 floats, static
+### 每实例属性（2026-10 起：**1 实例 = 1 砖**）
+- **静态配方表**（VBO，175 项）：每个 canonical 槽位 `(part, layer*64+slot, k0, k1)` ——
+  砖 6 个 part × 2 层（描边/填充）+ 图标 3 个 part × 17 槽；索引表 142 个三角形，**所有形状共用一份**。
+- **形状表**（RGBA32F 纹理 + `texelFetch`）：每个形状 12 条 8-float 记录 + 1 条活动位掩码。
+  记录内容 = `render/TileShape.cpp::buildShape()` 存下来的参数（cos/sin/pow 的结果都在这里）。
+- **每实例（每帧上传、只含可见）**：`[offX, offY, offZ, shape, iconBits]` — 5 floats。
+- 颜色/不透明度走 **uniform**（改造前是逐实例 `[fill*3, stroke*3, opacity]` 7 floats，28 B/实例）。
+- `aType` 仍然在拼色：VS 里 `mix(uStroke, uFill, layer)`（图标 part 直接用各自的常量色）。
 
-### Visibility cache
-`draw()` caches visible instance indices per shape group. Rebuilt when frustum bounds change (position or zoom). Camera-relative offsets recomputed each frame on cached set. Multithreaded CPU culling through a **persistent** `ThreadPool` (`render/TileMesh.cpp` 的 `getPool()`，Meyers 静态：首次 cull 时创建、活到进程退出；worker 数 = `hardware_concurrency()`）for >= 64 groups (每组一个任务)；`cullAndOffsetGroups` 每帧都跑，但只有缓存的视锥范围不再包含当前视野时才重新 SIMD culling，否则只按 (dx,dy) 平移相机相对偏移。
+### 可见性 / 剔除缓存
+`draw()` 只为**可见**实例建一份压实列表（一个全局缓存，容差 0.5 与改造前同）：视锥变了才重新
+SIMD 剔除（按绘制序切块并行，`render/TileMesh.cpp` 的 `getPool()`，Meyers 静态、活到进程退出），
+否则只按 (dx,dy) 平移相机相对偏移。世界 AABB = 形状局部包围盒（`Shape::localMin/Max`，double）+
+砖位置 —— 与改造前 `cullAndOffsetGroups` 同一条表达式（逐位相同）。
+
+**绘制顺序必须与改造前逐字相同**（`unordered_map<GeoKey>` 迭代序 + 组内下标降序），
+因为深度 24 bit 下相邻砖会量化到同一个深度，重叠处谁赢由先后决定：实测反转组内顺序，
+MYC t=30s 那一帧有 102 个像素不同（maxdelta 111）；而给形状表 `reserve()` 改了桶增长序列、
+形状顺序变了，会让 278 个像素从 stroke 变 fill。所以这里**不要**为了"看起来更整洁"去改容器、
+加 reserve、或换排序 —— 门槛会红，而且红的理由不直观。
+
+### 剔除边距 / TrackVis
+`draw()` 的视锥外扩 20 单位（与改造前相同）。TrackVis 的可见位是**每砖 1 字节**（首次
+`updateVisibleRange()` 时才分配；判据与消费方 `app/LevelScene.cpp` 的 `m_tileVisEnabled` 一致），
+砖隐藏时它的图标一起消失（= 改造前行为）。
 
 ### Memory management
 `LevelData::releaseMemory()` frees angleData, actions/decorations JSON, tilePositionOffsets after loading. `tileBPMs` kept — needed by `buildIcons()` for SetSpeed icon coloring.
@@ -486,13 +527,29 @@ Vertex shader: `aType` (0=stroke, 1=fill) mixes `iColor`/`iBgColor` per-instance
 ### Frame pacing
 Sleep-based: `sleep_for(remaining - 1ms)` + spin last 1ms for precision. 320 FPS soft cap. DPI awareness + CPU pin to performance cores on Windows.
 
-### Event icons
-Twirl (purple), SetSpeed up (red), SetSpeed down (blue). Per-tile icon instances with depth-sorted Z.
+### Event icons（2026-10 起**并入砖的实例流**）
+Twirl（紫）、SetSpeed up（红）、SetSpeed down（蓝）。每砖 1 字节 `iconBits`（bit0 twirl /
+bit1 ssUp / bit2 ssDown，判据 = 改造前 `buildIcons()` 的 `tileBPMs[i]/tileBPMs[i-1]` 1.05/0.95
+阈值），Z 由 VS 按 part 算：twirl `砖Z+0.002`、SetSpeed `砖Z+0.002+(有twirl?0.003:0.001)`。
+- **独立图标实例集已删除**（改造前 MYC 有 616 万个图标实例，外加 CSR 索引 / 独立可见位 /
+  独立颜色 VBO）。现在图标 part 在不亮的砖上塌成一个点 → 零面积 → 不产生片元。
+- **但图标仍然单独一次 draw**（`drawIcons()`），用的是**同一份实例缓冲**：改造前的 pass 顺序是
+  "砖 → 拖尾 → 行星 → 图标"，而拖尾是半透明混合 —— 图标并进砖那次 draw 会被拖尾盖上
+  （实测 The Moon t=1s 有 97 个像素的 alpha 从 255 变 194）。数据是并进来的，draw 分两次。
 
 ### 砖块几何 / 中旋砖（angleData=999）
-砖块 mesh 在 `render/TileGeometry.cpp`（`createTileMesh(sa, ea, sc)` 普通砖、`createMidSpinMesh(a1, sc)` 中旋砖），
-分批/缓存/实例化在 `render/TileMesh.cpp`（`GeoKey(round(sa*100), round(ea*100), mid)` → shape group）。
-角度约定：`sa = 上一砖 direction − 180`（= Re_ADOJAS 的 `pred`），`ea = 本砖 direction`；中旋砖的网格**只依赖 sa**。
+**几何在 GPU 上按"形状表"展开**（2026-10 改造，决策 10 落地）：`render/TileShape.{hpp,cpp}` 把每个
+形状键 `GeoKey(round(sa*100), round(ea*100), mid)` 解析成 canonical 布局里的 part 记录，
+`assets/shaders/tile.vert` 按这份表算出顶点。**没有 CPU 顶点汤**：改造前的
+`render/TileGeometry.cpp`（每形状一份 mesh + 每形状一次 draw）改名成
+`render/TileGeometryReference.cpp`，只在测试里当 A/B 基准（和 `parseLegacy` 一个路子）。
+角度约定：`sa = 上一砖 direction − 180`（= Re_ADOJAS 的 `pred`），`ea = 本砖 direction`；中旋砖的几何**只依赖 sa**。
+
+**canonical 布局**（`TileShape.hpp`）：175 槽 = 砖 6 个 part × 2 层 + 图标 3 个 part × 17；
+索引表 142 个三角形（砖 94 + 图标 48），**所有形状共用**。part 与模式：
+`ARC(0<ang<120°) = CIRCLE+WEDGE+CAPS`、`BIG(ang≥120°) = BIGQ+CAPS`、`ZERO(ang==0，U 型) = CIRCLE+EXT4`、
+`MIDSPIN = PENT`；不活动的 part 整块**塌成一个点** → 零面积 → 不产生片元（所以一次 draw 能画所有模式）。
+每形状只存 12 条 8-float 记录（+1 条活动位掩码 = 25 个 texel），实例只带形状号。
 
 中旋砖 = **五边形**：以 `a1 = sa` 为轴，`0..0.275` 是宽 0.55 的方块（半长 = 半宽 = `TILE_WIDTH`，比普通砖的 0.5 短），
 再向来路伸出 depth = 0.275 的**尖角**，整体沿 −a1 平移 0.04；7 顶点 / 3 三角形；描边层 = 各 +OUTLINE。
@@ -503,13 +560,42 @@ Twirl (purple), SetSpeed up (red), SetSpeed down (blue). Per-tile icon instances
 - 谱面里中旋是 `angleData` 里的**数字 999**（不是 `"!"`；`"!"` 只是编辑器的显示/`LevelData` 字符映射）。
   本地实测：The Moon - Coal 1307 个、Singularity 442、Won't You Make a Song with Me 11、Fledgling 9。
 
-**机械护栏**：`tests/tile_geometry_test.cpp`（`ctest --test-dir build`；CI 的 Linux job 现在跑**全部** ctest）——
-五边形三条不变量（7+7 顶点 / 尖角朝来路 / 面积 3w²，7 个入砖方向都查；注意顶点表顺序**不是**边界序，
-边界序是 `0,1,2,4,3`，直接对 0..4 求 shoelace 会得到 `3w²/2`）；描边顶点必须整段排在填充顶点前
-（`TileMesh.cpp` 靠扫 types 前缀算 `strokeVertCount`，两层一交错是**静默**画错）；**负向对照**：旧几何
-`createTileMesh(a,a)` 必须过不了这套断言；**调用点护栏**（源码级，和 `scripts/check-cli-help.sh` 一个路子）：
-`TileMesh.cpp` 必须出现 `createMidSpinMesh(sA` 且不许出现 `createTileMesh(eA,eA` —— 几何单测管不到
-"谁来调它"，把调用退回去上面几条会全绿。看图工具在 `tools/tile-geometry-lab/`（README 有三条路子 + 坑表）。
+**位精确（改任何几何前先读这段）**：参考实现是 `-O3 -march=native` 编出来的，`a*b+c` 会变成
+`fmadd/fmsub/fnmul`（实测 `TileGeometry.o` 里 45 fmul + 45 fmadd + 16 fnmsub）——**差 1 ULP 也算改坏**。
+所以：
+- 超越函数（`cos/sin/pow/fmod`）**只在 CPU**：结果进形状表；VS 里没有超越函数。
+- VS 每条公式与 `TileShape.cpp::expand()` **逐字同结构**：融合步显式 `fma()`，要单独舍入的乘积用
+  `rp(a,b)=fma(a,b,0)`（裸的 `a*b` 会被编译器合法地融合进旁边那次加法）；负系数一律
+  `-(rp(w,m))`（`rp(-w,m)` 里那个 +0 加数会吃掉 -0.0 的符号）。
+- **同一个算式在不同 part 里可能被编成不同结构**（PENT 与 EXT4 就是这样），所以每个 part 的融合结构
+  都是**实测钉死**的，不是推出来的。改几何必须三个测试全绿：
+  `tests/tile_expansion_test.cpp`（CPU 逐位）、`tests/geom_probe_test.cpp`（**GPU 逐位**，读的就是
+  生产 `tile.vert`，画点进 RGBA32F FBO 再读回来比）、`scripts/capture-gate.sh`（像素）。
+- `fma()` 要 GLSL 4.00+ → 上下文请求是 **4.1**（`app/GameWindow.cpp`；macOS 上限也是 4.1）。
+  实测 3.3 ↔ 4.1 **像素中性**（34 个验收状态逐字节相同）。不想要 4.1 的退路见 TODO.md。
+- 跨平台备注：这套镜像结构是**对同一台机器/同一编译器**钉的；换编译器时 1 ULP 级差异在 8-bit
+  输出上看不出来（见下），但 CPU/GPU 逐位对拍会红。
+
+**机械护栏**：`tests/tile_geometry_test.cpp`（五边形三条不变量；注意顶点表顺序**不是**边界序，
+边界序是 `0,1,2,4,3`，直接对 0..4 求 shoelace 会得到 `3w²/2`）+ 负向对照（旧几何 `createTileMesh(a,a)`
+必须过不了）+ **调用点护栏**（源码级：`TileMesh.cpp` 必须出现 `TileShape::buildShape`，不许出现
+`createTileMesh(`/`createMidSpinMesh(`、不许出现独立图标实例集；`drawIcons()` 本身不算违规）。
+看图工具在 `tools/tile-geometry-lab/`（注意它是针对旧的 CPU `TileGeometry` 的，别指望它画新管线）。
+
+**像素门槛怎么用**（改渲染前先存基线，改完 check）：
+```
+scripts/capture-gate.sh store --out /tmp/adocao-capture-baseline   # 改动前
+# …改代码、重新构建…
+scripts/capture-gate.sh check --against /tmp/adocao-capture-baseline
+```
+清单在 `tests/capture_states.txt`（由 `tests/gen_render_fixtures.py` 生成，别手改）：
+`<name>|<chart>|<tile|time>|<值>|<zoom>|<WxH>`。按**砖号**抓帧（`--capture-tile`）而不是按秒 ——
+6 千砖的谱面上按秒给的时刻会随砖时长累积漂移。脚本会断言日志里的 `tile=` 与清单一致（防"抓错时刻"
+这种静默失败），并记录 RSS / `unique shapes` / draw 次数。差异像素统计要 Pillow：
+`ADOCAO_GATE_PY=<带 Pillow 的 python3>`。**基线不入库**（驱动相关），`store` 一次、`check` 多次。
+两条已标定过的灵敏度：反转绘制顺序 → MYC 那帧 278 个像素变（抓得住）；把一处融合拆成 1 ULP 级扰动
+→ **7/7 状态完全相同**（8-bit 输出看不出来）—— 所以 ULP 级的正确性由上面那两个逐位测试负责，
+别指望 PNG。
 
 **怎么"实际看"**（本轮就是这么验的，别再靠脑补）：
 1. 几何层：`tools/tile-geometry-lab/dump.sh`（编的就是 `render/TileGeometry.cpp` 本人）→ 顶点 JSON →
@@ -526,7 +612,8 @@ Twirl (purple), SetSpeed up (red), SetSpeed down (blue). Per-tile icon instances
    注意 Re_ADOJAS 前端是 **HashRouter**：`http://127.0.0.1:3144/#/editor`，`/editor` 只会给你首页。
 
 ### Highlight
-Selected tile drawn with inverted colors via dedicated highlight shader (`1.0 - vColor` in fragment shader). Same vertex layout as tile shader, reads per-instance colors.
+选中砖用反转色画（`highlight.frag` 里 `1.0 - vColor`）。**共用** `tile.vert`（几何展开只有一份实现），
+颜色走与砖相同的 uniform；`drawHighlightedTile()` 往实例缓冲里写 1 条记录再画 1 个实例。
 
 ## File extensions
 

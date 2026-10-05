@@ -48,20 +48,13 @@ bool sameValue(float a, float b) {
     return a == 0.0f && b == 0.0f;
 }
 
-// 单调整数序：同符号位模式的差就是 ULP 距离
-int32_t order(float f) {
-    uint32_t u; std::memcpy(&u, &f, 4);
-    return (u & 0x80000000u) ? (int32_t)(0x80000000u - u) : (int32_t)(u | 0x80000000u);
-}
 // 默认容忍 ≤2 ULP：这台机器（Apple/Metal，clang 钉的融合结构）实测逐位相同，但**别的驱动**
 // 可能把 fma 融合成别的东西 —— 那在 8bit 输出上看不出来（见 AGENTS 的标定），没必要让别家 GPU
 // 上跑 ctest 直接红。`ADOCAO_TILE_EXACT=1` 恢复逐位要求（本地验收/换驱动时用）。
-int ulpDiff(float a, float b) {
-    if (a == b) return 0;   // 含 ±0
-    int64_t d = (int64_t)order(a) - (int64_t)order(b);
-    return (int)(d < 0 ? -d : d);
-}
 bool g_requireExact = false;
+// 与 tile_expansion 同一口径：默认按**几何尺度**的绝对容差，而不是输出值的 ULP
+// （y 有相消的槽位上，中间量差 1 ULP 会放大成几十 ULP，但绝对偏差 ~1e-8 砖）。
+constexpr double kTol = 1e-5;
 
 void fail(const char* fmt, ...) {
     if (g_fail < 12) {
@@ -239,7 +232,8 @@ void main() { fragColor = vProbe; }
 
     std::vector<float> readback((size_t)fbW * fbH * 4);
     std::vector<float> inst((size_t)batch * 5);
-    long long checked = 0, zeroSignOnly = 0, exact = 0, ulp1 = 0, ulp2 = 0;
+    long long checked = 0, zeroSignOnly = 0, exact = 0, near = 0;
+    double maxDev = 0.0;
     for (size_t base = 0; base < shapes.size(); base += batch) {
         int n = (int)std::min((size_t)batch, shapes.size() - base);
         for (int i = 0; i < n; i++) {
@@ -268,13 +262,15 @@ void main() { fragColor = vProbe; }
                 const float* want = &ex.pos[(size_t)s * 3];
                 for (int c = 0; c < 2; c++) {
                     checked++;
-                    const int d = ulpDiff(got[c], want[c]);
-                    if (d == 0) { exact++; if (std::memcmp(&got[c], &want[c], 4) != 0) zeroSignOnly++; }
-                    else if (d == 1) ulp1++;
-                    else if (d == 2) ulp2++;
-                    if (d > 2 || (g_requireExact && !sameValue(got[c], want[c]))) {
-                        fail("形状 %zu 槽 %d %s: GPU %s ≠ CPU %s（%d ULP）", base + (size_t)i, s,
-                             c ? "y" : "x", bits(got[c]).c_str(), bits(want[c]).c_str(), d);
+                    const bool sameBits = (std::memcmp(&got[c], &want[c], 4) == 0);
+                    const double dev = std::fabs((double)got[c] - (double)want[c]);
+                    if (sameBits) exact++;
+                    else if (std::fabs(got[c]) == 0.0 && std::fabs(want[c]) == 0.0) zeroSignOnly++;
+                    else if (dev <= kTol) near++;
+                    if (dev > maxDev) maxDev = dev;
+                    if (dev > kTol || (g_requireExact && !sameValue(got[c], want[c]))) {
+                        fail("形状 %zu 槽 %d %s: GPU %s ≠ CPU %s（偏差 %.3g）", base + (size_t)i, s,
+                             c ? "y" : "x", bits(got[c]).c_str(), bits(want[c]).c_str(), dev);
                     }
                 }
                 // 图标 z 的三个常量（砖的 z 恒 0，由实例偏移里的砖 Z 负责）
@@ -295,9 +291,10 @@ void main() { fragColor = vProbe; }
 
     std::printf("对拍坐标 %lld 个（x/y × %zu 形状 × %d 槽），失败 %d\n",
                 checked, shapes.size(), kTotalSlots, g_fail);
-    std::printf("  逐位相同 %lld（其中仅差零符号 %lld），差 1 ULP %lld，差 2 ULP %lld%s\n",
-                exact, zeroSignOnly, ulp1, ulp2,
-                g_requireExact ? "（ADOCAO_TILE_EXACT=1：要求逐位）" : "（默认容忍 ≤2 ULP）");
+    std::printf("  逐位相同 %lld（其中仅差零符号 %lld），非逐位但在 %.0e 内 %lld，最大偏差 %.3g%s\n",
+                exact, zeroSignOnly, kTol, near, maxDev,
+                g_requireExact ? "（ADOCAO_TILE_EXACT=1：要求逐位）"
+                               : "（默认按几何尺度容差）");
     glfwDestroyWindow(win);
     glfwTerminate();
     if (g_fail) { std::printf("FAILED\n"); return 1; }

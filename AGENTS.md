@@ -14,7 +14,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 几何测试（三层，2026-10 起）：`tests/tile_geometry_test.cpp`（中旋五边形不变量 + 调用点护栏）→
   `tests/tile_expansion_test.cpp`（**CPU 逐位**：形状表展开 vs 参考实现，168491 形状 / 3.3e7 坐标）→
   `tests/geom_probe_test.cpp`（**GPU 逐位**：真跑 `assets/shaders/tile.vert`，4.7e7 坐标；无显示时 SKIP）
-  → `scripts/capture-gate.sh store|check`（**像素逐字节**，50 个状态，基线存 /tmp、不入库）
+  → `scripts/capture-gate.sh store|check`（**像素逐字节**，50 个状态，基线存 /tmp、不入库）；
+  默认口径是几何尺度容差 1e-5 砖，`ADOCAO_TILE_EXACT=1` 才要求逐位（见"砖块几何"段）
 - shader 一致性：`scripts/check-shader-fallback.sh`（`render/Shaders.hpp` 的内嵌回退 GLSL 必须与
   `assets/shaders/*` 逐字相同）
 - 待办（已筛选）：`TODO.md`（未完成清单 + 遥远的未来：MoveTrack）
@@ -572,13 +573,20 @@ bit1 ssUp / bit2 ssDown，判据 = 改造前 `buildIcons()` 的 `tileBPMs[i]/til
 - 谱面里中旋是 `angleData` 里的**数字 999**（不是 `"!"`；`"!"` 只是编辑器的显示/`LevelData` 字符映射）。
   本地实测：The Moon - Coal 1307 个、Singularity 442、Won't You Make a Song with Me 11、Fledgling 9。
 
-**逐位对拍的两种口径**：两个逐位测试默认容忍 **≤2 ULP**（`逐位相同 / 差 1 ULP / 差 2 ULP`
-三个计数会打出来），因为"逐位"是在**这台机器**（clang + FMA）上钉的 —— 换编译器（GCC 的融合选择
-可能不同）或换驱动都可能差 1~2 ULP。本地验收/换驱动时要恢复逐位要求：
-`ADOCAO_TILE_EXACT=1 ctest --test-dir build -R 'tile_expansion|geom_probe'`
-（本机实测：CPU 3298 万坐标、GPU 4708 万坐标**全部逐位相同**，只有 ±0 的符号差异单独计数）。
-CI 的 Linux job 跑 `ctest` 用的是默认口径 —— 换编译器不该让 CI 红，而真正的转写错误（符号/参数/
-顺序错）是几十 ULP 往上，这个放宽不减牙。
+**逐位对拍的两种口径**：两个对拍测试的默认口径是**几何尺度上的绝对容差 1e-5 砖**
+（打印 `逐位相同 / 非逐位但在容差内 / 最大偏差`），`ADOCAO_TILE_EXACT=1` 才要求**逐位**：
+```
+ADOCAO_TILE_EXACT=1 ctest --test-dir build -R 'tile_expansion|geom_probe'   # 本地验收/换驱动
+ADOCAO_TILE_EXACT=1 ./build/tests/adocao_tile_expansion_test tests/charts/shapes_exhaustive.adofai
+```
+为什么默认不用"输出值的 ULP"当度量：**中旋 PENT 的 slot0/1 有相消**，中间量只差 1 ULP，输出上会
+放大成几十 ULP —— CI 上 GCC 实测 13 个坐标差 4~64 ULP，但绝对偏差始终 ~6e-9 砖（y 只有 5.9e-4）。
+拿 ULP 当门槛会误判，拿"砖"当门槛不会：真正的转写错误（符号/参数/顺序）是 1e-3 往上，而 zoom 1000
+时 1 px 才 1e-3 砖。
+本机（钉住的那台）两种口径都验过：**CPU 3298 万坐标、GPU 4708 万坐标全部逐位相同、最大偏差 0**
+（GPU 侧只有 ±0 的符号差 19366 个，单独计数）。CI 的 Linux job 跑默认口径。
+推论也要记着：换编译器/换驱动时"和改造前逐位一致"只在钉住的那台机器上成立，别的平台差 1 ULP 级 ——
+8-bit 输出上看不出来（实测：把一处融合拆成 1 ULP 级扰动，7/7 验收状态完全相同）。
 
 **位精确（改任何几何前先读这段）**：参考实现是 `-O3 -march=native` 编出来的，`a*b+c` 会变成
 `fmadd/fmsub/fnmul`（实测 `TileGeometry.o` 里 45 fmul + 45 fmadd + 16 fnmsub）——**差 1 ULP 也算改坏**。

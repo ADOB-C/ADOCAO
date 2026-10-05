@@ -15,7 +15,7 @@ if(NOT CMAKE_C_COMPILER AND NOT CMAKE_CXX_COMPILER)
     endif()
 endif()
 
-project(ADOCAO VERSION 6.0.0 LANGUAGES CXX C)
+project(ADOCAO VERSION 7.0.0 LANGUAGES CXX C)
 
 option(ADOCAO_PORTABLE "Build a static-linked portable executable" OFF)
 

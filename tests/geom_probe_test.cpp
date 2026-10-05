@@ -232,7 +232,8 @@ void main() { fragColor = vProbe; }
 
     std::vector<float> readback((size_t)fbW * fbH * 4);
     std::vector<float> inst((size_t)batch * 5);
-    long long checked = 0, zeroSignOnly = 0, exact = 0, near = 0;
+    // 注意别叫 near/far：Windows 的 <windows.h> 把这两个当宏（MinGW 直接编不过）
+    long long checked = 0, zeroSignOnly = 0, exact = 0, withinTol = 0;
     double maxDev = 0.0;
     for (size_t base = 0; base < shapes.size(); base += batch) {
         int n = (int)std::min((size_t)batch, shapes.size() - base);
@@ -266,7 +267,7 @@ void main() { fragColor = vProbe; }
                     const double dev = std::fabs((double)got[c] - (double)want[c]);
                     if (sameBits) exact++;
                     else if (std::fabs(got[c]) == 0.0 && std::fabs(want[c]) == 0.0) zeroSignOnly++;
-                    else if (dev <= kTol) near++;
+                    else if (dev <= kTol) withinTol++;
                     if (dev > maxDev) maxDev = dev;
                     if (dev > kTol || (g_requireExact && !sameValue(got[c], want[c]))) {
                         fail("形状 %zu 槽 %d %s: GPU %s ≠ CPU %s（偏差 %.3g）", base + (size_t)i, s,
@@ -292,7 +293,7 @@ void main() { fragColor = vProbe; }
     std::printf("对拍坐标 %lld 个（x/y × %zu 形状 × %d 槽），失败 %d\n",
                 checked, shapes.size(), kTotalSlots, g_fail);
     std::printf("  逐位相同 %lld（其中仅差零符号 %lld），非逐位但在 %.0e 内 %lld，最大偏差 %.3g%s\n",
-                exact, zeroSignOnly, kTol, near, maxDev,
+                exact, zeroSignOnly, kTol, withinTol, maxDev,
                 g_requireExact ? "（ADOCAO_TILE_EXACT=1：要求逐位）"
                                : "（默认按几何尺度容差）");
     glfwDestroyWindow(win);

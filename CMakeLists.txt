@@ -182,6 +182,14 @@ FetchContent_MakeAvailable(lzma)
 # 用要替它把公开头文件目录挂出来。
 target_include_directories(liblzma INTERFACE
     $<BUILD_INTERFACE:${lzma_SOURCE_DIR}/src/liblzma/api>)
+# 上游的 CLI（xz / xzdec / lzmadec / lzmainfo）我们一个都不用：27 个 .c 白编，还会把 CI 日志
+# 淹掉（依赖排在默认构建的最前面，tail 一眼望去全是 _deps/lzma-build）。上游没有开关，
+# 就用 EXCLUDE_FROM_ALL 挪出默认构建（想手动编仍然可以 `cmake --build build --target xz`）。
+foreach(_xz_tool xz xzdec lzmadec lzmainfo create_compress_files)
+    if(TARGET ${_xz_tool})
+        set_target_properties(${_xz_tool} PROPERTIES EXCLUDE_FROM_ALL TRUE)
+    endif()
+endforeach()
 
 # zstd keeps its CMakeLists in build/cmake/ (no root CMakeLists), so populate it and
 # add that directory by hand; target is libzstd_static / zstd::libzstd_static.
@@ -196,6 +204,8 @@ set(ZSTD_BUILD_STATIC ON CACHE BOOL "" FORCE)
 set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(ZSTD_LEGACY_SUPPORT OFF CACHE BOOL "" FORCE)
 set(ZSTD_MULTITHREAD_SUPPORT OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)   # 我们只要 libzstd，不要 zstd 命令行
+set(ZSTD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_GetProperties(zstd)
 if(NOT zstd_POPULATED)
     FetchContent_Populate(zstd)

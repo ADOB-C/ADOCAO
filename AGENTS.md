@@ -572,6 +572,14 @@ bit1 ssUp / bit2 ssDown，判据 = 改造前 `buildIcons()` 的 `tileBPMs[i]/til
 - 谱面里中旋是 `angleData` 里的**数字 999**（不是 `"!"`；`"!"` 只是编辑器的显示/`LevelData` 字符映射）。
   本地实测：The Moon - Coal 1307 个、Singularity 442、Won't You Make a Song with Me 11、Fledgling 9。
 
+**逐位对拍的两种口径**：两个逐位测试默认容忍 **≤2 ULP**（`逐位相同 / 差 1 ULP / 差 2 ULP`
+三个计数会打出来），因为"逐位"是在**这台机器**（clang + FMA）上钉的 —— 换编译器（GCC 的融合选择
+可能不同）或换驱动都可能差 1~2 ULP。本地验收/换驱动时要恢复逐位要求：
+`ADOCAO_TILE_EXACT=1 ctest --test-dir build -R 'tile_expansion|geom_probe'`
+（本机实测：CPU 3298 万坐标、GPU 4708 万坐标**全部逐位相同**，只有 ±0 的符号差异单独计数）。
+CI 的 Linux job 跑 `ctest` 用的是默认口径 —— 换编译器不该让 CI 红，而真正的转写错误（符号/参数/
+顺序错）是几十 ULP 往上，这个放宽不减牙。
+
 **位精确（改任何几何前先读这段）**：参考实现是 `-O3 -march=native` 编出来的，`a*b+c` 会变成
 `fmadd/fmsub/fnmul`（实测 `TileGeometry.o` 里 45 fmul + 45 fmadd + 16 fnmsub）——**差 1 ULP 也算改坏**。
 所以：

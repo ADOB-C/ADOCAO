@@ -92,6 +92,12 @@ jobs:
       - name: Tests (parser parity + tile geometry)
         run: ctest --test-dir build --output-on-failure
 
+      - name: Guards (core purity + CLI help + shader fallbacks)
+        run: |
+          bash scripts/check-core-purity.sh
+          bash scripts/check-cli-help.sh
+          bash scripts/check-shader-fallback.sh
+
       - uses: actions/upload-artifact@v4
         with:
           name: linux-${{ matrix.zoom }}

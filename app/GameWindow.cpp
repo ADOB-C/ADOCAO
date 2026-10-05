@@ -11,6 +11,7 @@
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <algorithm>
+#include <cstdlib>
 #include <chrono>
 #include <cmath>
 #include <cstdio>

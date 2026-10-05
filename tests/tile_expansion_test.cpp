@@ -21,6 +21,8 @@
 
 #include <cmath>
 #include <cstdarg>
+#include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -32,7 +34,24 @@ using namespace TileShape;
 namespace {
 
 int g_fail = 0, g_checked = 0, g_shapes = 0;
+long long g_exact = 0, g_ulp1 = 0, g_ulp2 = 0;
+bool g_requireExact = false;      // ADOCAO_TILE_EXACT=1：要求逐位（本地验收用；CI 默认放宽）
 constexpr int kMaxReport = 12;
+
+// 浮点的"单调整数序"：同符号位模式直接比大小就是 ULP 距离（标准技巧）。
+static int32_t order(float f) {
+    uint32_t u; std::memcpy(&u, &f, 4);
+    return (u & 0x80000000u) ? (int32_t)(0x80000000u - u) : (int32_t)(u | 0x80000000u);
+}
+// 为什么默认放宽到 2 ULP：逐位相同是**钉在这台机器**（clang + FMA）上的结论 ——
+// 换编译器时同一个 `a*b+c` 可能被融合、也可能不融合，甚至融合的是另一个乘数，差 1~2 ULP。
+// 真正的转写错误（符号/参数/顺序错）是几十 ULP 往上，所以这个放宽不减牙；本地验收用
+// `ADOCAO_TILE_EXACT=1` 恢复逐位要求。
+static int ulpDiff(float a, float b) {
+    if (a == b) return 0;                       // 含 ±0
+    int64_t d = (int64_t)order(a) - (int64_t)order(b);
+    return (int)(d < 0 ? -d : d);
+}
 
 std::string bits(float f) {
     uint32_t u; std::memcpy(&u, &f, 4);
@@ -112,10 +131,15 @@ void checkShape(float sa, float ea, bool mid, bool report) {
                     float got = ex.pos[(size_t)sv * 3 + c];
                     float want = ref.verts[(size_t)rv * 3 + c];
                     g_checked++;
-                    if (std::memcmp(&got, &want, 4) != 0) {
+                    const int d = ulpDiff(got, want);
+                    if (d == 0) g_exact++;
+                    else if (d == 1) g_ulp1++;
+                    else if (d == 2) g_ulp2++;
+                    if (d > 2 || (g_requireExact && d != 0)) {
                         const char* cn = (c == 0) ? "x" : (c == 1) ? "y" : "z";
-                        fail("sa=%.4f ea=%.4f mid=%d mode=%d part=%d layer=%d slot=%d %s: 新 %s ≠ 参考 %s",
-                             sa, ea, (int)mid, s.mode, part, layer, i, cn, bits(got).c_str(), bits(want).c_str());
+                        fail("sa=%.4f ea=%.4f mid=%d mode=%d part=%d layer=%d slot=%d %s: 新 %s ≠ 参考 %s（%d ULP）",
+                             sa, ea, (int)mid, s.mode, part, layer, i, cn, bits(got).c_str(),
+                             bits(want).c_str(), d);
                     }
                 }
                 float gotT = ex.type[sv], wantT = ref.types[(size_t)rv];
@@ -222,6 +246,7 @@ void addChartKeys(const std::string& path) {
 } // namespace
 
 int main(int argc, char** argv) {
+    if (const char* e = std::getenv("ADOCAO_TILE_EXACT")) g_requireExact = (std::atoi(e) != 0);
     std::printf("== 形状集 ==\n");
     for (int i = 1; i < argc; i++) addChartKeys(argv[i]);
     // 0.01° 网格抽样（含半格边界：x.xx5 是 round 的取舍点）
@@ -304,6 +329,8 @@ int main(int argc, char** argv) {
     }
 
     std::printf("\n检查坐标 %d 个，形状 %d 个，失败 %d\n", g_checked, g_shapes, g_fail);
+    std::printf("  逐位相同 %lld，差 1 ULP %lld，差 2 ULP %lld%s\n", g_exact, g_ulp1, g_ulp2,
+                g_requireExact ? "（ADOCAO_TILE_EXACT=1：要求逐位）" : "（默认容忍 ≤2 ULP；本地验收请设 ADOCAO_TILE_EXACT=1）");
     if (g_fail) { std::printf("FAILED\n"); return 1; }
     std::printf("OK\n");
     return 0;

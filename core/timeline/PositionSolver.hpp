@@ -3,6 +3,9 @@
 #include <glm/glm.hpp>
 #include <vector>
 
+
+namespace adofai {
+
 class Timeline;
 
 // Pure position solver: turns a Timeline + time into red/blue planet positions
@@ -63,3 +66,5 @@ public:
     // samples-per-second rate under-samples fast straight runs.
     static double tilePathSpeed(const Timeline& timeline, double t);
 };
+
+}  // namespace adofai

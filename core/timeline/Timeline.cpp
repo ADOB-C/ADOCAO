@@ -6,6 +6,9 @@
 #include <thread>
 #include <limits>
 
+
+namespace adofai {
+
 void Timeline::build(const LevelData& level, bool exportOnly) {
     m_level = &level;
     m_exportOnly = exportOnly;
@@ -390,3 +393,5 @@ int Timeline::findTileIndex(double t) const {
     if (idx >= n) idx = n - 1;
     return idx;
 }
+
+}  // namespace adofai

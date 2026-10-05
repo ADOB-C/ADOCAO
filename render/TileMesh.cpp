@@ -8,6 +8,9 @@
 #include <cstring>
 #include <functional>
 
+
+namespace adofai {
+
 using TileShape::Shape;
 
 namespace {
@@ -398,3 +401,5 @@ void TileMesh::updateVisibleRange(int startTile, int endTile, bool visible) {
     if (endTile < startTile) return;
     std::memset(m_visible.data() + startTile, visible ? 1 : 0, (size_t)(endTile - startTile + 1));
 }
+
+}  // namespace adofai

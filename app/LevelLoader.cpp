@@ -17,6 +17,11 @@
 #include <windows.h>
 #endif
 
+
+
+namespace adofai {}          // 前置声明：本文件可能不直接 include 库头
+using namespace adofai;      // 库侧公共 API 在 adofai:: 里（P1：为 ADOFAI.Lib 做准备）
+
 static void report(LoadingProgress& p, float pct, const char* text) {
     p.stage++;
     p.percent.store(pct);

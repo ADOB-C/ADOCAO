@@ -4,6 +4,9 @@
 #include <glm/glm.hpp>
 #include <vector>
 
+
+namespace adofai {
+
 class Shader;
 class Camera;
 
@@ -52,3 +55,5 @@ private:
     void rebuildGeometry();
     void ensureGPUResources() const;
 };
+
+}  // namespace adofai

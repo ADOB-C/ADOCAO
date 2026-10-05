@@ -1,5 +1,8 @@
 #include "JsonCleaner.hpp"
 
+
+namespace adofai {
+
 std::string cleanJson(const std::string& raw) {
     std::string out;
     out.reserve(raw.size());
@@ -83,3 +86,5 @@ std::string cleanJson(const std::string& raw) {
 
     return out2;
 }
+
+}  // namespace adofai

@@ -4,10 +4,15 @@
 #include <vector>
 #include <cstdint>
 
-constexpr int AUDIO_SAMPLE_RATE = 48000;
 
+// miniaudio 的类型属于**全局**命名空间：前置声明必须在 adofai 之外，
+// 否则声明出来的是 adofai::ma_device，跟真类型成了两个东西（编译期 incomplete type）。
 struct ma_device;
 struct ma_decoder;
+
+namespace adofai {
+
+constexpr int AUDIO_SAMPLE_RATE = 48000;
 
 class AudioEngine {
 public:
@@ -61,3 +66,5 @@ private:
 
     static void dataCallback(ma_device* pDevice, void* pOutput, const void*, unsigned int frameCount);
 };
+
+}  // namespace adofai

@@ -2,7 +2,7 @@
 
 #include <glm/glm.hpp>
 
-class Camera;
+namespace adofai { class Camera; }   // 库侧类型：前置声明也要在 adofai 里
 
 // Letterboxed viewport (in framebuffer pixels) for a target aspect ratio.
 struct LetterboxedViewport {
@@ -22,8 +22,8 @@ class CameraController {
 public:
     CameraController() = default;
 
-    void attach(Camera& camera) { m_camera = &camera; }
-    Camera& camera() const { return *m_camera; }
+    void attach(adofai::Camera& camera) { m_camera = &camera; }
+    adofai::Camera& camera() const { return *m_camera; }
 
     // Move the camera to a world position: sets target, updates the pan base
     // and cancels any in-progress drag offset.
@@ -51,7 +51,7 @@ public:
     bool dragging() const { return m_dragging; }
 
 private:
-    Camera* m_camera = nullptr;
+    adofai::Camera* m_camera = nullptr;
 
     double m_cursorX = 0, m_cursorY = 0;
     double m_dragStartX = 0, m_dragStartY = 0;

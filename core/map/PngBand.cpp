@@ -7,6 +7,8 @@
 // 没有 zlib 时退回 miniz（CI 的 Windows 就是这种情形，可编译即可）。
 #if defined(ADOCAO_HAVE_ZLIB)
   #include <zlib.h>
+
+
   using mz_ulong = uLong;
   #define mz_stream               z_stream
   #define mz_deflateInit2         deflateInit2
@@ -38,6 +40,9 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+
+namespace adofai {}          // 前置声明：本文件可能不直接 include 库头
+using namespace adofai;      // 库侧公共 API 在 adofai:: 里（P1：为 ADOFAI.Lib 做准备）
 
 namespace {
 

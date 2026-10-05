@@ -3,6 +3,7 @@
 set(ADOCAO_APP_SOURCES
     main.cpp
     Application.cpp
+    AssetSetup.cpp
     Application.hpp
     LauncherWindow.cpp
     LauncherWindow.hpp

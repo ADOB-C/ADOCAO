@@ -7,13 +7,13 @@
 
 struct GLFWwindow;
 struct LauncherConfig;
-struct PlaybackFrame;
-class Camera;
-class LevelData;
-class Planet;
-class Shader;
-class TileMesh;
-class Timeline;
+namespace adofai { struct PlaybackFrame; }   // 库侧类型：前置声明也要在 adofai 里
+namespace adofai { class Camera; }   // 库侧类型：前置声明也要在 adofai 里
+namespace adofai { class LevelData; }   // 库侧类型：前置声明也要在 adofai 里
+namespace adofai { class Planet; }   // 库侧类型：前置声明也要在 adofai 里
+namespace adofai { class Shader; }   // 库侧类型：前置声明也要在 adofai 里
+namespace adofai { class TileMesh; }   // 库侧类型：前置声明也要在 adofai 里
+namespace adofai { class Timeline; }   // 库侧类型：前置声明也要在 adofai 里
 
 // LevelScene owns the GL drawables of a loaded level — shaders, tile mesh,
 // planets with trails — plus the per-frame scene state (track appear/
@@ -30,18 +30,18 @@ public:
 
     // Compile shaders (with inline fallback), create planets and allocate the
     // tile mesh. A GL context must be current. Returns false on shader failure.
-    bool init(const LauncherConfig& cfg, const LevelData& level);
+    bool init(const LauncherConfig& cfg, const adofai::LevelData& level);
 
     // Build tile mesh + planet GPU buffers synchronously (mesh not built yet).
     // After this (and after any async build) the caller must release the
     // LevelData mesh temporaries (angleData / tileBPMs / ...).
-    void buildSync(const LevelData& level);
+    void buildSync(const adofai::LevelData& level);
 
     // Start the mesh + planet GPU build on a background thread sharing the GL
     // context via sharedWindow (context must be current on this thread).
     // Returns false when no background build could be started — fall back to
     // buildSync() in that case. Poll with pollAsyncBuild().
-    bool beginAsyncBuild(const LevelData& level, GLFWwindow* sharedWindow);
+    bool beginAsyncBuild(const adofai::LevelData& level, GLFWwindow* sharedWindow);
 
     // Returns true once when the background build just finished; false
     // afterwards (and when no async build is running).
@@ -52,7 +52,7 @@ public:
 
     // Apply the latest playback frame to planet positions and trail samples
     // (call only while playing).
-    void applyFrame(const PlaybackFrame& frame, const Timeline& timeline);
+    void applyFrame(const adofai::PlaybackFrame& frame, const adofai::Timeline& timeline);
 
     // GameWindow reports the measured work time (ms, excluding vsync/sleep) of
     // the previous frame. Used by the trail sample-rate governor.
@@ -61,22 +61,22 @@ public:
     // Draw the whole scene into the current viewport using the given camera.
     // highlightTile: selected tile index to outline, or -1 for none (only
     // drawn while stopped).
-    void render(Camera& camera, const Timeline& timeline, bool playing,
+    void render(adofai::Camera& camera, const adofai::Timeline& timeline, bool playing,
                 double timeInLevel, int highlightTile);
 
 private:
     bool compileShaders();
-    void updateTileVisibility(const Timeline& timeline, double t, bool playing);
+    void updateTileVisibility(const adofai::Timeline& timeline, double t, bool playing);
 
     // Shaders (heap-allocated, freed on destruction)
-    Shader* m_tileShader = nullptr;
-    Shader* m_planetShader = nullptr;
-    Shader* m_trailShader = nullptr;
-    Shader* m_highlightShader = nullptr;
+    adofai::Shader* m_tileShader = nullptr;
+    adofai::Shader* m_planetShader = nullptr;
+    adofai::Shader* m_trailShader = nullptr;
+    adofai::Shader* m_highlightShader = nullptr;
 
-    TileMesh* m_tileMesh = nullptr;
-    std::unique_ptr<Planet> m_redPlanet;
-    std::unique_ptr<Planet> m_bluePlanet;
+    adofai::TileMesh* m_tileMesh = nullptr;
+    std::unique_ptr<adofai::Planet> m_redPlanet;
+    std::unique_ptr<adofai::Planet> m_bluePlanet;
 
     // Build-time config snapshots (config object outlives the scene, but the
     // async build thread must not touch it).

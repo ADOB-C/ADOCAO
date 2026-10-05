@@ -8,6 +8,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   ✅ P1–P5 全部完成：目录搬迁+CMake 拆库（P1+P2）→ PlaybackEngine 拆 core/timeline（P3）→
   app 拆分（P4：GameWindow → `app/CameraController`/`app/LevelScene`，LauncherWindow → `app/wizard/` 分页）
   → 资产并入 `assets/` + g_sc 清理 + 文档/CI 同步（P5）
+- **库侧公共 API 都在 `adofai::` 里**（2026-10 起，为抽出 ADOFAI.Lib 做准备）：core/audio/render 的
+  头文件与实现都包在 `namespace adofai { … }` 里；app/tests 侧的文件用
+  `using namespace adofai;`（消费方当然也直接写 `adofai::X`）。两条相关规矩：
+  * 在 app 头里**别在全局前置声明库类型**（会和 `using` 打架变成"ambigous"）——写 `namespace adofai { class X; }`；
+  * 系统/第三方类型（`ma_device`/`ma_decoder` 之类）的**前置声明必须留在 adofai 之外**，否则声明出来的是
+    `adofai::ma_device`，跟真类型成两个东西。
+- 资产查找走 `adofai::assetOptions()`（`core/util/AssetPaths.{hpp,cpp}`）：库默认只认"相对当前目录"、
+  不找 zip、不找 data 目录；**产品名与布局集中在 `app/AssetSetup.cpp::configureAssetPaths()`**
+  （zip = `ADOCAO-data.zip`、dataDir = `ADOCAO-data`、roots = CWD→exe 目录→macOS bundle 的 `../Resources`→上溯 3 级；
+  非 Windows 优先 CWD，Windows 优先 exe 旁）。hitsounds 的相对目录同理由 `HitsoundManager::setDefaultHitsoundSubdir`
+  设进来。**改这些名字/顺序时别退回 `core/util/DataFile.cpp` 里**——那里现在一个产品名都没有。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`

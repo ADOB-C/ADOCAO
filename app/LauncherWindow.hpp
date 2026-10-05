@@ -4,8 +4,8 @@
 #include <memory>
 #include <functional>
 
-class LevelData;
-class Timeline;
+namespace adofai { class LevelData; }   // 库侧类型：前置声明也要在 adofai 里
+namespace adofai { class Timeline; }   // 库侧类型：前置声明也要在 adofai 里
 
 // User selections from the launcher
 struct LauncherConfig {
@@ -48,8 +48,8 @@ struct LauncherConfig {
 
     // Wizard (5.0.0): result of the "Next" preload step (parse + timeline).
     // Hitsound synthesis + audio are finished after Start in runLevelLoading.
-    std::shared_ptr<LevelData> preloadedLevel;
-    std::shared_ptr<Timeline> preloadedTimeline;
+    std::shared_ptr<adofai::LevelData> preloadedLevel;
+    std::shared_ptr<adofai::Timeline> preloadedTimeline;
 };
 
 // Opens a centered ImGui launcher window. Returns config after user clicks Start or closes.

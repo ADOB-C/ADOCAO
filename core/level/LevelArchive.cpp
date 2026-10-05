@@ -7,6 +7,9 @@
 #include <cstring>
 #include <new>
 
+
+namespace adofai {
+
 namespace {
 
 constexpr unsigned char kXzMagic[6]   = {0xFD, '7', 'z', 'X', 'Z', 0x00};
@@ -322,3 +325,5 @@ void ArchiveStream::consume(size_t completeBytes) {
     if (completeBytes > m_len) completeBytes = m_len;
     m_carry = m_len - completeBytes;
 }
+
+}  // namespace adofai

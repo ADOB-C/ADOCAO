@@ -14,6 +14,9 @@
 //   .adofai.zst  —— zstd
 // 按 **magic** 判断而不是扩展名（../Song.adofai 那套 audio-as-chart 工具也是这么
 // 自动识别的），所以改过名、或扩展名被抹掉的谱面照样能读。
+
+namespace adofai {
+
 enum class LevelArchiveKind { Plain, Xz, Zstd };
 
 LevelArchiveKind sniffLevelArchive(const char* data, size_t length);
@@ -77,3 +80,5 @@ private:
     ZSTD_inBuffer m_zin{nullptr, 0, 0};
     bool m_frameDone = false;
 };
+
+}  // namespace adofai

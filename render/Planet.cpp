@@ -6,6 +6,9 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
 
+
+namespace adofai {
+
 Planet::Planet(const glm::vec3& color, bool showTrail, float r)
     : color(color), radius(r) {
     if (showTrail)
@@ -129,3 +132,5 @@ void Planet::draw(Shader& shader, const Camera& camera, double camX, double camY
     glDrawElements(GL_TRIANGLE_STRIP, m_indexCount, GL_UNSIGNED_INT, nullptr);
     glBindVertexArray(0);
 }
+
+}  // namespace adofai

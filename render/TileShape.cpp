@@ -17,6 +17,9 @@
 // 独立变量（只被 fma 消费，编译器不会把它并进别的加法里）。
 // 注意：`std::fma(a, b, 0.0f)` 就是"正确舍入的乘积"，与单独一条 `fmul` 同值。
 
+
+namespace adofai {
+
 namespace TileShape {
 
 // ---- 静态表 ----------------------------------------------------------
@@ -400,3 +403,5 @@ int packShapeTable(const Shape* shapes, int count, std::vector<float>& out) {
 }
 
 } // namespace TileShape
+
+}  // namespace adofai

@@ -6,6 +6,11 @@
 #include <string>
 #include <vector>
 
+
+
+namespace adofai {}          // 前置声明：本文件可能不直接 include 库头
+using namespace adofai;      // 库侧公共 API 在 adofai:: 里（P1：为 ADOFAI.Lib 做准备）
+
 static void dump(const std::string& label, const std::string& note, Scratch& sc) {
     std::printf("{\"label\":\"%s\",\"note\":\"%s\",\"verts\":[", label.c_str(), note.c_str());
     for (size_t i = 0; i < sc.verts.size(); i++) std::printf("%s%.6f", i ? "," : "", sc.verts[i]);

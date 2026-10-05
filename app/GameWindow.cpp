@@ -22,6 +22,11 @@
 // 实现（STB_IMAGE_WRITE_IMPLEMENTATION）在 app/MapExport.cpp —— 同一个二进制里只留一份。
 #include "stb_image_write.h"
 
+
+
+namespace adofai {}          // 前置声明：本文件可能不直接 include 库头
+using namespace adofai;      // 库侧公共 API 在 adofai:: 里（P1：为 ADOFAI.Lib 做准备）
+
 namespace {
 
 // Start playback from the given floor (used for Space-from-selected-tile).

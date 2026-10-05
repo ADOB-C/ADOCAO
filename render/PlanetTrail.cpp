@@ -6,6 +6,9 @@
 #include <cmath>
 #include <algorithm>
 
+
+namespace adofai {
+
 PlanetTrail::PlanetTrail(const glm::vec3& color, float planetRadius)
     : m_planetRadius(planetRadius), m_color(color) {
     m_points.resize(m_maxPoints);
@@ -215,3 +218,5 @@ void PlanetTrail::draw(Shader& shader, const Camera& camera, double camX, double
     glEnable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
 }
+
+}  // namespace adofai

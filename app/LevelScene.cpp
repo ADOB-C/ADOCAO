@@ -1,5 +1,7 @@
 #include "LevelScene.hpp"
 
+#include "core/util/AssetPaths.hpp"
+
 #include "LauncherWindow.hpp"
 #include "glad/gl_core.hpp"
 #include "render/Camera.hpp"
@@ -33,72 +35,14 @@
 #include <limits.h>
 #endif
 
-namespace {
 
-// Shader assets live in "assets/shaders/" relative to the working directory,
-// the executable directory, a macOS bundle's Contents/Resources (see
-// scripts/make-app.sh) or up to 3 parent directories above the executable
-// (Finder launches / .app bundles / nested build dirs).
-static std::string executableDirectory() {
-#ifdef __APPLE__
-    uint32_t size = 0;
-    _NSGetExecutablePath(nullptr, &size);
-    std::vector<char> buf(size > 0 ? size : 1);
-    if (_NSGetExecutablePath(buf.data(), &size) != 0) return {};
-    std::string dir(buf.data());
-    auto pos = dir.find_last_of('/');
-    if (pos != std::string::npos) dir = dir.substr(0, pos);
-    // _NSGetExecutablePath reports the path as invoked, so it may go through a
-    // symlink (e.g. /Applications/ADOCAO.app -> repo/build/ADOCAO.app). Resolve
-    // it, otherwise every search root below points outside the real bundle.
-    char resolved[PATH_MAX];
-    if (realpath(dir.c_str(), resolved)) dir = resolved;
-    return dir;
-#elif defined(__linux__)
-    char buf[PATH_MAX];
-    ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-    if (len <= 0) return {};
-    buf[len] = '\0';
-    std::string dir(buf);
-    auto pos = dir.find_last_of('/');
-    if (pos != std::string::npos) dir = dir.substr(0, pos);
-    return dir;
-#else
-    return {};
-#endif
-}
 
-static bool fileExists(const std::string& path) {
-    std::ifstream f(path);
-    return f.good();
-}
+namespace adofai {}          // 前置声明：本文件可能不直接 include 库头
+using namespace adofai;      // 库侧公共 API 在 adofai:: 里（P1：为 ADOFAI.Lib 做准备）
 
-static std::string assetPath(const std::string& relative) {
-    std::vector<std::string> candidates;
-    candidates.push_back(relative);
-
-    const std::string exeDir = executableDirectory();
-    if (!exeDir.empty()) {
-        candidates.push_back(exeDir + "/" + relative);
-        // Standard macOS bundle layout, where the packaged assets live.
-        candidates.push_back(exeDir + "/../Resources/" + relative);
-        auto dir = exeDir;
-        for (int i = 0; i < 3 && !dir.empty(); i++) {
-            const auto slash = dir.find_last_of("/\\");
-            if (slash == std::string::npos) { dir.clear(); break; }
-            dir = dir.substr(0, slash);
-        }
-        if (!dir.empty())
-            candidates.push_back(dir + "/" + relative);
-    }
-
-    for (const auto& c : candidates) {
-        if (fileExists(c)) return c;
-    }
-    return relative;
-}
-
-} // namespace
+// 资产查找（shader 的 "assets/shaders/..."）走库里的 adofai::resolveAsset：
+// 搜索根由 app/AssetSetup.cpp 在启动时配置（CWD → exe 目录 → macOS bundle 的
+// ../Resources → 上溯 3 级；见 docs/project-structure.md §2）。
 
 LevelScene::LevelScene() = default;
 
@@ -119,11 +63,11 @@ bool LevelScene::compileShaders() {
         return s.compile(vs, fs);
     };
 
-    if (!compileShader(*m_tileShader, assetPath("assets/shaders/tile.vert").c_str(), assetPath("assets/shaders/tile.frag").c_str(), Shaders::kTileVertSrc, Shaders::kTileFragSrc)
-     || !compileShader(*m_planetShader, assetPath("assets/shaders/planet.vert").c_str(), assetPath("assets/shaders/planet.frag").c_str(), Shaders::kPlanetVertSrc, Shaders::kPlanetFragSrc)
-     || !compileShader(*m_trailShader, assetPath("assets/shaders/trail.vert").c_str(), assetPath("assets/shaders/trail.frag").c_str(), Shaders::kTrailVertSrc, Shaders::kTrailFragSrc)
+    if (!compileShader(*m_tileShader, resolveAsset("assets/shaders/tile.vert").c_str(), resolveAsset("assets/shaders/tile.frag").c_str(), Shaders::kTileVertSrc, Shaders::kTileFragSrc)
+     || !compileShader(*m_planetShader, resolveAsset("assets/shaders/planet.vert").c_str(), resolveAsset("assets/shaders/planet.frag").c_str(), Shaders::kPlanetVertSrc, Shaders::kPlanetFragSrc)
+     || !compileShader(*m_trailShader, resolveAsset("assets/shaders/trail.vert").c_str(), resolveAsset("assets/shaders/trail.frag").c_str(), Shaders::kTrailVertSrc, Shaders::kTrailFragSrc)
      // 高亮与砖共用同一个 VS（几何展开只有一份实现在 tile.vert 里），只有 FS 不同
-     || !compileShader(*m_highlightShader, assetPath("assets/shaders/tile.vert").c_str(), assetPath("assets/shaders/highlight.frag").c_str(), Shaders::kTileVertSrc, Shaders::kHighlightFragSrc)) {
+     || !compileShader(*m_highlightShader, resolveAsset("assets/shaders/tile.vert").c_str(), resolveAsset("assets/shaders/highlight.frag").c_str(), Shaders::kTileVertSrc, Shaders::kHighlightFragSrc)) {
         LOG_E("Shader compilation failed");
         return false;
     }

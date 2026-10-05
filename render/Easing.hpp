@@ -11,6 +11,9 @@
 //   back:   c1 = 1.70158, c3 = c1 + 1
 //   elastic: c4 = (2*PI)/3, c5 = (2*PI)/4.5
 
+
+namespace adofai {
+
 namespace Easing {
 
 using Func = std::function<float(float)>;
@@ -132,3 +135,5 @@ inline Func byName(const std::string& name) {
 }
 
 } // namespace Easing
+
+}  // namespace adofai

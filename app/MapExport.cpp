@@ -31,6 +31,11 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
+
+
+namespace adofai {}          // 前置声明：本文件可能不直接 include 库头
+using namespace adofai;      // 库侧公共 API 在 adofai:: 里（P1：为 ADOFAI.Lib 做准备）
+
 namespace {
 
 // 拼接用的瓦片（px 只在串行流式路径里懒加载；并行路径不保留解码结果）

@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <vector>
 
-class Timeline;
+namespace adofai { class Timeline; }   // 库侧类型：不许在全局前置声明（会和 using namespace 打架）
 
 // 关卡地图全景：把整条路径按世界坐标的等比缩放画进一张 RGBA8 图。
 //
@@ -57,5 +57,5 @@ inline uint32_t timeColorAt(double t) {
 }
 
 // 成功时 out 为 width*height*4 的 RGBA8（自上而下），返回 true。
-bool renderLevelMap(const Timeline& timeline, const LevelMapOptions& opts,
+bool renderLevelMap(const adofai::Timeline& timeline, const LevelMapOptions& opts,
                     std::vector<uint8_t>& out);

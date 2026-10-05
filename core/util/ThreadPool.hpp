@@ -8,6 +8,9 @@
 #include <atomic>
 #include <future>
 
+
+namespace adofai {
+
 class ThreadPool {
 public:
     explicit ThreadPool(unsigned count = 0);
@@ -28,3 +31,5 @@ private:
     std::atomic<bool> m_stop{false};
     void workerLoop();
 };
+
+}  // namespace adofai

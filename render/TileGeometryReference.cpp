@@ -1,5 +1,8 @@
 #include "TileGeometry.hpp"
 
+
+namespace adofai {
+
 void pushType(std::vector<float>& c, float type, int n) {
     for (int i = 0; i < n; i++) c.push_back(type);
 }
@@ -188,3 +191,5 @@ void createTileMesh(float startAngle, float endAngle, Scratch& sc) {
         sc.indices.insert(sc.indices.end(),{cnt,cnt+1,cnt+2,cnt+2,cnt+3,cnt});
     }
 }
+
+}  // namespace adofai

@@ -6,6 +6,9 @@
 
 #include "core/timeline/HitsoundTimestampGroup.hpp"
 
+
+namespace adofai {
+
 using HitsoundProgressCb = std::function<void(float percent)>;
 
 class HitsoundManager {
@@ -17,6 +20,9 @@ public:
     HitsoundManager& operator=(const HitsoundManager&) = delete;
 
     void init(const std::string& assetsDir = "");
+
+    // hitsounds 的相对目录（产品设一次，例如 "assets/hitsounds"）。不设 = 相对当前目录。
+    static void setDefaultHitsoundSubdir(const std::string& subdir);
 
     void setHitsoundType(const std::string& type);
     void setVolume(float vol);  // 0-100
@@ -70,3 +76,5 @@ private:
                  std::vector<float>& samples,
                  int& sampleRate, int& channels);
 };
+
+}  // namespace adofai

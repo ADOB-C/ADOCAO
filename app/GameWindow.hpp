@@ -7,11 +7,11 @@
 struct GLFWwindow;
 struct LauncherConfig;
 struct LoadResult;
-class LevelData;
-class Timeline;
-class PlaybackClock;
-class HitsoundManager;
-class AudioEngine;
+namespace adofai { class LevelData; }   // 库侧类型：前置声明也要在 adofai 里
+namespace adofai { class Timeline; }   // 库侧类型：前置声明也要在 adofai 里
+namespace adofai { class PlaybackClock; }   // 库侧类型：前置声明也要在 adofai 里
+namespace adofai { class HitsoundManager; }   // 库侧类型：前置声明也要在 adofai 里
+namespace adofai { class AudioEngine; }   // 库侧类型：前置声明也要在 adofai 里
 class LevelScene;
 
 void showGameWindow(const LauncherConfig& cfg, LoadResult& loadResult);
@@ -33,15 +33,15 @@ private:
 
     // Scene (shaders / tile mesh / planets / trails) + camera navigation
     std::unique_ptr<LevelScene> m_scene;
-    Camera m_camera;
+    adofai::Camera m_camera;
     CameraController m_camCtrl;   // attached to m_camera in init()
 
     const LauncherConfig* m_cfg = nullptr;
-    LevelData* m_level = nullptr;
-    Timeline* m_timeline = nullptr;
-    PlaybackClock* m_playback = nullptr;
-    HitsoundManager* m_hitsoundMgr = nullptr;
-    AudioEngine* m_audioEngine = nullptr;
+    adofai::LevelData* m_level = nullptr;
+    adofai::Timeline* m_timeline = nullptr;
+    adofai::PlaybackClock* m_playback = nullptr;
+    adofai::HitsoundManager* m_hitsoundMgr = nullptr;
+    adofai::AudioEngine* m_audioEngine = nullptr;
 
     // Playback/UI state
     int m_selectedTile = -1;

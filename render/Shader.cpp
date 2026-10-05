@@ -6,6 +6,9 @@
 #include <vector>
 #include <string>
 
+
+namespace adofai {
+
 static std::string readFile(const char* path) {
     auto data = readDataFile(path);
     if (data.empty()) return {};
@@ -106,3 +109,5 @@ bool Shader::compileFile(const char* vertPath, const char* fragPath) {
     return compile(vs.c_str(), fs.c_str());
 }
 
+
+}  // namespace adofai

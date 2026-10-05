@@ -1,6 +1,7 @@
 #include "HitsoundManager.hpp"
 #include "AudioEngine.hpp"
 #include "core/util/Logger.hpp"
+#include "core/util/AssetPaths.hpp"
 #include "core/util/DataFile.hpp"
 
 #include <cmath>
@@ -12,6 +13,9 @@
 #include <fstream>
 #include <thread>
 #include <unordered_map>
+
+
+namespace adofai {
 
 static std::unordered_map<std::string, std::vector<float>> s_wavCache;
 static std::unordered_map<std::string, std::vector<int16_t>> s_wavRawCache;
@@ -87,91 +91,22 @@ static const char* hitsoundKey(const std::string& type) {
     return nullptr;
 }
 
-static std::string executableDirectory() {
-#ifdef _WIN32
-    char exePath[MAX_PATH];
-    DWORD len = GetModuleFileNameA(nullptr, exePath, MAX_PATH);
-    if (len > 0 && len < MAX_PATH) {
-        std::string dir(exePath, len);
-        auto pos = dir.find_last_of("\\/");
-        if (pos != std::string::npos) dir = dir.substr(0, pos);
-        return dir;
-    }
-#elif defined(__APPLE__)
-    uint32_t size = 0;
-    _NSGetExecutablePath(nullptr, &size);
-    std::vector<char> buf(size > 0 ? size : 1);
-    if (_NSGetExecutablePath(buf.data(), &size) != 0) return {};
-    std::string dir(buf.data());
-    auto pos = dir.find_last_of('/');
-    if (pos != std::string::npos) dir = dir.substr(0, pos);
-    // The reported path is the one used to launch, which may go through a
-    // symlink (e.g. /Applications/ADOCAO.app). Resolve it so the search roots
-    // below actually point into the bundle.
-    char resolved[PATH_MAX];
-    if (realpath(dir.c_str(), resolved)) dir = resolved;
-    return dir;
-#elif defined(__linux__)
-    char buf[PATH_MAX];
-    ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-    if (len <= 0) return {};
-    buf[len] = '\0';
-    std::string dir(buf);
-    auto pos = dir.find_last_of('/');
-    if (pos != std::string::npos) dir = dir.substr(0, pos);
-    return dir;
-#endif
-    return {};
-}
+// hitsounds 放在哪个相对目录下，由**产品**决定（ADOCAO 在 app/AssetSetup.cpp 里设成
+// "assets/hitsounds"）。库自己不认产品布局，也不做平台相关的路径推断 —— 那是调用方的事。
+static std::string g_hitsoundSubdir;
 
-static bool fileExists(const std::string& path) {
-    std::ifstream f(path);
-    return f.good();
-}
+void HitsoundManager::setDefaultHitsoundSubdir(const std::string& subdir) { g_hitsoundSubdir = subdir; }
 
-static std::string findAssetsDir() {
-    const std::string exeDir = executableDirectory();
-
-    // Prefer CWD-relative hitsounds for command-line usage from the repo/build
-    // root, then fall back to the executable directory (Finder / desktop launches).
-    // Assets live in "assets/hitsounds/" (see docs/project-structure.md §2).
-    std::vector<std::string> candidates;
-#ifdef _WIN32
-    if (!exeDir.empty()) candidates.push_back(exeDir + "/assets/hitsounds/");
-#else
-    candidates.push_back("assets/hitsounds/");
-    if (!exeDir.empty()) {
-        candidates.push_back(exeDir + "/assets/hitsounds/");
-        // Standard macOS bundle layout (see scripts/make-app.sh).
-        candidates.push_back(exeDir + "/../Resources/assets/hitsounds/");
-
-        // If the binary is in a nested build subdirectory (e.g. build/app or
-        // build/ADOCAO.app/Contents/MacOS), also look above it for assets
-        // copied next to the executable / .app bundle.
-        auto dir = exeDir;
-        for (int i = 0; i < 3 && !dir.empty(); i++) {
-            const auto slash = dir.find_last_of("/\\");
-            if (slash == std::string::npos) { dir.clear(); break; }
-            dir = dir.substr(0, slash);
-        }
-        if (!dir.empty())
-            candidates.push_back(dir + "/assets/hitsounds/");
-    }
-#endif
-
-    for (const auto& dir : candidates) {
-        if (fileExists(dir + "Kick.wav"))
-            return dir;
-    }
-
-    return candidates.empty() ? "assets/hitsounds/" : candidates.front();
+static std::string defaultHitsoundDir() {
+    if (g_hitsoundSubdir.empty()) return {};   // 没配就以相对当前目录的方式找（调用方自己负责）
+    return resolveAssetDir(g_hitsoundSubdir);
 }
 
 HitsoundManager::HitsoundManager() = default;
 HitsoundManager::~HitsoundManager() { m_buffer.clear(); }
 
 void HitsoundManager::init(const std::string& assetsDir) {
-    m_assetsDir = assetsDir.empty() ? findAssetsDir() : assetsDir;
+    m_assetsDir = assetsDir.empty() ? defaultHitsoundDir() : assetsDir;
 }
 
 std::string HitsoundManager::hitsoundPath(const std::string& type) const {
@@ -531,3 +466,5 @@ bool HitsoundManager::writeWav(const std::string& filepath) {
     LOG_D("Hitsound: Exported %zu frames to %s", n, filepath.c_str());
     return true;
 }
+
+}  // namespace adofai

@@ -1,5 +1,8 @@
 #pragma once
 
+
+namespace adofai {
+
 namespace Shaders {
 
 // Instanced tile rendering. Vertex type (0=stroke, 1=fill) mixes per-instance colors.
@@ -239,3 +242,5 @@ void main() {
 
 
 } // namespace Shaders
+
+}  // namespace adofai

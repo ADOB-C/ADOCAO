@@ -1,6 +1,9 @@
 #include "ThreadPool.hpp"
 #include <algorithm>
 
+
+namespace adofai {
+
 ThreadPool::ThreadPool(unsigned count) {
     if (count == 0) { count = std::thread::hardware_concurrency(); if (count == 0) count = 2; }
     m_workers.reserve(count);
@@ -42,3 +45,5 @@ void ThreadPool::parallelFor(size_t start, size_t end,
         if (task) task(); else std::this_thread::yield();
     }
 }
+
+}  // namespace adofai

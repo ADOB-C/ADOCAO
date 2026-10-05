@@ -23,6 +23,9 @@
 // 绘制顺序：与改造前**逐字相同**（`unordered_map<GeoKey>` 的迭代序 + 组内下标降序）。
 // 这条不是洁癖：深度 24 bit 下相邻砖的深度会量化到同一个值，重叠处谁赢由先后决定 ——
 // 实测把组内顺序反过来，MYC t=30s 那一帧会有 102 个像素不同（maxdelta 111）。
+
+namespace adofai {
+
 class TileMesh {
 public:
     TileMesh() = default;
@@ -91,3 +94,5 @@ private:
     mutable int m_lastDrawn = 0;
     mutable double m_prevCamX = 0, m_prevCamY = 0;
 };
+
+}  // namespace adofai

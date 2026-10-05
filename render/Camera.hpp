@@ -5,6 +5,9 @@
 
 // Orthographic camera, always follows the current pivot planet.
 // Fixed relativeTo=Player, position=(0,0).
+
+namespace adofai {
+
 class Camera {
 public:
     Camera();
@@ -39,3 +42,5 @@ private:
 
     void updateProj() const;
 };
+
+}  // namespace adofai

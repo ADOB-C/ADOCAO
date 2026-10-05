@@ -10,6 +10,9 @@
 //
 // When C++26 std::simd lands, add a new backend here without touching callers.
 
+
+namespace adofai {
+
 namespace CullSIMD {
 
 // Number of AABBs processed in one SIMD batch
@@ -41,3 +44,5 @@ inline int test4(const double* minX, const double* maxX,
 }
 
 } // namespace CullSIMD
+
+}  // namespace adofai

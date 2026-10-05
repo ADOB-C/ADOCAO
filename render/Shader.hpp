@@ -3,6 +3,9 @@
 #include "glad/gl_core.hpp"
 #include <string>
 
+
+namespace adofai {
+
 class Shader {
 public:
     Shader() = default;
@@ -31,3 +34,5 @@ private:
 
     static GLuint compileShader(GLenum type, const char* src);
 };
+
+}  // namespace adofai

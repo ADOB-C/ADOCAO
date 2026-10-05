@@ -3,6 +3,9 @@
 #include <cstdio>
 #include <string>
 
+
+namespace adofai {
+
 enum class LogLevel { Debug, Info, Warning, Error };
 
 class Logger {
@@ -24,3 +27,5 @@ private:
 #define LOG_I(fmt, ...) Logger::instance().log(LogLevel::Info,    fmt, ##__VA_ARGS__)
 #define LOG_W(fmt, ...) Logger::instance().log(LogLevel::Warning, fmt, ##__VA_ARGS__)
 #define LOG_E(fmt, ...) Logger::instance().log(LogLevel::Error,   fmt, ##__VA_ARGS__)
+
+}  // namespace adofai

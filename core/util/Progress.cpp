@@ -4,6 +4,9 @@
 #include <cstdio>
 #include <mutex>
 
+
+namespace adofai {
+
 namespace progress {
 namespace {
 
@@ -58,3 +61,5 @@ void finish() {
 }
 
 }  // namespace progress
+
+}  // namespace adofai

@@ -3,6 +3,9 @@
 #include "glad/gl_core.hpp"
 #include <glm/glm.hpp>
 
+
+namespace adofai {
+
 class PlanetTrail;
 class Shader;
 class Camera;
@@ -39,3 +42,5 @@ private:
 
     void destroyGPU();
 };
+
+}  // namespace adofai

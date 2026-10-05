@@ -6,6 +6,9 @@
 #include <filesystem>
 #include <vector>
 
+
+namespace adofai {
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -71,3 +74,5 @@ std::string resolveLevelPath(const std::string& path) {
     }
     return path;                                            // 0 个或多个：不猜
 }
+
+}  // namespace adofai

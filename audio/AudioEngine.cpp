@@ -16,6 +16,9 @@
 #include <windows.h>
 #endif
 
+
+namespace adofai {
+
 AudioEngine::AudioEngine() = default;
 
 AudioEngine::~AudioEngine() {
@@ -235,3 +238,5 @@ void AudioEngine::dataCallback(ma_device* pDevice, void* pOutput, const void*, u
         if (cursor >= extTotal) *self->m_extPlaying = false;
     }
 }
+
+}  // namespace adofai

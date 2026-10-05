@@ -2,6 +2,9 @@
 
 #include <glm/glm.hpp>
 
+
+namespace adofai {
+
 class Timeline;
 
 struct PlaybackFrame {
@@ -46,3 +49,5 @@ private:
 
     void updateFrame();
 };
+
+}  // namespace adofai

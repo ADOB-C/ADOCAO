@@ -13,6 +13,9 @@
 // Parsed .adofai level file
 // 驻留实现：互斥量与 thread-local 缓存都在 .cpp 文件作用域，按驻留表地址做缓存键；
 // LevelData 里因此没有 mutex / thread_local 数据成员（保持可拷贝，MSVC 也接受）。
+
+namespace adofai {
+
 uint16_t internActionStrIn(std::vector<std::string>& table, const std::string& v);
 
 struct LevelData {
@@ -126,3 +129,5 @@ private:
     void applyPositionTrackOffsets();
     static float pathCharToAngle(char c);
 };
+
+}  // namespace adofai

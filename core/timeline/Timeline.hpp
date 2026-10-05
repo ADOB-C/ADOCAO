@@ -6,6 +6,9 @@
 #include <vector>
 
 // `--force-hitsound raw-pcm`：命中它时不做 hitsound 混音，直接把逐层音量当 PCM 播。
+
+namespace adofai {
+
 inline bool isRawPcmType(const std::string& t) {
     if (t.size() != 7) return false;
     const char* k = "raw-pcm";
@@ -76,3 +79,5 @@ private:
 
     void precalculateTiming();
 };
+
+}  // namespace adofai

@@ -28,6 +28,9 @@
 #include <cstdint>
 #include <vector>
 
+
+namespace adofai {
+
 namespace TileShape {
 
 // ---- 布局常量 --------------------------------------------------------
@@ -146,3 +149,5 @@ void expand(const Shape& s, Expanded& out);
 bool partActive(int mode, int part);
 
 } // namespace TileShape
+
+}  // namespace adofai

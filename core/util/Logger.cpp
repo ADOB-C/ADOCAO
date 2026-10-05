@@ -5,6 +5,9 @@
 #include <iomanip>
 #include <sstream>
 
+
+namespace adofai {
+
 static const char* levelStr(LogLevel lv) {
     switch (lv) {
         case LogLevel::Debug:   return "DEBUG";
@@ -78,3 +81,5 @@ void Logger::log(LogLevel level, const char* fmt, ...) {
         fprintf(stderr, "\n");
     }
 }
+
+}  // namespace adofai

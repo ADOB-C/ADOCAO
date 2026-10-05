@@ -5,6 +5,9 @@
 #include <cmath>
 #include <vector>
 
+
+namespace adofai {
+
 void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& redOut, glm::dvec2& blueOut) {
     const auto& tiles = timeline.level()->tiles;
     int n = (int)tiles.size();
@@ -227,3 +230,5 @@ void PositionSolver::sampleTrail(const Timeline& timeline, double t, float trail
     if (trailDuration <= 0.0f) return;
     sampleTrailRange(timeline, t - trailDuration, t, sampleRate, redHead, blueHead, redOut, blueOut);
 }
+
+}  // namespace adofai

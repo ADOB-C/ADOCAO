@@ -3,6 +3,7 @@ add_library(adocao_core STATIC
     level/LevelArchive.cpp
     level/LevelPath.cpp
     level/JsonCleaner.cpp
+    util/AssetPaths.cpp
     util/Logger.cpp
     util/Progress.cpp
     util/ThreadPool.cpp

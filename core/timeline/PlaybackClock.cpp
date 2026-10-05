@@ -5,6 +5,9 @@
 
 #include <algorithm>
 
+
+namespace adofai {
+
 void PlaybackClock::start(double wallClockSec) {
     if (!m_timeline || m_isPlaying) return;
     m_isPlaying = true;
@@ -91,3 +94,5 @@ void PlaybackClock::updateFrame() {
         LOG_D("Planet reached end: tileTime=%.3fs", t);
     }
 }
+
+}  // namespace adofai

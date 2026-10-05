@@ -7,6 +7,11 @@
 // miniz 的底层 deflate API（依赖里已经有了；audio 用它做 zip，core 用来做 PNG）
 #include "miniz.h"
 
+
+
+namespace adofai {}          // 前置声明：本文件可能不直接 include 库头
+using namespace adofai;      // 库侧公共 API 在 adofai:: 里（P1：为 ADOFAI.Lib 做准备）
+
 namespace {
 
 void put32(std::vector<uint8_t>& v, uint32_t x) {

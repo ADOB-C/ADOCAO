@@ -34,6 +34,9 @@
 
 // 事件字符串驻留表的"当前属主"：buildAction 等自由函数拿不到 LevelData，用这个指针访问。
 // loadFromBuffer 开始时指向 this，于是表仍然是 per-LevelData 的。
+
+namespace adofai {
+
 static LevelData* g_internOwner = nullptr;
 
 namespace {
@@ -1499,3 +1502,5 @@ void LevelData::convertPathToAngles() {
         angleData.push_back(pathCharToAngle(c));
     }
 }
+
+}  // namespace adofai

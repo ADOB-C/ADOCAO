@@ -1,5 +1,8 @@
 #include "Camera.hpp"
 
+
+namespace adofai {
+
 Camera::Camera() {
     m_view = glm::lookAt(
         glm::vec3(0.0f, 0.0f, 10.0f),
@@ -46,3 +49,5 @@ void Camera::frustumBounds(float& left, float& right, float& bottom, float& top)
     bottom = (float)(m_targetY - (double)m_halfH);
     top    = (float)(m_targetY + (double)m_halfH);
 }
+
+}  // namespace adofai

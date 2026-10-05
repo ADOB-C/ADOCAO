@@ -13,6 +13,9 @@
 // Scratch buffer for geometry generation (owned by the caller — was a global
 // `extern Scratch g_sc` before P5; local instances make future parallel mesh
 // builds safe).
+
+namespace adofai {
+
 struct Scratch {
     std::vector<float> verts;      // local xyz
     std::vector<float> types;      // 0.0=stroke, 1.0=fill per vertex
@@ -38,3 +41,5 @@ void createTileMesh(float startAngle, float endAngle, Scratch& sc);
 // 中旋砖（angleData=999）：五边形——“方块身体 + 朝来路的尖角”，沿入砖方向 a1 摆放。
 // 不是 createTileMesh(a,a)（那是圆+方块，像发卡弯）。
 void createMidSpinMesh(float a1, Scratch& sc);
+
+}  // namespace adofai

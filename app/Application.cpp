@@ -4,6 +4,7 @@
 #include "FileMap.hpp"
 #include "LevelLoader.hpp"
 #include "GameWindow.hpp"
+#include "AssetSetup.hpp"
 #include "audio/HitsoundManager.hpp"
 #include "core/level/LevelData.hpp"
 #include "core/timeline/Timeline.hpp"
@@ -32,6 +33,8 @@
 
 // Pin current thread to a performance core (big.LITTLE aware).
 // Uses GetSystemCpuSetInformation via dynamic load for MinGW compat.
+
+
 typedef BOOL (WINAPI *PGSCSI)(PSYSTEM_CPU_SET_INFORMATION, ULONG, PULONG, HANDLE, ULONG);
 
 static void pinToBigCore() {
@@ -81,6 +84,9 @@ static void enableDPIAwareness() {
     }
 }
 #endif
+
+namespace adofai {}          // 前置声明：本文件可能不直接 include 库头
+using namespace adofai;      // 库侧公共 API 在 adofai:: 里（P1：为 ADOFAI.Lib 做准备）
 
 static bool s_firstEarlyLog = true;
 
@@ -203,6 +209,9 @@ static void earlyLog(const char* msg) {
 
 int runApplication(bool debugConsole) {
     earlyLog("[ADOCAO] main() entered");
+
+    // 资产布局是产品知识：一次性告诉库（zip 名 / data 目录 / 搜索根）
+    configureAssetPaths();
 
     Logger::instance().init(logPath(), debugConsole);
     LOG_I("ADOCAO starting...");

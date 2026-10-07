@@ -10,10 +10,12 @@
 #include <filesystem>
 #include <string>
 #include <vector>
-#ifndef _WIN32
-#include <unistd.h>
+// 这两个必须在条件块之外：插进 `#ifndef _WIN32` 里的话，macOS/Linux 编得过、
+// Windows 直接 "not declared"（CI 真踩过一次）。
 #include "archive/Install.hpp"
 #include "app/AssetSetup.hpp"
+#ifndef _WIN32
+#include <unistd.h>
 #endif
 
 

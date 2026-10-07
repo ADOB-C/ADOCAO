@@ -50,7 +50,7 @@ void printHelp(Mode mode, bool all) {
     switch (mode) {
     case Mode::Pack:
         std::fprintf(stderr,
-            "adocao pack <谱> <输出.adocao> [选项]         把谱面打成二进制容器 .adocao\n"
+            "adocao pack <谱> <输出.adocao> [选项]      把谱面打成 .adocao（开发/格式验证工具）\n"
             "\n"
             "  列式存储：每列按取值基数选编码（字典/常量/差分/位打包/原始），**逐位无损**。\n"
             "  只存输入（角度 + 事件）；砖位置/朝向/BPM/时间线都由输入重算，不占文件。\n"
@@ -106,7 +106,6 @@ void printHelp(Mode mode, bool all) {
     case Mode::Export:
         std::fprintf(stderr,
             "adocao export --level <谱>                      导出该谱的 hitsound 混音 WAV\n"
-            "adocao pack <谱> <out.adocao>                  打成二进制容器（列式、逐位无损）\n"
             "\n"
             "  以前是 `--export` 开关，现在只有这一个入口。\n"
             "  强制 hitsound 类型：--force-hitsound [TYPE]；raw-pcm = 把每层音量当 PCM 直通。\n");

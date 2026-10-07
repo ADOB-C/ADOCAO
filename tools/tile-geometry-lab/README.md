@@ -27,7 +27,7 @@ NODE_PATH=$(npm root -g) node tools/tile-geometry-lab/svgshot.cjs geo.svg geo.pn
 ## 二、渲染层：真机 A/B
 
 ```bash
-./build/ADOCAO tools/tile-geometry-lab/midspin-sample.adofai --auto-play --no-hitsound --fullscreen
+./build/adocao tools/tile-geometry-lab/midspin-sample.adofai --auto-play --no-hitsound --fullscreen
 screencapture -x shot.png     # macOS；Linux 用 import/xwd，Windows 用 Win+Shift+S
 ```
 

@@ -11,7 +11,7 @@
 set -euo pipefail
 
 BIN=""
-for cand in ./build/ADOCAO ./build/ADOCAO.exe ./build/adocao; do
+for cand in ./build/adocao ./build/adocao.exe ./build/adocao; do
     if [ -x "$cand" ]; then BIN="$cand"; break; fi
 done
 

@@ -12,16 +12,16 @@
 #
 # 每次运行都会：
 #   * 断言跑之前没有别的 ADOCAO 进程（日志共享，并行会互相污染）
-#   * 从 build/ADOCAO.log 取 `capture: … tile=N req=M`，断言 N == M。应用启动时会**重写**日志，
+#   * 从 build/adocao.log 取 `capture: … tile=N req=M`，断言 N == M。应用启动时会**重写**日志，
 #     所以直接取整份日志里的最后一条，不要按字节偏移取增量。
 #   * 记录墙钟、峰值 RSS、`… unique shapes`、`Built track: … -> K shape groups`（K ≈ 每帧 draw 次数）
 # check 逐字节比对；不一致的状态报告差异像素数（有 Pillow 时，可用 ADOCAO_GATE_PY 指定 python3）
 set -u
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
-BIN=build/ADOCAO
+BIN=build/adocao
 STATES=tests/capture_states.txt
-LOG=build/ADOCAO.log
+LOG=build/adocao.log
 # 长期保留的东西一律放家目录的统一位置（~/.adocao/）—— /tmp 会被系统定期清掉，
 # 基线丢了就得重存一次（真发生过），重写前的 git 镜像更不能放那儿。
 GATE_HOME="${ADOFAO_GATE_HOME:-$HOME/.adocao/gate}"
@@ -75,12 +75,12 @@ run_capture() {   # name chart mode value zoom WxH → 写 $CAPDIR/$name.png；�
     local W="${size%x*}" H="${size#*x}"
     local chart_abs; chart_abs=$(abs "$chart")
     [ -f "$chart_abs" ] || { echo "SKIP|$name|谱面不存在（机器本地谱面？）"; return 0; }
-    # 只关心**写同一个日志**的进程（= 直接跑 build/ADOCAO 的那个）。macOS 的
-    # build/ADOCAO.app 是另一条日志路径（~/Library/Logs/ADOCAO/，见 AGENTS），
+    # 只关心**写同一个日志**的进程（= 直接跑 build/adocao 的那个）。macOS 的
+    # build/adocao.app 是另一条日志路径（~/Library/Logs/ADOCAO/，见 AGENTS），
     # 而且可能是用户自己开着的，所以不拦它 —— 正则也顺带避开"匹配到自己命令行"。
-    local running; running=$(pgrep -f '(^|/)build/ADOCAO( |$)' | wc -l | tr -d ' ')
+    local running; running=$(pgrep -if '(^|/)build/adocao( |$)' | wc -l | tr -d ' ')
     if [ "$running" != "0" ]; then
-        echo "FAIL|$name|跑之前有 $running 个 build/ADOCAO 进程（日志共享，先收干净）"; return 1
+        echo "FAIL|$name|跑之前有 $running 个 build/adocao 进程（日志共享，先收干净）"; return 1
     fi
     local flag
     case "$mode" in

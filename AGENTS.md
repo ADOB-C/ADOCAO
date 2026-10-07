@@ -117,7 +117,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 已彻底删除：GPU compute culling（2.0.0 起不需要，勿再引入）
 - 脚本：`scripts/push-ci.sh`（push → gh run watch；`--watch` 默认输出平台耗时/产物）
   `scripts/run.sh --debugger` | `scripts/release.sh`（支持 x.y.z-AlphaN/-BetaN/-RcN）
-  `scripts/make-app.sh`（macOS：把 `build/ADOCAO` + `assets/` 打成自包含的 `build/ADOCAO.app`，含 ad-hoc 签名；CI 的 macOS job 也用同一个脚本）
+  `scripts/make-app.sh`（macOS：把 `build/adocao` + `assets/` 打成自包含的 `build/adocao.app`，含 ad-hoc 签名；CI 的 macOS job 也用同一个脚本）
   `build.sh`（已有 build/ 缓存且不带参数 = 增量构建，不提问）
 
 ## Project
@@ -734,7 +734,7 @@ scripts/capture-gate.sh check
 1. 几何层：`tools/tile-geometry-lab/dump.sh`（编的就是 `render/TileGeometry.cpp` 本人）→ 顶点 JSON →
    `json2svg.mjs` → `svgshot.cjs`（Playwright + **系统无头 Chromium**）→ 看图。三条路子和坑表都在
    `tools/tile-geometry-lab/README.md`；
-2. 渲染层：`./build/ADOCAO <谱> --auto-play --fullscreen` + `screencapture -x`；最省事的验证谱是几层里放一个中旋，
+2. 渲染层：`./build/adocao <谱> --auto-play --fullscreen` + `screencapture -x`；最省事的验证谱是几层里放一个中旋，
    下面这段可以**直接存成 .adofai**（第 2 层中旋，合法 JSON，别再加省略号）：
    ```json
    {"angleData":[0,999,0,0,0,0],"settings":{"version":15,"bpm":60,"offset":0,"trackColor":"debb7b","backgroundColor":"000000"}}

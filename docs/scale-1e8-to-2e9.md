@@ -289,8 +289,8 @@ MYC 的 1,554 MB 与 AGENTS 记录的 app 侧 `adocao image` 1,560 MB 差 0.4% �
 # 探针思路：在 harness 里 loadFromBuffer 合成谱，打印 live/peak/internal/RSS 与每个 vector 的 size/capacity
 # 深度同深度比例（真 GL 探针）：每对相邻砖一像素，先画近砖红、再画远砖蓝，GL_LEQUAL，读回颜色
 # 窗口路径 bug（不需要写代码，直接对比两次）：
-ADOCAO_WINDOW_KB=4096 ./build/ADOCAO <audio-as-chart>.adofai.xz --capture /tmp/a.png --capture-tile 0  # 日志里会出现回退整份解压
-ADOCAO_WINDOW_KB=8192 ./build/ADOCAO <audio-as-chart>.adofai.xz --capture /tmp/b.png --capture-tile 0  # 走窗口
+ADOCAO_WINDOW_KB=4096 ./build/adocao <audio-as-chart>.adofai.xz --capture /tmp/a.png --capture-tile 0  # 日志里会出现回退整份解压
+ADOCAO_WINDOW_KB=8192 ./build/adocao <audio-as-chart>.adofai.xz --capture /tmp/b.png --capture-tile 0  # 走窗口
 # 帧时间标定：合成 N 实例的谱面 + --capture，ADOCAO_CAPTURE_FRAMES=20 取 render_ms 中位
 # 纪律：跑前跑后 sysctl vm.swapusage；峰值 RSS 预算 ≤2 GB（16 GB 机器，别照抄这次用的 6 GB）
 ```

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# make-app.sh — package build/ADOCAO into a self-contained macOS ADOCAO.app
+# make-app.sh — package build/adocao into a self-contained macOS ADOCAO.app
 #
 # The bundle ships its runtime assets in Contents/Resources/assets, so it runs
 # from anywhere (Finder, /Applications, a downloaded artifact) instead of
 # depending on the repo layout next to it.
 #
 # 用法:
-#   scripts/make-app.sh             # 打包 build/ADOCAO → build/ADOCAO.app
+#   scripts/make-app.sh             # 打包 build/adocao → build/adocao.app
 #   scripts/make-app.sh <binary>    # 指定可执行文件
 set -euo pipefail
 

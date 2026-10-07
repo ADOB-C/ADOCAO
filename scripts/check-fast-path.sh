@@ -9,7 +9,7 @@
 # 为什么不做成进程内自检：它跟前序自检共用进程状态，换工作目录就会假红（踩过）。
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-APP="$ROOT/build/ADOCAO"
+APP="$ROOT/build/adocao"
 if [ ! -x "$APP" ]; then echo "缺少 $APP（先构建）"; exit 1; fi
 fail=0
 

@@ -203,6 +203,16 @@ inline bool parseInt(const char*& p, const char* e, int& out) {
     int64_t v = 0;
     while (p < e && *p >= '0' && *p <= '9') { v = v * 10 + (*p - '0'); ++p; }
     if (p < e && (*p == '.' || *p == 'e' || *p == 'E')) { p = start; return false; }
+    // 2^31−1 层目标 #0 的契约：**绝不静默截断**。以前这里直接 `out = (int)v`，
+    // 于是 parseInt("2147483648") 得到 −2147483648，接着被 floor>=0 && floor<n 的守卫
+    // **无声丢掉**（没有日志）。今天 tiles 还是 32 位索引、这个谱确实装不下，
+    // 所以先做到"放弃快路径 + 喊出来"；阶段 2 把计数改成 int64 后这条会自然消失。
+    if (v > (int64_t)(neg ? 2147483648LL : 2147483647LL)) {
+        LOG_E("parseInt: 整数超出 int32 范围（'%.*s'）—— 放弃快路径，不截断",
+              (int)(p - start), start);
+        p = start;
+        return false;
+    }
     out = (int)(neg ? -v : v);
     return true;
 }

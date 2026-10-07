@@ -11,6 +11,9 @@ add_test(NAME level_parse_parity
 add_executable(adocao_lzma_mt_compat_test lzma_mt_compat_test.cpp)
 target_include_directories(adocao_lzma_mt_compat_test PRIVATE ${CMAKE_SOURCE_DIR})
 add_test(NAME lzma_mt_compat COMMAND adocao_lzma_mt_compat_test)
+add_executable(adocao_limits_test limits_test.cpp)
+target_include_directories(adocao_limits_test PRIVATE ${CMAKE_SOURCE_DIR})
+add_test(NAME limits COMMAND adocao_limits_test)
 
 # 快路径必须吃下非整数 action 字段（parseNumber 曾把"token 正好填满值跨度"误判为截断，
 # 于是所有含小数 action 字段的谱整份退回旧路径）。进程外跑，带负向对照。

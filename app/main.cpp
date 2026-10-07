@@ -264,7 +264,19 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--no-trail") == 0)              cli.showTrail = false;
             else if (std::strcmp(a, "--capture") == 0 && i+1<argc)      cli.capturePath = argv[++i];
             else if (std::strcmp(a, "--capture-time") == 0 && i+1<argc) cli.captureTime = (float)atof(argv[++i]);
-            else if (std::strcmp(a, "--capture-tile") == 0 && i+1<argc) cli.captureTile = atoi(argv[++i]);
+            else if (std::strcmp(a, "--capture-tile") == 0 && i+1<argc) {
+                // 2^31−1 层目标 #0：`atoi` 溢出是 UB（层号 > 2^31−1 会被静默算错），
+                // 所以显式解析 + 范围检查 + 明确报错。
+                char* endp = nullptr;
+                const long long v = std::strtoll(argv[++i], &endp, 10);
+                if (!endp || endp == argv[i] || *endp != '\0' || v < 0 || v > 2147483647LL) {
+                    std::fprintf(stderr,
+                                 "--capture-tile 需要一个 0..2147483647 的整数（给的是 '%s'）\n",
+                                 argv[i]);
+                    std::exit(2);
+                }
+                cli.captureTile = (int)v;
+            }
             else if (std::strcmp(a, "--capture-zoom") == 0 && i+1<argc) cli.captureZoom = (float)atof(argv[++i]);
             else if (std::strcmp(a, "--trail-duration") == 0 && i+1<argc) cli.trailDuration = (float)atof(argv[++i]);
             else if (std::strcmp(a, "--trail-sample-rate") == 0 && i+1<argc) { cli.trailSampleRate = (float)atof(argv[++i]); cli.trailAdaptive = false; }

@@ -17,8 +17,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `git remote add origin …` + `git branch --set-upstream-to=origin/master master`，否则
   `scripts/push-ci.sh` 里的无参 `git push` 会报 "no upstream branch"）。
 - **长期保留的产物统一放 `~/.adocao/`**，别放 `/tmp`（系统会定期清，像素基线就这么丢过一次）：
-  `gate/baseline`（像素门槛基线，`ADOFAO_GATE_HOME` 可改）、`backup/`（git 镜像）、`cache/gh`（gh CLI 缓存，
+  `gate/baseline`（像素门槛基线，`ADOFAO_GATE_HOME` 可改）、`cache/gh`（gh CLI 缓存，
   沙箱里要用 `XDG_CACHE_HOME=~/.adocao/cache/gh`）、`tools/`（如 git-filter-repo）、`scratch/`（一次性文件）。
+  重写历史前的镜像**单独放** `~/Projects/.ADOCAO-Backup-1`（352 提交 / 21 标签，**里面仍含用户名**，
+  这正是它作为回退手段的意义）：它的 origin 已被移除，**不要**把它 fetch/pull 回主仓库 ——
+  那会把清理掉的旧历史原样带回来。不需要时 `rm -rf` 即可（同目录有 BACKUP-README.txt 说明）。
   **但临时抓帧文件必须留在工作区内**（门槛默认 `build/gate-scratch`）：受限沙箱里往工作区外**写**会被拒，
   于是 `/usr/bin/time` 的重定向失败、抓帧静默不发生，`check` 会报出一整片假的"不一致"（真踩过：
   把 `gate/check` 也放进 `~/.adocao` 后，51 个状态全报不一致，其实一张新图都没生成）。

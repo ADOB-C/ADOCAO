@@ -188,9 +188,12 @@ MYC 的 1,554 MB 与 AGENTS 记录的 app 侧 `adocao image` 1,560 MB 差 0.4% �
 
 按收益排序，全部来自实测定位 `[实测]`：
 
-1. **`tiles` 容量翻倍（24 B/层，最大单项，一行修）**：
+1. ✅ **已修**（2026-10）：**`tiles` 容量翻倍（24 B/层，最大单项，一行修）**：
    `LevelData.cpp:1319` 先 `resize(n)`，`:1349` 再 `push_back(extra)` → libc++ 按 2× 增长 → 容量永久 2n。
-   改 `resize(n+1)` 即拿回。1e8 层省 2.4 GB，2^31−1 层省 51 GB。
+   修法是先 `reserve(n + 1)` 再 `resize(n)`（语义零变化）。**实测**：修复前 `cap = 2n`、
+   修复后 `cap = n + 2`（1e7 层省 229 MB）→ 1e8 层省 2.4 GB、2^31−1 层省 51 GB；
+   primer-final（6841 万层）GUI 播放的换出量 **+296 MB → 0**（峰值 RSS 5.9 GB），
+   像素门槛 51/51 逐字节不变，ctest 5/5。
 2. **`setSpeedByFloor`（12 B/层瞬态，无条件分配）**：`LevelData.cpp:1399`，没有 SetSpeed 事件也照分配
    （实测峰值快照抓到 `250,001 × 12 B` 的块，而那张谱一条 SetSpeed 都没有）。改成按需。
 3. **`m_tileStartDist`/`m_tileEndDist`（8 B/层）**：`Timeline.cpp:86-87,178` 在 0..n−2 上恒为 `1.0f`，

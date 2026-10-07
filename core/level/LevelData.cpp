@@ -1316,6 +1316,11 @@ void LevelData::calculateTilePositions() {
         }
     }
 
+    // 先 reserve(n+1) 再 resize(n)：末尾还要 push_back 第 n+1 块"extra"砖（见函数末），
+    // 若直接 resize(n) 再 push_back，libc++ 会按 2× 增长 → 容量永久停在 2n，
+    // 于是每层常驻是 48 B 而不是 24 B（实测三张谱全部 cap = 2n：1e8 层白扔 2.4 GB，
+    // 2^31-1 层 51 GB。见 docs/scale-1e8-to-2e9.md §7）。
+    tiles.reserve((size_t)n + 1);
     tiles.resize(n);
     double curX = 0.0, curY = 0.0;  // double for precision
 

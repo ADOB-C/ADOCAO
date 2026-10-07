@@ -69,6 +69,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   于是 miniz 的唯一使用者只剩 `DataFile`。实测 OFF：core 里 0 个 `mz_` 符号、`adocao image`
   解码后像素与 ON 完全一致（连 PNG 文件字节数都相同）、门槛子集逐字节相同。
   注意 `core/map/**` 不进 ADOFAI.Lib（见 PLAN.md），所以库里 OFF 天然成立、也不需要 zlib。
+- **`tiles` 不能先 `resize(n)` 再 `push_back` 末尾那块 extra 砖**：libc++ 会按 2× 增长 → 容量永久停在 2n
+  → 每层从 24 B 变成 **48 B**（`calculateTilePositions`，`core/level/LevelData.cpp`）。正确写法是先
+  `reserve(n + 1)` 再 `resize(n)`。实测：修复前 `cap = 2n`（三张谱一致）、修复后 `cap = n + 2`；
+  **primer-final（6841 万层）的 GUI 播放换出量从 +296 MB 变成 0**（峰值 RSS 5.9 GB），
+  像素门槛 51/51 逐字节不变。（背景与逐项开销见 `docs/scale-1e8-to-2e9.md` §7/§14。）
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`

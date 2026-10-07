@@ -16,6 +16,12 @@ add_test(NAME lzma_mt_compat COMMAND adocao_lzma_mt_compat_test)
 # 于是所有含小数 action 字段的谱整份退回旧路径）。进程外跑，带负向对照。
 add_test(NAME fast_path_noninteger COMMAND ${CMAKE_SOURCE_DIR}/scripts/check-fast-path.sh)
 
+# `.adocao` 列编码器自测：逐位往返 + 编码选择（字典/常量/差分/位打包）+ 坏数据必须干净失败
+# （截断、count 说谎、未知 codec、越界下标）。只链 archive（列编码器不用压缩库）。
+add_executable(adocao_columns_test adocao_columns_test.cpp)
+target_link_libraries(adocao_columns_test PRIVATE adocao_archive)
+add_test(NAME adocao_columns COMMAND adocao_columns_test)
+
 # 砖块几何自测：中旋砖（angleData=999）必须是五边形（尖角朝来路、面积 3w²）；带负向对照。
 # TileGeometryReference.cpp（改造前的 CPU 几何，现在的 A/B 基准）只需要 <vector>/<cmath>，
 # 直接编进测试，不碰 GL。

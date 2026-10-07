@@ -193,8 +193,11 @@ beatsBehind(f32) | beatsAhead(f32)`
 * `tests/adocao_columns_test.cpp`（ctest `adocao_columns`，19 项）：逐位往返（含 NaN/次正规/±0/极值）、
   编码选择（Dict/Const/DeltaVarint/BitPack）、CRC32C 已知检验值，以及 **5 个负向对照**：
   截断 1 字节 / 空输入 / `count` 说谎 / 未知 codec / 越界下标 —— 都必须**失败**。
-* `adocao_roundtrip`（**待做**，P1-⑦）：pack 后再加载 vs 原 JSON → 13 节 hash 全同 +
-  **可复现性**（同一输入两次 pack 必须逐字节相同）。
+* `archiveRoundTrip`（在 `tests/level_parse_test.cpp` 里，**已接**）：每个 fixture 都会被
+  pack 成 `.adocao` → 走**完整的** `loadFromBuffer`（含 magic 分派与 `finishLoad`）→ 与明文加载
+  **13 节逐位比对**；并断言**可复现性**（同一输入两次 pack 必须逐字节相同）与两个负向对照
+  （截断 / 改坏 settings 载荷 → 段 crc32c 必须抓住）。这些负向对照是**自证**的：
+  若 crc 没起作用，`loadBuffer(...).ok` 会是真，用例立刻报错。
 
 ## 7. 待做清单
 

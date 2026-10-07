@@ -350,3 +350,27 @@ settings 定长记录 → angleData 列 → actions 六列 → pathData；未知
 
 还剩 P1-⑦：把"pack → 走完整 loadFromBuffer → 13 节 hash 逐位相同 + 同一输入两次 pack 字节相同"
 做成常驻用例（复用 `tests/level_parse_test.cpp` 现成的 13 节比对与 archiveRoundTrip 框架）。
+
+### `.adocao` P1-⑦ 完成 → **P1 全部落地**（2026-10）
+
+`tests/level_parse_test.cpp::archiveRoundTrip` 已接入 `.adocao`：每个 fixture（39 个 + 真实谱）
+都会被 pack 成二进制 → 走**完整** `loadFromBuffer`（含 magic 分派与 `finishLoad`）→ 与明文加载
+**13 节逐位比对**；并断言**可复现性**（同一输入两次 pack 逐字节相同）与两个负向对照
+（截断 / 改坏 settings 载荷 → 段 crc32c 必须抓住）。负向对照自证：crc 失效则 `loadBuffer().ok`
+为真、用例立刻报错。
+
+最终成绩单（本机实测）：
+| 谱 | 明文 / 原容器 | `.adocao` | 倍数 |
+|---|---|---|---|
+| MYC（677 万层 / 618 万事件）| 611.18 MB | **19.58 MB** | **31×** |
+| angles360（5564 层）| — | 0.02 MB | — |
+| primer（6841 万层）| 7.38 GB（xz 357 MB）| 324.36 MB | 对明文 22.8× / 对 xz 1.10×（**停手线，不再加专用机制**）|
+
+回归：ctest 7/7、core purity、44 开关帮助、7 对 shader、严格几何 2/2、像素门槛 51/51 逐字节相同。
+
+剩余（都不是 P1 必需项）：
+* P3 零拷贝（段布局与内存布局一致时 mmap 直读）；
+* P4 段级压缩（复用 xz/zstd backend）+ `preserved` 段（供 ADOCAO-E 无损回写）；
+* `DeltaF32` 列编码（对 float 做**数值**差分）—— 只为榨音频谱，先实测熵再决定；
+* `writerCommit` / `inputHash` 的构建期注入（字段已在头里占位）；
+* `WindowSource` 对 `.adocao` 的"逐段交付"（目前整份读进内存；文件只有几十~几百 MB，不急）。

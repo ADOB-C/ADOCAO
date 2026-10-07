@@ -315,3 +315,22 @@ AGENTS 里"MYC 快路径 695 ms / 峰值 1560 MB"与实测对不上（`adocao im
 **待办（下一步）**：给这条加**永久**回归 —— 在 `tests/level_parse_test.cpp` 里加一个自检，
 用 `setenv("ADOCAO_FAST_REQUIRE","1")` + 一段含非整数 action 字段的内存 JSON，
 断言加载成功（即快路径必须吃下它）。否则这条静默回退还会回来。
+
+### `.adocao` 二进制容器（P1 进行中，2026-10）
+
+已落地：格式常量 + 列编码器（Dict/Const/DeltaVarint/BitPack/Raw + 编码自检 + 坏数据干净失败，
+19 项自测含 5 个负向对照）+ **写入方** `adocao pack` + 规范文档 `docs/adocao-format.md`。
+
+实测：
+* **MYC 611.18 MB → 19.58 MB = 3.033 B/层（31×，0 换页）**；
+  angleData Dict 0.7501 B/值（52 项/6bit）、floor DeltaVarint 1.0 B、type Dict 0.25 B、
+  strId **Const 0 B**、flag BitPack 0.125 B、val1 Dict 0.75 B、val2 Dict 0.375 B。
+* **primer 7.38 GB → 324.36 MB（对明文 22.8×），但对 xz -9e 的 357 MB 只有 1.10×**
+  → **触发停手线（<1.5×），不再为音频谱加专用机制**。原因是 `actions.val1`（每层音量）
+  6841 万个值几乎互不相同 → Raw 4 B/事件 = 272 MB = 全文件 84%；其余六列合计只有 68 MB。
+* 顺带纠正一个早先的错误认知：primer 的 `angleData` 不是"开头有一长串 0"，而是**整列常量**
+  （所以我那两次"中段采样"必然量出去重 1）。
+
+下一步（P1-⑥⑦⑧）：读取方（`sniffLevelArchive` 新增 Adocao + `loadFromBuffer` 分派 + 逐位无损）、
+`adocao_roundtrip`（13 节 hash + 可复现性）、零回归（ctest / 像素门槛 / 三护栏）。
+可选：`DeltaF32` 列编码（对 float 做**数值**差分）榨音频谱 —— 先实测熵再决定。

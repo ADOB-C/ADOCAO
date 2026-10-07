@@ -1,0 +1,205 @@
+# `.adocao` 二进制容器规范（v1）
+
+> 状态：**P1 写入方已完成**（`archive/AdocaoFormat.hpp`、`archive/AdocaoColumns.{hpp,cpp}`、
+> `archive/AdocaoWriter.{hpp,cpp}`、CLI `adocao pack`）；**读取方尚未实现**（P1-⑥）。
+> 本文只描述已落地的部分，未实现的明确标注"待做"。
+
+## 0. 为什么要有这个格式
+
+真实谱面大到无法传播：`primer-final.adofai.xz`（68,411,078 层）**xz -9e 之后仍是 357 MB**，
+未压缩 7.38 GB；MYC 明文 611 MB。目标是把这类谱面压到能分发的体量，且**逐位无损**。
+
+先算清楚现状的账（实测）：
+
+| 谱 | 未压缩 | xz -9e | 每层 |
+|---|---|---|---|
+| primer（68.4M 层，118 blocks）| 7.38 GB | 357 MB | 115.7 → 5.47 B |
+| Unity.wav_rate | 1.58 GB | 49.4 MB | 143 → 4.5 B |
+
+结论：xz 对**文本 JSON** 已经很强，单纯"换成二进制再 xz"赢不了多少（二进制 double 还丢掉了
+十进制文本的公共前缀，可能更差）。真正的杠杆是**领域编码**。
+
+## 1. 设计原则
+
+**列式存储 + 每列按其"取值基数"选编码。** 与谱面来源无关：
+
+* MYC 的 6,770,912 个 `angleData` 值里只有 **52 个不同值**（二元组 293/2704、三元组 682，
+  最常见三元组 `(13,25,13)` 出现 850,292 次）→ 字典 + 6 bit 下标；
+* action 各列的基数同样很小：`bpmMultiplier` 10、`beatsPerMinute` 9、
+  `angleOffset`/`rotation`/`opacity` **各只有 1 个取值**（→ 整列省略），`floor` 单调（→ 差分）。
+
+> 早期草案里有一个"音频谱存 PCM/int16"的机制，**已删除**：那是 `Song.adofai`
+> （audio-as-chart 工具）专有的，真正的观赏谱不长那样。字典编码顺带覆盖了它
+> （音频谱的取值集合就是 int16 的 65536 个 → 2 B/层），而且不需要任何"可逆性证明"。
+
+三条硬规矩：
+
+1. **逐位无损**：double 列按**位模式**建字典（`-0.0` / `NaN` 也原样往返）；解码出来的 double
+   位模式必须与输入完全相同。**不改变任何数值语义**，所以"浮点精度规则"不受影响 ——
+   我们只改"表示"，不改"值"。
+2. **编码器自检**：每次编码都先算候选、再解回来逐位比对，取"能用且最小"的那个；
+   任何输入最坏只是退回 `Raw`，**不会编错**。
+3. **失败必须响亮**：crc 坏 / 截断 / `version` 不符 / 未知 codec / 越界下标 → 明确失败，
+   **绝不静默回退**（这条被 2026-10 的两次"静默回退让测试全绿"教训逼出来）。
+
+另有一条分工：`writerCommit` / `inputHash` **只作溯源**，**绝不作兼容闸门** ——
+版本门禁只认 `version`。没有 git 的构建写全 0 并标 unknown，**不影响可读性**。
+
+## 2. 文件布局
+
+```
+Header (76 B) | SectionEntry × sectionCount (40 B each) | padding → 8 B 对齐 | 各段载荷
+```
+
+所有整数**小端**、**定宽**；段偏移 **8 B 对齐**（为将来的 mmap 直读）；段大小与元素数一律 `u64`
+（从格式层消除 2^31 边界）。
+
+### 2.1 Header（76 B）
+
+| 偏移 | 类型 | 字段 | 说明 |
+|---|---|---|---|
+| 0 | char[4] | `magic` | `"ADO1"`，接入 `core/level/ByteSource.cpp::sniffLevelArchive` |
+| 4 | u16 | `version` | 当前 1；**唯一的兼容闸门** |
+| 6 | u16 | `flags` | 保留（0）|
+| 8 | u16 | `sectionCount` | |
+| 10 | u16 | `reserved` | 0 |
+| 12 | u64 | `fileSize` | 全文件字节数（截断检测）|
+| 20 | u32 | `headerCrc` | 覆盖"头（本字段按 0 参与）+ **整张段表**"|
+| 24 | u8[20] | `writerCommit` | 写入方 git commit（SHA-1 原始字节）；全 0 = unknown。**待做：构建期注入** |
+| 44 | u8[32] | `inputHash` | 源谱规范化字节的 SHA-256；全 0 = unknown。**待做** |
+
+### 2.2 SectionEntry（40 B）
+
+`id(u8) | codec(u8) | flags(u16) | offset(u64) | compSize(u64) | rawSize(u64) | elemCount(u64) | crc32c(u32)`
+
+* `crc32c` 覆盖该段 `compSize` 字节（Castagnoli；`"123456789"` 的标准检验值 `0xE3069283`）。
+* `codec` 目前恒为 `Raw`：段内是**自描述**的列流（每个列头带自己的 codec）。
+* 未知 `id` 一律跳过（前向兼容）。
+
+### 2.3 段
+
+| id | 段 | 内容 |
+|---|---|---|
+| 1 | `Settings` | 定长记录（见 §3.1）|
+| 2 | `StringPool` | `u32 count` + 每项 `u32 len + bytes`；`v[0]` 必须是空串 |
+| 3 | `AngleData` | **一列 double**（§4）|
+| 4 | `Actions` | `u32 columnCount(=6)` + 每列 `u64 byteLen + bytes` |
+| 5 | `PathData` | `u64 len + bytes`（仅当非空）|
+| 6 | `Preserved` | 未识别成员的原始字节 —— **待做**（v1 不写，今天这些本来就被丢弃）|
+| 7 | `Derived` | 预计算/检查点 —— **待做**（v1 不写）|
+
+**只存输入，不存派生数据**：`Tile::position`（全局前缀和）、`direction`、`tileBPMs`、
+`Timeline` 全部由 `angleData` + `actions` 重算。
+
+## 3. 各段细节
+
+### 3.1 Settings 定长记录
+
+字段顺序固定（打包确定性）：`version(i32) | bpm(f32) | offset(f32) | countdownTicks(i32) |
+zoom(f32) | rotation(f32) | relativeTo(u16 池下标) | position[2](f32) | hitsound(u16) |
+hitsoundVolume(f32) | trackColor(u16) | secondaryTrackColor(u16) | backgroundColor(u16) |
+stickToFloors(u8) | planetEase(u16) | trackDisappearAnimation(u16) | trackAnimation(u16) |
+beatsBehind(f32) | beatsAhead(f32)`
+
+* `f32` 按**位模式**原样存（float 列必须逐位无损）。
+* 未知 settings 键与今天两条解析路径的行为一致（本来就只读已知字段）；无损回写靠 `Preserved` 段。
+
+### 3.2 StringPool
+
+**`actionStrTable` 的原序必须保留**（`FastAction::strId` 就是它的下标）；settings 用到的字符串按
+固定顺序追加到末尾。`v[0]` 是空串（`strId = 0` 的约定）。
+
+### 3.3 Actions（列式）
+
+固定 6 列，顺序：`floor(int64) | type(u32) | strId(u32) | flag(u32) | val1(u32) | val2(u32)`。
+
+* `floor` → `encodeIntColumn`（单调 → `DeltaVarint`）；
+* `type` / `strId` / `flag` → `encodeU32Column`（小枚举 → `Dict`/`BitPack`/`Const`）；
+* `val1` / `val2` 是 **float 的位模式**当 `u32` 存（逐位无损；`bpmMultiplier` 那种只有几十个取值
+  → `Dict`）。
+
+每列前缀 `u64 byteLen`，于是读取方可以跳过不关心的列（`u64` 允许单列 > 4 GB）。
+
+## 4. 列编码（Codec）
+
+列头（20 B）：`codec(u8) | bits(u8) | flags(u16) | count(u64) | aux(u64)`；
+`aux` = 字典项数（`Dict` 用），其余编码为 0。
+
+| codec | 值 | 载荷 | 用在 |
+|---|---|---|---|
+| `Raw` | 0 | 定宽原始（double/int64 8 B，u32 4 B）| 高基数兜底 |
+| `Dict` | 1 | `aux × 8 B`（double/int64）或 `aux × 4 B`（u32）字典 + 位打包下标 | 基数小（主编码）|
+| `DeltaVarint` | 2 | 首值 zigzag varint，其后 zigzag(相邻差) varint | 单调列（`floor`）|
+| `Const` | 3 | 一个值（8 B / 4 B）| 整列同值 |
+| `BitPack` | 4 | 位打包（位宽 = `ceil(log2(max+1))`）| 小枚举/位标志 |
+| `JsonPassthrough` | 5 | 原样文本 | 保留（诊断/未知段）|
+
+位打包是**低位在前**、1..32 位/值。`Dict` 的下标与 `Raw/Const` 的载荷都按 `count` 读取，
+任何越界/截断都返回 `false`。
+
+## 5. 实测
+
+`adocao pack <谱> <out.adocao> --codec-report` 打印每列的编码、元素数、朴素/编码后字节、
+字典项数与位宽。
+
+**MYC（6,770,912 层 / 6,181,981 action）：611.18 MB → 19.58 MB = 3.033 B/层（31×，0 换页）**
+
+| 列 | 编码 | 每值 | 字典 |
+|---|---|---|---|
+| `angleData` | Dict | 0.7501 B | 52 项 / 6 bit |
+| `actions.floor` | DeltaVarint | 1.0000 B | — |
+| `actions.type` | Dict | 0.2500 B | 4 项 / 2 bit |
+| `actions.strId` | Const | 0.0000 B | 1 项 |
+| `actions.flag` | BitPack | 0.1250 B | 1 bit |
+| `actions.val1` | Dict | 0.7500 B | 40 项 / 6 bit |
+| `actions.val2` | Dict | 0.3750 B | 7 项 / 3 bit |
+
+`angles360`（5,564 层 / 14 action）→ 0.02 MB（3.168 B/层，`angleData` 字典 1,167 项 / 11 bit）。
+
+### 5.1 音频谱（`Song.adofai` 那一类）：primer 只赢 1.10× —— **按停手线停止**
+
+**primer（68,411,077 层 / 68,023,438 action）：7.38 GB JSON → 324.36 MB**（对明文 22.8×），
+但**对 `xz -9e` 的 357.12 MB 只有 1.10×** —— 低于本格式的停手线（<1.5× 就停），
+所以**不再为这一类继续加专用机制**。逐列一看就明白为什么：
+
+| 列 | 编码 | 每值 | 说明 |
+|---|---|---|---|
+| `angleData` | **Const** | 0.0000 B | 6,841 万个角度**全部相同** |
+| `actions.floor` | DeltaVarint | 1.0000 B | 68 MB |
+| `actions.type` / `strId` / `flag` / `val2` | **Const** | 0 | 各列常量（共 96 B）|
+| **`actions.val1`** | **Raw** | **4.0000 B** | **272 MB = 全文件的 84%** |
+
+结论与教训：
+
+* 这张谱的**音频数据在 `actions.val1`（每层的音量）**，而不是我早先以为的 `angleData`；
+  6,841 万个值几乎互不相同 → 字典不划算（`Dict` 候选算出来比 `Raw` 还大）→ `Raw` 胜出。
+  也就是说这 272 MB 是**实打实的 4 B/事件的信息量**，通用手段压不动。
+* 早先"从中段采样估计字典基数"的启发式**对它完全无效**：`angleData` 是整列常量，
+  任何采样点看到的都是同一个值（这也解释了当时连着两次量出"去重 1"）。
+* **向量化的收益边界**：观赏谱（MYC）31×，音频谱 1.10× —— 差别的来源不是"格式好不好"，
+  而是**数据本身的基数**。格式已经把能省的都省了（其他六列合计 68 MB，理论上都来自 floor 的差分）。
+
+**下一步（如果要继续榨音频谱）**：给 float 列加一个 **`DeltaF32` 编码**（对**数值**相邻差而不是
+位模式做差分，再 zip/位打包）。音频采样在数值上高度相关，而按位模式的 `Raw` 把这个相关性丢掉了。
+**验收前提**：`adocao_roundtrip` 的逐位无损必须先绿；并且要实测"数值差分后的熵"是否真的变小
+（估 1.5~2×，未测）。
+
+## 6. 测试
+
+* `tests/adocao_columns_test.cpp`（ctest `adocao_columns`，19 项）：逐位往返（含 NaN/次正规/±0/极值）、
+  编码选择（Dict/Const/DeltaVarint/BitPack）、CRC32C 已知检验值，以及 **5 个负向对照**：
+  截断 1 字节 / 空输入 / `count` 说谎 / 未知 codec / 越界下标 —— 都必须**失败**。
+* `adocao_roundtrip`（**待做**，P1-⑦）：pack 后再加载 vs 原 JSON → 13 节 hash 全同 +
+  **可复现性**（同一输入两次 pack 必须逐字节相同）。
+
+## 7. 待做清单
+
+1. **读取方**（P1-⑥）：`sniffLevelArchive` 增加 `LevelArchiveKind::Adocao`；`LevelData::loadFromBuffer`
+   分派到 `AdocaoReader`（逐位无损）；`WindowSource` 对 `.adocao` 的语义 = **逐段交付**。
+2. `writerCommit` / `inputHash`：构建期注入 git hash + 源谱 SHA-256。
+2b. `DeltaF32` 列编码（float 按**数值**差分），专治 primer 那种"每层一个采样"的列 ——
+   先实测差分后的熵再决定，不要凭估计上。
+3. **压缩**：段可选 xz/zstd 包装（复用现有 backend，不引入新库）；列流先做可选 delta 滤波。
+4. `Preserved` 段（供 ADOCAO-E 无损回写）。
+5. **零拷贝**：段布局与内存布局一致时（`Raw` 且对齐）直接 mmap/memcpy。
+6. `Derived` 段：预计算/检查点（与 Timeline 检查点化共用设计）。

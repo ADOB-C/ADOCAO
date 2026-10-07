@@ -139,10 +139,35 @@ inline bool parseNumber(const char*& p, const char* e, double& out) {
     int digits = 0;
     while (p < e && *p >= '0' && *p <= '9') { v = v * 10 + (uint64_t)(*p - '0'); ++digits; ++p; }
     if (digits > 15 || (p < e && (*p == '.' || *p == 'e' || *p == 'E'))) {
+        // 先在 [start, e) 里把数字 token 界定出来，再转换 —— **不能**直接把 start 交给 strtod：
+        // strtod 要求 NUL 终止，而这里的缓冲区只保证到 e（流式窗口的半窗在 e 之后是上一窗的
+        // 残留字节；app 的 mmap 路径更糟：文件末尾不在 e 处终止，读过去可能直接 SIGSEGV）。
+        // 越界读会给出错值（实测 Unity.wav_rate 上 4 KB 半窗因此放弃窗口、回退整份解压）。
+        const char* q = start;
+        if (q < e && (*q == '-' || *q == '+')) ++q;
+        while (q < e && *q >= '0' && *q <= '9') ++q;
+        if (q < e && *q == '.') { ++q; while (q < e && *q >= '0' && *q <= '9') ++q; }
+        if (q < e && (*q == 'e' || *q == 'E')) {
+            const char* save = q;
+            ++q;
+            if (q < e && (*q == '+' || *q == '-')) ++q;
+            if (q < e && *q >= '0' && *q <= '9') { while (q < e && *q >= '0' && *q <= '9') ++q; }
+            else q = save;                      // 光秃秃的 e / e+ 之后没有数字：不算指数
+        }
+        if (q <= start || q >= e) { p = start; return false; }   // token 触到 e：交给 carry 补数据
+        // 到这里 [start, q) 是完整 token，复制到本地缓冲再 NUL 终止后转换
+        // （仍然走 strtod，保证与旧路径 parseAngleDataFast 逐位同值）。
+        char buf[128];
+        const size_t n = (size_t)(q - start);
+        std::string heap;
+        char* dst = buf;
+        if (n + 1 > sizeof buf) { heap.assign(start, q); dst = &heap[0]; }
+        else std::memcpy(buf, start, n);
+        dst[n] = '\0';
         char* endp = nullptr;
-        double d = std::strtod(start, &endp);
-        if (endp == start) { p = start; return false; }
-        p = endp;
+        double d = std::strtod(dst, &endp);
+        if (endp != dst + n) { p = start; return false; }   // 没有整段消费掉：交给上层回退
+        p = q;
         out = d;
         return true;
     }

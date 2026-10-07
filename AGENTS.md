@@ -13,6 +13,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   本地资源一律走**环境变量**（如 `$ADOCAO_CHARTS`）或 `~/` 相对形式；`scripts/capture-gate.sh` 的 `abs()`
   会把 `~/` 展开成 `$HOME`。提交前自检（应为空）：
   `git grep -nE "/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z0-9._-]+/" -- . ':!build'`
+  （真做过一次：`git filter-repo` 会**移除 origin** 并让分支失去 upstream —— 重写后要
+  `git remote add origin …` + `git branch --set-upstream-to=origin/master master`，否则
+  `scripts/push-ci.sh` 里的无参 `git push` 会报 "no upstream branch"）。
 - **长期保留的产物统一放 `~/.adocao/`**，别放 `/tmp`（系统会定期清，像素基线就这么丢过一次）：
   `gate/baseline`（像素门槛基线，`ADOFAO_GATE_HOME` 可改）、`backup/`（git 镜像）、`cache/gh`（gh CLI 缓存，
   沙箱里要用 `XDG_CACHE_HOME=~/.adocao/cache/gh`）、`tools/`（如 git-filter-repo）、`scratch/`（一次性文件）。

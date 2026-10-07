@@ -378,7 +378,7 @@ std::string trackVisAllocationSelfTest() {
             // 逐字复制 app/LevelScene.cpp 的 m_tileVisEnabled
             const bool consumerEnabled = (lv.settings.trackDisappearAnimation != "None" ||
                                           lv.settings.trackAnimation != "None" ||
-                                          !lv.atStates.empty());
+                                          lv.hasAtStates);
             if (allocated != consumerEnabled) {
                 char buf[224];
                 std::snprintf(buf, sizeof buf,

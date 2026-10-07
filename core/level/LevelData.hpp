@@ -102,6 +102,11 @@ struct LevelData {
     // AnimateTrack state overrides (sparse, floor → state)
     struct ATState { std::string da, aa; float bb=4, ba=3; bool hasAA=false; };
     std::unordered_map<int, ATState> atStates;
+    // 粘性标志：releaseMemory() 会清掉 atStates 的实体（每条 101 B，巨谱上是几十 MB~几百 MB），
+    // 但 Timeline 与 LevelScene 都要按"有没有 AnimateTrack"来判定 TrackVis —— 那个判定发生在
+    // 释放之后，所以不能再看 .empty()。三处判据（Timeline.cpp、app/LevelScene.cpp、
+    // tests/level_parse_test.cpp 的自检）必须一起用它。
+    bool hasAtStates = false;
 
     void releaseMemory();  // free data no longer needed after loading
 

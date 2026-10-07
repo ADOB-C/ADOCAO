@@ -258,7 +258,7 @@ void Timeline::precalculateTiming() {
     // 现在留空，判定同样是 disabled。判据一旦改动，两处必须一起改。
     const bool needsTrackVis = (m_level->settings.trackDisappearAnimation != "None" ||
                                m_level->settings.trackAnimation != "None" ||
-                               !m_level->atStates.empty());
+                               m_level->hasAtStates);
     if (needsTrackVis)
     {
         m_tileDisappearTimes.assign(n, std::numeric_limits<double>::infinity());

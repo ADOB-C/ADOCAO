@@ -1495,6 +1495,7 @@ void LevelData::processActions() {
         case FastAction::Bookmark:
             bookmarkFloors.push_back(floor); break;
         case FastAction::AnimateTrack:
+            hasAtStates = true;
             atStates[floor] = {actionStr(a).empty() ? settings.trackDisappearAnimation : actionStr(a),
                                settings.trackAnimation, // aa not parsed yet; use global
                                a.val1 >= 0 ? a.val1 : settings.beatsBehind,
@@ -1571,6 +1572,10 @@ void LevelData::releaseMemory() {
     tilePositionOffsets.clear();
     tileHitsounds.clear();
     tileHitsoundVolumes.clear(); tileHitsoundVolumes.shrink_to_fit();
+    // atStates 只有 Timeline::build() 用（它在本函数之前就跑完了），运行时只靠 hasAtStates 判定，
+    // 所以实体可以释放：每条 101 B（两个 std::string + 2 float + bool），AnimateTrack 密集的谱上很可观。
+    atStates.clear();
+    std::unordered_map<int, ATState>().swap(atStates);
     std::string().swap(pathData);
     // angleData kept: needed by TileMesh::build() for midspin detection
     // tileBPMs kept: needed by buildIcons() for SetSpeed icon coloring

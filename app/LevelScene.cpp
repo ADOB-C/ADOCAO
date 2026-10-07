@@ -94,11 +94,11 @@ bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level) {
 
     m_tileVisEnabled = (level.settings.trackDisappearAnimation != "None" ||
                         level.settings.trackAnimation != "None" ||
-                        !level.atStates.empty());
-    LOG_D("TrackVis: enabled=%d da=%s aa=%s atStates=%zu", m_tileVisEnabled,
+                        level.hasAtStates);
+    LOG_D("TrackVis: enabled=%d da=%s aa=%s atStates=%d(size=%zu)", m_tileVisEnabled,
           level.settings.trackDisappearAnimation.c_str(),
           level.settings.trackAnimation.c_str(),
-          level.atStates.size());
+          (int)level.hasAtStates, level.atStates.size());
 
     // Shaders (heap-allocated, freed on destruction)
     m_tileShader = new Shader();

@@ -320,16 +320,19 @@ def main():
         state(name, FIXTURE, "tile", str(a.marks[mark] - 1), 250.0)
         state(name + "_wide", FIXTURE, "tile", str(a.marks[mark] - 2), 90.0)
     lines.append("")
+    # 本地谱面根：默认 ~/Documents/Charts，可用 ADOCAO_CHARTS 覆盖。
+    # **写进清单的一律是 ~ 相对形式**，绝不写机器绝对路径（用户名不该进仓库）。
+    CHARTS = os.environ.get("ADOCAO_CHARTS", "~/Documents/Charts")
     lines.append("# 既有 3 个状态（历史基线：The Moon / MYC，机器本地谱面；文件不在就跳过）")
-    MOON = "~/Documents/Charts/The Moon - Coal/level.adofai"
-    MYC = ("~/Documents/Charts/Seedbean - Won't You Make a Song with Me (Final_Fix)/"
+    MOON = f"{CHARTS}/The Moon - Coal/level.adofai"
+    MYC = (f"{CHARTS}/Seedbean - Won't You Make a Song with Me (Final_Fix)/"
            "Won't you make a chart with me_MYC.adofai")
     state("moon_t1_z100", MOON, "time", "1.0", 100.0)
     state("moon_t1_z25", MOON, "time", "1.0", 25.0)
     state("myc_t30_z25", MYC, "time", "30.0", 25.0)
     lines.append("")
     lines.append("# 形状压力：形状数最多的本地谱面（今天每形状一次 draw → 这里最糟）")
-    state("singularity_mid", "~/Documents/Charts/15. Singularity at 2.64e+6 BPM/"
+    state("singularity_mid", f"{CHARTS}/15. Singularity at 2.64e+6 BPM/"
                              "15. Singularity at 2.64e+6 BPM.adofai", "tile", "500000", 25.0)
     with open(STATES_PATH, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")

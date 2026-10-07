@@ -40,7 +40,10 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-abs() { case "$1" in /*) echo "$1" ;; *) echo "$ROOT/$1" ;; esac; }
+abs() {   # ~ 开头按 $HOME 展开：清单里的本地谱面一律写 ~ 相对形式（不写机器绝对路径）
+    case "$1" in "~/"*) set -- "$HOME/${1#\~/}" ;; esac
+    case "$1" in /*) echo "$1" ;; *) echo "$ROOT/$1" ;; esac
+}
 
 case "$MODE" in
     store)

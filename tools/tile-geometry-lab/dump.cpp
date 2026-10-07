@@ -1,6 +1,7 @@
 // 把 render/TileGeometry.cpp 的真实输出 dump 成 JSON —— 验证用的就是**编译进游戏的同一份代码**。
-// 编译：clang++ -std=c++20 -O1 -I~/Projects/ADOCAO/render \
-//          /tmp/midspin-lab/dump.cpp ~/Projects/ADOCAO/render/TileGeometry.cpp -o /tmp/midspin-lab/dump
+// 编译（在仓库根执行；把 <repo> 换成本地仓库路径）：
+//   clang++ -std=c++20 -O1 -I<repo>/render <repo>/tools/tile-geometry-lab/dump.cpp \
+//       <repo>/render/TileGeometry.cpp -o /tmp/dump
 #include "TileGeometry.hpp"
 #include <cstdio>
 #include <string>

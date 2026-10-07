@@ -34,7 +34,9 @@ public:
 
     // Precalculated timing arrays (size = n tiles including extra)
     const std::vector<double>& tileStartTimes() const { return m_tileStartTimes; }
-    const std::vector<float>& tileDurations() const { return m_tileDurations; }
+    float durationAt(int64_t i) const;
+    float startAngleAt(int64_t i) const;
+    float totalAngleAt(int64_t i) const;
 
     // A/B 参考实现（和 TileGeometryReference / parseLegacy 同一套路）：把 Phase 2 的三个数组
     // **用同一批输入、同一套算式、原样再算一遍**，写进调用方给的三个向量。
@@ -45,8 +47,6 @@ public:
                           std::vector<float>& outDurations) const;
     const std::vector<double>& tileDisappearTimes() const { return m_tileDisappearTimes; }
     const std::vector<double>& tileAppearTimes() const { return m_tileAppearTimes; }
-    const std::vector<float>& tileTotalAngles() const { return m_tileTotalAngles; }
-    const std::vector<float>& tileStartAngles() const { return m_tileStartAngles; }
     const std::vector<float>& tileBPMs() const { return m_tileBPM; }
     const std::vector<bool>& tileIsCW() const { return m_tileIsCW; }
     // 每层距离：0..n-2 上恒为 1.0f，只有**最后一层**可能是实测距离（Timeline.cpp 的 Phase 4）。
@@ -80,9 +80,10 @@ private:
     std::vector<double> m_tileStartTimes;
     std::vector<double> m_tileDisappearTimes;
     std::vector<double> m_tileAppearTimes;
-    std::vector<float> m_tileDurations;
-    std::vector<float> m_tileTotalAngles;
-    std::vector<float> m_tileStartAngles;
+    std::vector<std::pair<int64_t, float>> m_pauseRot;
+    float angleDirBefore(int64_t i) const;
+    float extraRotAt(int64_t i) const;
+    float m_lastTotalAngle = 0.0f;
     std::vector<float> m_tileBPM;
     std::vector<bool>  m_tileIsCW;
     size_t m_distCount = 0;          // 有效层数（= n）；配合下面两个标量实现 tileStartDist/tileEndDist

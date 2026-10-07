@@ -49,11 +49,13 @@ int main(int argc, char** argv) {
         tl.build(lvl, false);
         std::vector<float> rs, rt, rd;
         tl.recomputeForTest(rs, rt, rd);
-        const int n = (int)tl.tileDurations().size();
+        const int n = (int)tl.tileStartTimes().size();
         std::printf("%s（%d 层）\n", argv[ai], n);
-        report("durations",   compare(tl.tileDurations(),    rd), 1.0, n);
-        report("startAngles", compare(tl.tileStartAngles(),  rs), 3.14159265, n);
-        report("totalAngles", compare(tl.tileTotalAngles(),  rt), 3.14159265, n);
+        std::vector<float> ps(n), pt(n), pd(n);
+        for (int i = 0; i < n; ++i) { ps[i] = tl.startAngleAt(i); pt[i] = tl.totalAngleAt(i); pd[i] = tl.durationAt(i); }
+        report("durations",   compare(pd, rd), 1.0, n);
+        report("startAngles", compare(ps, rs), 3.14159265, n);
+        report("totalAngles", compare(pt, rt), 3.14159265, n);
 
         // 下游：用"现算的 durations"重做前缀和，和留存下来的 tileStartTimes 比 —— 这才是
         // 真正会移动画面的量（durations 的差会沿层累积）。
@@ -64,7 +66,7 @@ int main(int argc, char** argv) {
         for (int i = 0; i < n; ++i) {
             const double d = std::fabs(sum - (double)st[i]);
             if (d > maxDrift) { maxDrift = d; driftAt = i; }
-            if (i < n - 1) sum += (double)rd[i];
+            if (i < n - 1) sum += (double)pd[i];
         }
         std::printf("  %-13s max|Δ|=%.3g s（第 %d 层）；相对 %.2g\n",
                     "前缀和", maxDrift, driftAt, st.empty() ? 0.0 : maxDrift / std::fabs((double)st[n - 1]));

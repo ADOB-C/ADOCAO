@@ -167,6 +167,65 @@ void Timeline::recomputeForTest(std::vector<float>& outStartAngles,
     outStartAngles[n - 1] = outStartAngles[n - 2];
 }
 
+float Timeline::angleDirBefore(int64_t i) const {
+    const auto& ad = m_level->angleData;
+    if (i <= 0) return 180.0f;
+    const int64_t k = i - 1;
+    const double rawAngleData = (k < (int64_t)ad.size()) ? ad[(size_t)k] : 180.0;
+    float angleDir;
+    if (rawAngleData == 999.0) {
+        int minus = 1;
+        while (k - minus >= 0 && ad[(size_t)(k - minus)] == 999.0) minus++;
+        const double realAngle = (k - minus >= 0) ? ad[(size_t)(k - minus)] : 0.0;
+        angleDir = (float)std::fmod(realAngle + (minus - 1) * 180.0, 360.0);
+    } else {
+        angleDir = (float)std::fmod(rawAngleData + 180.0, 360.0);
+    }
+    if (angleDir < 0) angleDir += 360.0f;
+    return angleDir;
+}
+float Timeline::extraRotAt(int64_t i) const {
+    auto it = std::lower_bound(m_pauseRot.begin(), m_pauseRot.end(), i,
+                               [](const std::pair<int64_t, float>& e, int64_t v) { return e.first < v; });
+    return (it != m_pauseRot.end() && it->first == i) ? it->second : 0.0f;
+}
+float Timeline::startAngleAt(int64_t i) const {
+    if (m_level->tiles.empty()) return 0.0f;
+    const int64_t n = (int64_t)m_tileBPM.size();
+    if (i <= 0) return (m_level->settings.rotation + 180.0f) * 3.14159265f / 180.0f;
+    if (i >= n - 1) return startAngleAt(n - 2);
+    return std::fmod(m_level->tiles[(size_t)(i - 1)].direction + 180.0f, 360.0f) * 3.14159265f / 180.0f;
+}
+float Timeline::totalAngleAt(int64_t i) const {
+    if (m_level->tiles.empty()) return 0.0f;
+    const int64_t nAll = (int64_t)m_tileBPM.size();
+    if (i >= nAll - 1) return m_lastTotalAngle;
+    const auto& ad = m_level->angleData;
+    const bool isCW = m_tileIsCW[(size_t)i];
+    const double rawAngleData = (i < (int64_t)ad.size()) ? ad[(size_t)i] : 180.0;
+    double relAngle;
+    if (rawAngleData == 999.0) {
+        relAngle = 0.0;
+    } else {
+        double delta = std::fmod((double)angleDirBefore(i) - rawAngleData, 360.0);
+        if (delta < 0) delta += 360.0;
+        if (!isCW) { relAngle = 360.0 - delta; if (relAngle >= 360.0) relAngle -= 360.0; }
+        else       { relAngle = delta; }
+        if (delta < 0.0001) relAngle = 360.0;
+    }
+    float totalAngle = (float)relAngle * 3.14159265f / 180.0f;
+    if (isCW) totalAngle = -totalAngle;
+    const float rot = extraRotAt(i);
+    if (isCW) totalAngle -= rot * 2.0f * 3.14159265f;
+    else      totalAngle += rot * 2.0f * 3.14159265f;
+    return totalAngle;
+}
+float Timeline::durationAt(int64_t i) const {
+    const int64_t n = (int64_t)m_tileBPM.size();
+    if (i >= n - 1) return m_exportOnly ? 0.1f : 0.0f;
+    const float rotationAmount = std::abs(totalAngleAt(i)) / (2.0f * 3.14159265f);
+    return rotationAmount * 2.0f * (60.0f / m_tileBPM[(size_t)i]);
+}
 void Timeline::precalculateTiming() {
     const auto& tiles = m_level->tiles;
     const auto& angleData = m_level->angleData;
@@ -183,9 +242,6 @@ void Timeline::precalculateTiming() {
     if (n < 2) return;
 
     m_tileStartTimes.resize(n);
-    m_tileDurations.resize(n);
-    m_tileTotalAngles.resize(n);
-    m_tileStartAngles.resize(n);
     m_tileBPM.resize(n);
     m_tileIsCW.resize(n);
     // 每层距离只在最后一层可能是真值，其余恒 1.0f —— 所以只记层数 + 两个标量（见 Timeline.hpp）。
@@ -201,8 +257,6 @@ void Timeline::precalculateTiming() {
     std::stable_sort(flatActions.begin(), flatActions.end());
 
     // Phase 1 (sequential): Write directly to m_tileIsCW/m_tileBPM
-    std::vector<float> preAngleDir(n - 1);
-    std::vector<float> preExtraRot(n - 1, 0.0f);
 
     bool isCW = true;
     float currentBPM = m_level->settings.bpm;
@@ -210,7 +264,6 @@ void Timeline::precalculateTiming() {
     size_t actionCursor = 0;
 
     for (int i = 0; i < n - 1; i++) {
-        preAngleDir[i] = angleDir;
         float extraRotation = 0.0f;
 
         while (actionCursor < flatActions.size() && flatActions[actionCursor].first == i) {
@@ -227,7 +280,7 @@ void Timeline::precalculateTiming() {
 
         m_tileIsCW[i] = isCW;
         m_tileBPM[i] = currentBPM;
-        preExtraRot[i] = extraRotation;
+        if (extraRotation != 0.0f) m_pauseRot.push_back({(int64_t)i, extraRotation});
 
         double rawAngleData = (i < (int)angleData.size()) ? angleData[i] : 180.0;
         if (rawAngleData == 999.0) {
@@ -248,81 +301,11 @@ void Timeline::precalculateTiming() {
     m_tileIsCW[n - 1] = isCW;
     m_tileBPM[n - 1] = currentBPM;
 
-    // Phase 2: Per-tile angles/durations.
-    // 导出模式**也要真实角度**：PositionSolver::positionAtTile 用 startAngles/totalAngles 算行星的
-    // 轨道位置（mv = pivot + (cos,sin)(start + total*progress) * dist），而 MapExport 的矢量 image
-    // 与 --1px 两条路、以及 core/map/LevelMap 都在调它。原来这里把两个角度清零，于是导出图画出的
-    // 不是游戏那条曲线（实测 angles360 1024²：32.79% 的墨点位置不同、墨点多 25%，呈"串珠"状）。
-    // 现在两条路共用 precalcTileRange，导出模式的角度与渲染路径逐位相同。
-    if (m_exportOnly) {
-        // 导出模式分两种，判据是**运行时有没有 tiles**：
-        //   * MapExport 那条路（`adocao image` / tiles / stitch）：tiles 在 → 走真实角度，
-        //     导出图与游戏那条曲线逐位相同（这是 b1f5158 修的东西）；
-        //   * `adocao export`（Application.cpp，`exportOnly=true` 加载）：它只要时间线
-        //     （hitsound 混音靠 durations）、**根本不用角度**，而 tiles 恰好被 exportOnly 省掉了
-        //     —— 那时 `tiles` 是空 vector，绝不能去读 `tiles[i-1].direction`（2026-10 就这么崩过：
-        //     precalcTileRange 里 `ldr s0, [x25]` → EXC_BAD_ACCESS，而日志只写文件、终端什么都看不到）。
-        //     所以这条路保持老行为：自己按 angleData/preAngleDir 算时长，两个角度数组清零。
-        if (m_level->tiles.size() >= (size_t)n) {
-            precalcTileRange(*m_level, m_tileIsCW, m_tileBPM, preAngleDir, preExtraRot,
-                             m_tileStartAngles, m_tileTotalAngles, m_tileDurations,
-                             0, n - 1, n);
-        } else {
-            for (int i = 0; i < n - 1; i++) {
-                const double rawAng =
-                    (i < (int)m_level->angleData.size()) ? m_level->angleData[i] : 180.0;
-                double relAngle;
-                if (rawAng == 999.0) {
-                    relAngle = 0.0;
-                } else {
-                    double delta = std::fmod((double)preAngleDir[i] - rawAng, 360.0);
-                    if (delta < 0) delta += 360.0;
-                    if (!m_tileIsCW[i]) relAngle = (delta < 0.0001) ? 360.0 : 360.0 - delta;
-                    else                relAngle = (delta < 0.0001) ? 360.0 : delta;
-                }
-                const double rot = relAngle / 360.0 + (double)preExtraRot[i];
-                m_tileDurations[i] = (float)(rot * 2.0 * (60.0 / m_tileBPM[i]));
-                m_tileStartAngles[i] = 0.0f;
-                m_tileTotalAngles[i] = 0.0f;
-            }
-        }
-        m_tileDurations[n - 1] = 0.1f;      // 导出模式的末层时长（原行为，保持不变）
-    } else {
-        constexpr int PARALLEL_THRESHOLD = 256;
-        int workItems = n - 1;
-        if (workItems >= PARALLEL_THRESHOLD) {
-            unsigned int hw = std::thread::hardware_concurrency();
-            if (hw == 0) hw = 2;
-            unsigned int numThreads = std::min(hw, (unsigned)(workItems / 64));
-            if (numThreads < 2) numThreads = 2;
-            size_t chunk = ((size_t)workItems + numThreads - 1) / numThreads;
-            std::vector<std::future<void>> futures;
-            for (unsigned int t = 0; t < numThreads; t++) {
-                size_t s = t * chunk;
-                size_t e = std::min(s + chunk, (size_t)workItems);
-                if (s >= e) break;
-                futures.push_back(std::async(std::launch::async,
-                    precalcTileRange, std::cref(*m_level),
-                    std::cref(m_tileIsCW), std::cref(m_tileBPM),
-                    std::cref(preAngleDir), std::cref(preExtraRot),
-                    std::ref(m_tileStartAngles), std::ref(m_tileTotalAngles),
-                    std::ref(m_tileDurations),
-                    (int)s, (int)e, n));
-            }
-            for (auto& f : futures) f.wait();
-        } else {
-            precalcTileRange(*m_level, m_tileIsCW, m_tileBPM, preAngleDir, preExtraRot,
-                             m_tileStartAngles, m_tileTotalAngles,
-                             m_tileDurations,
-                             0, workItems, n);
-        }
-    }
-
     // Phase 3: Prefix sum
     double totalTime = 0.0;
     for (int i = 0; i < n - 1; i++) {
         m_tileStartTimes[i] = totalTime;
-        totalTime += m_tileDurations[i];
+        totalTime += durationAt(i);
     }
     if (n > 0) m_tileStartTimes[n - 1] = totalTime;
 
@@ -336,9 +319,8 @@ void Timeline::precalculateTiming() {
     // Export mode has no tile geometry, so this phase is only needed for normal
     // rendering/timeline data.
     if (!m_exportOnly) {
-        int lastIdx = n - 1;
-        m_tileDurations[lastIdx] = 0.0f;
-        m_tileStartAngles[lastIdx] = (lastIdx > 0) ? m_tileStartAngles[lastIdx - 1] : 0.0f;
+        const int lastIdx = n - 1;
+        m_lastTotalAngle = totalAngleAt(lastIdx);
 
         while (actionCursor < flatActions.size() && flatActions[actionCursor].first == lastIdx) {
             auto& a = m_level->actions[flatActions[actionCursor].second];

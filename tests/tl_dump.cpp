@@ -12,12 +12,11 @@ int main(int argc, char** argv) {
     if (!lvl.loadFromFile(argv[1])) { std::printf("# 读不了 %s\n", argv[1]); return 1; }
     Timeline tl;
     tl.build(lvl, false);
-    const auto& d = tl.tileDurations();
-    const auto& s = tl.tileStartAngles();
-    const auto& t = tl.tileTotalAngles();
     const auto& st = tl.tileStartTimes();
-    std::printf("# n=%zu\n", d.size());
-    for (size_t i = 0; i < d.size(); ++i)
-        std::printf("%zu %.9g %.9g %.9g %.17g\n", i, (double)d[i], (double)s[i], (double)t[i], (double)st[i]);
+    const size_t n = st.size();
+    std::printf("# n=%zu\n", n);
+    for (size_t i = 0; i < n; ++i)
+        std::printf("%zu %.9g %.9g %.9g %.17g\n", i, (double)tl.durationAt(i),
+                    (double)tl.startAngleAt(i), (double)tl.totalAngleAt(i), (double)st[i]);
     return 0;
 }

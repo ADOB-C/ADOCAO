@@ -436,6 +436,10 @@ int main(int argc, char* argv[]) {
     if (mode == Mode::Play && !pos.empty() && cli.levelPath.empty())
         cli.levelPath = resolveLevelPath(pos[0]);
 
+    // 抓帧必须是**确定性**的（AGENTS：不走 wall clock / 音频 / **帧时间反馈**），但拖尾的自适应
+    // 采样率正是由测得的帧时间驱动的 → 同一帧在不同性能的构建上会画出**不同长度**的拖尾。
+    // 2026-10 真踩过：一个数值逐位相同、只省内存的改动，因为快了几毫秒，让 51 个抓帧状态里 31 个变色。
+    if (!cli.capturePath.empty()) cli.trailAdaptive = false;
     if (!cli.levelPath.empty()) return runApplicationFromCLI(cli, debug);
     return runApplication(debug);
 }

@@ -8,6 +8,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   ✅ P1–P5 全部完成：目录搬迁+CMake 拆库（P1+P2）→ PlaybackEngine 拆 core/timeline（P3）→
   app 拆分（P4：GameWindow → `app/CameraController`/`app/LevelScene`，LauncherWindow → `app/wizard/` 分页）
   → 资产并入 `assets/` + g_sc 清理 + 文档/CI 同步（P5）
+- **入库文件里绝不出现机器绝对路径**（2026-10 真出过事：验收清单把 `/Users/<用户名>/Documents/Charts/...`
+  写进了仓库，352 个提交里 50 个带着它，最后只能 `git filter-repo` 重写历史 + force-push + 重打 21 个标签）。
+  本地资源一律走**环境变量**（如 `$ADOCAO_CHARTS`）或 `~/` 相对形式；`scripts/capture-gate.sh` 的 `abs()`
+  会把 `~/` 展开成 `$HOME`。提交前自检（应为空）：
+  `git grep -nE "/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z0-9._-]+/" -- . ':!build'`
+- **长期保留的产物统一放 `~/.adocao/`**，别放 `/tmp`（系统会定期清，像素基线就这么丢过一次）：
+  `gate/baseline`（像素门槛基线，`ADOFAO_GATE_HOME` 可改）、`backup/`（git 镜像）、`cache/gh`（gh CLI 缓存，
+  沙箱里要用 `XDG_CACHE_HOME=~/.adocao/cache/gh`）、`tools/`（如 git-filter-repo）、`scratch/`（一次性文件）。
+  **但临时抓帧文件必须留在工作区内**（门槛默认 `build/gate-scratch`）：受限沙箱里往工作区外**写**会被拒，
+  于是 `/usr/bin/time` 的重定向失败、抓帧静默不发生，`check` 会报出一整片假的"不一致"（真踩过：
+  把 `gate/check` 也放进 `~/.adocao` 后，51 个状态全报不一致，其实一张新图都没生成）。
+  规则：**基线（只读）可以放 `~/.adocao`，临时/中间产物一律放工作区内**。
 - **库侧公共 API 都在 `adofai::` 里**（2026-10 起，为抽出 ADOFAI.Lib 做准备）：core/audio/render 的
   头文件与实现都包在 `namespace adofai { … }` 里；app/tests 侧的文件用
   `using namespace adofai;`（消费方当然也直接写 `adofai::X`）。两条相关规矩：
@@ -49,7 +61,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 几何测试（三层，2026-10 起）：`tests/tile_geometry_test.cpp`（中旋五边形不变量 + 调用点护栏）→
   `tests/tile_expansion_test.cpp`（**CPU 逐位**：形状表展开 vs 参考实现，168491 形状 / 3.3e7 坐标）→
   `tests/geom_probe_test.cpp`（**GPU 逐位**：真跑 `assets/shaders/tile.vert`，4.7e7 坐标；无显示时 SKIP）
-  → `scripts/capture-gate.sh store|check`（**像素逐字节**，51 个状态，基线存 /tmp、不入库；带 `+hitsounds` 的状态会真的加载音色）；
+  → `scripts/capture-gate.sh store|check`（**像素逐字节**，51 个状态，基线默认 `~/.adocao/gate/baseline`、不入库；带 `+hitsounds` 的状态会真的加载音色）；
   默认口径是几何尺度容差 1e-5 砖，`ADOCAO_TILE_EXACT=1` 才要求逐位（见"砖块几何"段）
 - shader 一致性：`scripts/check-shader-fallback.sh`（`render/Shaders.hpp` 的内嵌回退 GLSL 必须与
   `assets/shaders/*` 逐字相同）
@@ -647,15 +659,15 @@ ADOCAO_TILE_EXACT=1 ./build/tests/adocao_tile_expansion_test tests/charts/shapes
 
 **像素门槛怎么用**（改渲染前先存基线，改完 check）：
 ```
-scripts/capture-gate.sh store --out /tmp/adocao-capture-baseline   # 改动前
+scripts/capture-gate.sh store                                 # 改动前（默认 ~/.adocao/gate/baseline）
 # …改代码、重新构建…
-scripts/capture-gate.sh check --against /tmp/adocao-capture-baseline
+scripts/capture-gate.sh check
 ```
 清单在 `tests/capture_states.txt`（由 `tests/gen_render_fixtures.py` 生成，别手改）：
 `<name>|<chart>|<tile|time>|<值>|<zoom>|<WxH>|[额外开关]`。按**砖号**抓帧（`--capture-tile`）而不是按秒 ——
 6 千砖的谱面上按秒给的时刻会随砖时长累积漂移。脚本会断言日志里的 `tile=` 与清单一致（防"抓错时刻"
 这种静默失败），并记录 RSS / `unique shapes` / draw 次数。差异像素统计要 Pillow：
-`ADOCAO_GATE_PY=<带 Pillow 的 python3>`。**基线不入库**（驱动相关），`store` 一次、`check` 多次。
+`ADOCAO_GATE_PY=<带 Pillow 的 python3>`。**基线不入库**（驱动相关），`store` 一次、`check` 多次；默认落在 `$HOME/.adocao/gate/baseline`（`ADOFAO_GATE_HOME` 可改）—— 别写 `/tmp`，会被系统清掉。
 三条已标定过的灵敏度：砖的绘制顺序反转 → MYC 那帧 278 个像素变；**图标放回拖尾之后**
 （旧 bug 行为）→ 8 个 `*_under_trail` 状态红 13700~29241 个像素（maxdelta ~220）；
 而把一处融合拆成 1 ULP 级扰动 → **7/7 状态完全相同**（8-bit 输出看不出来）—— 所以 ULP 级的

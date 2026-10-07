@@ -116,6 +116,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   就画出**不同长度**的拖尾。规则：① 差异先出图；② 抓帧必须确定性（`--capture` 已强制
   `trailAdaptive=false`），任何“由帧时间反馈决定的量”都不许进抓帧路径。
   ③ 本沙箱里 `~/.adocao` **不可写** → 重存基线要用工作区内目录（`ADOFAO_GATE_HOME=build/gate-base`）。
+  ④ **抓帧块里新增的日志不许以 `capture:` 开头** ✗（2026-10 真踩过）：`capture-gate.sh` 用
+  "日志里**最后一条** `capture:` 行"核对本次的 `tile=`/`req=`，而自检日志一开始也叫 `capture:` →
+  脚本取到自检那行 → 51 个状态全判 FAIL（门槛**自己**把这个疏忽抓住了 ✓）。自检统一用
+  `capture-selfcheck:` 前缀。
   ④ **两层兜底（各自的边界要说清 ✗）**：
   * **钉死 + 守卫**（今天这个 bug 的解法）：`--capture` 时 `trailAdaptive=false`，并在抓帧块里
     自检 `trailAdaptive`，为 true 就 `LOG_E`。**负向对照验过**：故意打开 → 日志确实出现

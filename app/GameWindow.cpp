@@ -508,9 +508,9 @@ void GameWindow::captureAndExit() {
     //  看起来改了 31/51 个像素状态）。main.cpp 已在 --capture 时把 trailAdaptive 关掉，
     // 这里再守一道 —— 真被打开了就喊出来，别让它静默污染基线。
     if (m_cfg->trailAdaptive) {
-        LOG_E("capture: trailAdaptive=true —— 抓帧不再确定性！采样率会被帧时间驱动（应为 false）");
+        LOG_E("capture-selfcheck: trailAdaptive=true —— 抓帧不再确定性！采样率会被帧时间驱动（应为 false）");
     } else {
-        LOG_I("capture: 拖尾采样率已钉死 = %.1f Hz（adaptive off，确定性抓帧）",
+        LOG_I("capture-selfcheck: 拖尾采样率已钉死 = %.1f Hz（adaptive off，确定性抓帧）",
               (double)m_cfg->trailSampleRate);
     }
     float targetTime = m_cfg->captureTime;
@@ -596,14 +596,14 @@ void GameWindow::captureAndExit() {
             for (size_t i = 0; i < px.size(); ++i) {
                 if (px[i] != px2[i]) { ++diffBytes; if (firstBad == px.size()) firstBad = i; }
             }
-            LOG_E("capture: **自检失败** —— 同一帧两次渲染结果不同（首个差异字节 %zu，%zu/%zu 字节 = %.4f%%）："
+            LOG_E("capture-selfcheck: **自检失败** —— 同一帧两次渲染结果不同（首个差异字节 %zu，%zu/%zu 字节 = %.4f%%）："
                   "抓帧路径里混进了非确定性的输入（帧时间 / 墙上时钟 / 音频 / GPU 计时 / 负载…）。"
                   "这类量必须先写死（参考 trailAdaptive）再进抓帧路径。",
                   firstBad, diffBytes, px.size(), 100.0 * (double)diffBytes / (double)px.size());
             std::fflush(nullptr);
             std::exit(3);   // 明确失败：门槛报红，且 PNG 已写出便于诊断
         }
-        LOG_I("capture: 自检通过（同一帧两次渲染逐字节相同 → 这一帧是可复现的）");
+        LOG_I("capture-selfcheck: 自检通过（同一帧两次渲染逐字节相同 → 这一帧是可复现的）");
     }
 }
 

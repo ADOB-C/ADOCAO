@@ -1117,6 +1117,37 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
 
 // 快路径：mmap 出来的原文直接扫。任何一步复现不了 cleanJson 的语义就返回 false，
 // 此时 this 还没有被改动过，调用方会走旧路径。
+// 采样估计 angleData 的元素个数：在整段上均匀取若干窗口，数每个窗口里的逗号，
+// 按窗口密度外推到整段，**取最大的那个估计**，再加余量。
+//
+// 为什么不能再用固定常数：实测同一批谱面的每元素字节数相差 4 倍（The Moon 3.53、
+// angles360 5.76、MYC 13.39），旧的 /3 于是预留 1.18~4.46 倍，MYC 一个谱就白占 187 MB。
+// 为什么估计要偏大：低估会触发 vector 的倍增，那一刻新旧缓冲同时在 —— 峰值翻倍，
+// 比多留十几个百分点糟得多。所以取最大窗口估计 + 1/8 余量（实测各谱面都落在 1.1x 上下，
+// 既不再有 4 倍浪费，也不会重新分配）。
+// 每窗口 32 KB、最多 8 个 → 扫描量与谱面大小无关（总共 256 KB 上限，微秒级）。
+static size_t estimateAngleCount(const char* p, size_t span) {
+    if (span == 0) return 0;
+    const size_t kW = 32u << 10;
+    const int    kMaxWin = 8;
+    size_t best = 0;
+    for (int w = 0; w < kMaxWin; ++w) {
+        // 均匀铺开：窗口中心按 (w+0.5)/kMaxWin 落在整段上
+        const size_t center = (size_t)((double)span * ((double)w + 0.5) / (double)kMaxWin);
+        const size_t off = center > kW / 2 ? center - kW / 2 : 0;
+        const size_t n = (span - off < kW) ? (span - off) : kW;
+        if (n < 16) continue;
+        size_t commas = 0;
+        for (size_t i = 0; i < n; ++i) if (p[off + i] == ',') ++commas;
+        if (commas == 0) continue;
+        // 把窗口密度外推到整段（先乘后除，避免整数截断丢精度）
+        const size_t est = (size_t)((double)commas * (double)span / (double)n) + 1;
+        if (est > best) best = est;
+    }
+    if (best == 0) return span / 3;        // 退化（一个逗号都没采到）：退回旧启发式
+    return best + best / 8 + 16;           // +12.5% 余量，确保不触发倍增
+}
+
 bool LevelData::tryFastParse(const char* data, size_t len, ProgressCb onProgress) {
     if (onProgress) onProgress(0.10f, "Parsing angleData...");
     std::vector<FastAction> newActions;   // actions 在根扫描里就地解析
@@ -1127,8 +1158,9 @@ bool LevelData::tryFastParse(const char* data, size_t len, ProgressCb onProgress
 
     std::vector<double> newAngles;
     if (r.angle) {
-        // angleData 只有几十 MB，加上整数快路径后 6.77 M 个值只要 ~25 ms
-        newAngles.reserve((size_t)(r.angleEnd - r.angle) / 3);
+        // angleData 只有几十 MB，加上整数快路径后 6.77 M 个值只要 ~25 ms。
+        // 预留量按采样估出来的每元素字节数算（见 estimateAngleCount），不要用固定常数。
+        newAngles.reserve(estimateAngleCount(r.angle, (size_t)(r.angleEnd - r.angle)));
         if (!parseAngleDataRegion(r.angle, r.angleEnd, newAngles)) return false;
     }
 

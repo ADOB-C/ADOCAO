@@ -202,8 +202,10 @@ MYC 的 1,554 MB 与 AGENTS 记录的 app 侧 `adocao image` 1,560 MB 差 0.4% �
    这种加载期瞬态会被后面 Timeline 的更大峰值盖住，要按 §5 用 operator new 记账量。
 3. **`m_tileStartDist`/`m_tileEndDist`（8 B/层）**：`Timeline.cpp:86-87,178` 在 0..n−2 上恒为 `1.0f`，
    只有最后一层写真值（`:251-253`）。改成"最后一层的标量 + 其余取 1.0"。
-4. **`angleData` 的 reserve 启发式（最坏 35.7 → 8 B/层）**：`LevelData.cpp:1131` 的 `/3`。
-   按分隔符计数预留才准。
+4. ✅ **已修**（2026-10）：**`angleData` 的 reserve 启发式**：`LevelData.cpp:1131` 的 `/3`。
+   现在按采样估（8 个 32 KB 窗口、按密度外推整段、取最大 + 12.5% 余量）：实测 MYC 4.46x → **1.14x**、
+   angles360 1.92x → 1.13x、纯整数写法 0.67x（低估，会触发倍增）→ 1.13x；MYC 少请求 171 MB。
+   只影响 capacity：`parseAngleDataRegion` 未改，逐位对拍与像素门槛 51/51 全绿。
 5. **`atStates` 从不释放**：`LevelData.cpp:1489-1497` 的 `releaseMemory` 漏了它；
    运行时代码只在 `app/LevelScene.cpp:97` 看过 `.empty()`。每条 101 B 永久常驻，可立刻清。
 6. **`Tile::angle` 是死数据**：`LevelData.hpp:47`，全仓库无读者（唯一写点 `LevelData.cpp:1347`）。

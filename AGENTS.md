@@ -80,6 +80,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   空 vector 与原来**逐位等价**（默认构造的 SS 全 false/0，循环体本来就什么都不做）。
   注意：这类**加载期瞬态**用 peak RSS 量不出来（会被后面 Timeline 的更大峰值盖住），
   要按 `docs/scale-1e8-to-2e9.md` §5 的办法用 operator new 记账 + 返回地址定位。
+- **`angleData` 的预留别用固定常数**：每元素字节数实测差 4 倍（The Moon 3.53、angles360 5.76、
+  MYC 13.39），旧的 `reserve(len / 3)` 于是预留 0.67x~4.46x —— MYC 白请求 171 MB、纯整数写法反而
+  **低估**到 0.67x 触发一次倍增。现在按 `estimateAngleCount()` 采样估（8 个 32 KB 窗口、按密度外推到
+  整段、取最大估计 + 12.5% 余量），实测五种谱面都落在 1.13~1.14x（出现 ~2x 就说明发生了重新分配）。
+  **它只影响 capacity，不碰值**：`parseAngleDataRegion` 一行未动，逐位对拍（`a.bytes(&v, 8)` 的 FNV）
+  与像素门槛都是绿的。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`

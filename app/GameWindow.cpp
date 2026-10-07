@@ -503,6 +503,16 @@ void GameWindow::captureAndExit() {
     //    → audioPos = T + preRoll - audioStartOffset。wallClock 传 0：之后不再有 wall clock 参与。
     //    `--capture-tile N` 把 T 换成第 N 砖的起始时刻：6 万砖的验收谱面上，按秒给的时刻会随
     //    砖时长累积漂移，按砖给则永远落在同一砖（相机会 snap 到它），门槛不受时间轴数学影响。
+    // 抓帧必须**确定性**：任何"由帧时间/墙上时钟/音频反馈决定的量"都不许进这条路径
+    // （2026-10 真踩过：拖尾的自适应采样率让一个数值逐位相同、只快了几毫秒的改动，
+    //  看起来改了 31/51 个像素状态）。main.cpp 已在 --capture 时把 trailAdaptive 关掉，
+    // 这里再守一道 —— 真被打开了就喊出来，别让它静默污染基线。
+    if (m_cfg->trailAdaptive) {
+        LOG_E("capture: trailAdaptive=true —— 抓帧不再确定性！采样率会被帧时间驱动（应为 false）");
+    } else {
+        LOG_I("capture: 拖尾采样率已钉死 = %.1f Hz（adaptive off，确定性抓帧）",
+              (double)m_cfg->trailSampleRate);
+    }
     float targetTime = m_cfg->captureTime;
     if (m_cfg->captureTile >= 0) {
         const auto& st = m_timeline->tileStartTimes();

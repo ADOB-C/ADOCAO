@@ -393,3 +393,14 @@ settings 定长记录 → angleData 列 → actions 六列 → pathData；未知
 
 顺带：Singularity / Tempest 在我试的两个路径下不存在（`~/Documents/Charts/Singularity/level.adofai`
 等），所以上面的"一般谱面"结论目前只有 The Moon / angles360 两个样本，**样本偏少**。
+
+### RLE 列编码（实测结论，2026-10）
+
+四张赫兹谱实拍图（用户提供：锯齿 / 45° 直线 / 整圈 / L 形）引出的是**游程**结构。实测：
+* `angleData`：游程均值 **1.0**（MYC，锯齿型）→ **RLE 反而更差**（5.08 MB → 11.58 MB）；
+* `type` 117 / `flag` 11179 / `val1` 118 / `val2` 62444 → **RLE 极佳**
+  （MYC 的这四列 9.29 MB → **~160 KB**，其中 val2 是 14,000×）；
+* `floor` 是差分列 → 要用"**对差分流再取游程**"（6.18 MB → 十几字节）。
+
+→ 加 `Rle` 列编码 + `DeltaRleVarint`；选中的判据必须是**实测字节数最小**
+（不能按列名硬编码：直线的赫兹谱会在 angleData 上选中 RLE，锯齿型则不会）。

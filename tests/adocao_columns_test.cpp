@@ -98,7 +98,9 @@ int main() {
         std::vector<int64_t> back;
         ok = ok && adocao::decodeIntColumn(enc.data(), enc.size(), back);
         check(ok && back == v, "floor 列往返（单调 + 偶尔重复）");
-        check(std::strcmp(st.codec, "DeltaVarint") == 0, "单调列选中 DeltaVarint");
+        // 差分是 2,2,2,2,2,2,-5 的循环 → 六个相同差分构成游程 → DeltaRleVarint 胜出（合法）
+        check(std::strcmp(st.codec, "DeltaRleVarint") == 0, "差分有游程时选中 DeltaRleVarint");
+        check(st.encodedBytes < v.size(), "DeltaRle 后低于 1 B/值（差分有游程就有收益）");
         std::printf("     floor 列：%zu B = %.2f B/值（%s）\n", st.encodedBytes,
                     (double)st.encodedBytes / (double)v.size(), st.codec);
     }
@@ -171,6 +173,57 @@ int main() {
         bad[20 + 13 * 8] = 0xFF;                           // 下标流里塞越界下标（4 bit/值）
         bad[20 + 13 * 8 + 1] = 0xFF;
         check(!adocao::decodeDoubleColumn(bad.data(), bad.size(), back), "越界下标 → 必须失败");
+    }
+
+    // ⑨ DeltaVarint vs DeltaRleVarint 的分界：差分**互不相同**时没有游程 → 应选 DeltaVarint
+    {
+        std::vector<int64_t> v(50000);
+        int64_t x = 0;
+        for (size_t i = 0; i < v.size(); ++i) { x += (int64_t)(i % 7) + 1 + (int64_t)(i % 3) * 5; v[i] = x; }
+        std::vector<uint8_t> enc;
+        ColumnStats st;
+        std::vector<int64_t> back;
+        const bool ok = adocao::encodeIntColumn(v, enc, &st) &&
+                        adocao::decodeIntColumn(enc.data(), enc.size(), back) && back == v;
+        check(ok && std::strcmp(st.codec, "DeltaVarint") == 0, "差分无游程时选中 DeltaVarint");
+    }
+
+    // ⑩ Rle 专用用例：几段长游程（不是整列常量，所以不会退化成 Const）
+    {
+        std::vector<uint32_t> v;
+        v.insert(v.end(), 100000, 3u);
+        v.insert(v.end(), 200000, 5u);
+        v.insert(v.end(), 50000, 9u);
+        std::vector<uint8_t> enc;
+        ColumnStats st;
+        std::vector<uint32_t> back;
+        const bool ok = adocao::encodeU32Column(v, enc, &st) &&
+                        adocao::decodeU32Column(enc.data(), enc.size(), back) && back == v;
+        check(ok && std::strcmp(st.codec, "Rle") == 0, "长游程的列选中 Rle");
+        check(st.encodedBytes < 64, "长游程的列塌成几十字节");
+        std::printf("     三段长游程（35 万值）→ %zu B（%s）\n", st.encodedBytes, st.codec);
+    }
+
+    // ⑪ 新编码的负向对照：RLE 载荷被改坏 / 截断，都必须干净失败
+    {
+        std::vector<uint32_t> v;
+        v.insert(v.end(), 1000, 1u);
+        v.insert(v.end(), 1000, 2u);
+        std::vector<uint8_t> enc;
+        ColumnStats st;
+        adocao::encodeU32Column(v, enc, &st);
+        std::vector<uint32_t> back;
+        check(std::strcmp(st.codec, "Rle") == 0, "负向对照的样本列用 Rle 编成");
+        check(!adocao::decodeU32Column(enc.data(), enc.size() - 1, back), "Rle 截断 → 必须失败");
+        std::vector<uint8_t> bad = enc;
+        // 把"游程总数"改大 → 展开后总数对不上 → 必须失败
+        uint64_t rc = 0;
+        const size_t runOff = adocao::ColumnHeader{}.count ? 0 : 0;   // 占位，下面按布局算
+        (void)runOff;
+        std::memcpy(&rc, bad.data() + 20 + 2 * 4, 8);                 // 20 列头 + 2 项 u32 字典
+        rc += 1000;                                                   // 谎报游程数
+        std::memcpy(bad.data() + 20 + 2 * 4, &rc, 8);
+        check(!adocao::decodeU32Column(bad.data(), bad.size(), back), "Rle 游程数说谎 → 必须失败");
     }
 
     std::printf("\n%s：%s（%d 项失败）\n", g_fail ? "FAIL" : "ok",

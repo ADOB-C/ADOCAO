@@ -5,6 +5,8 @@
 #include "archive/AdocaoColumns.hpp"
 #include "core/level/LevelData.hpp"
 
+#include <zstd.h>   // 段级压缩（archive 的 PRIVATE 依赖；实测真实文件上 zstd 比 xz 更小）
+
 namespace adofai {
 namespace adocao {
 namespace {
@@ -28,6 +30,15 @@ void putF32(std::vector<uint8_t>& b, float f) {
     uint32_t x = 0;
     std::memcpy(&x, &f, 4);          // 位模式原样：float 列必须逐位无损
     putU32(b, x);
+}
+
+// 载荷列按类型稀疏：只写"该类型真的用到这一列"的事件，其余读侧取默认 0。
+// 判据是**自描述的**：某类型在这一列出现过非默认值 → 该类型进掩码（不靠列名/语义硬编码）。
+uint32_t sparseMask(const std::vector<uint32_t>& types, const std::vector<uint32_t>& col) {
+    uint32_t mask = 0;
+    for (size_t i = 0; i < types.size(); ++i)
+        if (col[i] != 0u) mask |= (1u << (types[i] & 31u));
+    return mask;
 }
 
 struct Section {
@@ -123,31 +134,47 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
             std::memcpy(&x, &a.val2, 4); v2.push_back(x);
         }
         putU32(actionsBlob, 6);                       // 列数
-        auto addBlob = [&](const char* name, const std::vector<uint8_t>& enc, const ColumnStats& st) {
+        auto pushColumn = [&](const char* name, const std::vector<uint8_t>& enc, const ColumnStats& st,
+                              size_t elements, size_t rawBytes) {
             putU64(actionsBlob, enc.size());           // u64：允许单列 > 4 GB
             putBytes(actionsBlob, enc.data(), enc.size());
-            rep.columns.push_back({name, st.codec, 0, st.rawBytes, st.encodedBytes, st.dictEntries, st.bits});
+            rep.columns.push_back({name, st.codec, elements, rawBytes, enc.size(), st.dictEntries, st.bits});
         };
         auto addI = [&](const char* name, const std::vector<int64_t>& col) {
             std::vector<uint8_t> enc; ColumnStats st;
             encodeIntColumn(col, enc, &st);
-            st.rawBytes = col.size() * 8;
-            addBlob(name, enc, st);
+            pushColumn(name, enc, st, col.size(), col.size() * 8);
         };
         auto addU = [&](const char* name, const std::vector<uint32_t>& col) {
             std::vector<uint8_t> enc; ColumnStats st;
             encodeU32Column(col, enc, &st);
-            st.rawBytes = col.size() * 4;
-            addBlob(name, enc, st);
+            pushColumn(name, enc, st, col.size(), col.size() * 4);
+        };
+        // 稀疏列：u32 掩码 + u64 实际条数 + 一列（只含掩码内的类型）
+        auto addSparseU = [&](const char* name, const std::vector<uint32_t>& col) {
+            const uint32_t mask = sparseMask(types, col);
+            std::vector<uint32_t> used;
+            used.reserve(col.size() / 4 + 16);
+            for (size_t i = 0; i < col.size(); ++i)
+                if (mask & (1u << (types[i] & 31u))) used.push_back(col[i]);
+            std::vector<uint8_t> enc; ColumnStats st;
+            encodeU32Column(used, enc, &st);
+            std::vector<uint8_t> blob;
+            putU32(blob, mask);
+            putU64(blob, used.size());
+            putBytes(blob, enc.data(), enc.size());
+            putU64(actionsBlob, blob.size());
+            putBytes(actionsBlob, blob.data(), blob.size());
+            rep.columns.push_back({name, st.codec, used.size(), col.size() * 4, blob.size(),
+                                   st.dictEntries, st.bits});
         };
         addI("actions.floor", floors);
         addU("actions.type", types);
-        addU("actions.strId", strIds);
+        addSparseU("actions.strId", strIds);
         addU("actions.flag", flags);
-        addU("actions.val1", v1);
-        addU("actions.val2", v2);
-        for (ColumnReport& r : rep.columns)
-            if (r.name.rfind("actions.", 0) == 0) r.elements = n;
+        addSparseU("actions.val1", v1);
+        addSparseU("actions.val2", v2);
+        (void)n;
     }
 
     // ---- 组装段 ----
@@ -179,17 +206,34 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
     uint64_t off = (tableBytes + 7u) & ~7ull;
     std::vector<SectionEntry> table;
     table.reserve(secs.size());
-    for (const Section& s : secs) {
+    // 段级压缩：zstd 19（实测真实文件上比 xz 更小、解码更快、且 archive 本来就链着它）。
+    // 太小的段不值得压；压不小就存原样。crc32c 覆盖**实际存储的字节**（读侧先校验再解压）。
+    std::vector<std::vector<uint8_t>> stored(secs.size());
+    for (size_t i = 0; i < secs.size(); ++i) {
+        const std::vector<uint8_t>& blob = secs[i].blob;
+        stored[i] = blob;
+        if (blob.size() >= 256) {
+            std::vector<uint8_t> z(ZSTD_compressBound(blob.size()));
+            const size_t got = ZSTD_compress(z.data(), z.size(), blob.data(), blob.size(), 19);
+            if (!ZSTD_isError(got) && got < blob.size()) {
+                z.resize(got);
+                stored[i] = std::move(z);
+            }
+        }
+    }
+    for (size_t i = 0; i < secs.size(); ++i) {
+        const Section& s = secs[i];
+        const std::vector<uint8_t>& st = stored[i];
         SectionEntry e{};
         e.id = s.id;
-        e.codec = (uint8_t)Codec::Raw;      // 段内自描述（列头带 codec）；压缩是后续版本的事
+        e.codec = (st.size() < s.blob.size()) ? (uint8_t)Codec::SectionZstd : (uint8_t)Codec::Raw;
         e.flags = 0;
         e.offset = off;
-        e.compSize = s.blob.size();
+        e.compSize = st.size();
         e.rawSize = s.blob.size();
         e.elemCount = s.elements;
-        e.crc32c = crc32c(s.blob.data(), s.blob.size());
-        off = (off + s.blob.size() + 7u) & ~7ull;
+        e.crc32c = crc32c(st.data(), st.size());
+        off = (off + st.size() + 7u) & ~7ull;
         table.push_back(e);
     }
     const uint64_t fileSize = off;
@@ -222,8 +266,8 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
     out.assign((size_t)fileSize, 0);
     std::memcpy(out.data(), hb.data(), hb.size());
     for (size_t i = 0; i < secs.size(); ++i)
-        if (!secs[i].blob.empty())
-            std::memcpy(out.data() + table[i].offset, secs[i].blob.data(), secs[i].blob.size());
+        if (!stored[i].empty())
+            std::memcpy(out.data() + table[i].offset, stored[i].data(), stored[i].size());
 
     if (hb.size() != (size_t)tableBytes) {
         err = "内部错误：头 + 段表的长度与预期不符";

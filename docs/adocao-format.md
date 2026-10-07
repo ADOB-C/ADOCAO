@@ -1,6 +1,6 @@
 # `.adocao` 二进制容器规范（v1）
 
-> 状态：**读写都已落地** —— `archive/AdocaoFormat.hpp`、`archive/AdocaoColumns.{hpp,cpp}`、
+> 状态：**v2 已落地**（列级 `Rle`/`DeltaRleVarint` + 稀疏载荷列 + 段级 zstd；读写都在）。**读写都已落地** —— `archive/AdocaoFormat.hpp`、`archive/AdocaoColumns.{hpp,cpp}`、
 > `archive/AdocaoWriter.{hpp,cpp}`、`archive/AdocaoReader.{hpp,cpp}`、CLI `adocao pack`。
 > 读取路径已接通：core 的 `sniffLevelArchive` 认 magic `ADO1` → `LevelData::loadFromBuffer`
 > 经 `ArchiveBackend::decodeAdocao` 钩子分派（**core 不依赖 archive**，依赖倒置不变）→
@@ -63,7 +63,7 @@ Header (76 B) | SectionEntry × sectionCount (40 B each) | padding → 8 B 对�
 | 偏移 | 类型 | 字段 | 说明 |
 |---|---|---|---|
 | 0 | char[4] | `magic` | `"ADO1"`，接入 `core/level/ByteSource.cpp::sniffLevelArchive` |
-| 4 | u16 | `version` | 当前 1；**唯一的兼容闸门** |
+| 4 | u16 | `version` | 当前 **2**；**唯一的兼容闸门**（v2：稀疏载荷列 + 段级压缩）|
 | 6 | u16 | `flags` | 保留（0）|
 | 8 | u16 | `sectionCount` | |
 | 10 | u16 | `reserved` | 0 |
@@ -87,7 +87,7 @@ Header (76 B) | SectionEntry × sectionCount (40 B each) | padding → 8 B 对�
 | 1 | `Settings` | 定长记录（见 §3.1）|
 | 2 | `StringPool` | `u32 count` + 每项 `u32 len + bytes`；`v[0]` 必须是空串 |
 | 3 | `AngleData` | **一列 double**（§4）|
-| 4 | `Actions` | `u32 columnCount(=6)` + 每列 `u64 byteLen + bytes` |
+| 4 | `Actions` | `u32 columnCount(=6)` + 每列 `u64 byteLen + bytes`。**v2 起 `strId`/`val1`/`val2` 是稀疏列**：列内容 = `u32 typeMask` + `u64 usedCount` + 一列（只含掩码内的类型）；掩码自描述（某类型在这一列出现过非默认值即入掩码），读取方按事件顺序只在掩码命中时取下一个值，其余取 0 —— 顺序与语义逐位不变 |
 | 5 | `PathData` | `u64 len + bytes`（仅当非空）|
 | 6 | `Preserved` | 未识别成员的原始字节 —— **待做**（v1 不写，今天这些本来就被丢弃）|
 | 7 | `Derived` | 预计算/检查点 —— **待做**（v1 不写）|
@@ -137,6 +137,10 @@ beatsBehind(f32) | beatsAhead(f32)`
 | `Const` | 3 | 一个值（8 B / 4 B）| 整列同值 |
 | `BitPack` | 4 | 位打包（位宽 = `ceil(log2(max+1))`）| 小枚举/位标志 |
 | `JsonPassthrough` | 5 | 原样文本 | 保留（诊断/未知段）|
+| `Rle` | 6 | 字典 + `u64 runCount` + 每游程 `(varint 下标, varint 长度)` | 长游程（直线型赫兹谱的 angleData、type/flag/val1/val2）|
+| `DeltaRleVarint` | 7 | `u64 runCount` + 每游程 `(varint zigzag(差分), varint 长度)`——游程是对**差分流**取的 | 单调且差分有游程（floor）|
+| `SectionZstd` | 16 | 段内容是一整帧 zstd | **段级压缩，v2 默认**（实测真实文件上比 xz 更小、解码更快、零新依赖）|
+| `SectionXz` | 17 | 段内容是一整帧 xz | 可选高档（体积敏感时）|
 
 位打包是**低位在前**、1..32 位/值。`Dict` 的下标与 `Raw/Const` 的载荷都按 `count` 读取，
 任何越界/截断都返回 `false`。
@@ -422,6 +426,24 @@ LZMA2 分块/状态重置全都无关。这也解释了为什么**不需要写 `
 **赫兹族的地板**：RLE + 稀疏载荷 + zstd = **5,838 B**（MYC，§5.9）—— 之后没有别的结构性收益了，
 因为这一族的信息量就是"单元序列 + 26,480 次网格摆放"。
 
+### 5.11 v2 成绩单（列级 Rle/DeltaRleVarint + 稀疏载荷列 + 段级 zstd）
+
+| 谱 | 明文 JSON | `.adocao` v1 | **`.adocao` v2** | 倍数（对明文）|
+|---|---|---|---|---|
+| **MYC** | 611.18 MB | 20,534,344 B | **6,120 B** | **104,718×** |
+| v300 | 300.95 MB | 20,534,352 B | 6,128 B | 51,496× |
+| v282 | 282.23 MB | 19,256,384 B | 6,104 B | 48,483× |
+| The Moon | 15.60 MB | 1,315,128 B | 3,544 B | 4,617× |
+| angles360（人工谱）| 0.03 MB | 17,624 B | 9,344 B | 4×（字典主导，见 §5.10）|
+
+MYC 逐列（`--codec-report`）：angleData **Dict** 0.7501 B/值（编码器**没有**误选 Rle，正如 §5.4 所测）；
+floor **DeltaRleVarint** 0.3637 B/值；type **Rle** 105,732 B；flag **Rle** 1,358 B；
+val1 **稀疏 n=26,795** + Rle **1,472 B**（原 4.64 MB）；val2 **稀疏 n=26,480** + Rle **162 B**（原 2.32 MB）；
+strId 稀疏后为空。
+
+验收：`.adocao` 与明文 JSON 出的 64×64 PNG **逐字节相同**；39 个 fixture 全部 pack→load→13 节逐位一致；
+ctest 7/7、core purity、44 开关帮助、7 对 shader、`ADOCAO_TILE_EXACT=1` 几何 2/2、像素门槛 51/51。
+
 ## 6. 测试
 
 * `tests/adocao_columns_test.cpp`（ctest `adocao_columns`，19 项）：逐位往返（含 NaN/次正规/±0/极值）、
@@ -443,7 +465,8 @@ LZMA2 分块/状态重置全都无关。这也解释了为什么**不需要写 `
 2. `writerCommit` / `inputHash`：构建期注入 git hash + 源谱 SHA-256。
 2b. `DeltaF32` 列编码（float 按**数值**差分），专治 primer 那种"每层一个采样"的列 ——
    先实测差分后的熵再决定，不要凭估计上。
-3. **压缩**：段可选 xz/zstd 包装（复用现有 backend，不引入新库）；列流先做可选 delta 滤波。
+3. ~~**压缩**~~ **已完成（v2）**：段级 zstd（`ZSTD_compress` level 19，仅当更小时用；crc32c 覆盖存储字节，
+   读侧先校验再解压并核对 `rawSize`）。列级 `Rle`/`DeltaRleVarint` 与稀疏载荷列同时落地。
 4. `Preserved` 段（供 ADOCAO-E 无损回写）。
 5. **零拷贝**：段布局与内存布局一致时（`Raw` 且对齐）直接 mmap/memcpy。
 6. `Derived` 段：预计算/检查点（与 Timeline 检查点化共用设计）。

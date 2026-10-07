@@ -145,8 +145,47 @@ const char* codecName(Codec c) {
         case Codec::Const: return "Const";
         case Codec::BitPack: return "BitPack";
         case Codec::JsonPassthrough: return "JsonPassthrough";
+        case Codec::Rle: return "Rle";
+        case Codec::DeltaRleVarint: return "DeltaRleVarint";
     }
     return "?";
+}
+
+// 由"字典下标流"生成 RLE 载荷：u64 runCount + 每个游程 (varint 下标, varint 长度)
+void rleFromIndices(const std::vector<uint64_t>& idx, std::vector<uint8_t>& out) {
+    std::vector<uint8_t> runs;
+    uint64_t runCount = 0;
+    size_t i = 0;
+    while (i < idx.size()) {
+        size_t j = i;
+        while (j < idx.size() && idx[j] == idx[i]) ++j;
+        putVarint(runs, idx[i]);
+        putVarint(runs, (uint64_t)(j - i));
+        ++runCount;
+        i = j;
+    }
+    putU64(out, runCount);
+    out.insert(out.end(), runs.begin(), runs.end());
+}
+
+// 由"值序列"生成 DeltaRle 载荷：u64 runCount + 每个游程 (varint zigzag(差分), varint 长度)
+void deltaRleFromValues(const std::vector<int64_t>& v, std::vector<uint8_t>& out) {
+    std::vector<uint8_t> runs;
+    uint64_t runCount = 0;
+    int64_t prev = 0;
+    size_t i = 0;
+    while (i < v.size()) {
+        const int64_t d = v[i] - prev;
+        size_t j = i + 1;
+        while (j < v.size() && v[j] - v[j - 1] == d) ++j;
+        putVarint(runs, zigzag(d));
+        putVarint(runs, (uint64_t)(j - i));
+        ++runCount;
+        prev = v[j - 1];
+        i = j;
+    }
+    putU64(out, runCount);
+    out.insert(out.end(), runs.begin(), runs.end());
 }
 
 int bitsForCount(uint64_t count) {
@@ -156,6 +195,25 @@ int bitsForCount(uint64_t count) {
 }
 
 }  // namespace
+
+// 读 RLE 载荷（下标流）：u64 runCount + (varint 下标, varint 长度)，总数必须正好等于 count
+bool rleIndices(const uint8_t* body, size_t bodyN, size_t count, size_t dictN,
+                std::vector<uint64_t>& out) {
+    if (!have(bodyN, 0, 8)) return false;
+    const uint64_t runCount = rdU64(body);
+    size_t off = 8;
+    out.clear();
+    out.reserve(count);
+    for (uint64_t r = 0; r < runCount; ++r) {
+        uint64_t idx = 0;
+        uint64_t len = 0;
+        if (!getVarint(body, bodyN, off, idx) || !getVarint(body, bodyN, off, len)) return false;
+        if (idx >= dictN || len == 0) return false;
+        if (out.size() + len > count) return false;          // 越界 = 坏数据
+        out.insert(out.end(), (size_t)len, idx);
+    }
+    return out.size() == count;                              // 总数不符 = 坏数据
+}
 
 // ---------------- double 列 ----------------
 
@@ -196,6 +254,13 @@ bool encodeDoubleColumn(const std::vector<double>& v, std::vector<uint8_t>& out,
             bitPack(idx, dbits, packed);
             b.insert(b.end(), packed.begin(), packed.end());
             consider(best, Codec::Dict, dbits, dict.size(), std::move(b));
+
+            // 同一份字典 + 下标，顺手产一个 RLE 候选（长游程的列会选它）
+            std::vector<uint8_t> br;
+            writeColumnHeader(br, Codec::Rle, 0, n, (uint64_t)dict.size());
+            for (uint64_t dv : dict) putU64(br, dv);
+            rleFromIndices(idx, br);
+            consider(best, Codec::Rle, 0, dict.size(), std::move(br));
         }
     }
 
@@ -267,7 +332,7 @@ bool decodeDoubleColumn(const uint8_t* p, size_t n, std::vector<double>& out) {
         out.assign(count, d);
         return true;
     }
-    if (h.codec == (uint8_t)Codec::Dict) {
+    if (h.codec == (uint8_t)Codec::Dict || h.codec == (uint8_t)Codec::Rle) {
         const size_t dictN = (size_t)h.aux;
         if (dictN == 0 || dictN > count) return false;
         if (!have(bodyN, 0, dictN * 8)) return false;
@@ -277,7 +342,11 @@ bool decodeDoubleColumn(const uint8_t* p, size_t n, std::vector<double>& out) {
             std::memcpy(&dict[i], &b, sizeof(double));
         }
         std::vector<uint64_t> idx;
-        if (!bitUnpack(body + dictN * 8, bodyN - dictN * 8, count, h.bits, idx)) return false;
+        if (h.codec == (uint8_t)Codec::Rle) {
+            if (!rleIndices(body + dictN * 8, bodyN - dictN * 8, count, dictN, idx)) return false;
+        } else if (!bitUnpack(body + dictN * 8, bodyN - dictN * 8, count, h.bits, idx)) {
+            return false;
+        }
         out.resize(count);
         for (size_t i = 0; i < count; ++i) {
             if (idx[i] >= dictN) return false;                 // 越界下标 = 坏数据
@@ -313,6 +382,12 @@ bool encodeIntColumn(const std::vector<int64_t>& v, std::vector<uint8_t>& out, C
         putVarint(b, zigzag(v[0]));
         for (size_t i = 1; i < n; ++i) putVarint(b, zigzag(v[i] - v[i - 1]));
         consider(best, Codec::DeltaVarint, 0, 0, std::move(b));
+
+        // 差分再取游程：floor 恒 +1 时整列塌成"一个游程"（十几字节）
+        std::vector<uint8_t> br;
+        writeColumnHeader(br, Codec::DeltaRleVarint, 0, n, 0);
+        deltaRleFromValues(v, br);
+        consider(best, Codec::DeltaRleVarint, 0, 0, std::move(br));
     }
 
     // Dict：取值重复度高时更划算（例如 floor 只在少数几层上出现）
@@ -414,6 +489,28 @@ bool decodeIntColumn(const uint8_t* p, size_t n, std::vector<int64_t>& out) {
         }
         return true;
     }
+    if (h.codec == (uint8_t)Codec::DeltaRleVarint) {
+        if (!have(bodyN, 0, 8)) return false;
+        const uint64_t runCount = rdU64(body);
+        size_t off = 8;
+        out.clear();
+        out.reserve(count);
+        int64_t cur = 0;
+        for (uint64_t r = 0; r < runCount; ++r) {
+            uint64_t du = 0;
+            uint64_t len = 0;
+            if (!getVarint(body, bodyN, off, du) || !getVarint(body, bodyN, off, len)) return false;
+            if (len == 0 || out.size() + len > count) return false;
+            // 注意：游程是对**差分流**取的（"这个差分连续出现 len 次"）→ 必须累加 len 次，
+            // 不是把同一个值重复 len 次（第一版就错在这里，被编码器自检抓出来退回了 Raw）。
+            const int64_t d = unzigzag(du);
+            for (uint64_t k = 0; k < len; ++k) {
+                cur += d;
+                out.push_back(cur);
+            }
+        }
+        return out.size() == count;
+    }
     if (h.codec == (uint8_t)Codec::Dict) {
         const size_t dictN = (size_t)h.aux;
         if (dictN == 0 || dictN > count) return false;
@@ -482,6 +579,12 @@ bool encodeU32Column(const std::vector<uint32_t>& v, std::vector<uint8_t>& out, 
             bitPack(idx, dbits, packed);
             b.insert(b.end(), packed.begin(), packed.end());
             consider(best, Codec::Dict, dbits, dict.size(), std::move(b));
+
+            std::vector<uint8_t> br;
+            writeColumnHeader(br, Codec::Rle, 0, n, (uint64_t)dict.size());
+            for (uint32_t dv : dict) putU32(br, dv);
+            rleFromIndices(idx, br);
+            consider(best, Codec::Rle, 0, dict.size(), std::move(br));
         }
     }
 
@@ -545,14 +648,18 @@ bool decodeU32Column(const uint8_t* p, size_t n, std::vector<uint32_t>& out) {
         for (size_t i = 0; i < count; ++i) out[i] = (uint32_t)vals[i];
         return true;
     }
-    if (h.codec == (uint8_t)Codec::Dict) {
+    if (h.codec == (uint8_t)Codec::Dict || h.codec == (uint8_t)Codec::Rle) {
         const size_t dictN = (size_t)h.aux;
         if (dictN == 0 || dictN > count) return false;
         if (!have(bodyN, 0, dictN * 4)) return false;
         std::vector<uint32_t> dict(dictN);
         for (size_t i = 0; i < dictN; ++i) dict[i] = rdU32(body + i * 4);
         std::vector<uint64_t> idx;
-        if (!bitUnpack(body + dictN * 4, bodyN - dictN * 4, count, h.bits, idx)) return false;
+        if (h.codec == (uint8_t)Codec::Rle) {
+            if (!rleIndices(body + dictN * 4, bodyN - dictN * 4, count, dictN, idx)) return false;
+        } else if (!bitUnpack(body + dictN * 4, bodyN - dictN * 4, count, h.bits, idx)) {
+            return false;
+        }
         out.resize(count);
         for (size_t i = 0; i < count; ++i) {
             if (idx[i] >= dictN) return false;

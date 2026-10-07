@@ -29,7 +29,7 @@ namespace adocao {
 inline constexpr char kMagic[4] = {kAdocaoMagic[0], kAdocaoMagic[1], kAdocaoMagic[2], kAdocaoMagic[3]};
 static_assert(kAdocaoMagic[0] == 'A' && kAdocaoMagic[1] == 'D' && kAdocaoMagic[2] == 'O' &&
               kAdocaoMagic[3] == '1', "core 的 kAdocaoMagic 变了，archive 这边要一起改");
-inline constexpr uint16_t kVersion  = 1;
+inline constexpr uint16_t kVersion  = 2;   // v2：Actions 段改成"稀疏载荷列"，新增 Rle/DeltaRleVarint 与段级压缩
 
 // 段 id。v1 只用 1..5；6/7 预留（preserved / derived），未知 id 一律跳过（前向兼容）。
 enum class SectionId : uint8_t {
@@ -50,6 +50,12 @@ enum class Codec : uint8_t {
     Const         = 3,   // 整列同一个值（angleOffset / rotation / opacity 实测各只有 1 个取值）
     BitPack       = 4,   // 小枚举/位标志
     JsonPassthrough = 5, // 兜底：原样文本（诊断/未知段用）
+    // —— 列级（写在 ColumnHeader.codec 里）——
+    Rle = 6,            // 字典 + (下标, 游程长度)：抓"长游程"（直线型赫兹谱的 angleData、type/flag/val1/val2）
+    DeltaRleVarint = 7, // 差分 + 对差分再取游程：抓"单调且差分恒定"（floor 恒 +1 → 十几字节）
+    // —— 段级（写在 SectionEntry.codec 里；与列级同字段但取值区间分开）——
+    SectionZstd = 16,   // 段内容是一整帧 zstd
+    SectionXz   = 17,   // 段内容是一整帧 xz（体积敏感时用，实测真实文件上 zstd 更小）
 };
 
 #pragma pack(push, 1)

@@ -1463,8 +1463,16 @@ void LevelData::processActions() {
     // 空 vector 与原来逐位等价：默认构造的 SS 全 false/0，下面那个逐层循环体什么都不做。
     std::vector<SS> setSpeedByFloor;
 
-    struct HSChange { int floor; std::string type; float volume; };
+    // 每个 SetHitsound 事件一条。原来存 std::string（40 B/条），改成存驻留 id：12 B/条，
+    // 而 2^31 层 × 0.9 事件/层时这是 72 GB → 18 GB 的差别（见 docs/scale-1e8-to-2e9.md §13）。
+    // strId == 0 表示空串（= 用 settings.hitsound），与 FastAction::strId 的约定一致。
+    struct HSChange { int floor; float volume; uint16_t strId; };
+    static_assert(sizeof(HSChange) == 12, "HSChange 必须保持 12 B（大谱的事件数是十亿级）");
     std::vector<HSChange> hsChanges;
+
+    // settings.hitsound 的驻留 id：一次求得。原来逐层比较的是两个 std::string（1e9 层就是
+    // 10 亿次字符串比较），现在只是一次整数比较。
+    const uint16_t settingsHitsoundId = internActionStr(settings.hitsound);
 
     for (auto& a : actions) {
         int floor = a.floor;
@@ -1481,8 +1489,9 @@ void LevelData::processActions() {
         case FastAction::PositionTrack:
             tilePositionOffsets[floor] = {a.val1, a.val2, a.flag}; break;
         case FastAction::SetHitsound:
-            hsChanges.push_back({floor, actionStr(a).empty() ? settings.hitsound : actionStr(a),
-                                 a.flag ? a.val1 : settings.hitsoundVolume}); break;
+            // strId == 0 就是空串（= 用 settings.hitsound），与上面 push 的 type 语义逐字一致。
+            hsChanges.push_back({floor, a.flag ? a.val1 : settings.hitsoundVolume,
+                                 a.strId ? a.strId : settingsHitsoundId}); break;
         case FastAction::Bookmark:
             bookmarkFloors.push_back(floor); break;
         case FastAction::AnimateTrack:
@@ -1508,14 +1517,14 @@ void LevelData::processActions() {
     }
 
     if (!hsChanges.empty()) {
-        std::string curHS = settings.hitsound;
+        uint16_t curId = settingsHitsoundId;      // 驻留 id 取代原来的 std::string curHS
         float curVol = settings.hitsoundVolume;
         size_t ci = 0;
         for (int i = 0; i < n; i++) {
             while (ci < hsChanges.size() && hsChanges[ci].floor <= i) {
-                curHS = hsChanges[ci].type; curVol = hsChanges[ci].volume; ci++;
+                curId = hsChanges[ci].strId; curVol = hsChanges[ci].volume; ci++;
             }
-            if (curHS != settings.hitsound) tileHitsounds[i] = curHS;
+            if (curId != settingsHitsoundId) tileHitsounds[i] = actionStrTable[curId];
             if (curVol != settings.hitsoundVolume) {
                 if (tileHitsoundVolumes.size() != (size_t)n)
                     tileHitsoundVolumes.assign((size_t)n, std::numeric_limits<float>::quiet_NaN());

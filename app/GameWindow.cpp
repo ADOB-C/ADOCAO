@@ -102,6 +102,15 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
 
     if (cfg.msaaSamples > 0) glfwWindowHint(GLFW_SAMPLES, cfg.msaaSamples);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    // 抓帧（--capture）是开发/验收用的脚本化运行：**别弹窗、别抢焦点**。
+    // GL 仍然需要窗口（GLFW 的隐藏窗口照样有有效 drawable），所以三个 hint 一起给：
+    // 不显示、创建时不聚焦、显示时也不聚焦 —— 否则 macOS 上建窗口会激活 App，
+    // 把用户正在用的窗口顶掉（这就是"抢焦点"）。
+    if (!cfg.capturePath.empty()) {
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+        glfwWindowHint(GLFW_FOCUSED, GLFW_FALSE);
+        glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
+    }
 
     // 砖块几何的 VS 要用 `fma()`（GLSL 4.00+）来逐字镜像参考实现的融合结构，所以首选 4.1
     // （macOS 的上限）。**拿不到就退到 3.3 core** —— 那时几何走 CPU 回退路（见 TileMeshCpu）：

@@ -1,4 +1,5 @@
 #include "LevelArchive.hpp"
+#include "LzmaMtCompat.hpp"
 
 #include <lzma.h>
 #include <zstd.h>
@@ -37,16 +38,7 @@ lzma_ret xzDecoderInit(lzma_stream* strm) {
     mt.flags = LZMA_CONCATENATED;
     mt.threads = lzma_cputhreads();
     if (mt.threads == 0) mt.threads = 1;
-#if LZMA_VERSION >= 50060000
-    // 线程缓冲上限。../Song.adofai 那边给的是 UINT64_MAX（只要最快），但那是 CLI，
-    // 而 ADOCAO 解完还要在同一个进程里放下解析结构，峰值内存更值钱。同机 10 核、
-    // 64 MiB 字典 / 19 blocks 实测（1.18 GB 输出）：不限 475 ms / 1.67 GB 峰值，
-    // 1 GiB 上限 585 ms / 1.04 GB —— +110 ms 换掉 0.6 GB，值。
-    mt.memlimit_threading = (uint64_t)1 << 30;
-    mt.memlimit_stop = UINT64_MAX;
-#else
-    mt.memlimit = UINT64_MAX;
-#endif
+    archive_detail::setMtMemlimit(mt);   // 字段名跨版本改过（见 LzmaMtCompat.hpp）
     return lzma_stream_decoder_mt(strm, &mt);
 #else
     return lzma_stream_decoder(strm, UINT64_MAX, LZMA_CONCATENATED);

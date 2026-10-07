@@ -6,6 +6,12 @@ target_link_libraries(adocao_level_parse_test PRIVATE adocao_core adocao_archive
 add_test(NAME level_parse_parity
          COMMAND adocao_level_parse_test "${CMAKE_CURRENT_SOURCE_DIR}/level_fixtures")
 
+# lzma_mt 内存字段的跨版本兼容（5.4 起 `memlimit` 拆成 memlimit_threading/memlimit_stop）：
+# 纯编译期选择 + 断言，不依赖压缩库，也不链任何 target。
+add_executable(adocao_lzma_mt_compat_test lzma_mt_compat_test.cpp)
+target_include_directories(adocao_lzma_mt_compat_test PRIVATE ${CMAKE_SOURCE_DIR})
+add_test(NAME lzma_mt_compat COMMAND adocao_lzma_mt_compat_test)
+
 # 砖块几何自测：中旋砖（angleData=999）必须是五边形（尖角朝来路、面积 3w²）；带负向对照。
 # TileGeometryReference.cpp（改造前的 CPU 几何，现在的 A/B 基准）只需要 <vector>/<cmath>，
 # 直接编进测试，不碰 GL。

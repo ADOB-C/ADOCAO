@@ -19,6 +19,29 @@
 - [ ] 备选：形状表改成"每槽位直接存顶点"（fetch 模式）—— 只有"不想把 GL 上下文提到 4.1（`fma()` 需要
       GLSL 4.00+）"或"换编译器后 CPU/GPU 逐位对拍对不上"时才需要；架构（实例流/canonical 表/图标并入/
       剔除/测试）都不变，只换 `packShapeTable` 的内容与 VS 主体
+
+- [ ] **CPU 几何作为 3.3 回退路**（2026-10 用户拍板方案 B：4.1 拿不到 → 3.3 core 上下文 + CPU 几何）
+      已落地的前提（两步行为中性、已验）：`tile.frag`/`highlight.frag` 降到 `#version 330 core`
+      （**只有 `tile.vert` 必须留 410** —— 它是唯一用 `fma()` 的）；`app/GameWindow.cpp` 有
+      4.1 → 3.3 的重试链（`ADOCAO_GL_VERSION=4.6` 可验重试真的会触发）+ `m_glMajor/gpuTileGeometryUsable()`。
+      平台事实：macOS 的核心 profile 地板是 4.1（请求 3.3 也只会给你 4.1），**本机造不出真 3.3 上下文**，
+      所以端到端只能靠"强制 CPU 路"验 —— 别以为在这台机器上点一下 3.3 就算验过。
+      剩下的（**从历史恢复，不要新写** —— 位精确正是恢复出来的最大理由）：
+      1. `render/TileMeshCpu.{hpp,cpp}` ← `git show 74cc5e0:render/TileMesh.cpp`（改造前最后那版：
+         逐顶点 `(pos, type)` 交错 stride 4*float、逐实例 offset/颜色/opacity、`buildIcons()`、每形状一次 draw）；
+      2. `assets/shaders/tile_cpu.vert` ← `git show 0998a0d:assets/shaders/tile.vert`（`#version 330 core`，
+         `aPos/aType/aInstOffset/iColor/iBgColor/iOpacity`）；同步 `render/Shaders.hpp` 内嵌串，
+         并把 `scripts/check-shader-fallback.sh` 的配对数 7 → 8；
+      3. `render/TileGeometryReference.cpp` 从"只进测试"改成也进 `adocao_render`（改 `render/CMakeLists.txt`
+         那句注释 —— 它现在会挡住回退路）；
+      4. 切换用**能力探测**（试编 410 的 tile 管线，失败才切 CPU 路），**不要按版本号猜** —— 同 `lzma_mt`
+         那个教训；再加 `ADOCAO_CPU_GEOMETRY=1` 强制切（验收 + 救急）；
+      5. 护栏 `tests/tile_geometry_test.cpp:154` 改成"旧几何调用只许出现在 `TileMeshCpu.cpp`"
+         （保留"防无意退回旧路"，放行**故意**的回退）；
+      6. 验收：`ADOCAO_CPU_GEOMETRY=1` 下 `scripts/capture-gate.sh check` 必须 **51/51 逐字节相同**。
+         两个坑：(a) 回退路必须按 `m_drawOrder` 遍历（深度 24 bit 下相邻砖同深度，顺序变就变赢家，
+         实测 102~278 px）；(b) `74cc5e0` 那版把图标画在拖尾**之后**（已知 bug，`d1bfc47` 才修），
+         恢复时必须一并改成"图标在拖尾之前"，否则 8 个 `*_under_trail` 状态会红 13700~29241 px。
 - [x] ~~备选：按 mode 分 4 次 draw~~ —— **2026-10 量过，不值得做**：稳态帧时间
       （`render()` + `glFinish`，30 帧取中位；`ADOCAO_CAPTURE_FRAMES=30`）
       145 实例 0.37 ms → 2509 实例 0.67 ms → 5564 实例 0.95 ms → **17569 实例 1.09 ms**，

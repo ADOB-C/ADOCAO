@@ -84,6 +84,89 @@ static void precalcTileRange(
     }
 }
 
+// A/B 参考实现：Phase 1 的状态递推 + Phase 2 的逐层公式，**逐字**照抄一遍。
+// 与生产路径的唯一差别是"这段代码在另一个函数里" —— 这正是要被测量的变量。
+void Timeline::recomputeForTest(std::vector<float>& outStartAngles,
+                                std::vector<float>& outTotalAngles,
+                                std::vector<float>& outDurations) const {
+    const int n = (int)m_tileBPM.size();
+    outStartAngles.assign(n, 0.0f);
+    outTotalAngles.assign(n, 0.0f);
+    outDurations.assign(n, 0.0f);
+    if (n < 2) return;
+    const auto& tiles = m_level->tiles;
+    const auto& angleData = m_level->angleData;
+
+    // Phase 1 的两个量：preAngleDir（入层方向）与 preExtraRot（该层 Pause 的累加）
+    std::vector<float> preAngleDir(n - 1), preExtraRot(n - 1, 0.0f);
+    {
+        bool isCW = true;
+        float angleDir = 180.0f;
+        size_t cursor = 0;
+        std::vector<std::pair<int, size_t>> flat;
+        for (size_t j = 0; j < m_level->actions.size(); j++) {
+            const auto& a = m_level->actions[j];
+            if (a.floor >= 0 && a.floor < n) flat.push_back({a.floor, j});
+        }
+        std::stable_sort(flat.begin(), flat.end());
+        for (int i = 0; i < n - 1; i++) {
+            preAngleDir[i] = angleDir;
+            float extraRotation = 0.0f;
+            while (cursor < flat.size() && flat[cursor].first == i) {
+                const auto& a = m_level->actions[flat[cursor].second];
+                switch (a.type) {
+                case LevelData::FastAction::Twirl:    isCW = !isCW; break;
+                case LevelData::FastAction::SetSpeed: break;   // BPM 不参与角度公式
+                case LevelData::FastAction::Pause:    extraRotation += a.val1 / 2.0f; break;
+                default: break;
+                }
+                cursor++;
+            }
+            preExtraRot[i] = extraRotation;
+            const double rawAngleData = (i < (int)angleData.size()) ? angleData[i] : 180.0;
+            if (rawAngleData == 999.0) {
+                int minus = 1;
+                while (i - minus >= 0 && angleData[i - minus] == 999.0) minus++;
+                const double realAngle = (i - minus >= 0) ? angleData[i - minus] : 0.0;
+                angleDir = (float)std::fmod(realAngle + (minus - 1) * 180.0, 360.0);
+            } else {
+                angleDir = (float)std::fmod(rawAngleData + 180.0, 360.0);
+            }
+            if (angleDir < 0) angleDir += 360.0f;
+        }
+    }
+
+    // Phase 2：逐层独立
+    for (int i = 0; i < n - 1; i++) {
+        const bool isCW = m_tileIsCW[i];
+        const float currentBPM = m_tileBPM[i];
+        float startAngle;
+        if (i == 0) startAngle = (m_level->settings.rotation + 180.0f) * 3.14159265f / 180.0f;
+        else startAngle = std::fmod(tiles[i - 1].direction + 180.0f, 360.0f) * 3.14159265f / 180.0f;
+        outStartAngles[i] = startAngle;
+        const double rawAngleData = (i < (int)angleData.size()) ? angleData[i] : 180.0;
+        double relAngle;
+        if (rawAngleData == 999.0) {
+            relAngle = 0.0;
+        } else {
+            double delta = std::fmod((double)preAngleDir[i] - rawAngleData, 360.0);
+            if (delta < 0) delta += 360.0;
+            if (!isCW) { relAngle = 360.0 - delta; if (relAngle >= 360.0) relAngle -= 360.0; }
+            else       { relAngle = delta; }
+            if (delta < 0.0001) relAngle = 360.0;
+        }
+        float totalAngle = (float)relAngle * 3.14159265f / 180.0f;
+        if (isCW) totalAngle = -totalAngle;
+        if (isCW) totalAngle -= preExtraRot[i] * 2.0f * 3.14159265f;
+        else      totalAngle += preExtraRot[i] * 2.0f * 3.14159265f;
+        outTotalAngles[i] = totalAngle;
+        const float rotationAmount = std::abs(totalAngle) / (2.0f * 3.14159265f);
+        outDurations[i] = rotationAmount * 2.0f * (60.0f / currentBPM);
+    }
+    outDurations[n - 1] = 0.0f;
+    outStartAngles[n - 1] = outStartAngles[n - 2];
+}
+
 void Timeline::precalculateTiming() {
     const auto& tiles = m_level->tiles;
     const auto& angleData = m_level->angleData;

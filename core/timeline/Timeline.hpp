@@ -35,6 +35,14 @@ public:
     // Precalculated timing arrays (size = n tiles including extra)
     const std::vector<double>& tileStartTimes() const { return m_tileStartTimes; }
     const std::vector<float>& tileDurations() const { return m_tileDurations; }
+
+    // A/B 参考实现（和 TileGeometryReference / parseLegacy 同一套路）：把 Phase 2 的三个数组
+    // **用同一批输入、同一套算式、原样再算一遍**，写进调用方给的三个向量。
+    // 用途只有一个：量出"换个代码位置重算"会把值改变多少（浮点的位模式依赖编译上下文，
+    // 见 docs/scale-1e8-to-2e9.md §6.1 / TODO 的 2^31 任务 ②(b)）。它**不参与生产路径**。
+    void recomputeForTest(std::vector<float>& outStartAngles,
+                          std::vector<float>& outTotalAngles,
+                          std::vector<float>& outDurations) const;
     const std::vector<double>& tileDisappearTimes() const { return m_tileDisappearTimes; }
     const std::vector<double>& tileAppearTimes() const { return m_tileAppearTimes; }
     const std::vector<float>& tileTotalAngles() const { return m_tileTotalAngles; }

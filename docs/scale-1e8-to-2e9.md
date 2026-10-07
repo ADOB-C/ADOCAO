@@ -193,6 +193,53 @@ MYC 的 1,554 MB 与 AGENTS 记录的 app 侧 `adocao image` 1,560 MB 差 0.4% �
 
 **即使内存无限，本实现在 2^31−1 也是"类型层面就坏"，而不是"慢"。**
 
+> ⚠️ 上表的行号是那一轮调研时的；2026-10 的 **#0 阶段 1–2** 之后已重定位并改造，见 §6.1。
+> 表里剩下的"阶段 3"部分（循环索引、`floor` 本身的类型、GL 分批）**仍然**是坏的。
+
+### 6.1 #0 阶段 1–2 已做（2026-10）
+
+**契约**：#0 不是"让渲染器能画 21 亿个实例"（那是窗口化的事），而是 **"类型层面不再坏、
+而且坏的时候必须喊出来"**。本地**造不出** 21 亿层的谱（最大的 primer 只有 6.84e7 层 = 目标的 **3%**），
+所以边界必须能**在纯函数上单测** —— 这是阶段 1 的主要产物。
+
+**阶段 1（`core/util/CountLimits.hpp` + `tests/limits_test.cpp`，ctest `limits`）**
+
+* `countFromAngleCount()` / `countFromTilesOrAngles()`：老的 `(int)angleData.size() + 1`
+  在 2^31−1 时那个 `+1` 就是有符号溢出（UBSan 报过）→ n 变负 → `resize(负)` 炸；
+  新写法在 int64 里得到 2^31，并由**两条 static_assert** 钉死"合法但已超 int32"。
+* `fitsInt32()` / `toInt32Checked()`：凡要收窄到 32 位的地方都必须过它。
+* 13 条断言里有一条是**反面对照**：`(int)(kInt32Max + 1) < 0` —— 证明这个边界是真的。
+* 顺带修掉一个**正确性 bug**（不是规模问题）：`parseInt` 累加用 int64、最后却 `out = (int)v`
+  **硬截断** → `parseInt("2147483648")` 得到 −2147483648，接着被 `floor >= 0 && floor < n`
+  的守卫**无声丢弃**（无日志）。现在超出 int32 记 LOG_E 并放弃快路径（阶段 3 改类型后消失）。
+* 顺带：`--capture-tile` 从 `atoi`（溢出是 UB）改成 `strtoll` + 范围检查 + 明确报错退 2。
+
+**阶段 2（"int64 算、收窄前显式判、装不下就喊"）** —— 覆盖 §6 表里所有 `(int)size()` 型站点：
+
+| 站点（当前行号）| 处理 |
+|---|---|
+| `core/level/LevelData.cpp:1408` `calculateTilePositions` | int64 算 + `fitsInt32` 判定 + LOG_E + return |
+| `core/level/LevelData.cpp:1498` `processActions`（`+1`）| 同上（用 `countFromAngleCount`）|
+| `core/level/LevelData.cpp:1596` `applyPositionTrackOffsets` | 同上 |
+| `core/timeline/Timeline.cpp:91` `precalculateTiming` | 同上（用 `countFromTilesOrAngles`）|
+| `core/timeline/PositionSolver.cpp:13,67` | 同上 |
+| `core/timeline/PlaybackClock.cpp:84` | 同上 |
+| `core/map/LevelMap.cpp:105` | 同上（函数有返回值 → `return false`）|
+
+**阶段 2 的验收**（渲染/时间线被动过 → 全跑）：ctest 8/8 ✓；39 fixture 对拍 36/0 ✓；
+MYC 与 angles360 的快路径仍被吃下 ✓；`adocao image` MYC 64×64 与改动前 **md5 相同**
+（`8fdbed25f383aaabea32d0677f89eae1`）✓；**像素门槛 51/51 逐字节相同** ✓✓
+—— 即 2^31 以下**零行为变化**，只有 2^31 时才从"静默算错"变成"一条明确的日志"。
+
+**阶段 3（还没做，是真正的 64 位化）**：
+
+* **循环索引**（`for (int i = 0; i < n; i++)`）与 `m_drawOrder`/`tileIdx` 这类逐层 id；
+* **`floor` 本身的类型**：`FastAction::floor` / `ActionFields::floor` / `HSChange::floor` /
+  `bookmarkFloors` / flatActions 的 `pair<int,size_t>` / `tileHitsoundVolumes` 的索引
+  —— 这一族才是"21 亿层"最深的那层 32 位假设（阶段 2 只保证**不静默错**）；
+* **GL 分批**：`TileMesh` 的 `GLsizei` 单次绘制上限恰好 2^31−1（零余量），
+  且 `int m_nTiles` 是层数的"权威类型"—— 要配合窗口化（#6）一起改。
+
 ---
 
 ## 7. 可以立刻拿到的确定性收益（无需架构改动）

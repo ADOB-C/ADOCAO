@@ -5,6 +5,7 @@
 #include <future>
 #include <thread>
 #include <limits>
+#include "core/util/CountLimits.hpp"
 
 
 namespace adofai {
@@ -88,7 +89,14 @@ void Timeline::precalculateTiming() {
     const auto& angleData = m_level->angleData;
     // Export mode intentionally leaves LevelData::tiles empty; the timeline can
     // still be built from angleData (which is angleData.size()+1 tiles).
-    int n = !tiles.empty() ? (int)tiles.size() : (int)angleData.size() + 1;
+    // #0：int64 算，收窄前显式判（原来 `(int)angleData.size() + 1` 在 2^31−1 时溢出为负）。
+    const int64_t nFull = countFromTilesOrAngles((int64_t)tiles.size(), (int64_t)angleData.size());
+    if (!fitsInt32(nFull)) {
+        LOG_E("Timeline::precalculateTiming 需要 64 位索引（#0 阶段 3）：%lld 层超出 int32",
+              (long long)nFull);
+        return;
+    }
+    const int n = (int)nFull;
     if (n < 2) return;
 
     m_tileStartTimes.resize(n);

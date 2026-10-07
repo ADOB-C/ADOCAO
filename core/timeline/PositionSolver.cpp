@@ -4,13 +4,20 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include "core/util/CountLimits.hpp"
+#include "core/util/Logger.hpp"
 
 
 namespace adofai {
 
 void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& redOut, glm::dvec2& blueOut) {
     const auto& tiles = timeline.level()->tiles;
-    int n = (int)tiles.size();
+    const int64_t nFull = (int64_t)tiles.size();   // #0：int64 算，收窄前显式判
+    if (!fitsInt32(nFull)) {
+        LOG_E("PositionSolver 需要 64 位索引（#0 阶段 3）：%lld 层超出 int32", (long long)nFull);
+        return;
+    }
+    const int n = (int)nFull;
     if (n < 2) return;
     int tileIdx = timeline.findTileIndex(t);
 
@@ -64,7 +71,12 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
 
 void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tileIdx, glm::dvec2& redOut, glm::dvec2& blueOut) {
     const auto& tiles = timeline.level()->tiles;
-    int n = (int)tiles.size();
+    const int64_t nFull = (int64_t)tiles.size();   // #0：int64 算，收窄前显式判
+    if (!fitsInt32(nFull)) {
+        LOG_E("PositionSolver 需要 64 位索引（#0 阶段 3）：%lld 层超出 int32", (long long)nFull);
+        return;
+    }
+    const int n = (int)nFull;
     if (n < 2) return;
     if (t < timeline.tileStartTimes()[0]) {
         const auto& p0 = tiles[0].position;

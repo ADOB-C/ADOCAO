@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <glm/glm.hpp>
+#include "core/util/CountLimits.hpp"
 
 
 
@@ -102,7 +103,13 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
     }
     const LevelData* lv = tl.level();
     if (!lv) return false;
-    const int n = (int)lv->tiles.size();
+    // #0：int64 算，收窄前显式判（走到这里之前 maxPixels 通常已经拦住了，但仍不许静默截断）
+    const int64_t nFull = (int64_t)lv->tiles.size();
+    if (!fitsInt32(nFull)) {
+        LOG_E("LevelMap 需要 64 位索引（#0 阶段 3）：%lld 层超出 int32", (long long)nFull);
+        return false;
+    }
+    const int n = (int)nFull;
     const auto& times = tl.tileStartTimes();
     if (n < 2 || times.size() < (size_t)n) {
         LOG_E("Map: 层数不足（n=%d, times=%zu）", n, times.size());

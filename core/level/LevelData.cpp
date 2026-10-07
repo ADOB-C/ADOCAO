@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstdio>
 #include <iterator>
+#include "core/util/CountLimits.hpp"
 
 
 // ===========================================================================
@@ -1415,7 +1416,13 @@ void LevelData::calculateTilePositions() {
     tiles.clear();
     if (angleData.empty()) return;
 
-    int n = static_cast<int>(angleData.size());
+    const int64_t nFull = (int64_t)angleData.size();
+    if (!fitsInt32(nFull)) {
+        LOG_E("calculateTilePositions 需要 64 位索引（2^31−1 目标 #0 阶段 3）：%lld 层超出 int32",
+              (long long)nFull);
+        return;
+    }
+    const int n = (int)nFull;
 
     // Build "floats" array: 999 = midspin (previous + 180)
     std::vector<float> floats(n);
@@ -1505,7 +1512,14 @@ float LevelData::pathCharToAngle(char c) {
 }
 
 void LevelData::processActions() {
-    int n = (int)angleData.size() + 1;  // +1 for tile 0 (tiles may be empty in export mode)
+    // +1 是第 0 层那一格；用 int64 算，避免 2^31−1 时 `+1` 有符号溢出（UBSan 报过）。
+    const int64_t nFull = countFromAngleCount((int64_t)angleData.size());
+    if (!fitsInt32(nFull)) {
+        LOG_E("processActions 需要 64 位索引（2^31−1 目标 #0 阶段 3）：%lld 层超出 int32",
+              (long long)nFull);
+        return;
+    }
+    const int n = (int)nFull;
     tileBPMs.assign(n, settings.bpm);
     tileHasTwirl.assign(n, false);
     tileHasSetSpeed.assign(n, false);
@@ -1603,7 +1617,13 @@ void LevelData::applyPositionTrackOffsets() {
     if (tilePositionOffsets.empty()) return;
 
     double cumX = 0.0, cumY = 0.0;
-    int n = (int)tiles.size();
+    const int64_t nFull = (int64_t)tiles.size();
+    if (!fitsInt32(nFull)) {
+        LOG_E("applyPositionTrackOffsets 需要 64 位索引（#0 阶段 3）：%lld 层超出 int32",
+              (long long)nFull);
+        return;
+    }
+    const int n = (int)nFull;
 
     std::vector<std::pair<int, TilePositionOffset>> sorted(tilePositionOffsets.begin(), tilePositionOffsets.end());
     std::sort(sorted.begin(), sorted.end(), [](auto& a, auto& b) { return a.first < b.first; });

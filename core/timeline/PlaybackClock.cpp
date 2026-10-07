@@ -4,6 +4,7 @@
 #include "core/util/Logger.hpp"
 
 #include <algorithm>
+#include "core/util/CountLimits.hpp"
 
 
 namespace adofai {
@@ -81,7 +82,13 @@ void PlaybackClock::updateFrame() {
     if (!m_timeline) return;
 
     const double t = timeInLevel();
-    const int n = (int)m_timeline->tileStartTimes().size();
+    // #0：int64 算，收窄前显式判
+    const int64_t nFull = (int64_t)m_timeline->tileStartTimes().size();
+    if (!fitsInt32(nFull)) {
+        LOG_E("PlaybackClock 需要 64 位索引（#0 阶段 3）：%lld 层超出 int32", (long long)nFull);
+        return;
+    }
+    const int n = (int)nFull;
     m_currentTileIndex = m_timeline->findTileIndex(t);
     m_frame.timeInLevel = t;
     m_frame.elapsedMs = m_elapsedTime;

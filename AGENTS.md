@@ -103,6 +103,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   解开后与两条 JSON 路径**共用同一个 `finishLoad()`**；`.adocao` 与 JSON 出的图逐字节相同（MYC 677 万层验过）。
   实测：MYC 611.18 MB → **6,120 B**（10.5 万倍）、v300 300.95 MB → 6,128 B、The Moon 15.60 MB → 3,544 B、
   angles360（人工谱）→ 9,344 B（字典主导）。规范 + 逐项实测分析见 `docs/adocao-format.md`（§5.1–§5.11）。
+- **2^31−1 层目标的 32 位边界（#0，2026-10）**：计数/长度一律 **int64**，只在必须交给 32 位 API
+  （`GLsizei`、`int` 参数）时收窄，而且**必须**走 `core/util/CountLimits.hpp` 的 `fitsInt32()` /
+  `toInt32Checked()` —— **绝不静默截断**。纯函数 + `tests/limits_test.cpp`（ctest `limits`）是这条
+  边界的唯一验证手段：本地最大谱（primer 6.84e7 层）只有目标的 **3%**，真造 21 亿层的谱不可能。
+  已完成阶段 1–2（"int64 算、收窄前显式判、装不下就喊"）；**阶段 3**（循环索引、`floor` 本身的类型、
+  GL 分批）未做，见 `docs/scale-1e8-to-2e9.md` §6.1。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`

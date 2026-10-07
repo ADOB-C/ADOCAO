@@ -41,8 +41,14 @@ public:
     const std::vector<float>& tileStartAngles() const { return m_tileStartAngles; }
     const std::vector<float>& tileBPMs() const { return m_tileBPM; }
     const std::vector<bool>& tileIsCW() const { return m_tileIsCW; }
-    const std::vector<float>& tileStartDist() const { return m_tileStartDist; }
-    const std::vector<float>& tileEndDist() const { return m_tileEndDist; }
+    // 每层距离：0..n-2 上恒为 1.0f，只有**最后一层**可能是实测距离（Timeline.cpp 的 Phase 4）。
+    // 所以不存整条数组（那要 8 B/层 —— 2^31 层就是 17 GB），只存最后一层的标量 + 层数。
+    float tileStartDist(size_t i) const {
+        return (i + 1 == m_distCount) ? m_lastStartDist : 1.0f;
+    }
+    float tileEndDist(size_t i) const {
+        return (i + 1 == m_distCount) ? m_lastEndDist : 1.0f;
+    }
 
     float preRoll() const { return m_preRoll; }
     float audioStartOffset() const { return m_audioStartOffset; }
@@ -71,8 +77,9 @@ private:
     std::vector<float> m_tileStartAngles;
     std::vector<float> m_tileBPM;
     std::vector<bool>  m_tileIsCW;
-    std::vector<float> m_tileStartDist;
-    std::vector<float> m_tileEndDist;
+    size_t m_distCount = 0;          // 有效层数（= n）；配合下面两个标量实现 tileStartDist/tileEndDist
+    float  m_lastStartDist = 1.0f;   // 只有最后一层用得上（其余恒 1.0f）
+    float  m_lastEndDist   = 1.0f;
 
     float m_preRoll = 0.0f;
     float m_audioStartOffset = 0.0f;

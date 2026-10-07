@@ -55,7 +55,7 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
     double progress = (duration>0.0001)?(t-startTime)/duration:1.0;
     if (progress<0) progress=0; if (progress>1) progress=1;
     double angle = (double)timeline.tileStartAngles()[tileIdx]+(double)timeline.tileTotalAngles()[tileIdx]*progress;
-    double dist = (double)timeline.tileStartDist()[tileIdx]+((double)timeline.tileEndDist()[tileIdx]-(double)timeline.tileStartDist()[tileIdx])*progress;
+    double dist = (double)timeline.tileStartDist(tileIdx)+((double)timeline.tileEndDist(tileIdx)-(double)timeline.tileStartDist(tileIdx))*progress;
     glm::dvec2 pv(pivotPos[0],pivotPos[1]);
     glm::dvec2 mv(pivotPos[0]+std::cos(angle)*dist, pivotPos[1]+std::sin(angle)*dist);
     if (isRed) { redOut=pv; blueOut=mv; }
@@ -102,7 +102,7 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
     double progress = (duration>0.0001)?(t-startTime)/duration:1.0;
     if (progress<0) progress=0; if (progress>1) progress=1;
     double angle = (double)timeline.tileStartAngles()[tileIdx]+(double)timeline.tileTotalAngles()[tileIdx]*progress;
-    double dist = (double)timeline.tileStartDist()[tileIdx]+((double)timeline.tileEndDist()[tileIdx]-(double)timeline.tileStartDist()[tileIdx])*progress;
+    double dist = (double)timeline.tileStartDist(tileIdx)+((double)timeline.tileEndDist(tileIdx)-(double)timeline.tileStartDist(tileIdx))*progress;
     glm::dvec2 pv(pivotPos[0],pivotPos[1]);
     glm::dvec2 mv(pivotPos[0]+std::cos(angle)*dist, pivotPos[1]+std::sin(angle)*dist);
     if (isRed) { redOut=pv; blueOut=mv; }
@@ -124,8 +124,8 @@ double PositionSolver::tilePathSpeed(const Timeline& timeline, double t) {
     // follow that arc, otherwise slow sharp turns come out as chunky polylines.
     const double step = 1.0;
     const double rot  = std::abs((double)timeline.tileTotalAngles()[idx]);
-    const double radius = std::max((double)timeline.tileStartDist()[idx],
-                                   (double)timeline.tileEndDist()[idx]);
+    const double radius = std::max((double)timeline.tileStartDist(idx),
+                                   (double)timeline.tileEndDist(idx));
     const double arc = rot * std::max(0.5, radius);
     return std::max(step, arc) / d;
 }

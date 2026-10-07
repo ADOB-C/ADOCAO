@@ -35,8 +35,6 @@ static void precalcTileRange(
     std::vector<float>& outStartAngles,
     std::vector<float>& outTotalAngles,
     std::vector<float>& outDurations,
-    std::vector<float>& outStartDist,
-    std::vector<float>& outEndDist,
     int start, int end, int n)
 {
     const auto& tiles = level.tiles;
@@ -82,9 +80,6 @@ static void precalcTileRange(
         float rotationAmount = std::abs(totalAngle) / (2.0f * 3.14159265f);
         float duration = rotationAmount * 2.0f * (60.0f / currentBPM);
         outDurations[i] = duration;
-
-        outStartDist[i] = 1.0f;
-        outEndDist[i]   = 1.0f;
     }
 }
 
@@ -102,8 +97,9 @@ void Timeline::precalculateTiming() {
     m_tileStartAngles.resize(n);
     m_tileBPM.resize(n);
     m_tileIsCW.resize(n);
-    m_tileStartDist.resize(n);
-    m_tileEndDist.resize(n);
+    // 每层距离只在最后一层可能是真值，其余恒 1.0f —— 所以只记层数 + 两个标量（见 Timeline.hpp）。
+    // 原先是两条 vector<float>：8 B/层，2^31 层就是 17 GB。
+    m_distCount = (size_t)n;
 
     // Phase 0: Build sorted flat action index (O(m) space instead of O(n))
     std::vector<std::pair<int, size_t>> flatActions;
@@ -175,7 +171,6 @@ void Timeline::precalculateTiming() {
             double rot = relAngle / 360.0 + (double)preExtraRot[i];
             m_tileDurations[i] = (float)(rot * 2.0 * (60.0 / m_tileBPM[i]));
             m_tileStartAngles[i] = 0.0f; m_tileTotalAngles[i] = 0.0f;
-            m_tileStartDist[i] = 1.0f; m_tileEndDist[i] = 1.0f;
         }
         m_tileDurations[n - 1] = 0.1f;
     } else {
@@ -197,14 +192,14 @@ void Timeline::precalculateTiming() {
                     std::cref(m_tileIsCW), std::cref(m_tileBPM),
                     std::cref(preAngleDir), std::cref(preExtraRot),
                     std::ref(m_tileStartAngles), std::ref(m_tileTotalAngles),
-                    std::ref(m_tileDurations), std::ref(m_tileStartDist), std::ref(m_tileEndDist),
+                    std::ref(m_tileDurations),
                     (int)s, (int)e, n));
             }
             for (auto& f : futures) f.wait();
         } else {
             precalcTileRange(*m_level, m_tileIsCW, m_tileBPM, preAngleDir, preExtraRot,
                              m_tileStartAngles, m_tileTotalAngles,
-                             m_tileDurations, m_tileStartDist, m_tileEndDist,
+                             m_tileDurations,
                              0, workItems, n);
         }
     }
@@ -248,9 +243,9 @@ void Timeline::precalculateTiming() {
                 const auto& pp = tiles[lastIdx - 1].position;
                 float dx = (float)(p[0] - pp[0]), dy = (float)(p[1] - pp[1]);
                 float d = std::sqrt(dx * dx + dy * dy);
-                m_tileStartDist[lastIdx] = d > 0.01f ? d : 1.0f;
+                m_lastStartDist = d > 0.01f ? d : 1.0f;
             }
-            m_tileEndDist[lastIdx] = m_tileStartDist[lastIdx];
+            m_lastEndDist = m_lastStartDist;
         }
     }
 

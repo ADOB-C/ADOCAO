@@ -116,6 +116,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   就画出**不同长度**的拖尾。规则：① 差异先出图；② 抓帧必须确定性（`--capture` 已强制
   `trailAdaptive=false`），任何“由帧时间反馈决定的量”都不许进抓帧路径。
   ③ 本沙箱里 `~/.adocao` **不可写** → 重存基线要用工作区内目录（`ADOFAO_GATE_HOME=build/gate-base`）。
+  ④ **机制兜底**：`--capture` 写完 PNG 后会**再渲染同一帧一次并逐字节比**（自检），不一致就 `LOG_E`
+  + `exit(3)` —— 这样将来任何"反馈驱动量"混进抓帧路径都会被当场抓住，**不需要预先知道它是什么**
+  （负向对照验过：故意打开 `trailAdaptive` → rc=3 + 自检失败的日志）。抓帧路径新增任何量时，
+  先问一句"它会不会因为机器快几毫秒而变"。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`

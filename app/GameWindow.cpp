@@ -581,6 +581,30 @@ void GameWindow::captureAndExit() {
               m_cfg->captureTile, renderMs, firstMs, frames, dragged);
     else
         LOG_W("capture: 写 PNG 失败 %s", m_cfg->capturePath.c_str());
+
+    // 4) **自检：同一帧再渲染一次，逐字节比** —— 这是"抓帧必须确定性"的机械保证。
+    // 为什么这么做：与其去追"哪些量是反馈驱动的"（追不完 —— 帧时间、墙上时钟、音频位置、
+    // GPU 计时、系统负载……），不如让抓帧**自己证明**这一帧是可复现的：任何 2026-10 那种
+    // "拖尾自适应采样率"式的东西混进来，两次渲染就会不同，这里当场抓住，无需知道它是什么。
+    {
+        std::vector<unsigned char> px2(rowBytes * (size_t)fbH);
+        render();
+        glFinish();
+        glReadPixels(0, 0, fbW, fbH, GL_RGBA, GL_UNSIGNED_BYTE, px2.data());
+        if (std::memcmp(px.data(), px2.data(), px.size()) != 0) {
+            size_t diffBytes = 0, firstBad = px.size();
+            for (size_t i = 0; i < px.size(); ++i) {
+                if (px[i] != px2[i]) { ++diffBytes; if (firstBad == px.size()) firstBad = i; }
+            }
+            LOG_E("capture: **自检失败** —— 同一帧两次渲染结果不同（首个差异字节 %zu，%zu/%zu 字节 = %.4f%%）："
+                  "抓帧路径里混进了非确定性的输入（帧时间 / 墙上时钟 / 音频 / GPU 计时 / 负载…）。"
+                  "这类量必须先写死（参考 trailAdaptive）再进抓帧路径。",
+                  firstBad, diffBytes, px.size(), 100.0 * (double)diffBytes / (double)px.size());
+            std::fflush(nullptr);
+            std::exit(3);   // 明确失败：门槛报红，且 PNG 已写出便于诊断
+        }
+        LOG_I("capture: 自检通过（同一帧两次渲染逐字节相同 → 这一帧是可复现的）");
+    }
 }
 
 void GameWindow::run() {

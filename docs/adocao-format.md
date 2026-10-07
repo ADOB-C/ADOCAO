@@ -435,6 +435,7 @@ LZMA2 分块/状态重置全都无关。这也解释了为什么**不需要写 `
 | v282 | 282.23 MB | 19,256,384 B | 6,104 B | 48,483× |
 | The Moon | 15.60 MB | 1,315,128 B | 3,544 B | 4,617× |
 | angles360（人工谱）| 0.03 MB | 17,624 B | 9,344 B | 4×（字典主导，见 §5.10）|
+| **primer（音频谱）** | **7.38 GB**（xz-JSON 容器 357 MB）| 324.36 MB | **230.41 MB** | 对 xz-JSON **1.55×** ✓ |
 
 MYC 逐列（`--codec-report`）：angleData **Dict** 0.7501 B/值（编码器**没有**误选 Rle，正如 §5.4 所测）；
 floor **DeltaRleVarint** 0.3637 B/值；type **Rle** 105,732 B；flag **Rle** 1,358 B；
@@ -443,6 +444,13 @@ strId 稀疏后为空。
 
 验收：`.adocao` 与明文 JSON 出的 64×64 PNG **逐字节相同**；39 个 fixture 全部 pack→load→13 节逐位一致；
 ctest 7/7、core purity、44 开关帮助、7 对 shader、`ADOCAO_TILE_EXACT=1` 几何 2/2、像素门槛 51/51。
+
+**primer 逐列（v2）**：`angleData` **Const 28 B**（6841 万个角度全同）、
+`actions.floor` **DeltaRleVarint 446,041 B**（**68 MB → 446 KB，152×**）、
+`type`/`strId`/`flag` 各 Const ~24 B、`actions.val1` **Raw 272,093,784 B**（每层音量 = 音频采样）。
+段级 zstd 把 val1 那 272 MB 压到 ~230 MB（1.18×）—— **primer 剩下的体积几乎全是它**，
+这就是 `DeltaF32`（对 float 做**数值**差分）要打的目标（§5.1 / §5.10）。
+音频族的停手线因此改写：v1 的"1.10×"→ v2 的 **1.55×**（越过 1.5×）。
 
 ## 6. 测试
 

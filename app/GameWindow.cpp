@@ -101,40 +101,56 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     m_windowedH = winH;
 
     if (cfg.msaaSamples > 0) glfwWindowHint(GLFW_SAMPLES, cfg.msaaSamples);
-    // 4.1 而不是 3.3：砖块几何的 VS 要用 `fma()`（GLSL 4.00+）来逐字镜像参考实现的融合结构。
-    // 4.1 是 macOS 的上限，也是本机实测**像素中性**的（34 个验收状态在 3.3 与 4.1 下逐字节相同）。
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
-    if (cfg.fullscreen) {
-        if (cfg.exclusiveFullscreen) {
-            // Exclusive fullscreen: GPU dedicated to this app, mode switch
-            glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
-            m_window = glfwCreateWindow(fsW, fsH, "ADOCAO", primary, nullptr);
+    // 砖块几何的 VS 要用 `fma()`（GLSL 4.00+）来逐字镜像参考实现的融合结构，所以首选 4.1
+    // （macOS 的上限）。**拿不到就退到 3.3 core** —— 那时几何走 CPU 回退路（见 TileMeshCpu）：
+    // 3.3 编译不了那份 VS，但参考几何在 CPU 上是逐位精确的，画面照样对。
+    // `ADOCAO_GL_VERSION=3.3` 可强制（验收用：直接验"3.3 上下文 + CPU 几何"这条降级链）。
+    auto createWindow = [&](int major, int minor) -> GLFWwindow* {
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, major);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, minor);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+        GLFWwindow* w = nullptr;
+        if (cfg.fullscreen) {
+            if (cfg.exclusiveFullscreen) {
+                glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
+                w = glfwCreateWindow(fsW, fsH, "ADOCAO", primary, nullptr);
+            } else {
+                glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+                w = glfwCreateWindow(fsW, fsH, "ADOCAO", nullptr, nullptr);
+                if (w) glfwSetWindowPos(w, 0, 0);
+            }
         } else {
-            // Borderless windowed fullscreen: compositor still active
-            glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
-            m_window = glfwCreateWindow(fsW, fsH, "ADOCAO", nullptr, nullptr);
-            glfwSetWindowPos(m_window, 0, 0);
+            glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
+            w = glfwCreateWindow(winW, winH, "ADOCAO", nullptr, nullptr);
+            if (w && primary) {
+                int wx, wy, ww, wh;
+                glfwGetMonitorWorkarea(primary, &wx, &wy, &ww, &wh);
+                glfwSetWindowPos(w, wx + (ww - winW) / 2, wy + (wh - winH) / 2);
+                m_windowedX = wx + (ww - winW) / 2;
+                m_windowedY = wy + (wh - winH) / 2;
+            }
         }
-    } else {
-        glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
-        m_window = glfwCreateWindow(winW, winH, "ADOCAO", nullptr, nullptr);
-        if (primary) {
-            // Center using the monitor work area in logical points
-            int wx, wy, ww, wh;
-            glfwGetMonitorWorkarea(primary, &wx, &wy, &ww, &wh);
-            glfwSetWindowPos(m_window, wx + (ww - winW) / 2, wy + (wh - winH) / 2);
-            m_windowedX = wx + (ww - winW) / 2;
-            m_windowedY = wy + (wh - winH) / 2;
-        }
+        return w;
+    };
+
+    int wantMajor = 4, wantMinor = 1;
+    if (const char* env = std::getenv("ADOCAO_GL_VERSION")) {   // 测试钩子：强制某个版本
+        int a = 0, b = 0;
+        if (std::sscanf(env, "%d.%d", &a, &b) == 2 && a >= 3) { wantMajor = a; wantMinor = b; }
+    }
+    m_window = createWindow(wantMajor, wantMinor);
+    if (!m_window && !(wantMajor == 3 && wantMinor == 3)) {
+        LOG_W("OpenGL %d.%d 上下文拿不到，退回 3.3 core（砖块几何将走 CPU 回退）", wantMajor, wantMinor);
+        m_window = createWindow(3, 3);
     }
     if (!m_window) { LOG_E("Failed to create game window"); return false; }
 
     glfwMakeContextCurrent(m_window);
     glfwSwapInterval(0);
+    glGetIntegerv(GL_MAJOR_VERSION, &m_glMajor);
+    glGetIntegerv(GL_MINOR_VERSION, &m_glMinor);
     if (!loadGLCore()) { LOG_E("Failed to load OpenGL functions"); glfwDestroyWindow(m_window); return false; }
     if (cfg.msaaSamples > 0) glEnable(GL_MULTISAMPLE);
     LOG_D("OpenGL %s | GLSL %s", glGetString(GL_VERSION), glGetString(GL_SHADING_LANGUAGE_VERSION));

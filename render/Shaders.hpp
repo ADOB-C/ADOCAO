@@ -186,7 +186,7 @@ void main() {
 }
 )";
 
-constexpr const char* kTileFragSrc = R"(#version 410 core
+constexpr const char* kTileFragSrc = R"(#version 330 core
 in vec3 vColor;
 in float vOpacity;
 out vec4 fragColor;
@@ -232,7 +232,7 @@ void main() {
 // Highlight shader：与砖**共用** kTileVertSrc（几何展开只有一份实现），只有 FS 不同
 constexpr const char* kHighlightVertSrc = kTileVertSrc;
 
-constexpr const char* kHighlightFragSrc = R"(#version 410 core
+constexpr const char* kHighlightFragSrc = R"(#version 330 core
 in vec3 vColor;
 out vec4 fragColor;
 void main() {

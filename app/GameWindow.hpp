@@ -25,6 +25,10 @@ public:
     ~GameWindow();   // out-of-line: LevelScene is only forward-declared here
 
     bool init(const LauncherConfig& cfg, LoadResult& loadResult);
+    // 砖块几何的 GLSL 路需要 GLSL 4.00+（`fma()`）。
+    bool gpuTileGeometryUsable() const { return m_glMajor >= 4; }
+    int  glMajor() const { return m_glMajor; }
+    int  glMinor() const { return m_glMinor; }
     void run();
 
 private:
@@ -51,6 +55,8 @@ private:
     bool m_musicPending = false;
     bool m_exclusiveFullscreen = true;
     bool m_isFullscreen = false;
+    // 实际拿到的 GL 版本（4.1 拿不到时会退到 3.3，那时砖块几何走 CPU 回退路）。
+    int m_glMajor = 0, m_glMinor = 0;
     int m_windowedX = 0, m_windowedY = 0;
     int m_windowedW = 1920, m_windowedH = 1080;
     float m_targetAspect = 16.0f / 9.0f;

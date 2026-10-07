@@ -164,9 +164,37 @@ void Timeline::precalculateTiming() {
     // 不是游戏那条曲线（实测 angles360 1024²：32.79% 的墨点位置不同、墨点多 25%，呈"串珠"状）。
     // 现在两条路共用 precalcTileRange，导出模式的角度与渲染路径逐位相同。
     if (m_exportOnly) {
-        precalcTileRange(*m_level, m_tileIsCW, m_tileBPM, preAngleDir, preExtraRot,
-                         m_tileStartAngles, m_tileTotalAngles, m_tileDurations,
-                         0, n - 1, n);
+        // 导出模式分两种，判据是**运行时有没有 tiles**：
+        //   * MapExport 那条路（`adocao image` / tiles / stitch）：tiles 在 → 走真实角度，
+        //     导出图与游戏那条曲线逐位相同（这是 b1f5158 修的东西）；
+        //   * `adocao export`（Application.cpp，`exportOnly=true` 加载）：它只要时间线
+        //     （hitsound 混音靠 durations）、**根本不用角度**，而 tiles 恰好被 exportOnly 省掉了
+        //     —— 那时 `tiles` 是空 vector，绝不能去读 `tiles[i-1].direction`（2026-10 就这么崩过：
+        //     precalcTileRange 里 `ldr s0, [x25]` → EXC_BAD_ACCESS，而日志只写文件、终端什么都看不到）。
+        //     所以这条路保持老行为：自己按 angleData/preAngleDir 算时长，两个角度数组清零。
+        if (m_level->tiles.size() >= (size_t)n) {
+            precalcTileRange(*m_level, m_tileIsCW, m_tileBPM, preAngleDir, preExtraRot,
+                             m_tileStartAngles, m_tileTotalAngles, m_tileDurations,
+                             0, n - 1, n);
+        } else {
+            for (int i = 0; i < n - 1; i++) {
+                const double rawAng =
+                    (i < (int)m_level->angleData.size()) ? m_level->angleData[i] : 180.0;
+                double relAngle;
+                if (rawAng == 999.0) {
+                    relAngle = 0.0;
+                } else {
+                    double delta = std::fmod((double)preAngleDir[i] - rawAng, 360.0);
+                    if (delta < 0) delta += 360.0;
+                    if (!m_tileIsCW[i]) relAngle = (delta < 0.0001) ? 360.0 : 360.0 - delta;
+                    else                relAngle = (delta < 0.0001) ? 360.0 : delta;
+                }
+                const double rot = relAngle / 360.0 + (double)preExtraRot[i];
+                m_tileDurations[i] = (float)(rot * 2.0 * (60.0 / m_tileBPM[i]));
+                m_tileStartAngles[i] = 0.0f;
+                m_tileTotalAngles[i] = 0.0f;
+            }
+        }
         m_tileDurations[n - 1] = 0.1f;      // 导出模式的末层时长（原行为，保持不变）
     } else {
         constexpr int PARALLEL_THRESHOLD = 256;

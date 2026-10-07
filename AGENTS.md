@@ -307,7 +307,11 @@ What may change (and did):
 - `--force-hitsound`: override "None" type → "Kick" (GUI: "Force HS" checkbox)
 - Per-group WAV loading with volume scaling, cached in `s_wavCache` + `s_wavRawCache`
 - `preSynthesize()` → stereo float buffer → streamed via `attachExternal()`
-- Export: 向导的 Export 按钮，或 `adocao export --level <谱>`（写出 `<level>_hitsounds.wav`）
+- Export: 向导的 Export 按钮，或 `adocao export --level <谱>`（写出 `<level>_hitsounds.wav`）。
+  **`adocao export` 必须给 `--music`**（导出的是 hitsound **混音**）：不给会**明确报错并退 2**，
+  不再是崩（2026-10 真崩过：`exportOnly=true` 的加载不建 `tiles`，而导出分支去读
+  `tiles[i-1].direction` → EXC_BAD_ACCESS，且日志只写文件、终端看不见）。
+  另外注意产物**很大**：3 分钟的谱就是 ~1 GB WAV —— 别留在仓库里。
 
 ## 关卡加载（Level loading）
 

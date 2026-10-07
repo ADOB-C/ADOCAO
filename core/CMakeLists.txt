@@ -1,6 +1,6 @@
 add_library(adocao_core STATIC
     level/LevelData.cpp
-    level/LevelArchive.cpp
+    level/ByteSource.cpp
     level/LevelPath.cpp
     level/JsonCleaner.cpp
     util/AssetPaths.cpp
@@ -45,7 +45,7 @@ endif()
 
 target_include_directories(adocao_core PUBLIC ${CMAKE_SOURCE_DIR})
 target_link_libraries(adocao_core
-    PUBLIC glm::glm miniz liblzma libzstd_static
+    PUBLIC glm::glm miniz
 )
 
 # RapidJSON is header-only; expose its include directory to consumers that use

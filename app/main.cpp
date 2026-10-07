@@ -12,6 +12,8 @@
 #include <vector>
 #ifndef _WIN32
 #include <unistd.h>
+#include "archive/Install.hpp"
+#include "app/AssetSetup.hpp"
 #endif
 
 
@@ -168,6 +170,12 @@ int usageErr(Mode m, const char* msg) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
+    // 压缩容器（.adofai.xz/.zst）的解压实现：core 只认接口，这里把 archive 模块注册进去。
+    // 必须在任何 loadFromFile 之前 —— GUI 与无头子命令（image/tiles/stitch/export）都走这里。
+    adofai::archive::install();
+    // 资产布局（zip 名 / data 目录 / 搜索根 / hitsounds 目录）：GUI、CLI、无头三条路都要，
+    // 所以放在 main 顶部一次配好（以前只在 runApplication 里配，走 --level 的 CLI 路径漏了）。
+    configureAssetPaths();
     bool debug = false;
     Mode mode = Mode::Play;
     int argStart = 1;

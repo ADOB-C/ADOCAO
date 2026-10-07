@@ -19,13 +19,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   （zip = `ADOCAO-data.zip`、dataDir = `ADOCAO-data`、roots = CWD→exe 目录→macOS bundle 的 `../Resources`→上溯 3 级；
   非 Windows 优先 CWD，Windows 优先 exe 旁）。hitsounds 的相对目录同理由 `HitsoundManager::setDefaultHitsoundSubdir`
   设进来。**改这些名字/顺序时别退回 `core/util/DataFile.cpp` 里**——那里现在一个产品名都没有。
+- **模块依赖：core 不依赖 archive**（2026-10 解耦，依赖倒置）。`core/level/ByteSource.{hpp,cpp}` 只有
+  容器种类（`LevelArchiveKind`）、magic 判断（`sniffLevelArchive`）和 `WindowSource` 接口 + `ArchiveBackend`
+  钩子；真正的解压（lzma/zstd、半窗 `ArchiveStream`）在独立的 **`archive/` 模块**（CMake target
+  `adocao_archive`），由 `adofai::archive::install()` 注册 —— **`main()` 顶部调一次**（GUI / CLI /
+  无头子命令都要，漏了就会出现"明文能读、.xz 读不了"）。只想解析明文谱的目标只链 `adocao_core` 即可，
+  不背压缩库（`tile_expansion` / `geom_probe` / `tile_geometry` 就是这种目标）。
+  `archive/Install.hpp` 刻意不带 `<lzma.h>`：app 只调 `install()`，不该为它配压缩库头路径。
+- **音色目录必须带尾分隔符**：`HitsoundManager` 下游是 `m_assetsDir + type + ".wav"`，目录少了 `/` 会拼出
+  `assets/hitsoundsKick.wav`（P1 真踩过，而且**像素门槛全程 `--no-hitsound` 看不见**）。现在拼接统一走
+  `withTrailingSlash()`；门槛也补了守卫：清单里带 `+hitsounds` 的状态会真的加载 WAV，且对**所有**状态断言
+  日志里没有 `Hitsound: Cannot open` / `Failed to read WAV`（负向对照验过：打断补斜杠那步立刻变红）。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`
 - 几何测试（三层，2026-10 起）：`tests/tile_geometry_test.cpp`（中旋五边形不变量 + 调用点护栏）→
   `tests/tile_expansion_test.cpp`（**CPU 逐位**：形状表展开 vs 参考实现，168491 形状 / 3.3e7 坐标）→
   `tests/geom_probe_test.cpp`（**GPU 逐位**：真跑 `assets/shaders/tile.vert`，4.7e7 坐标；无显示时 SKIP）
-  → `scripts/capture-gate.sh store|check`（**像素逐字节**，50 个状态，基线存 /tmp、不入库）；
+  → `scripts/capture-gate.sh store|check`（**像素逐字节**，51 个状态，基线存 /tmp、不入库；带 `+hitsounds` 的状态会真的加载音色）；
   默认口径是几何尺度容差 1e-5 砖，`ADOCAO_TILE_EXACT=1` 才要求逐位（见"砖块几何"段）
 - shader 一致性：`scripts/check-shader-fallback.sh`（`render/Shaders.hpp` 的内嵌回退 GLSL 必须与
   `assets/shaders/*` 逐字相同）
@@ -231,7 +242,7 @@ What may change (and did):
 
 **容器**：除明文 `.adofai`，还支持 `.adofai.xz`（xz/LZMA2）与 `.adofai.zst`（zstd）——
 `../Song.adofai`（audio-as-chart 编解码器）就用这两个格式存谱面（4 分钟谱 ~1.5 GB 文本 → 50–80 MB）。
-`core/level/LevelArchive.cpp` 按 **magic** 识别（不看扩展名），在**内存里**解压后交给下面的解析路径，
+`core/level/ByteSource.cpp` 的 `sniffLevelArchive` 按 **magic** 识别（不看扩展名），再交给 **`archive/`** 模块在**内存里**解压，然后走下面的解析路径，
 不写任何临时文件。xz 用 `lzma_stream_decoder_mt`（与 `../Song.adofai` 的 `xz.c` 同配置）：
 那些谱是多 block 压出来的，单线程只有 ~0.5 GB/s，MT 到 ~2.8 GB/s（1.18 GB 实测 2549 ms → 534 ms）。
 实测直接读 `.adofai.xz`：43 MB → 1.18 GB 谱面 ~2.4 s、50 MB → 1.40 GB 谱面 ~2.9 s（含解码，跑动区间 ±0.15 s）。
@@ -246,7 +257,7 @@ What may change (and did):
 `tests/level_parse_test.cpp` 会把每个明文 fixture 在内存里压成 xz/zstd 再加载一遍，要求逐位一致，
 并检查截断的流是干净失败而不是崩。
 
-**流式窗口（压缩输入默认路径）**：`core/level/LevelArchive.hpp` 的 `ArchiveStream` 用两块**固定地址**的半窗
+**流式窗口（压缩输入默认路径）**：`archive/LevelArchive.hpp` 的 `ArchiveStream`（实现 core 的 `WindowSource` 接口，见文件顶部那节）用两块**固定地址**的半窗
 （默认 4 MB，`ADOCAO_WINDOW_KB` 可调）交替解压；消费方 `WindowParser`（同在 `LevelData.cpp`）按根成员
 逐个处理、把残缺的值 carry 到下一块开头，于是 10 GB 文本不再需要 10 GB 匿名内存——那 10 GB 匿名页装不下
 时会被系统压缩/写 swap，实测吞吐 1.35 GB/s → 0.12 GB/s，而且每次访问都要换回来。

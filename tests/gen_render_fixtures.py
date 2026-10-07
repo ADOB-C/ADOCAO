@@ -306,6 +306,9 @@ def main():
     FIXTURE = "tests/charts/angles360.adofai"
     for name, mark, off, zoom in fixture_states:
         state(name, FIXTURE, "tile", str(tile_of(mark, off)), zoom)
+    # 一条**真的加载音色**的状态：门槛其余状态都是 --no-hitsound，音色路径得有人覆盖
+    state("hitsound_path", FIXTURE, "tile", "359", 6.0, "+hitsounds")
+
     for name, mark in icon_states:
         # 锚在图标砖**之后 2 砖**（zoom 120）：行星在图标前方，拖尾正好从行星往回扫过图标 ——
         # 专门覆盖"图标不许盖住拖尾"这条。老顺序是"砖 → 拖尾 → 行星 → 图标"，图标不透明、

@@ -16,6 +16,7 @@ midspin_a|tests/charts/angles360.adofai|tile|3562|200.0|1280x720|
 midspin_b|tests/charts/angles360.adofai|tile|3162|200.0|1280x720|
 random_overlap_a|tests/charts/angles360.adofai|tile|4464|200.0|1280x720|
 random_overlap_b|tests/charts/angles360.adofai|tile|5064|200.0|1280x720|
+hitsound_path|tests/charts/angles360.adofai|tile|359|6.0|1280x720|+hitsounds
 icon_twirl_under_trail|tests/charts/angles360.adofai|tile|1159|120.0|1280x720|--trail-tiles 8
 icon_twirl_under_planet|tests/charts/angles360.adofai|tile|1157|250.0|1280x720|
 icon_twirl|tests/charts/angles360.adofai|tile|1156|250.0|1280x720|

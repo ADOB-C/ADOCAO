@@ -97,16 +97,24 @@ static std::string g_hitsoundSubdir;
 
 void HitsoundManager::setDefaultHitsoundSubdir(const std::string& subdir) { g_hitsoundSubdir = subdir; }
 
+// 目录一律带尾分隔符：下游是 `m_assetsDir + type + ".wav"`，少一个斜杠就会拼出
+// `assets/hitsoundsKick.wav` 这种路径（P1 真踩过，而且像素门槛全程 --no-hitsound 抓不到）。
+static std::string withTrailingSlash(std::string dir) {
+    if (!dir.empty() && dir.back() != '/' && dir.back() != '\\') dir.push_back('/');
+    return dir;
+}
+
 static std::string defaultHitsoundDir() {
     if (g_hitsoundSubdir.empty()) return {};   // 没配就以相对当前目录的方式找（调用方自己负责）
-    return resolveAssetDir(g_hitsoundSubdir);
+    return withTrailingSlash(resolveAssetDir(g_hitsoundSubdir));
 }
 
 HitsoundManager::HitsoundManager() = default;
 HitsoundManager::~HitsoundManager() { m_buffer.clear(); }
 
 void HitsoundManager::init(const std::string& assetsDir) {
-    m_assetsDir = assetsDir.empty() ? defaultHitsoundDir() : assetsDir;
+    m_assetsDir = withTrailingSlash(assetsDir.empty() ? defaultHitsoundDir() : assetsDir);
+    LOG_D("HitsoundManager: assets dir = \"%s\"", m_assetsDir.c_str());
 }
 
 std::string HitsoundManager::hitsoundPath(const std::string& type) const {

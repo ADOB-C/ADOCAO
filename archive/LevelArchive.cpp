@@ -12,9 +12,6 @@ namespace adofai {
 
 namespace {
 
-constexpr unsigned char kXzMagic[6]   = {0xFD, '7', 'z', 'X', 'Z', 0x00};
-constexpr unsigned char kZstdMagic[4] = {0x28, 0xB5, 0x2F, 0xFD};
-
 // 输出分块：1 MiB。解压后动辄上 GB（1.2 GB 谱面），一次一块、按需增长。
 constexpr size_t kChunk = 1u << 20;
 
@@ -175,15 +172,6 @@ bool decodeZstd(const char* data, size_t length, std::string& out, std::string& 
 
 }  // namespace
 
-LevelArchiveKind sniffLevelArchive(const char* data, size_t length) {
-    if (!data || length == 0) return LevelArchiveKind::Plain;
-    if (length >= sizeof(kXzMagic) && std::memcmp(data, kXzMagic, sizeof(kXzMagic)) == 0)
-        return LevelArchiveKind::Xz;
-    if (length >= sizeof(kZstdMagic) && std::memcmp(data, kZstdMagic, sizeof(kZstdMagic)) == 0)
-        return LevelArchiveKind::Zstd;
-    return LevelArchiveKind::Plain;
-}
-
 bool decompressLevelArchive(const char* data, size_t length, LevelArchiveKind kind,
                             std::string& out, std::string& reason,
                             const std::function<void(float)>& onProgress) {
@@ -325,5 +313,32 @@ void ArchiveStream::consume(size_t completeBytes) {
     if (completeBytes > m_len) completeBytes = m_len;
     m_carry = m_len - completeBytes;
 }
+
+// ---------------- core 的后端钩子实现（依赖倒置的"实现"这一侧）----------------
+
+namespace archive {
+
+namespace {
+
+bool decodeWholeImpl(const char* data, size_t length, LevelArchiveKind kind,
+                     std::string& out, std::string& reason,
+                     const std::function<void(float)>& onProgress) {
+    return decompressLevelArchive(data, length, kind, out, reason, onProgress);
+}
+
+WindowSource* makeWindowImpl() { return new ArchiveStream(); }
+
+}  // namespace
+
+ArchiveBackend backend() {
+    ArchiveBackend b;
+    b.decodeWhole = &decodeWholeImpl;
+    b.makeWindow = &makeWindowImpl;
+    return b;
+}
+
+void install() { setArchiveBackend(backend()); }
+
+}  // namespace archive
 
 }  // namespace adofai

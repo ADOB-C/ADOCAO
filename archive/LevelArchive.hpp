@@ -4,6 +4,9 @@
 #include <string>
 #include <vector>
 
+#include "core/level/ByteSource.hpp"   // 容器种类 / magic 判断 / WindowSource 接口都在 core
+#include "Install.hpp"                     // install()（本文件带 lzma/zstd 头，别让 app 引它）
+
 #include <lzma.h>
 #include <zstd.h>
 
@@ -16,10 +19,6 @@
 // 自动识别的），所以改过名、或扩展名被抹掉的谱面照样能读。
 
 namespace adofai {
-
-enum class LevelArchiveKind { Plain, Xz, Zstd };
-
-LevelArchiveKind sniffLevelArchive(const char* data, size_t length);
 
 // 解压到 out（覆盖写）。可选进度回调，参数 0..1。失败时返回 false，reason 里是原因。
 bool decompressLevelArchive(const char* data, size_t length, LevelArchiveKind kind,
@@ -41,7 +40,7 @@ bool decompressLevelArchive(const char* data, size_t length, LevelArchiveKind ki
 //   }
 // 于是任何跨窗的 JSON 值都能连续（carry 会把残缺部分拷到下一块开头）。
 // 单个值比半窗还大时会卡住：next() 返回 false 且 stuck() 为真，调用方应退回整份解压。
-class ArchiveStream {
+class ArchiveStream : public WindowSource {
 public:
     static constexpr size_t kDefaultHalf = 96u << 20;   // 96 MB（半窗）
 
@@ -51,16 +50,16 @@ public:
     ArchiveStream& operator=(const ArchiveStream&) = delete;
 
     bool open(const char* data, size_t length, LevelArchiveKind kind,
-              size_t halfSize = kDefaultHalf);
-    bool next();                       // 装填下一块；false = 结束（或出错/卡住）
-    const char* data() const { return m_buf[m_cur]; }
-    size_t size() const { return m_len; }
-    void consume(size_t completeBytes);   // 记录残缺尾部长度，下一块补在开头
-    bool failed() const { return m_failed; }
-    bool stuck() const { return m_stuck; }   // 单个值 > 半窗，调用方退回整份解压
-    bool eof() const { return m_eof; }
-    size_t halfSize() const { return m_half; }
-    const std::string& error() const { return m_error; }
+              size_t halfSize = kDefaultHalf) override;
+    bool next() override;              // 装填下一块；false = 结束（或出错/卡住）
+    const char* data() const override { return m_buf[m_cur]; }
+    size_t size() const override { return m_len; }
+    void consume(size_t completeBytes) override;   // 记录残缺尾部长度，下一块补在开头
+    bool failed() const override { return m_failed; }
+    bool stuck() const override { return m_stuck; }   // 单个值 > 半窗，调用方退回整份解压
+    bool eof() const override { return m_eof; }
+    size_t halfSize() const override { return m_half; }
+    const std::string& error() const override { return m_error; }
 
 private:
     bool pump(size_t carry);
@@ -80,5 +79,12 @@ private:
     ZSTD_inBuffer m_zin{nullptr, 0, 0};
     bool m_frameDone = false;
 };
+
+// archive 模块的入口：注册后端（core 通过 ArchiveBackend 钩子调用这里的实现）
+namespace archive {
+
+ArchiveBackend backend();   // decodeWhole + makeWindow（install() 的声明在 Install.hpp）
+
+}  // namespace archive
 
 }  // namespace adofai

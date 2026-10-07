@@ -22,7 +22,7 @@
 
 #include <fstream>
 #include "core/level/LevelPath.hpp"
-#include "core/level/LevelArchive.hpp"
+#include "archive/LevelArchive.hpp"
 #include "core/level/LevelData.hpp"
 #include "core/timeline/Timeline.hpp"
 
@@ -555,6 +555,7 @@ std::vector<std::string> collect(int argc, char** argv) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    adofai::archive::install();   // 解压后端（core 只认接口）
     std::vector<std::string> files = collect(argc, argv);
     if (files.empty()) {
         std::fprintf(stderr, "usage: %s <level file|fixture dir> ...\n", argv[0]);

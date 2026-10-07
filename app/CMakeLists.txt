@@ -64,6 +64,7 @@ endif()
 target_include_directories(adocao PRIVATE ${CMAKE_SOURCE_DIR} ${stb_SOURCE_DIR})
 target_link_libraries(adocao PRIVATE
     adocao_core
+    adocao_archive
     adocao_render
     adocao_audio
     adocao_glad

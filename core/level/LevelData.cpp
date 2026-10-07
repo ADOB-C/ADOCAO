@@ -1,6 +1,6 @@
 #include "LevelData.hpp"
 #include "JsonCleaner.hpp"
-#include "LevelArchive.hpp"
+#include "ByteSource.hpp"   // 容器识别 + 解压后端接口（实现见 archive/）
 #include "core/util/Logger.hpp"
 #include "core/util/ThreadPool.hpp"
 #include <fstream>
@@ -837,7 +837,7 @@ struct WindowParser {
     }
 
     // 跑完整个流。1 = 完成；0 = 结构上搞不定（退回整份解压）；-1 = 解压失败
-    int run(ArchiveStream& stream) {
+    int run(WindowSource& stream) {
         const bool dbg = std::getenv("ADOCAO_WINDOW_DBG") != nullptr;
         if (!stream.next()) {
             if (dbg) std::fprintf(stderr, "[win] 首块就失败 failed=%d err=%s\n", (int)stream.failed(), stream.error().c_str());
@@ -1022,15 +1022,16 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
                 long kb = std::atol(env);
                 if (kb >= 4) half = (size_t)kb * 1024;
             }
-            ArchiveStream stream;
-            if (stream.open(data, len, archive, half)) {
+            const ArchiveBackend& bk = archiveBackend();
+            std::unique_ptr<WindowSource> stream(bk.makeWindow ? bk.makeWindow() : nullptr);
+            if (stream && stream->open(data, len, archive, half)) {
                 if (onProgress) onProgress(0.05f, "Decompressing level...");
                 WindowParser wp;
                 wp.settings = settings;         // 与整份路径一致：文件里没有的字段沿用旧值
-                const int rc = wp.run(stream);
+                const int rc = wp.run(*stream);
                 if (rc < 0) {
                     LOG_E("Cannot decompress level (%s): %s",
-                          archive == LevelArchiveKind::Xz ? "xz" : "zstd", stream.error().c_str());
+                          archive == LevelArchiveKind::Xz ? "xz" : "zstd", stream->error().c_str());
                     return false;
                 }
                 if (rc == 1) {
@@ -1065,7 +1066,13 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
         auto progress = [&](float p) {
             if (onProgress) onProgress(0.05f + p * 0.15f, "Decompressing level...");
         };
-        if (!decompressLevelArchive(data, len, archive, decompressed, reason, progress)) {
+        const ArchiveBackend& bk = archiveBackend();
+        if (!bk.decodeWhole) {
+            LOG_E("Cannot decompress level (%s): 这个构建没有 archive 模块（没调用 adofai::archive::install()）",
+                  archive == LevelArchiveKind::Xz ? "xz" : "zstd");
+            return false;
+        }
+        if (!bk.decodeWhole(data, len, archive, decompressed, reason, progress)) {
             LOG_E("Cannot decompress level (%s): %s",
                   archive == LevelArchiveKind::Xz ? "xz" : "zstd", reason.c_str());
             return false;

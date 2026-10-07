@@ -4,7 +4,6 @@
 #include "FileMap.hpp"
 #include "LevelLoader.hpp"
 #include "GameWindow.hpp"
-#include "AssetSetup.hpp"
 #include "audio/HitsoundManager.hpp"
 #include "core/level/LevelData.hpp"
 #include "core/timeline/Timeline.hpp"
@@ -209,9 +208,6 @@ static void earlyLog(const char* msg) {
 
 int runApplication(bool debugConsole) {
     earlyLog("[ADOCAO] main() entered");
-
-    // 资产布局是产品知识：一次性告诉库（zip 名 / data 目录 / 搜索根）
-    configureAssetPaths();
 
     Logger::instance().init(logPath(), debugConsole);
     LOG_I("ADOCAO starting...");

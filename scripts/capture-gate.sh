@@ -78,10 +78,19 @@ run_capture() {   # name chart mode value zoom WxH → 写 $CAPDIR/$name.png；�
         *) echo "FAIL|$name|未知模式 $mode"; return 1 ;;
     esac
     local t0; t0=$(date +%s)
-    local extra_args=()
-    [ -n "$extra" ] && read -r -a extra_args <<< "$extra"
+    local extra_args=() hitsound_flag=(--no-hitsound)
+    if [ -n "$extra" ]; then
+        read -r -a extra_args <<< "$extra"
+        # `+hitsounds` = 这个状态**加载音色**（默认 --no-hitsound 是为了快与确定，
+        # 但那样音色路径就没人覆盖了 —— 真踩过：hitsounds 目录少个尾斜杠只在实玩时暴露）
+        local filtered=()
+        for a in "${extra_args[@]}"; do
+            if [ "$a" = "+hitsounds" ]; then hitsound_flag=(); else filtered+=("$a"); fi
+        done
+        extra_args=("${filtered[@]}")
+    fi
     /usr/bin/time "$TIME_FLAG" "$BIN" "$chart_abs" --capture "$CAPDIR/$name.png" "${flag[@]}" \
-        --capture-zoom "$zoom" --width "$W" --height "$H" --no-hitsound "${extra_args[@]}" \
+        --capture-zoom "$zoom" --width "$W" --height "$H" "${hitsound_flag[@]}" "${extra_args[@]}" \
         >/dev/null 2>"$CAPDIR/$name.time"
     local rc=$?
     local t1; t1=$(date +%s)
@@ -99,6 +108,12 @@ run_capture() {   # name chart mode value zoom WxH → 写 $CAPDIR/$name.png；�
     shapes=$(grep -oE "[0-9]+ unique shapes" "$LOG" | tail -1 | grep -oE "^[0-9]+")
     groups=$(grep -oE "\-> [0-9]+ shape groups" "$LOG" | tail -1 | grep -oE "[0-9]+")
     [ -n "${groups:-}" ] || groups=$(grep -oE "draws=[0-9]+" "$LOG" | tail -1 | grep -oE "[0-9]+")
+    # 音色路径的守卫：门槛默认 --no-hitsound（快且确定），于是"hitsounds 目录不对"这类 bug
+    # 只会出现在真实游玩里（真踩过：少一个尾斜杠 → assets/hitsoundsKick.wav，像素门槛全程看不见）。
+    # 带 +hitsounds 的状态会真的加载 WAV；这里对**所有**状态断言日志里没有音色加载失败。
+    if grep -qE "Hitsound: (Cannot open|Failed to read WAV)" "$LOG" 2>/dev/null; then
+        echo "FAIL|$name|音色加载失败：$(grep -m1 -oE 'Hitsound: (Cannot open|Failed to read WAV).*' "$LOG")"; return 1
+    fi
     if [ -z "${tline:-}" ] || [ "$(echo "$tline" | grep -c "$name.png")" = "0" ]; then
         echo "FAIL|$name|日志里没有本次 capture 行（拿到的是: ${tline:-空}）"; return 1
     fi

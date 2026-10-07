@@ -214,6 +214,7 @@ endif()
 
 # ---- Library/application targets (directory = library boundary) ----
 add_subdirectory(core)
+add_subdirectory(archive)
 add_subdirectory(glad)
 add_subdirectory(render)
 add_subdirectory(audio)

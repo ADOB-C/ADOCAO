@@ -199,8 +199,10 @@ bool encodeDoubleColumn(const std::vector<double>& v, std::vector<uint8_t>& out,
         }
     }
 
-    // Raw 兜底：定宽 8 B
-    {
+    // Raw 兜底：定宽 8 B。**只在它可能更小的时候才建** —— 否则白占 n*8 字节的瞬时内存，
+    // 6841 万个值就是 547 MB（pack primer 时真付不起）。
+    const size_t rawBytes = sizeof(ColumnHeader) + n * 8;
+    if (!best.valid || best.bytes.size() > rawBytes) {
         std::vector<uint8_t> b;
         writeColumnHeader(b, Codec::Raw, 64, n, 0);
         const size_t off = b.size();
@@ -333,8 +335,9 @@ bool encodeIntColumn(const std::vector<int64_t>& v, std::vector<uint8_t>& out, C
         }
     }
 
-    // Raw：定宽 8 B
-    {
+    // Raw：定宽 8 B（同样按需才建）
+    const size_t rawBytes = sizeof(ColumnHeader) + n * 8;
+    if (!best.valid || best.bytes.size() > rawBytes) {
         std::vector<uint8_t> b;
         writeColumnHeader(b, Codec::Raw, 64, n, 0);
         const size_t off = b.size();
@@ -482,7 +485,8 @@ bool encodeU32Column(const std::vector<uint32_t>& v, std::vector<uint8_t>& out, 
         }
     }
 
-    {
+    const size_t rawBytes = sizeof(ColumnHeader) + n * 4;
+    if (!best.valid || best.bytes.size() > rawBytes) {
         std::vector<uint8_t> b;
         writeColumnHeader(b, Codec::Raw, 32, n, 0);
         for (size_t i = 0; i < n; ++i) putU32(b, v[i]);

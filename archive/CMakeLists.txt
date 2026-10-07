@@ -6,6 +6,8 @@ add_library(adocao_archive STATIC
     # `.adocao` 的列编码器（字典/常量/差分/位打包/原始）。它**不依赖** lzma/zstd：
     # 压缩只是列流之后的可选一步，设计核心是"每列按取值基数选编码"。
     AdocaoColumns.cpp
+    # `.adocao` 写入方（pack）：依赖 core 的 LevelData（archive → core 是允许的方向）
+    AdocaoWriter.cpp
 )
 
 target_include_directories(adocao_archive PUBLIC ${CMAKE_SOURCE_DIR})

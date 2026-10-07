@@ -1,0 +1,238 @@
+#include "archive/AdocaoWriter.hpp"
+
+#include <cstring>
+
+#include "archive/AdocaoColumns.hpp"
+#include "core/level/LevelData.hpp"
+
+namespace adofai {
+namespace adocao {
+namespace {
+
+void putU8(std::vector<uint8_t>& b, uint8_t v) { b.push_back(v); }
+void putU16(std::vector<uint8_t>& b, uint16_t v) {
+    b.push_back((uint8_t)(v & 0xFF));
+    b.push_back((uint8_t)((v >> 8) & 0xFF));
+}
+void putU32(std::vector<uint8_t>& b, uint32_t v) {
+    for (int i = 0; i < 4; ++i) b.push_back((uint8_t)((v >> (8 * i)) & 0xFF));
+}
+void putU64(std::vector<uint8_t>& b, uint64_t v) {
+    for (int i = 0; i < 8; ++i) b.push_back((uint8_t)((v >> (8 * i)) & 0xFF));
+}
+void putBytes(std::vector<uint8_t>& b, const void* p, size_t n) {
+    const uint8_t* q = (const uint8_t*)p;
+    b.insert(b.end(), q, q + n);
+}
+void putF32(std::vector<uint8_t>& b, float f) {
+    uint32_t x = 0;
+    std::memcpy(&x, &f, 4);          // 位模式原样：float 列必须逐位无损
+    putU32(b, x);
+}
+
+struct Section {
+    uint8_t id = 0;
+    uint64_t elements = 0;
+    std::vector<uint8_t> blob;
+};
+
+// 字符串池：v[0] 必须是空串（strId = 0 的约定）。actionStrTable 的**原序**必须保留
+// （strId 就是它的下标），settings 用到的字符串按固定顺序追加到末尾。
+struct Pool {
+    std::vector<std::string> v;
+    uint16_t add(const std::string& s) {
+        if (s.empty()) return 0;
+        for (size_t i = 1; i < v.size(); ++i)
+            if (v[i] == s) return (uint16_t)i;
+        v.push_back(s);
+        return (uint16_t)(v.size() - 1);
+    }
+};
+
+// settings 的定长记录（字段顺序固定 → 打包确定性）。字符串走池下标；未知键与今天的行为一致
+// （两条解析路径本来就只读已知字段），原样保留原始字节的 `preserved` 段留给后续版本。
+void writeSettings(const LevelData::Settings& s, Pool& pool, std::vector<uint8_t>& b) {
+    putU32(b, (uint32_t)s.version);
+    putF32(b, s.bpm);
+    putF32(b, s.offset);
+    putU32(b, (uint32_t)s.countdownTicks);
+    putF32(b, s.zoom);
+    putF32(b, s.rotation);
+    putU16(b, pool.add(s.relativeTo));
+    putF32(b, s.position[0]);
+    putF32(b, s.position[1]);
+    putU16(b, pool.add(s.hitsound));
+    putF32(b, s.hitsoundVolume);
+    putU16(b, pool.add(s.trackColor));
+    putU16(b, pool.add(s.secondaryTrackColor));
+    putU16(b, pool.add(s.backgroundColor));
+    putU8(b, s.stickToFloors ? 1 : 0);
+    putU16(b, pool.add(s.planetEase));
+    putU16(b, pool.add(s.trackDisappearAnimation));
+    putU16(b, pool.add(s.trackAnimation));
+    putF32(b, s.beatsBehind);
+    putF32(b, s.beatsAhead);
+}
+
+}  // namespace
+
+bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& err,
+               PackResult* result) {
+    out.clear();
+    err.clear();
+    PackResult rep;
+
+    // ---- ① settings（先做：它会往字符串池里追加 settings 的字符串）----
+    Pool pool;
+    pool.v = level.actionStrTable;
+    if (pool.v.empty()) pool.v.emplace_back();
+    std::vector<uint8_t> settingsBlob;
+    writeSettings(level.settings, pool, settingsBlob);
+
+    // ---- ② 字符串池（原序保留 actionStrTable，末尾是 settings 追加的）----
+    std::vector<uint8_t> poolBlob;
+    putU32(poolBlob, (uint32_t)pool.v.size());
+    for (const std::string& s : pool.v) {
+        putU32(poolBlob, (uint32_t)s.size());
+        putBytes(poolBlob, s.data(), s.size());
+    }
+
+    // ---- ③ angleData：一列 double（字典是主编码）----
+    std::vector<uint8_t> angleBlob;
+    {
+        ColumnStats st;
+        encodeDoubleColumn(level.angleData, angleBlob, &st);
+        rep.columns.push_back({"angleData", st.codec, level.angleData.size(), st.rawBytes,
+                               st.encodedBytes, st.dictEntries, st.bits});
+    }
+
+    // ---- ④ actions：列式（floor 差分、type/strId/flag 位打包、val1/val2 按 float 位模式）----
+    std::vector<uint8_t> actionsBlob;
+    {
+        const size_t n = level.actions.size();
+        std::vector<int64_t> floors;
+        std::vector<uint32_t> types, strIds, flags, v1, v2;
+        floors.reserve(n); types.reserve(n); strIds.reserve(n); flags.reserve(n); v1.reserve(n); v2.reserve(n);
+        for (const LevelData::FastAction& a : level.actions) {
+            floors.push_back((int64_t)a.floor);
+            types.push_back((uint32_t)a.type);
+            strIds.push_back((uint32_t)a.strId);
+            flags.push_back(a.flag ? 1u : 0u);
+            uint32_t x = 0;
+            std::memcpy(&x, &a.val1, 4); v1.push_back(x);
+            std::memcpy(&x, &a.val2, 4); v2.push_back(x);
+        }
+        putU32(actionsBlob, 6);                       // 列数
+        auto addBlob = [&](const char* name, const std::vector<uint8_t>& enc, const ColumnStats& st) {
+            putU64(actionsBlob, enc.size());           // u64：允许单列 > 4 GB
+            putBytes(actionsBlob, enc.data(), enc.size());
+            rep.columns.push_back({name, st.codec, 0, st.rawBytes, st.encodedBytes, st.dictEntries, st.bits});
+        };
+        auto addI = [&](const char* name, const std::vector<int64_t>& col) {
+            std::vector<uint8_t> enc; ColumnStats st;
+            encodeIntColumn(col, enc, &st);
+            st.rawBytes = col.size() * 8;
+            addBlob(name, enc, st);
+        };
+        auto addU = [&](const char* name, const std::vector<uint32_t>& col) {
+            std::vector<uint8_t> enc; ColumnStats st;
+            encodeU32Column(col, enc, &st);
+            st.rawBytes = col.size() * 4;
+            addBlob(name, enc, st);
+        };
+        addI("actions.floor", floors);
+        addU("actions.type", types);
+        addU("actions.strId", strIds);
+        addU("actions.flag", flags);
+        addU("actions.val1", v1);
+        addU("actions.val2", v2);
+        for (ColumnReport& r : rep.columns)
+            if (r.name.rfind("actions.", 0) == 0) r.elements = n;
+    }
+
+    // ---- 组装段 ----
+    std::vector<Section> secs;
+    {
+        Section s; s.id = (uint8_t)SectionId::Settings; s.blob = std::move(settingsBlob); secs.push_back(std::move(s));
+    }
+    {
+        Section s; s.id = (uint8_t)SectionId::StringPool; s.elements = pool.v.size();
+        s.blob = std::move(poolBlob); secs.push_back(std::move(s));
+    }
+    {
+        Section s; s.id = (uint8_t)SectionId::AngleData; s.elements = level.angleData.size();
+        s.blob = std::move(angleBlob); secs.push_back(std::move(s));
+    }
+    {
+        Section s; s.id = (uint8_t)SectionId::Actions; s.elements = level.actions.size();
+        s.blob = std::move(actionsBlob); secs.push_back(std::move(s));
+    }
+    if (!level.pathData.empty()) {
+        Section s; s.id = (uint8_t)SectionId::PathData;
+        putU64(s.blob, level.pathData.size());
+        putBytes(s.blob, level.pathData.data(), level.pathData.size());
+        secs.push_back(std::move(s));
+    }
+
+    // ---- 段目录（偏移 8 B 对齐，为 mmap 直读）----
+    const uint64_t tableBytes = sizeof(Header) + (uint64_t)secs.size() * sizeof(SectionEntry);
+    uint64_t off = (tableBytes + 7u) & ~7ull;
+    std::vector<SectionEntry> table;
+    table.reserve(secs.size());
+    for (const Section& s : secs) {
+        SectionEntry e{};
+        e.id = s.id;
+        e.codec = (uint8_t)Codec::Raw;      // 段内自描述（列头带 codec）；压缩是后续版本的事
+        e.flags = 0;
+        e.offset = off;
+        e.compSize = s.blob.size();
+        e.rawSize = s.blob.size();
+        e.elemCount = s.elements;
+        e.crc32c = crc32c(s.blob.data(), s.blob.size());
+        off = (off + s.blob.size() + 7u) & ~7ull;
+        table.push_back(e);
+    }
+    const uint64_t fileSize = off;
+
+    // ---- 头 + 表 ----
+    std::vector<uint8_t> hb;
+    putBytes(hb, kMagic, 4);
+    putU16(hb, kVersion);
+    putU16(hb, 0);                                  // flags
+    putU16(hb, (uint16_t)secs.size());
+    putU16(hb, 0);                                  // reserved
+    putU64(hb, fileSize);
+    putU32(hb, 0);                                  // headerCrc（待回填）
+    for (int i = 0; i < 20; ++i) hb.push_back(0);   // writerCommit：构建时注入，见 TODO
+    for (int i = 0; i < 32; ++i) hb.push_back(0);   // inputHash：SHA-256 待接，见 TODO
+    for (const SectionEntry& e : table) {
+        putU8(hb, e.id);
+        putU8(hb, e.codec);
+        putU16(hb, e.flags);
+        putU64(hb, e.offset);
+        putU64(hb, e.compSize);
+        putU64(hb, e.rawSize);
+        putU64(hb, e.elemCount);
+        putU32(hb, e.crc32c);
+    }
+    // headerCrc 覆盖"头（本字段按 0 参与）+ 整张段表"：段表小，索性一起校验，读侧无从漏检
+    const uint32_t hc = crc32c(hb.data(), hb.size());
+    std::memcpy(hb.data() + 20, &hc, 4);
+
+    out.assign((size_t)fileSize, 0);
+    std::memcpy(out.data(), hb.data(), hb.size());
+    for (size_t i = 0; i < secs.size(); ++i)
+        if (!secs[i].blob.empty())
+            std::memcpy(out.data() + table[i].offset, secs[i].blob.data(), secs[i].blob.size());
+
+    if (hb.size() != (size_t)tableBytes) {
+        err = "内部错误：头 + 段表的长度与预期不符";
+        return false;
+    }
+    rep.fileBytes = fileSize;
+    if (result) *result = std::move(rep);
+    return true;
+}
+
+}  // namespace adocao
+}  // namespace adofai

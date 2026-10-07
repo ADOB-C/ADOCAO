@@ -59,6 +59,7 @@ void printHelp(Mode mode, bool all) {
             "  外观:\n"
             "    --time-color         按谱面时间六档彩虹（否则沿进度渐变）\n"
             "    --bg <hex>|transparent   --padding F（默认 0 = 贴边；给正数才留白）   --thickness N（<=1 = 1px 硬线）\n"
+            "    --time-color          按谱面时间六档彩虹   --gradient  沿进度渐变（默认整条纯色 DEBB7B）\n"
             "    --range A-B          只画第 A..B 层（看密集“结”）   --native  1 像素 = 1 世界单位\n"
             "  资源:\n"
             "    --threads N          线程数（默认 4 = 2P+2E；stitch/mono 用）\n"
@@ -201,6 +202,7 @@ int main(int argc, char* argv[]) {
     std::string size, bg, range, keepTiles;
     bool native = false, timeColor = false, onePx = false, oneBit = false;
     float padding = -1.0f, thickness = -1.0f;        // <0 = 用默认
+    bool  gradient = false;                          // --gradient：沿进度渐变（默认纯色）
     int block = 4096, threads = 0, scale = 1, progressForce = 0;
 
     // CLI-FLAGS-BEGIN —— scripts/check-cli-help.sh 只在这个区间里找开关名
@@ -265,6 +267,7 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--size") == 0       && i+1<argc) size = argv[++i];
             else if (std::strcmp(a, "--bg") == 0         && i+1<argc) bg = argv[++i];
             else if (std::strcmp(a, "--time-color") == 0)             timeColor = true;
+            else if (std::strcmp(a, "--gradient") == 0)               gradient = true;
             else if (std::strcmp(a, "--padding") == 0    && i+1<argc) padding = (float)atof(argv[++i]);
             else if (std::strcmp(a, "--thickness") == 0  && i+1<argc) thickness = (float)atof(argv[++i]);
             else if (std::strcmp(a, "--range") == 0      && i+1<argc) range = argv[++i];
@@ -325,7 +328,7 @@ int main(int argc, char* argv[]) {
         const std::string& outPng = pos[0];
         if (!onePx && !oneBit)     // 默认：矢量全景，一条命令直接出图
             return exportLevelMap(cli.levelPath, outPng, size, bg, range, native, timeColor,
-                                  padding, thickness);
+                                  padding, thickness, gradient);
         if (oneBit && scale != 1)  std::fprintf(stderr, "提示：--scale 对 --1bit 无效（索引色不做降采样）\n");
         // 1px=1tile：内部出瓦片 → 拼接（或 1-bit 索引色）→ 清中间产物
         namespace fs = std::filesystem;

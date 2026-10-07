@@ -519,9 +519,11 @@ hash 与元素个数，逐位相同才通过；`ctest --test-dir build`。`tests
 （红/蓝两星 ✓）按世界坐标包围盒**等比**铺进一张 PNG ✓ —— **不碰 GL、不开窗口、不需要 ffmpeg** ✓，
 所以在没有显示的机器上也能出图 ✓，CI 里也不用 Xvfb ✓。
 
-- 位置取自 `PositionSolver::positionAtTile` ✓（和游戏里同一套解算 ✓），颜色用渲染器默认那对
-  `fill`/`stroke` ✓，起点绿点、终点红点 ✓，沿进度从 stroke 渐变到 fill 便于看走向 ✓；
-  `--time-color` 改成按**谱面时间**六档彩虹（`timeColorAt`，与 1px=1tile 瓦片同一函数 ✓）。
+- 位置取自 `PositionSolver::positionAtTile` ✓（和游戏里同一套解算 ✓）；颜色**默认纯色**：
+  整条路径 `fillRgba = #DEBB7B`、背景 `bgRgba = #000000`（就是游戏里那两种颜色 ✓）。
+  `--gradient` 才沿进度从 `strokeRgba` 渐变到 `fillRgba`（便于看走向）；
+  `--time-color` 按**谱面时间**六档彩虹（`timeColorAt`，与 1px=1tile 瓦片同一函数 ✓）。
+  要做到**严格两种颜色**还要配 `--thickness 1`（无 AA 硬线）：AA 边缘会与背景混出中间色。
 - **`--padding F`**：画布留白比例（**默认 0 = 内容贴边、不留黑边**；给正数才四周留白，
   例如 `--padding 0.02` = 四边各留 2%）。实测四边留白与 `padding` 精确对应（16K 上 2% → 左右 327 px、
   上下 131 px；`--padding 0` → 墨包围盒 `x[0,16383] y[0,6615]`，四边 0.00%）。

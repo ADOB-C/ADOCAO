@@ -9,7 +9,8 @@
 int exportLevelMap(const std::string& levelPath, const std::string& outPath,
                   const std::string& sizeStr, const std::string& bgStr,
                   const std::string& tilesStr = "", bool native = false,
-                  bool timeColor = false, float padding = -1.0f, float lineWidthPx = -1.0f);
+                  bool timeColor = false, float padding = -1.0f, float lineWidthPx = -1.0f,
+                  bool gradient = false);
 // lineWidthPx > 0 = 直接指定线宽（像素）；<= 0 = 用默认（thicknessScale + clamp）
 
 // 整谱 1 像素 = 1 层：流式分块写出（只写有墨的块），可选按层区间裁剪。

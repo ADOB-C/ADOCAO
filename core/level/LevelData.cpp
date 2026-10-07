@@ -37,6 +37,11 @@
 
 namespace adofai {
 
+// 快路径回退到旧路径时"在哪个阶段放弃"。以前这里是**静默**的：MYC 这种大谱一直在跑旧路径
+// （实测 4.6 s / ~4.4 GB，快路径是 ~0.7 s / ~1.6 GB），却没有任何测试或日志能看出来 ——
+// 与当年"窗口路径静默回退让测试全绿"是同一类坑。ADOCAO_FAST_REQUIRE=1 现在会把阶段名带出来。
+static const char* g_fastStage = "start";
+
 static LevelData* g_internOwner = nullptr;
 
 namespace {
@@ -1127,9 +1132,11 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
             // 测试用：要求快路径必须能吃下这个文件（不许静默回退到 DOM），用来界定
             // "窗口路径也必须能吃下"的范围。
             if (std::getenv("ADOCAO_FAST_REQUIRE") != nullptr) {
-                LOG_E("fast parse declined the buffer (test hook ADOCAO_FAST_REQUIRE)");
+                LOG_E("fast parse declined the buffer (test hook ADOCAO_FAST_REQUIRE); stage=%s", g_fastStage);
+                std::fprintf(stderr, "[ADOCAO] fast parse declined at stage: %s\n", g_fastStage);
                 return false;
             }
+            LOG_D("fast parse declined at stage: %s (falling back to legacy)", g_fastStage);
         }
         if (onProgress) onProgress(0.10f, "Parsing angleData...");
         std::string content(data, len);
@@ -1177,6 +1184,7 @@ bool LevelData::tryFastParse(const char* data, size_t len, ProgressCb onProgress
     if (onProgress) onProgress(0.10f, "Parsing angleData...");
     std::vector<FastAction> newActions;   // actions 在根扫描里就地解析
     Regions r;
+    g_fastStage = "scanRootMembers";
     if (!scanRootMembers(data, data + len, r, newActions)) return false;
 
     if (onProgress) onProgress(0.12f, "Parsing JSON...");
@@ -1186,6 +1194,7 @@ bool LevelData::tryFastParse(const char* data, size_t len, ProgressCb onProgress
         // angleData 只有几十 MB，加上整数快路径后 6.77 M 个值只要 ~25 ms。
         // 预留量按采样估出来的每元素字节数算（见 estimateAngleCount），不要用固定常数。
         newAngles.reserve(estimateAngleCount(r.angle, (size_t)(r.angleEnd - r.angle)));
+        g_fastStage = "angleData";
         if (!parseAngleDataRegion(r.angle, r.angleEnd, newAngles)) return false;
     }
 
@@ -1196,11 +1205,13 @@ bool LevelData::tryFastParse(const char* data, size_t len, ProgressCb onProgress
         std::string sub = cleanJson(std::string(r.settings, (size_t)(r.settingsEnd - r.settings)));
         rapidjson::Document s;
         s.Parse<rapidjson::kParseTrailingCommasFlag>(sub.c_str());
+        g_fastStage = "settings";
         if (s.HasParseError() || !s.IsObject()) return false;
         readSettings(s, newSettings);
     }
     if (r.path && r.pathEnd > r.path + 1) {
         // 旧路径用 GetString()（会解转义），带反斜杠就交回旧路径；裸 CR 则照 cleanJson 删掉
+        g_fastStage = "pathData(escape)";
         if (std::memchr(r.path, '\\', (size_t)(r.pathEnd - r.path))) return false;
         newPath.assign(r.path + 1, (size_t)(r.pathEnd - r.path - 1));
         newPath.erase(std::remove(newPath.begin(), newPath.end(), '\r'), newPath.end());

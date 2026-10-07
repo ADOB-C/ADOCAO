@@ -240,3 +240,27 @@ Timeline 却是 `exportOnly=true` 建的）画出的是**层心折线整体平�
 重算（普通模式 = `(i==0) ? (rotation+180)*pi/180 : fmod(tiles[i-1].direction+180,360)*pi/180`，
 导出模式 = 0），所以 4 B/层仍然可以省；但**先要把"导出模式该不该用真实角度"这件事定了**：
 若改成用真实角度，`adocao image` 的输出会变（多出层内弧线），这是行为变更，要用户拍板。
+
+### 已修：导出模式的角度不再清零（`Timeline.cpp` Phase 2，2026-10）
+
+`if (m_exportOnly)` 分支原来把 `m_tileStartAngles`/`m_tileTotalAngles` 都写 0，而
+`PositionSolver::positionAtTile` 用它们算行星轨道位置（`mv = pivot + (cos,sin)(start+total*progress)*dist`），
+`MapExport`（矢量 image 与 --1px 两条路）和 `core/map/LevelMap` 都在调它 —— 所以 `adocao image`
+画的不是游戏那条曲线。现在导出模式与渲染路径**共用 `precalcTileRange`**，角度逐位相同。
+
+实测（探针 + 图像对比）：
+* angles360 1024²：导出 vs 游戏 墨点 69,551/55,522、位置不同 18,207（32.79%）、最大通道差 218
+  → 修后 **55,522/55,522、差 0、最大通道差 0**；
+* MYC 16384x6616：修前/修后只有 3,675 个像素不同（0.0034%，最大通道差 37）—— 巨谱上 1 世界单位
+  远小于 1 像素，所以**几乎看不出**（敏感用例是小谱/低分辨率）。
+* 回归：ctest 5/5、像素门槛 51/51（只动 m_exportOnly，--capture 路径不受影响）。
+
+**遗留**：AGENTS 里那些"墨点 27,331 / AA 版 62,293""stitch 那条路均匀 2 px"的数字，
+**是在这个有 bug 的输出上量的** ✗，需要重测重写（`--1px` 的线宽大概会从 2 px 收窄到 ~1 px）。
+
+### 待查异常 ✗：MYC 无头加载的峰值 RSS 对不上
+
+`adocao image --size 64x64`（MYC 611 MB 明文）实测峰值 **4,943 MB**，而 AGENTS 记的是 **1560 MB**。
+本轮的改动全是省内存方向（tiles 容量 / setSpeedByFloor / hsChanges / 距离数组 / atStates），
+没有一个会变大 —— 所以**原因未明，要单独二分**（`git worktree` 回到旧提交重建对比）。
+这条与 2.1e9 的目标直接相关（加载峰值就是"能不能开"），优先级高于继续做检查点化。

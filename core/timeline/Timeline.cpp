@@ -157,22 +157,17 @@ void Timeline::precalculateTiming() {
     m_tileIsCW[n - 1] = isCW;
     m_tileBPM[n - 1] = currentBPM;
 
-    // Phase 2: Per-tile durations
+    // Phase 2: Per-tile angles/durations.
+    // 导出模式**也要真实角度**：PositionSolver::positionAtTile 用 startAngles/totalAngles 算行星的
+    // 轨道位置（mv = pivot + (cos,sin)(start + total*progress) * dist），而 MapExport 的矢量 image
+    // 与 --1px 两条路、以及 core/map/LevelMap 都在调它。原来这里把两个角度清零，于是导出图画出的
+    // 不是游戏那条曲线（实测 angles360 1024²：32.79% 的墨点位置不同、墨点多 25%，呈"串珠"状）。
+    // 现在两条路共用 precalcTileRange，导出模式的角度与渲染路径逐位相同。
     if (m_exportOnly) {
-        for (int i = 0; i < n - 1; i++) {
-            double rawAng = (i < (int)angleData.size()) ? angleData[i] : 180.0;
-            double relAngle;
-            if (rawAng == 999.0) { relAngle = 0.0; } else {
-                double delta = std::fmod((double)preAngleDir[i] - rawAng, 360.0);
-                if (delta < 0) delta += 360.0;
-                if (!m_tileIsCW[i]) relAngle = (delta < 0.0001) ? 360.0 : 360.0 - delta;
-                else relAngle = (delta < 0.0001) ? 360.0 : delta;
-            }
-            double rot = relAngle / 360.0 + (double)preExtraRot[i];
-            m_tileDurations[i] = (float)(rot * 2.0 * (60.0 / m_tileBPM[i]));
-            m_tileStartAngles[i] = 0.0f; m_tileTotalAngles[i] = 0.0f;
-        }
-        m_tileDurations[n - 1] = 0.1f;
+        precalcTileRange(*m_level, m_tileIsCW, m_tileBPM, preAngleDir, preExtraRot,
+                         m_tileStartAngles, m_tileTotalAngles, m_tileDurations,
+                         0, n - 1, n);
+        m_tileDurations[n - 1] = 0.1f;      // 导出模式的末层时长（原行为，保持不变）
     } else {
         constexpr int PARALLEL_THRESHOLD = 256;
         int workItems = n - 1;

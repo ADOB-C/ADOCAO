@@ -86,6 +86,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   整段、取最大估计 + 12.5% 余量），实测五种谱面都落在 1.13~1.14x（出现 ~2x 就说明发生了重新分配）。
   **它只影响 capacity，不碰值**：`parseAngleDataRegion` 一行未动，逐位对拍（`a.bytes(&v, 8)` 的 FNV）
   与像素门槛都是绿的。
+- **`parseNumber` 的 `e` 是"这个值/这个区间的真实末尾"，token 正好填满它是正常的**：两个调用方
+  （`angleData` 区间、action 字段，后者来自 `skipValue`）都传真实末尾；流式窗口那条路有它自己的
+  可续扫描器，不经过本函数。曾经这里把 `q >= e` 当"截断"返回 false，于是**所有非整数的 action 字段**
+  （`bpmMultiplier: 0.5`、`beatsPerMinute: 1.5`、`angleOffset`…）让整份文件放弃快路径 ——
+  整数走整数快路径、不经过那里，所以**只有小数中招**。实测 MYC：放弃时 4.60 s / 4,943 MB，
+  修复后 **1.39 s / 1,473 MB**。三个 "Won't You" 版本与 `tests/charts/angles360.adofai` 全都受影响。
+  **推论（血的教训）**：① 对拍测试比的是"两条路的输出"，而快路径一放弃，"快路径那次加载"**就是**
+  旧路径 → 永远绿；② 所以 `ADOCAO_FAST_REQUIRE=1` 这类钩子**必须验它真的会触发**（拿一个"本该放弃"
+  的输入做负向对照），否则它形同虚设 —— 本次它曾对所有真实谱都返回 declined；③ A/B 要把**整个改动**
+  一起回退，只回退其中一行会得出错误结论（本次就因此错误地排除了自己的改动）。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`

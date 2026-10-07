@@ -291,3 +291,27 @@ AGENTS 里"MYC 快路径 695 ms / 峰值 1560 MB"与实测对不上（`adocao im
 回退时用 `LOG_W` 打出"在哪个阶段放弃"，并让 `ADOCAO_FAST_REQUIRE=1` 把它带出来（把静默回退
 变成可诊断的失败，正如 `ADOCAO_WINDOW_REQUIRE` 当年做的那样）；然后按原因修，并把这张谱
 （或一个等价的中等谱）加进回归。
+
+### 更正：上面那条"不是本轮改动造成的"结论是错的 ✗（2026-10）
+
+真凶就是本轮的 `parseNumber` hardening（`cfa7c3c`）：它把 `q >= e` 当成"token 被截断"而返回 false，
+但**两个调用方传进来的 `e` 都是"这个值/这个区间的真实末尾"**（`angleData` 是区域括号、action 字段来自
+`skipValue`），所以一个"正好填满跨度"的完整 token 被误判。整数走整数快路径、不经过这段代码，
+于是**只有非整数的 action 字段**（`bpmMultiplier: 0.5` 这类）中招 → 整份文件退回旧路径。
+
+我上一轮的 A/B **只回退了 `endp != dst + n` 那一行**，没回退这个 `q >= e` 判断，所以得出了
+"不是本轮改动"的**错误结论**。教训：A/B 要把**整个改动**一起回退（或逐项各回退一次）。
+
+修复：`if (q <= start) { p = start; return false; }`（去掉 `q >= e` 的误判）。
+
+实测（修复后）：
+* 最小复现 `{"bpmMultiplier": 0.5}`、`level.adofai`（300.9 MB）、`level_no three planets.adofai`（282.2 MB）、
+  `…_MYC.adofai`（611.2 MB）、`tests/charts/angles360.adofai` —— **全部走快路径** ✓
+  （修复前五张全放弃）；
+* MYC 无头 `--size 64x64`：**4,943 MB / 4.60 s → 1,473 MB / 1.39 s**（含写 PNG）；
+* ctest 5/5（三路逐位对拍这次真的在比快路径）、The Moon 60 万层对拍 1 通过 0 不一致、
+  严格几何 2/2、三护栏、像素门槛 51/51 逐字节相同。
+
+**待办（下一步）**：给这条加**永久**回归 —— 在 `tests/level_parse_test.cpp` 里加一个自检，
+用 `setenv("ADOCAO_FAST_REQUIRE","1")` + 一段含非整数 action 字段的内存 JSON，
+断言加载成功（即快路径必须吃下它）。否则这条静默回退还会回来。

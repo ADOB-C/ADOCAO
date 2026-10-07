@@ -41,6 +41,14 @@ namespace adofai {
 // （实测 4.6 s / ~4.4 GB，快路径是 ~0.7 s / ~1.6 GB），却没有任何测试或日志能看出来 ——
 // 与当年"窗口路径静默回退让测试全绿"是同一类坑。ADOCAO_FAST_REQUIRE=1 现在会把阶段名带出来。
 static const char* g_fastStage = "start";
+static const char* g_bufBase = nullptr;      // 文件缓冲区起点（把内部指针换算成文件偏移）
+static const char* g_failPos = nullptr;      // 放弃点（内部指针）
+static char g_fastStageBuf[96];
+// 带字节偏移的阶段名（偏移是相对缓冲区起点，即文件偏移，便于直接去看那一段字节）
+static void setFastStage(const char* what, long long off) {
+    std::snprintf(g_fastStageBuf, sizeof g_fastStageBuf, "%s@%lld", what, off);
+    g_fastStage = g_fastStageBuf;
+}
 
 static LevelData* g_internOwner = nullptr;
 
@@ -159,7 +167,13 @@ inline bool parseNumber(const char*& p, const char* e, double& out) {
             if (q < e && *q >= '0' && *q <= '9') { while (q < e && *q >= '0' && *q <= '9') ++q; }
             else q = save;                      // 光秃秃的 e / e+ 之后没有数字：不算指数
         }
-        if (q <= start || q >= e) { p = start; return false; }   // token 触到 e：交给 carry 补数据
+        // 注意：**不能**把"token 触到 e"当成截断。本函数的两个调用方（angleData 区间、action 字段）
+        // 传进来的 e 都是**该值/该区间的真实末尾**（来自 skipValue / 区域括号），所以一个
+        // "正好填满这个跨度"的完整 token 是正常的 —— 早期版本在这里返回 false，于是**所有非整数
+        // 的 action 字段**（bpmMultiplier/beatsPerMinute/angleOffset…）都会让整个文件放弃快路径
+        // （整数走上面的整数快路径，不经过这里，所以只有小数中招）。流式窗口那条路有它自己的
+        // 可续扫描器，不经过本函数。
+        if (q <= start) { p = start; return false; }
         // 到这里 [start, q) 是完整 token，复制到本地缓冲再 NUL 终止后转换
         // （仍然走 strtod，保证与旧路径 parseAngleDataFast 逐位同值）。
         char buf[128];
@@ -220,6 +234,7 @@ inline bool scanRootMembers(const char* s, const char* e, Regions& r,
     if (p >= e || *p != '{') return false;
     for (++p;;) {
         p = skipWs(p, e);
+        setFastStage("scanRootMembers/member", (long long)(p - s));   // 放弃时看这里
         if (p >= e) return false;
         if (*p == '}') return true;
         if (*p == ',') { ++p; continue; }        // 前置/重复/尾随逗号
@@ -232,12 +247,14 @@ inline bool scanRootMembers(const char* s, const char* e, Regions& r,
         p = skipWs(p + 1, e);
         if (*p == '[' && keyIs(key, "actions") && !r.actions) {
             const char* aEnd = nullptr;
+            setFastStage("scanRootMembers/actions", (long long)(p - s));
             if (!parseActionRegionParallel(p, e, actionsOut, &aEnd)) return false;
             r.actions = p;
             r.actionsEnd = aEnd;
             p = aEnd;
             continue;
         }
+        setFastStage("scanRootMembers/value", (long long)(p - s));
         const char* vEnd = skipValue(p, e);
         if (!vEnd) return false;
         // 重复键取第一个（RapidJSON 的 FindMember 也是第一个）
@@ -476,9 +493,11 @@ inline bool parseActionRegion(const char* b, const char* end,
         const char* objEnd = skipContainer(p, end);
         if (!objEnd) return false;
         ActionFields f;
+        g_failPos = p;
         if (!parseActionObject(p + 1, objEnd, f)) return false;
         LevelData::FastAction a;
         bool keep = false;
+        g_failPos = p;
         if (!buildAction(f, a, keep)) return false;
         if (keep) out.push_back(std::move(a));
         p = objEnd;
@@ -1133,7 +1152,8 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
             // "窗口路径也必须能吃下"的范围。
             if (std::getenv("ADOCAO_FAST_REQUIRE") != nullptr) {
                 LOG_E("fast parse declined the buffer (test hook ADOCAO_FAST_REQUIRE); stage=%s", g_fastStage);
-                std::fprintf(stderr, "[ADOCAO] fast parse declined at stage: %s\n", g_fastStage);
+                std::fprintf(stderr, "[ADOCAO] fast parse declined at stage: %s off=%lld\n", g_fastStage,
+                             (g_failPos && g_bufBase) ? (long long)(g_failPos - g_bufBase) : -1LL);
                 return false;
             }
             LOG_D("fast parse declined at stage: %s (falling back to legacy)", g_fastStage);
@@ -1182,6 +1202,8 @@ static size_t estimateAngleCount(const char* p, size_t span) {
 
 bool LevelData::tryFastParse(const char* data, size_t len, ProgressCb onProgress) {
     if (onProgress) onProgress(0.10f, "Parsing angleData...");
+    g_bufBase = data;
+    g_failPos = nullptr;
     std::vector<FastAction> newActions;   // actions 在根扫描里就地解析
     Regions r;
     g_fastStage = "scanRootMembers";

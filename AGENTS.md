@@ -74,6 +74,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `reserve(n + 1)` 再 `resize(n)`。实测：修复前 `cap = 2n`（三张谱一致）、修复后 `cap = n + 2`；
   **primer-final（6841 万层）的 GUI 播放换出量从 +296 MB 变成 0**（峰值 RSS 5.9 GB），
   像素门槛 51/51 逐字节不变。（背景与逐项开销见 `docs/scale-1e8-to-2e9.md` §7/§14。）
+- **没有 SetSpeed 事件的谱面不该分配 `setSpeedByFloor`**：`processActions` 里那张 `vector<SS>`（12 B/层）
+  曾经无条件 `resize(n)`，1e8 层就是 1.2 GB 白占（探针实测：25 万层的无害谱上有一块 250001 x 12
+  的分配）。现在改成第一次遇到 SetSpeed 才 `resize`，读侧的逐层循环用 `empty()` 跳过 ——
+  空 vector 与原来**逐位等价**（默认构造的 SS 全 false/0，循环体本来就什么都不做）。
+  注意：这类**加载期瞬态**用 peak RSS 量不出来（会被后面 Timeline 的更大峰值盖住），
+  要按 `docs/scale-1e8-to-2e9.md` §5 的办法用 operator new 记账 + 返回地址定位。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`

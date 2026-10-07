@@ -1401,7 +1401,10 @@ void LevelData::processActions() {
     bookmarkFloors.clear();
 
     struct SS { float multiplier = 0.0f; float bpm = 0.0f; bool isMultiplier = false; };
-    std::vector<SS> setSpeedByFloor(n);
+    // 按需分配：没有任何 SetSpeed 事件时这 n x 12 B 是白占的（实测 25 万层的无害谱上，
+    // 峰值快照里就有一块 250001 x 12 = 3,000,012 B 的分配）。1e8 层就是 1.2 GB。
+    // 空 vector 与原来逐位等价：默认构造的 SS 全 false/0，下面那个逐层循环体什么都不做。
+    std::vector<SS> setSpeedByFloor;
 
     struct HSChange { int floor; std::string type; float volume; };
     std::vector<HSChange> hsChanges;
@@ -1414,6 +1417,7 @@ void LevelData::processActions() {
             tileHasTwirl[floor] = true; break;
         case FastAction::SetSpeed:
             tileHasSetSpeed[floor] = true;
+            if (setSpeedByFloor.empty()) setSpeedByFloor.resize((size_t)n);   // 第一次遇到才分配
             { SS& ev = setSpeedByFloor[floor]; ev.isMultiplier = a.flag;
               if (a.flag) ev.multiplier = a.val1; else ev.bpm = a.val1; }
             break;
@@ -1436,10 +1440,14 @@ void LevelData::processActions() {
     }
 
     float runningBPM = settings.bpm;
-    for (int i = 0; i < n; i++) {
-        if (setSpeedByFloor[i].isMultiplier) runningBPM *= setSpeedByFloor[i].multiplier;
-        else if (setSpeedByFloor[i].bpm > 0.0f) runningBPM = setSpeedByFloor[i].bpm;
-        tileBPMs[i] = runningBPM;
+    // 空 = 本谱一条 SetSpeed 都没有：tileBPMs 上面已经 assign 成全 settings.bpm，
+    // 而原循环在这种情况下本来就只写回 settings.bpm —— 所以整段跳过是逐位等价的。
+    if (!setSpeedByFloor.empty()) {
+        for (int i = 0; i < n; i++) {
+            if (setSpeedByFloor[i].isMultiplier) runningBPM *= setSpeedByFloor[i].multiplier;
+            else if (setSpeedByFloor[i].bpm > 0.0f) runningBPM = setSpeedByFloor[i].bpm;
+            tileBPMs[i] = runningBPM;
+        }
     }
 
     if (!hsChanges.empty()) {

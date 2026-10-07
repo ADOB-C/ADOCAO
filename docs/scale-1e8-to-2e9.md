@@ -194,8 +194,12 @@ MYC 的 1,554 MB 与 AGENTS 记录的 app 侧 `adocao image` 1,560 MB 差 0.4% �
    修复后 `cap = n + 2`（1e7 层省 229 MB）→ 1e8 层省 2.4 GB、2^31−1 层省 51 GB；
    primer-final（6841 万层）GUI 播放的换出量 **+296 MB → 0**（峰值 RSS 5.9 GB），
    像素门槛 51/51 逐字节不变，ctest 5/5。
-2. **`setSpeedByFloor`（12 B/层瞬态，无条件分配）**：`LevelData.cpp:1399`，没有 SetSpeed 事件也照分配
-   （实测峰值快照抓到 `250,001 × 12 B` 的块，而那张谱一条 SetSpeed 都没有）。改成按需。
+2. ✅ **已修**（2026-10）：**`setSpeedByFloor`（12 B/层瞬态，无条件分配）**：`LevelData.cpp:1399`，没有 SetSpeed 事件也照分配
+   （实测峰值快照抓到 `250,001 × 12 B` 的块，而那张谱一条 SetSpeed 都没有）。
+   **已改成按需**：第一次遇到 SetSpeed 才 `resize`，读侧循环用 `empty()` 跳过（空 vector 与原来逐位等价）。
+   验收：ctest 5/5、`angles360`（含 7 个 SetSpeed）与 The Moon（31.4 万事件）的三路逐位对拍通过、
+   像素门槛 51/51 逐字节不变。**注意**：我用 peak RSS 做的 A/B 无效（765 vs 803 MB ✗）——
+   这种加载期瞬态会被后面 Timeline 的更大峰值盖住，要按 §5 用 operator new 记账量。
 3. **`m_tileStartDist`/`m_tileEndDist`（8 B/层）**：`Timeline.cpp:86-87,178` 在 0..n−2 上恒为 `1.0f`，
    只有最后一层写真值（`:251-253`）。改成"最后一层的标量 + 其余取 1.0"。
 4. **`angleData` 的 reserve 启发式（最坏 35.7 → 8 B/层）**：`LevelData.cpp:1131` 的 `/3`。

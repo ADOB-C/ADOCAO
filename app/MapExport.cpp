@@ -93,11 +93,19 @@ int exportLevelMap(const std::string& levelPath, const std::string& outPath,
     }
 
     LevelData level;
-    if (!level.loadFromFile(levelPath)) {
+    // 无头加载也要有反馈：巨谱的解析/解压能跑几十秒，以前这里是静默的。
+    // CLI 进度行（stderr、\r 原地刷新、自带速率与 ETA），不碰 ImGui —— GUI 那条路仍走 ImGui。
+    progress::reset();
+    auto onLoad = [](float p, const char* what) {
+        progress::update((long long)(p * 1000.0f), 1000, "%", what);
+    };
+    if (!level.loadFromFile(levelPath, onLoad)) {
+        progress::finish();
         LOG_E("Map: 加载失败 %s", levelPath.c_str());
         std::fprintf(stderr, "Failed to load level: %s\n", levelPath.c_str());
         return 1;
     }
+    progress::finish();
     Timeline timeline;
     timeline.build(level, /*exportOnly=*/true);
     LOG_I("Map: %d 层，开始出图 %dx%d", (int)level.tiles.size(), opts.width, opts.height);
@@ -134,10 +142,16 @@ int exportLevelMap(const std::string& levelPath, const std::string& outPath,
 int exportLevelMapNativeAll(const std::string& levelPath, const std::string& outDir,
                             const std::string& tilesStr, int block, int threads, bool timeColor) {
     LevelData level;
-    if (!level.loadFromFile(levelPath)) {
+    progress::reset();
+    auto onLoadAll = [](float p, const char* what) {
+        progress::update((long long)(p * 1000.0f), 1000, "%", what);
+    };
+    if (!level.loadFromFile(levelPath, onLoadAll)) {
+        progress::finish();
         std::fprintf(stderr, "Failed to load level: %s\n", levelPath.c_str());
         return 1;
     }
+    progress::finish();
     Timeline tl;
     tl.build(level, /*exportOnly=*/true);
     const int n = (int)level.tiles.size();

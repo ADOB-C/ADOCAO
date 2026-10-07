@@ -14,6 +14,7 @@
 // Windows 直接 "not declared"（CI 真踩过一次）。
 #include "archive/Install.hpp"
 #include "app/AssetSetup.hpp"
+#include "core/level/LevelData.hpp"
 #ifndef _WIN32
 #include <unistd.h>
 #endif
@@ -193,6 +194,13 @@ int main(int argc, char* argv[]) {
                          a, std::strcmp(a, "mono") == 0 ? " --1px --1bit" : "");
             return 2;
         }
+    }
+    // 无头子命令（image/tiles/stitch/export）不走流式半窗，直接整份解压：它们只在验收/CI 里跑，
+    // 一条确定的路比"先试窗口、可能静默回退"更好维护（GUI 播放仍走窗口，见 LevelData）。
+    // 进度用 CLI 进度条（见 ProgressBar），不碰 ImGui。
+    if (mode != Mode::Play) {
+        adofai::setForceWholeDecompress(true);
+        LOG_I("headless: whole-buffer decompression (no streaming window)");
     }
 
     LauncherConfig cli;

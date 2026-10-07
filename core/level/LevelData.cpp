@@ -37,6 +37,13 @@
 
 namespace adofai {
 
+namespace {
+bool g_forceWhole = false;
+}  // namespace
+
+void setForceWholeDecompress(bool on) { g_forceWhole = on; }
+bool forceWholeDecompress() { return g_forceWhole; }
+
 static LevelData* g_internOwner = nullptr;
 
 namespace {
@@ -1031,7 +1038,8 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
     if (archive != LevelArchiveKind::Plain) {
         // 优先走窗口流水线：不把整份解压结果摊进内存（10 GB 文本那份匿名内存会被系统
         // 压缩/换页，实测吞吐掉到 1/11）。任何搞不定的情况都退回下面的整份解压。
-        const bool forceWhole = std::getenv("ADOCAO_WHOLE_DECOMPRESS") != nullptr;   // 每次读：测试会在同一进程里切换
+        // 每次读：测试会在同一进程里切换。库级开关（无头模式设的）与环境变量任一为真即整份解压。
+        const bool forceWhole = forceWholeDecompress() || std::getenv("ADOCAO_WHOLE_DECOMPRESS") != nullptr;
         // 压缩输入默认走窗口流水线：逐位一致（fixture 用 4 KB 半窗、1.18 / 1.40 GB 真实谱用
         // 96 KB / 1 MB / 8 MB 半窗都核对过 13 个节的 hash），而且比整份解压省掉"整份文本"
         // 的分配与二次扫描。搞不定的情况一律放弃并落到下面的整份解压，所以默认开启无风险。

@@ -374,3 +374,22 @@ settings 定长记录 → angleData 列 → actions 六列 → pathData；未知
 * `DeltaF32` 列编码（对 float 做**数值**差分）—— 只为榨音频谱，先实测熵再决定；
 * `writerCommit` / `inputHash` 的构建期注入（字段已在头里占位）；
 * `WindowSource` 对 `.adocao` 的"逐段交付"（目前整份读进内存；文件只有几十~几百 MB，不急）。
+
+### Twirl 能压多少（实测，2026-10）—— 两个杠杆
+
+用户问"Twirl 有能压的地方吗"，答案是**有，而且不小**：
+
+1. **载荷列被所有事件共享**（设计缺口）：MYC 的 actions **99.6% 是 Twirl**（6,155,053 条），
+   而 Twirl 的 val1/val2/strId 非零比例全是 **0%** —— 但它照样在 val1(6bit)/val2(3bit) 的
+   下标流里占位。Twirl 现在占 13.94 MB（floor 5.87 + type 1.47 + val1 4.40 + val2 2.20）。
+   **改成"按类型稀疏的载荷列"可省 6.60 MB / 19.58 MB = 33.7%**，且事件顺序与语义逐位不变
+   （读取方按"类型→用哪些列"的固定表跳过不用的类型，值取默认 0）。
+2. **段级压缩（P4）更大**：.adocao 再 xz -9e → MYC 19.58 MB 变 ~11 KB、The Moon 1.25 MB 变 <10 KB
+   （这两张极度规则，**不可外推**）；angles360（1167 个角度）几乎压不动；
+   **primer 324.36 MB → 195.43 MB**（对 xz-JSON 的 357 MB = **1.83×**）。
+   → **修正上一轮的停手结论**：primer 的"只有 1.10×"只在"不压缩"时成立，P4 应当提上来做。
+3. 音频谱还有第三个杠杆：`DeltaF32`（对 float 做**数值**差分）。依据是"位模式 Raw + 仅 xz 就能
+   1.66×"，说明 float 里有真实结构被位模式表示丢掉了；**先实测数值差分后的熵再决定**。
+
+顺带：Singularity / Tempest 在我试的两个路径下不存在（`~/Documents/Charts/Singularity/level.adofai`
+等），所以上面的"一般谱面"结论目前只有 The Moon / angles360 两个样本，**样本偏少**。

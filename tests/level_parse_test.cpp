@@ -293,6 +293,11 @@ std::string levelPathResolveSelfTest() {
     std::ofstream(root / "many" / "a.adofai").put('x');
     std::ofstream(root / "many" / "b.adofai.xz").put('x');
     std::ofstream(root / "nested" / "chart" / "c.adofai.zst").put('x');
+    std::ofstream(root / "bin.adocao").put('x');                       // .adocao 也是谱
+    fs::create_directories(root / "solo", ec);
+    std::ofstream(root / "solo" / "d.adocao").put('x');
+    std::ofstream(root / "amb.adofai").put('x');                       // 补全有歧义：两个都命中
+    std::ofstream(root / "amb.adocao").put('x');
     struct Case { fs::path in; fs::path want; const char* what; };
     const Case cases[] = {
         { root / "plain.adofai", root / "plain.adofai",                      "文件原样返回" },
@@ -300,6 +305,9 @@ std::string levelPathResolveSelfTest() {
         { root / "nested",       root / "nested" / "chart" / "c.adofai.zst", "往下看一层子目录" },
         { root / "many",         root / "many",                              "多个命中不猜" },
         { root / "missing",      root / "missing",                           "不存在原样返回" },
+        { root / "bin",          root / "bin.adocao",                        "落下 .adocao 后缀时补全" },
+        { root / "solo",         root / "solo" / "d.adocao",                 "目录里唯一的 .adocao" },
+        { root / "amb",          root / "amb",                               "补全有歧义时不猜" },
     };
     for (const auto& c : cases) {
         const std::string got = resolveLevelPath(c.in.string());

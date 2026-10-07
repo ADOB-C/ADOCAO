@@ -4,7 +4,9 @@
 #include <vector>
 
 // 把"用户给的 level 路径"解析成真正的谱文件：
-//   * 是文件（或不存在）→ 原样返回，交给调用方报错；
+//   * 是文件 → 原样返回；
+//   * 不存在 → 试 `<path> + 已知后缀`（.adofai / .adofai.xz / .adofai.zst / .adocao），
+//     **唯一命中**才用它（macOS 的 Finder 默认隐藏扩展名，用户看到的路径往往没有后缀）；
 //   * 是目录 → 直接子文件里**唯一**的谱就用它；没有就看下一层子目录
 //     （`Charts/Song.adofai/<chart>/<name>.adofai.xz` 那种结构）；多于一个就原样返回。
 // 唯一命中才生效、绝不猜 —— 文件名以 .adofai / .adofai.xz / .adofai.zst 结尾（大小写不敏感）。

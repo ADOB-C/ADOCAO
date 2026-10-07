@@ -1,0 +1,1 @@
+{"angleData":[0,90,180,0],"settings":{"version":15,"bpm":120,"offset":0,"trackColor":"debb7b","backgroundColor":"000000"},"actions":[{"floor":1,"eventType":"SetSpeed","speedType":"Multiplier","bpmMultiplier":0.5},{"floor":2,"eventType":"SetSpeed","speedType":"Multiplier","bpmMultiplier":1.25}],"decorations":[]}

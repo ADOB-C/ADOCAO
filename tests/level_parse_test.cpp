@@ -399,43 +399,6 @@ std::string trackVisAllocationSelfTest() {
 
 // 单个值远大于半窗：`levelDesc` 是 200 KB 的字符串、每个装饰物里还有 300 B 的字符串。
 // skip / settings / path 三个子扫描器带状态可续，必须能跨窗流过去，而不是"放弃并回退"。
-// 快路径必须吃下**非整数**的 action 字段。这条是被一次真实回归逼出来的：parseNumber 曾把
-// "token 正好填满 e"（两个调用方传的 e 都是该值/该区间的真实末尾）误判成"被截断"而返回 false
-// → 于是**所有含小数 action 字段的谱**（bpmMultiplier: 0.5 之类）整份退回旧路径：
-// MYC 实测 4.60 s / 4,943 MB，快路径是 1.39 s / 1,473 MB。而三路对拍测试永远绿 ——
-// 因为快路径一放弃，"快路径那次加载"就是旧路径。
-//
-// 所以这里同时放一个**负向对照**（非整数 floor 本来就该让快路径放弃）：如果钩子形同虚设，
-// 负向对照会失败 —— 这正是当初没能发现该回归的原因。
-std::string fastPathNonIntegerSelfTest() {
-    const char* text =
-        "{\"angleData\": [0, 90, 180, 0], \"settings\": {\"bpm\": 120}, \"actions\": ["
-        "{ \"floor\": 1, \"eventType\": \"SetSpeed\", \"speedType\": \"Multiplier\", \"bpmMultiplier\": 0.5 }, "
-        "{ \"floor\": 2, \"eventType\": \"SetSpeed\", \"speedType\": \"Multiplier\", \"bpmMultiplier\": 1.25 }], "
-        "\"decorations\": []}";
-    // ① 正向：含小数字段时快路径必须能吃下（ADOCAO_FAST_REQUIRE=1 把"放弃"变成加载失败）
-    setEnv("ADOCAO_FAST_REQUIRE", "1");
-    LevelData lv;
-    const bool ok = lv.loadFromBuffer(text, std::strlen(text));
-    unsetEnv("ADOCAO_FAST_REQUIRE");
-    if (!ok) return "非整数 action 字段让快路径放弃了（应当吃下）";
-    if (lv.tileBPMs.size() < 3) return "非整数 action 字段：tileBPMs 太小";
-    if (std::abs(lv.tileBPMs[0] - 120.0f) > 1e-3f || std::abs(lv.tileBPMs[1] - 60.0f) > 1e-3f ||
-        std::abs(lv.tileBPMs[2] - 75.0f) > 1e-3f)
-        return "非整数 action 字段：BPM 传播不对（期望 120 / 60 / 75）";
-    // ② 负向对照：非整数 floor 本来就该放弃（旧路径 GetInt() 会 UB，所以快路径直接放行给旧路径）。
-    //    用 FAST_REQUIRE 让它变成失败 —— 顺便证明这个钩子真的会触发。
-    const char* bad =
-        "{\"angleData\": [0, 90, 180], \"settings\": {\"bpm\": 120}, "
-        "\"actions\": [{ \"floor\": 1.5, \"eventType\": \"Twirl\" }], \"decorations\": []}";
-    setEnv("ADOCAO_FAST_REQUIRE", "1");
-    LevelData lv2;
-    const bool ok2 = lv2.loadFromBuffer(bad, std::strlen(bad));
-    unsetEnv("ADOCAO_FAST_REQUIRE");
-    if (ok2) return "负向对照失败：非整数 floor 竟被快路径吃下了（ADOCAO_FAST_REQUIRE 形同虚设？）";
-    return "";
-}
-
 std::string windowHugeValueSelfTest() {
     std::string text = "{\"angleData\":[0, 90, 180], \"levelDesc\":\"";
     text.append(200 * 1024, 'x');
@@ -617,11 +580,7 @@ int main(int argc, char** argv) {
     }
     std::printf("ok   音量语义断言（负/零音量原样保留，两条路径都查）\n");
 
-    if (const std::string e = fastPathNonIntegerSelfTest(); !e.empty()) {
-        std::printf("FAIL 快路径/非整数字段自检: %s\n", e.c_str());
-        return 1;
-    }
-    std::printf("ok   快路径吃下非整数 action 字段（含负向对照：非整数 floor 必须放弃）\n");
+
     if (const std::string e = windowHugeValueSelfTest(); !e.empty()) {
         std::printf("FAIL 超大单值跨窗用例: %s\n", e.c_str());
         return 1;

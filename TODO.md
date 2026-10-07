@@ -334,3 +334,19 @@ AGENTS 里"MYC 快路径 695 ms / 峰值 1560 MB"与实测对不上（`adocao im
 下一步（P1-⑥⑦⑧）：读取方（`sniffLevelArchive` 新增 Adocao + `loadFromBuffer` 分派 + 逐位无损）、
 `adocao_roundtrip`（13 节 hash + 可复现性）、零回归（ctest / 像素门槛 / 三护栏）。
 可选：`DeltaF32` 列编码（对 float 做**数值**差分）榨音频谱 —— 先实测熵再决定。
+
+### `.adocao` P1-⑥ 完成：读取方 + 端到端逐字节证明（2026-10）
+
+core 侧只加了三样：`LevelArchiveKind::Adocao`、`kAdocaoMagic`（magic 唯一来源）、
+`ArchiveBackend::decodeAdocao` 钩子；`loadFromBuffer` 按 magic 分派后**与两条 JSON 路径共用
+同一个 `finishLoad()`**（这是逐位一致的结构性保证）。archive 侧 `AdocaoReader::unpackLevel`
+校验 magic/version/fileSize/headerCrc（覆盖头+整张段表）/逐段 crc32c，并解析字符串池 →
+settings 定长记录 → angleData 列 → actions 六列 → pathData；未知段 id 跳过（前向兼容）。
+
+端到端验收（最硬的那种）：
+* MYC（6,770,913 层）用 `.adocao` 与用明文 JSON 各出一张 64×64 PNG → **md5 逐字节相同**
+  （`8fdbed25f383aaabea32d0677f89eae1`）；
+* ctest 7/7、三护栏、`ADOCAO_TILE_EXACT=1` 几何 2/2、像素门槛 **51/51 逐字节相同**。
+
+还剩 P1-⑦：把"pack → 走完整 loadFromBuffer → 13 节 hash 逐位相同 + 同一输入两次 pack 字节相同"
+做成常驻用例（复用 `tests/level_parse_test.cpp` 现成的 13 节比对与 archiveRoundTrip 框架）。

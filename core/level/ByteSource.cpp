@@ -18,6 +18,8 @@ LevelArchiveKind sniffLevelArchive(const char* data, size_t length) {
         return LevelArchiveKind::Xz;
     if (length >= sizeof(kZstdMagic) && std::memcmp(data, kZstdMagic, sizeof(kZstdMagic)) == 0)
         return LevelArchiveKind::Zstd;
+    if (length >= sizeof(kAdocaoMagic) && std::memcmp(data, kAdocaoMagic, sizeof(kAdocaoMagic)) == 0)
+        return LevelArchiveKind::Adocao;
     return LevelArchiveKind::Plain;
 }
 

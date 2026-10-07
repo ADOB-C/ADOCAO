@@ -1052,6 +1052,17 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
     // 解压后的缓冲区必须活到解析结束，所以放在这个作用域里。
     std::string decompressed;
     const LevelArchiveKind archive = sniffLevelArchive(data, len);
+    if (archive == LevelArchiveKind::Adocao) {
+        // 自研二进制容器：**明确失败，绝不静默回退**（这和压缩容器的"搞不定就退回整份解压"
+        // 是两种态度 —— 那里的回退不改变语义，这里回退意味着把一个坏文件当好文件读了）。
+        const ArchiveBackend& bk = archiveBackend();
+        std::string why;
+        if (!bk.decodeAdocao || !bk.decodeAdocao(data, len, *this, why)) {
+            LOG_E("adocao 解码失败: %s", why.empty() ? "archive 后端未注册（缺 install()）" : why.c_str());
+            return false;
+        }
+        return finishLoad(onProgress, exportOnly);      // 与两条 JSON 路径共用同一段收尾
+    }
     if (archive != LevelArchiveKind::Plain) {
         // 优先走窗口流水线：不把整份解压结果摊进内存（10 GB 文本那份匿名内存会被系统
         // 压缩/换页，实测吞吐掉到 1/11）。任何搞不定的情况都退回下面的整份解压。

@@ -18,12 +18,17 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "core/level/ByteSource.hpp"   // kAdocaoMagic（magic 的唯一来源）
+
 namespace adofai {
 namespace adocao {
 
 // 文件 magic：与 core/level/ByteSource.cpp 的 sniffLevelArchive 一致（按 magic 判断，
 // 不看扩展名，所以改过名/抹掉扩展名照样能读）。
-inline constexpr char     kMagic[4] = {'A', 'D', 'O', '1'};
+// magic 的唯一来源在 core（sniffLevelArchive 也要用它）；这里逐字节拷贝并由 static_assert 钉住。
+inline constexpr char kMagic[4] = {kAdocaoMagic[0], kAdocaoMagic[1], kAdocaoMagic[2], kAdocaoMagic[3]};
+static_assert(kAdocaoMagic[0] == 'A' && kAdocaoMagic[1] == 'D' && kAdocaoMagic[2] == 'O' &&
+              kAdocaoMagic[3] == '1', "core 的 kAdocaoMagic 变了，archive 这边要一起改");
 inline constexpr uint16_t kVersion  = 1;
 
 // 段 id。v1 只用 1..5；6/7 预留（preserved / derived），未知 id 一律跳过（前向兼容）。

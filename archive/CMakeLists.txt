@@ -8,6 +8,8 @@ add_library(adocao_archive STATIC
     AdocaoColumns.cpp
     # `.adocao` 写入方（pack）：依赖 core 的 LevelData（archive → core 是允许的方向）
     AdocaoWriter.cpp
+    # `.adocao` 读取方（unpack）：填 LevelData 但不做收尾（收尾与两条 JSON 路径共用）
+    AdocaoReader.cpp
 )
 
 target_include_directories(adocao_archive PUBLIC ${CMAKE_SOURCE_DIR})

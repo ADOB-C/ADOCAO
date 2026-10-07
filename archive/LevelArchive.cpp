@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <new>
+#include "archive/AdocaoReader.hpp"   // .adocao 解码（注册进 backend 钩子）
 
 
 namespace adofai {
@@ -351,10 +352,16 @@ WindowSource* makeWindowImpl() { return new ArchiveStream(); }
 
 }  // namespace
 
+// `.adocao` 的解码钩子：core 只按 magic 分派到这里，真正的解析在 AdocaoReader。
+bool decodeAdocaoImpl(const char* data, size_t length, LevelData& out, std::string& reason) {
+    return adocao::unpackLevel((const uint8_t*)data, length, out, reason);
+}
+
 ArchiveBackend backend() {
     ArchiveBackend b;
     b.decodeWhole = &decodeWholeImpl;
     b.makeWindow = &makeWindowImpl;
+    b.decodeAdocao = &decodeAdocaoImpl;
     return b;
 }
 

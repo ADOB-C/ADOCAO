@@ -1,8 +1,12 @@
 # `.adocao` 二进制容器规范（v1）
 
-> 状态：**P1 写入方已完成**（`archive/AdocaoFormat.hpp`、`archive/AdocaoColumns.{hpp,cpp}`、
-> `archive/AdocaoWriter.{hpp,cpp}`、CLI `adocao pack`）；**读取方尚未实现**（P1-⑥）。
-> 本文只描述已落地的部分，未实现的明确标注"待做"。
+> 状态：**读写都已落地** —— `archive/AdocaoFormat.hpp`、`archive/AdocaoColumns.{hpp,cpp}`、
+> `archive/AdocaoWriter.{hpp,cpp}`、`archive/AdocaoReader.{hpp,cpp}`、CLI `adocao pack`。
+> 读取路径已接通：core 的 `sniffLevelArchive` 认 magic `ADO1` → `LevelData::loadFromBuffer`
+> 经 `ArchiveBackend::decodeAdocao` 钩子分派（**core 不依赖 archive**，依赖倒置不变）→
+> 填好 `LevelData` 后与两条 JSON 路径**共用同一个 `finishLoad()` 收尾**。
+> 端到端验证：MYC 用 `.adocao` 与用明文 JSON 出的 64×64 PNG **逐字节相同**
+> （md5 `8fdbed25f383aaabea32d0677f89eae1`，6,770,913 层）。
 
 ## 0. 为什么要有这个格式
 
@@ -194,8 +198,11 @@ beatsBehind(f32) | beatsAhead(f32)`
 
 ## 7. 待做清单
 
-1. **读取方**（P1-⑥）：`sniffLevelArchive` 增加 `LevelArchiveKind::Adocao`；`LevelData::loadFromBuffer`
-   分派到 `AdocaoReader`（逐位无损）；`WindowSource` 对 `.adocao` 的语义 = **逐段交付**。
+1. ~~**读取方**（P1-⑥）~~ **已完成**：`LevelArchiveKind::Adocao` + magic 认领（magic 的唯一来源在
+   `core/level/ByteSource.hpp`，archive 侧 `static_assert` 钉住）+ `ArchiveBackend::decodeAdocao`
+   钩子 + `AdocaoReader::unpackLevel`（段表/headerCrc/逐段 crc32c 全校验，坏数据明确失败）。
+   待做的小尾巴：`WindowSource` 对 `.adocao` 的"逐段交付"语义（目前是整份读进内存再解，
+   文件本身只有几十到几百 MB，所以不急）。
 2. `writerCommit` / `inputHash`：构建期注入 git hash + 源谱 SHA-256。
 2b. `DeltaF32` 列编码（float 按**数值**差分），专治 primer 那种"每层一个采样"的列 ——
    先实测差分后的熵再决定，不要凭估计上。

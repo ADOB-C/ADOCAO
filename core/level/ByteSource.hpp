@@ -13,7 +13,17 @@
 
 namespace adofai {
 
-enum class LevelArchiveKind { Plain, Xz, Zstd };
+enum class LevelArchiveKind { Plain, Xz, Zstd, Adocao };
+
+// `.adocao` 的 magic（"ADO1"）：**唯一来源** —— core 的 sniff 与 archive 的读写都用它，
+// archive/AdocaoFormat.hpp 用 static_assert 钉住一致。
+inline constexpr char kAdocaoMagic[4] = {'A', 'D', 'O', '1'};
+
+struct LevelData;
+
+// `.adocao` 解码钩子：core 只按 magic 分派，真正的解析在 archive 模块（依赖倒置）。
+// 失败时**必须**给出原因；不许静默回退到别的路径（文件坏了就说坏了）。
+using AdocaoDecoder = bool (*)(const char* data, size_t length, LevelData& out, std::string& reason);
 
 // 按 **magic** 判断容器种类（不看扩展名，所以改过名/抹掉扩展名的谱面照样能读）
 LevelArchiveKind sniffLevelArchive(const char* data, size_t length);
@@ -41,10 +51,11 @@ using WholeDecoder = bool (*)(const char* data, size_t length, LevelArchiveKind 
                               std::string& out, std::string& reason,
                               const std::function<void(float)>& onProgress);
 
-// 后端能力：两个都可以为空（= 该能力不可用）。由 archive 模块注册。
+// 后端能力：三个都可以为空（= 该能力不可用）。由 archive 模块注册。
 struct ArchiveBackend {
     WholeDecoder decodeWhole = nullptr;
     WindowSource* (*makeWindow)() = nullptr;
+    AdocaoDecoder decodeAdocao = nullptr;
 };
 
 void setArchiveBackend(const ArchiveBackend& backend);   // archive 模块在启动时调用

@@ -13,6 +13,10 @@ add_library(adocao_archive STATIC
 )
 
 target_include_directories(adocao_archive PUBLIC ${CMAKE_SOURCE_DIR})
+# 构建期注入 git commit（根 CMakeLists 里取；空 = 没有 git → 写入方写 20 个 0）
+if(ADOCAO_GIT_COMMIT)
+    target_compile_definitions(adocao_archive PRIVATE ADOCAO_GIT_COMMIT="${ADOCAO_GIT_COMMIT}")
+endif()
 # 头里已经没有任何 lzma/zstd 类型（pimpl，见 LevelArchive.hpp），所以它们在这里可以
 # **真正 PRIVATE**：链 adocao_archive 的消费者不必配压缩库的头/库路径。
 target_link_libraries(adocao_archive

@@ -69,8 +69,22 @@ Header (76 B) | SectionEntry × sectionCount (40 B each) | padding → 8 B 对�
 | 10 | u16 | `reserved` | 0 |
 | 12 | u64 | `fileSize` | 全文件字节数（截断检测）|
 | 20 | u32 | `headerCrc` | 覆盖"头（本字段按 0 参与）+ **整张段表**"|
-| 24 | u8[20] | `writerCommit` | 写入方 git commit（SHA-1 原始字节）；全 0 = unknown。**待做：构建期注入** |
-| 44 | u8[32] | `inputHash` | 源谱规范化字节的 SHA-256；全 0 = unknown。**待做** |
+| 24 | u8[20] | `writerCommit` | 写入方 git commit 的**原始 20 字节**（构建期由 `git rev-parse HEAD` 注入，见下）；全 0 = unknown（没有 git 的构建）|
+| 44 | u8[32] | `inputHash` | **内容指纹**：前 8 字节 = `FNV-1a-64`（小端），其余 24 字节写 0 |
+
+**内容指纹（`inputHash`）的准确算法**（别的实现按这个算就能逐字节对上）：
+
+* `FNV-1a-64`：`h = 1469598103934665603`（offset basis）；对每个字节 `h ^= b; h *= 1099511628211`；
+* 覆盖范围 = **按写入顺序**的每一段：先段 id（1 字节），再该段的**未压缩**内容（`rawSize` 字节）；
+* 所以它与压缩器、与构建**无关** —— 同一份谱在任何实现里都得到同一个指纹（可用于去重/溯源）；
+* 结果按小端写进前 8 字节，后 24 字节写 0（留出将来换更宽哈希的余地）；
+* 读取方**不看**这个字段，也**不许**拿它当兼容闸门。
+
+**`writerCommit` 的注入方式**：根 `CMakeLists.txt` 在 configure 时跑 `git rev-parse HEAD`，
+只给 `adocao_archive` 目标加 `-DADOCAO_GIT_COMMIT=<40 位十六进制>`；写入方把它解码成 20 原始字节。
+拿不到 git（tarball / 离线构建）时该宏不存在 → 写 20 个 0。注意它记的是**构建**的 commit
+而不是打包那一刻的 ✓ —— 这正是"写入方"的含义；也意味着**跨构建**两次打包会有这 20 字节的差异
+（同一构建内仍然逐字节相同，`archiveRoundTrip` 断言的就是后者）。
 
 ### 2.2 SectionEntry（40 B）
 

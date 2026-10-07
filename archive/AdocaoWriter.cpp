@@ -41,6 +41,39 @@ uint32_t sparseMask(const std::vector<uint32_t>& types, const std::vector<uint32
     return mask;
 }
 
+// 内容指纹：FNV-1a-64（算法写进 docs/adocao-format.md §2.1，别的实现可逐字节复现）。
+// 覆盖**未压缩**的各段内容 + 段 id，所以与压缩器、与构建都无关（可跨实现比对）。
+uint64_t fnv1a64(const void* data, size_t n, uint64_t h) {
+    const uint8_t* p = (const uint8_t*)data;
+    for (size_t i = 0; i < n; ++i) {
+        h ^= p[i];
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+// 构建期注入的 git commit（40 位十六进制）→ 20 原始字节；没有/不合法就写全 0。
+// 读取方**不看**这个字段，它只作溯源 —— 绝不能当兼容闸门。
+void writerCommitBytes(uint8_t out[20]) {
+    std::memset(out, 0, 20);
+#ifdef ADOCAO_GIT_COMMIT
+    const char* s = ADOCAO_GIT_COMMIT;
+    if (std::strlen(s) != 40) return;
+    auto hex = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    for (int i = 0; i < 20; ++i) {
+        const int hi = hex(s[i * 2]);
+        const int lo = hex(s[i * 2 + 1]);
+        if (hi < 0 || lo < 0) { std::memset(out, 0, 20); return; }
+        out[i] = (uint8_t)((hi << 4) | lo);
+    }
+#endif
+}
+
 struct Section {
     uint8_t id = 0;
     uint64_t elements = 0;
@@ -247,8 +280,20 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
     putU16(hb, 0);                                  // reserved
     putU64(hb, fileSize);
     putU32(hb, 0);                                  // headerCrc（待回填）
-    for (int i = 0; i < 20; ++i) hb.push_back(0);   // writerCommit：构建时注入，见 TODO
-    for (int i = 0; i < 32; ++i) hb.push_back(0);   // inputHash：SHA-256 待接，见 TODO
+    {
+        uint8_t commit[20];
+        writerCommitBytes(commit);
+        putBytes(hb, commit, 20);
+    }
+    {
+        uint64_t h = 1469598103934665603ull;        // FNV-1a-64 offset basis
+        for (const Section& s : secs) {
+            h = fnv1a64(&s.id, 1, h);
+            h = fnv1a64(s.blob.data(), s.blob.size(), h);
+        }
+        putU64(hb, h);                              // 前 8 字节 = 内容指纹
+        for (int i = 0; i < 24; ++i) hb.push_back(0);
+    }
     for (const SectionEntry& e : table) {
         putU8(hb, e.id);
         putU8(hb, e.codec);

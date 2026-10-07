@@ -44,6 +44,18 @@ else()
     set(ADOCAO_MIN_ZOOM 1.0)
 endif()
 add_compile_definitions(ADOCAO_MIN_ZOOM=${ADOCAO_MIN_ZOOM}f)
+
+# `.adocao` 的 writerCommit：构建期记下写入方的 git commit。
+# 只喂给 archive 目标（全局 define 会让每次提交都触发全量重编），而且**没有 git 就留空** ——
+# 写入方那边会把空值写成 20 个 0（读取方根本不看这个字段，它只作溯源）。
+execute_process(COMMAND git rev-parse HEAD
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                OUTPUT_VARIABLE ADOCAO_GIT_COMMIT
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET)
+if(NOT ADOCAO_GIT_COMMIT MATCHES "^[0-9a-fA-F][0-9a-fA-F]*$" OR NOT ADOCAO_GIT_COMMIT)
+    set(ADOCAO_GIT_COMMIT "")
+endif()
 message(STATUS "Zoom level: ${ADOCAO_ZOOM_LEVEL} (min ${ADOCAO_MIN_ZOOM}x)")
 
 set(CMAKE_CXX_STANDARD 20)

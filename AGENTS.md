@@ -52,7 +52,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   （`lzma_stream`/`ZSTD_DStream`/半窗缓冲）都在 `.cpp` 里的 `struct ArchiveStream::Impl`，头里只有
   `std::unique_ptr<Impl>` + 7 个访问器声明 → **`archive/LevelArchive.hpp` 不含任何 lzma/zstd 类型**，
   `adocao_archive` 的 `liblzma libzstd_static` 因此是**真正 PRIVATE**（消费者不必配压缩库头路径）。
-  改 `ArchiveStream` 时新状态一律加进 `Impl`，别往头里塞成员。注意 `tests/level_parse_test.cpp`
+  改 `ArchiveStream` 时新状态一律加进 `Impl`，别往头里塞成员。
+  **跨版本兼容：别用 `LZMA_VERSION`/`ZSTD_VERSION` 去 gate 结构体字段** —— `lzma_mt::memlimit`
+  在 **5.4.0** 就被拆成 `memlimit_threading` + `memlimit_stop`，按版本号判断时 5.4/5.5 的系统库
+  会走进旧分支、然后报 `no member named 'memlimit'`（ADOFAI.Lib 的 `linux-system-deps` 那一格真红过，
+  内嵌的 5.6.3 让本地永远看不出来）。现在走 `archive/LzmaMtCompat.hpp` 的**字段探测**
+  （`if constexpr` + concept；discarded 分支必须留在**模板**里，非模板的 `if constexpr` 两边都会被检查），
+  永久用例 `tests/lzma_mt_compat_test.cpp`（两种结构各喂一遍，`static_assert` 选择本身）。
+  推论：**平台性风险不在"跑过没跑过"，而在"依赖的版本落在哪个区间"** —— macOS 上 system-deps
+  验过 4/4 也挡不住这个（brew 的 lzma 5.8.4 ≥ 5.6）。注意 `tests/level_parse_test.cpp`
   **自己**在用 lzma/zstd API 造压缩样本（`lzma_easy_buffer_encode` / `ZSTD_compress`），所以那个
   测试目标的 include 与链接依赖不能跟着删。
 - **`ADOCAO_ASSET_ZIP`**（根 CMake，默认 ON）：OFF 时 `DataFile.cpp` 不编 zip 那条路

@@ -1,4 +1,5 @@
 #include "LoadingWindow.hpp"
+#include "core/util/Progress.hpp"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
@@ -15,7 +16,30 @@ using namespace adofai;      // 库侧公共 API 在 adofai:: 里（P1：为 ADO
 static constexpr int LOADING_W = 480;
 static constexpr int LOADING_H = 160;
 
-void showLoadingWindow(std::function<void(LoadingProgress&)> loader) {
+void showLoadingWindow(std::function<void(LoadingProgress&)> loader, bool cliOnly) {
+    if (cliOnly) {
+        // 非交互运行（--capture 等）：**不建窗口、不碰 ImGui**，把同一份进度打成 CLI 进度行
+        // （stderr、\r 原地刷新、速率+ETA，见 core/util/Progress.hpp）。加载照样在后台线程里跑，
+        // 进度结构与 GUI 那条路完全一样，所以下面的行为不受影响。
+        LoadingProgress progress;
+        std::thread loaderThread([&]() {
+            loader(progress);
+            progress.percent.store(100.0f);
+        });
+        progress::reset();
+        while (progress.percent.load() < 100.0f) {
+            {   // stageText 由 loader 线程写，读的时候持锁（update 只是拷贝字符串，可以放在锁内）
+                std::lock_guard<std::mutex> lock(progress.textMutex);
+                progress::update((long long)progress.percent.load(), 100, "%", progress.stageText);
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        progress::update(100, 100, "%", "done");
+        progress::finish();
+        if (loaderThread.joinable()) loaderThread.join();
+        return;
+    }
+
     // Window size in logical points. The GLFW + ImGui backends handle high-DPI
     // (Retina) scaling automatically via DisplayFramebufferScale — manually
     // multiplying by monitor content scale would double-scale and blur on macOS.

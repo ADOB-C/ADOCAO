@@ -18,12 +18,6 @@ namespace adofai {
 
 uint16_t internActionStrIn(std::vector<std::string>& table, const std::string& v);
 
-// 强制"整份解压"而不是流式半窗（默认关）。无头子命令（image/tiles/stitch/export）用它：
-// 那条路只在验收/CI 里跑，一条确定的路比"先试窗口、可能静默回退"更好维护；GUI 保持窗口路径。
-// 环境变量 ADOCAO_WHOLE_DECOMPRESS 仍然有效（测试会在同一进程里切换）。
-void setForceWholeDecompress(bool on);
-bool forceWholeDecompress();
-
 struct LevelData {
     struct Settings {
         int    version = 15;

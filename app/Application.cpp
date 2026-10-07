@@ -278,7 +278,7 @@ int runApplication(bool debugConsole) {
     LoadResult loadResult;
     showLoadingWindow([&](LoadingProgress& progress) {
         runLevelLoading(cfg, progress, loadResult);
-    });
+    }, /*cliOnly=*/!cfg.capturePath.empty());
 
     if (!loadResult.level) {
         LOG_E("Failed to load level");
@@ -361,7 +361,7 @@ int runApplicationFromCLI(const LauncherConfig& cfg, bool debugConsole) {
     LoadResult loadResult;
     showLoadingWindow([&](LoadingProgress& progress) {
         runLevelLoading(config, progress, loadResult);
-    });
+    }, /*cliOnly=*/!config.capturePath.empty());
 
     if (!loadResult.level) {
         LOG_E("Failed to load level");

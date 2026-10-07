@@ -218,3 +218,25 @@
 
 **③ 因此实施顺序改为**：先做 (b)（12 B/层、逐位可验、零精度让步）→ 再谈 (a) 与
 `tileDisappear/AppearTimes`（那两条是前缀扫描，情况同 (a)）。
+
+### 步骤 ② 路上撞到的一个真问题：导出模式的角度是 0
+
+`m_tileStartAngles` 我原以为是死数据（顺序路径写 `0.0f`），**查完发现不是** ✗：
+
+* `precalcTileRange`（并行路径，n ≥ 256）写的是真值 `outStartAngles[i] = startAngle`；
+* `if (m_exportOnly)` 分支（`Timeline.cpp` 的 Phase 2）把 `m_tileStartAngles[i]` 与
+  `m_tileTotalAngles[i]` **都写 0**；
+* 而 `PositionSolver` 拿它算行星相对枢轴的轨道角：
+  `angle = startAngles[i] + totalAngles[i]*progress; mv = pivot + (cos,sin)(angle)*dist`。
+
+实测（一次性探针，angles360，65 组 (tile, progress)）：导出模式与普通模式同一 `(tile, t)` 上的
+**最大位置偏差 = 2.000000 砖**；tile 1 的取值 导出 `(0, 0)`、游戏 `(3.159046, -3.124139)`。
+也就是说 `adocao image` 的矢量路线（`MapExport.cpp:169/197/199` 用 `positionAtTile`，
+Timeline 却是 `exportOnly=true` 建的）画出的是**层心折线整体平移 (1,0)** ——
+因为画布按墨迹包围盒自动适配，看起来仍像正常轨道（所以一直没人发现），
+但它**丢掉了层内弧线**，且**与游戏不是同一条曲线**。像素门槛只测 `--capture`，盖不到这条路。
+
+**对内存方案的影响**：`m_tileStartAngles` 不能当死数据删 ✗。不过它在两种模式下都能 **O(1) 且逐位**
+重算（普通模式 = `(i==0) ? (rotation+180)*pi/180 : fmod(tiles[i-1].direction+180,360)*pi/180`，
+导出模式 = 0），所以 4 B/层仍然可以省；但**先要把"导出模式该不该用真实角度"这件事定了**：
+若改成用真实角度，`adocao image` 的输出会变（多出层内弧线），这是行为变更，要用户拍板。

@@ -15,9 +15,7 @@ struct LevelMapOptions {
     int   height = 4096;
     float padding = 0.0f;               // 画布留白（比例）；默认 0 = 内容贴边，不留黑边
     uint32_t fillRgba   = 0xDEBB7BFF;   // 轨道主色（与渲染器默认同一对颜色）
-    uint32_t strokeRgba = 0x6F5D3DFF;   // 起点的颜色，终点渐变到 fillRgba
     uint32_t bgRgba     = 0x000000FF;   // 默认不透明黑（想透明就传 alpha=0）
-    bool  gradient = false;             // true = 沿进度从 strokeRgba 渐变到 fillRgba；默认纯色（游戏里就是两种颜色）
     bool  timeColor = false;            // 按**谱面时间**着色：t=0 为 timeFrom，结束为 timeTo
     uint32_t timeFrom = 0xFF0000FF;     // 红
     uint32_t timeTo   = 0xFF00FFFF;     // 品红

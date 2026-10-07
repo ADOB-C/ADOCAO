@@ -521,8 +521,9 @@ hash 与元素个数，逐位相同才通过；`ctest --test-dir build`。`tests
 
 - 位置取自 `PositionSolver::positionAtTile` ✓（和游戏里同一套解算 ✓）；颜色**默认纯色**：
   整条路径 `fillRgba = #DEBB7B`、背景 `bgRgba = #000000`（就是游戏里那两种颜色 ✓）。
-  `--gradient` 才沿进度从 `strokeRgba` 渐变到 `fillRgba`（便于看走向）；
-  `--time-color` 按**谱面时间**六档彩虹（`timeColorAt`，与 1px=1tile 瓦片同一函数 ✓）。
+  **看走向用 `--time-color`**：按**谱面时间**六档彩虹（`timeColorAt`，与 1px=1tile 瓦片同一函数 ✓）；
+  不开它时整条路径只有一种线色（原来那条"按进度从 stroke 渐变到 fill 便于看走向"的 `--gradient`
+  已删除 —— 那是彩虹的职责，不该由渐变兼任）。
   要做到**严格两种颜色**还要配 `--thickness 1`（无 AA 硬线）：AA 边缘会与背景混出中间色。
   带 AA 时的实测口径（MYC 16K 纯色）：610 种颜色，前两名就是 `#000000` 与 `#DEBB7B`，
   其余全是它与黑的混合；但其中 **2,257 个墨点（5.4%）不严格落在等比线上**，最大偏差约

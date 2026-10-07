@@ -164,7 +164,6 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
         }
     }
     const Rgba fill   = unpack(opts.fillRgba);
-    const Rgba stroke = unpack(opts.strokeRgba);
     const double halfW = opts.lineWidthPx > 0.0f
         ? std::max(0.5, std::min(64.0, (double)opts.lineWidthPx * 0.5))            // 显式指定线宽
         : std::max(0.5, std::min(6.0, scale * opts.thicknessScale * 0.5));         // 按 scale 推（下限 0.5）
@@ -179,11 +178,6 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
             if (opts.timeColor) {
                 const double tot = std::max(1e-9, tl.totalDuration());
                 c = unpack(timeColorAt(times[(size_t)i] / tot));   // 六档彩虹，按真实谱面时间
-            } else if (opts.gradient) {
-                const double t = (double)(i - i0) / (double)std::max(1, i1 - i0);
-                c.r = stroke.r + (fill.r - stroke.r) * (float)t;
-                c.g = stroke.g + (fill.g - stroke.g) * (float)t;
-                c.b = stroke.b + (fill.b - stroke.b) * (float)t;
             }
             const glm::dvec2 a = toPx(prevRed), b = toPx(red);
             if (opts.hardLine) drawSegmentHard(out, (int)W, (int)H, a.x, a.y, b.x, b.y, c);

@@ -61,7 +61,7 @@ uint32_t parseHex(const std::string& h, uint32_t fallback) {
 int exportLevelMap(const std::string& levelPath, const std::string& outPath,
                    const std::string& sizeStr, const std::string& bgStr,
                    const std::string& tilesStr, bool native, bool timeColor, float padding,
-                   float lineWidthPx, bool gradient) {
+                   float lineWidthPx) {
     LevelMapOptions opts;
     if (lineWidthPx > 0.0f) {                                 // --map-thickness：直接给线宽（像素）
         opts.lineWidthPx = lineWidthPx;
@@ -87,7 +87,6 @@ int exportLevelMap(const std::string& levelPath, const std::string& outPath,
     }
     opts.nativeScale = native;
     opts.timeColor = timeColor;
-    opts.gradient = gradient;
     if (!bgStr.empty()) {
         if (bgStr == "transparent" || bgStr == "none") opts.bgRgba = 0x00000000u;
         else opts.bgRgba = parseHex(bgStr, opts.bgRgba);

@@ -136,3 +136,44 @@
 
 ### CI
 - [x] GitHub Actions: Windows (MinGW) + Linux, build + release
+
+
+---
+
+## [进行中] Timeline 检查点化（2^31−1 层目标）
+
+**目标**：把 Timeline 从"全量存储"改成"稀疏检查点 + 按需重算"。现状 Timeline ≈ 24~32 B/层
+→ 2^31−1 层就是 51~69 GB，是 2.1e9 目标里剩下的三笔之一（另两笔：`FastAction` 16 B/事件、
+`Tile` 24 B/层，见 `docs/scale-1e8-to-2e9.md` §7/§8）。
+
+**依据（别重新推导，先读它）**：`../ADOCAO-E/docs/design.md` 的 §4.1「上游数据流的真实依赖图」。
+那份草案是给编辑器做"编辑→增量重算"的，但它逐段判过依赖形状并给了 `文件:行` 证据，
+结论可以直接拿来定"哪些量必须留检查点"：
+
+| 派生量 | 形状 | 能否检查点化 |
+|---|---|---|
+| `m_tileStartTimes` | durations 的**纯前缀和**（`Timeline.cpp:210-221`，末尾整体平移）| ✅ 最干净 |
+| `tileDisappear/AppearTimes` | **前缀扫描**（Phase 5，curDA/curAA/curBB/curBA + flag2 单向锁存）| ✅ |
+| `tileBPMs` | SetSpeed **前缀扫描**（`*=` 或 `=`）| 是输入，多半得留（4 B/层）|
+| `m_tileDurations`/`TotalAngles`/`StartAngles` | **每层独立**（Phase 2，可并行）| ✅ 按层重算 |
+| `isCW` / `angleDir` | 局部（999 段内回溯；`angleDir[i]` 只依赖自己）| ✅ |
+
+**步骤**
+1. ① 进程内探针量清 Timeline 每条数组的实际字节数（B/层），别再拿 24~32 这个区间估。
+2. ② 设计 `m_tileStartTimes` 的检查点方案。**硬约束**：它现在被 `findTileIndex()` 二分查找
+   （播放定位、`--range`、拖尾都走它）—— 改成"检查点 + 重算"后随机访问会变贵，
+   所以方案必须**同时**给出替代的定位结构（例如稀疏索引 + 段内二分）。
+3. ③ 实现原型。
+4. ④ **验收口径**（照 `docs/scale-1e8-to-2e9.md` 的 ⚠️ 规则）：整条下游逐位/逐样本对拍
+   （`tileStartTimes`、`durations`、hitsound 时间戳）+ `ctest` + 像素门槛 51/51 逐字节。
+   量加载期瞬态**不要**用 peak RSS（会被后面的峰值盖住），用 operator new 记账（见该报告 §5）。
+5. ⑤ 更新 `docs/scale-1e8-to-2e9.md` 与 `AGENTS.md`。
+
+**相关文件**：`core/timeline/Timeline.{hpp,cpp}`、`core/timeline/PositionSolver.cpp`、
+`app/LevelScene.cpp`（消费方）、`tests/level_parse_test.cpp`（对拍与自检）。
+
+**别混淆（三处"增量"说法是不同的事）**
+* `../ADOCAO-E/docs/design.md` §4：**编辑后**少算（延迟），未实现；
+* 本任务：**少存**（内存），机制同样是检查点；
+* `AGENTS.md` 里"无须增量算前缀时间线 + 回头重算"：那是当年讨论**加载耗时**时否掉的方案，
+  跟上面两件都不是一回事。

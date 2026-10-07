@@ -58,7 +58,7 @@ void printHelp(Mode mode, bool all) {
             "    --keep-tiles <dir>   保留中间瓦片（默认临时目录，成功后自动删除）\n"
             "  外观:\n"
             "    --time-color         按谱面时间六档彩虹（否则沿进度渐变）\n"
-            "    --bg <hex>|transparent   --padding F（0 = 贴边）   --thickness N（<=1 = 1px 硬线）\n"
+            "    --bg <hex>|transparent   --padding F（默认 0 = 贴边；给正数才留白）   --thickness N（<=1 = 1px 硬线）\n"
             "    --range A-B          只画第 A..B 层（看密集“结”）   --native  1 像素 = 1 世界单位\n"
             "  资源:\n"
             "    --threads N          线程数（默认 4 = 2P+2E；stitch/mono 用）\n"

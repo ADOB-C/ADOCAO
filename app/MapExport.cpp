@@ -67,7 +67,7 @@ int exportLevelMap(const std::string& levelPath, const std::string& outPath,
         opts.lineWidthPx = lineWidthPx;
         if (lineWidthPx <= 1.0f) opts.hardLine = true;        // ≤1 px 只能走无 AA 硬线
     }
-    if (padding >= 0.0f) opts.padding = padding;     // --map-padding 0 = 贴边（默认 0.02 = 四周留 2%）
+    if (padding >= 0.0f) opts.padding = padding;     // --padding F 覆盖默认；默认 0 = 贴边
     if (!sizeStr.empty()) {
         int w = 0, h = 0;
         if (std::sscanf(sizeStr.c_str(), "%dx%d", &w, &h) == 2 && w > 0 && h > 0) {

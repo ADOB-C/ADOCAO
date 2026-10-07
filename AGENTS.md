@@ -522,8 +522,8 @@ hash 与元素个数，逐位相同才通过；`ctest --test-dir build`。`tests
 - 位置取自 `PositionSolver::positionAtTile` ✓（和游戏里同一套解算 ✓），颜色用渲染器默认那对
   `fill`/`stroke` ✓，起点绿点、终点红点 ✓，沿进度从 stroke 渐变到 fill 便于看走向 ✓；
   `--time-color` 改成按**谱面时间**六档彩虹（`timeColorAt`，与 1px=1tile 瓦片同一函数 ✓）。
-- **`--padding F`**：画布留白比例（默认 0.02 = 四边各留 2%，是"看得见的黑边"的来源；
-  `--padding 0` = 内容**贴边**）。实测四边留白与 `padding` 精确对应（16K 上 2% → 左右 327 px、
+- **`--padding F`**：画布留白比例（**默认 0 = 内容贴边、不留黑边**；给正数才四周留白，
+  例如 `--padding 0.02` = 四边各留 2%）。实测四边留白与 `padding` 精确对应（16K 上 2% → 左右 327 px、
   上下 131 px；`--padding 0` → 墨包围盒 `x[0,16383] y[0,6615]`，四边 0.00%）。
 - **线宽 / `--thickness N`**：默认 `halfW = clamp(scale x thicknessScale x 0.5, 0.5, 6.0)`。
   注意 `thicknessScale` 只在 native 1px=1unit 下才起效；普通分辨率下永远撞 **0.5 px 下限**，

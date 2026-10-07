@@ -13,7 +13,7 @@ namespace adofai { class Timeline; }   // 库侧类型：不许在全局前置�
 struct LevelMapOptions {
     int   width  = 4096;
     int   height = 4096;
-    float padding = 0.02f;              // 画布留白（比例）
+    float padding = 0.0f;               // 画布留白（比例）；默认 0 = 内容贴边，不留黑边
     uint32_t fillRgba   = 0xDEBB7BFF;   // 轨道主色（与渲染器默认同一对颜色）
     uint32_t strokeRgba = 0x6F5D3DFF;   // 起点的颜色，终点渐变到 fillRgba
     uint32_t bgRgba     = 0x000000FF;   // 默认不透明黑（想透明就传 alpha=0）

@@ -116,19 +116,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   就画出**不同长度**的拖尾。规则：① 差异先出图；② 抓帧必须确定性（`--capture` 已强制
   `trailAdaptive=false`），任何“由帧时间反馈决定的量”都不许进抓帧路径。
   ③ 本沙箱里 `~/.adocao` **不可写** → 重存基线要用工作区内目录（`ADOFAO_GATE_HOME=build/gate-base`）。
-  ④ **抓帧块里新增的日志不许以 `capture:` 开头** ✗（2026-10 真踩过）：`capture-gate.sh` 用
-  "日志里**最后一条** `capture:` 行"核对本次的 `tile=`/`req=`，而自检日志一开始也叫 `capture:` →
-  脚本取到自检那行 → 51 个状态全判 FAIL（门槛**自己**把这个疏忽抓住了 ✓）。自检统一用
-  `capture-selfcheck:` 前缀。
-  ④ **两层兜底（各自的边界要说清 ✗）**：
+  ④ **两层兜底 + 日志前缀**（各自的边界要说清 ✗）：
   * **钉死 + 守卫**（今天这个 bug 的解法）：`--capture` 时 `trailAdaptive=false`，并在抓帧块里
     自检 `trailAdaptive`，为 true 就 `LOG_E`。**负向对照验过**：故意打开 → 日志确实出现
-    `capture: trailAdaptive=true …` ✓。
+    `capture-selfcheck: trailAdaptive=true …` ✓。
   * **自检**（防将来的未知量）：`--capture` 写完 PNG 后再渲染同一帧一次并逐字节比，不一致
-    `LOG_E` + `exit(3)`。**它的边界**：只抓得住**每次渲染都不同**的不确定性（随机/未初始化/竞态），
+    `LOG_E` + `exit(3)`。**它的边界**：只抓得住**每次渲染都不同**的不确定性（随机 / 未初始化 / 竞态），
     **抓不住**"跨帧才漂移"的那类（拖尾 governor 就是 —— 负向对照里两次连续渲染它还没反应过来，
-    所以自检**没响** ✗）。所以新增量时仍要人问一句"它会不会因为机器快几毫秒而变"，
-    再按 ④ 第一条钉死。
+    所以自检**没响** ✗）。所以新增量时仍要人问一句"它会不会因为机器快几毫秒而变"，再按上一条钉死。
+  * **日志前缀**：抓帧块里新增的日志**不许**以 `capture:` 开头 ✗（`capture-gate.sh` 用"日志里最后一条
+    `capture:` 行"核对本次的 `tile=`/`req=`；自检日志一开始也叫 `capture:` → 51 个状态全判 FAIL，
+    门槛**自己**抓住了这个疏忽 ✓）。自检统一用 `capture-selfcheck:` 前缀。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`

@@ -116,10 +116,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   就画出**不同长度**的拖尾。规则：① 差异先出图；② 抓帧必须确定性（`--capture` 已强制
   `trailAdaptive=false`），任何“由帧时间反馈决定的量”都不许进抓帧路径。
   ③ 本沙箱里 `~/.adocao` **不可写** → 重存基线要用工作区内目录（`ADOFAO_GATE_HOME=build/gate-base`）。
-  ④ **机制兜底**：`--capture` 写完 PNG 后会**再渲染同一帧一次并逐字节比**（自检），不一致就 `LOG_E`
-  + `exit(3)` —— 这样将来任何"反馈驱动量"混进抓帧路径都会被当场抓住，**不需要预先知道它是什么**
-  （负向对照验过：故意打开 `trailAdaptive` → rc=3 + 自检失败的日志）。抓帧路径新增任何量时，
-  先问一句"它会不会因为机器快几毫秒而变"。
+  ④ **两层兜底（各自的边界要说清 ✗）**：
+  * **钉死 + 守卫**（今天这个 bug 的解法）：`--capture` 时 `trailAdaptive=false`，并在抓帧块里
+    自检 `trailAdaptive`，为 true 就 `LOG_E`。**负向对照验过**：故意打开 → 日志确实出现
+    `capture: trailAdaptive=true …` ✓。
+  * **自检**（防将来的未知量）：`--capture` 写完 PNG 后再渲染同一帧一次并逐字节比，不一致
+    `LOG_E` + `exit(3)`。**它的边界**：只抓得住**每次渲染都不同**的不确定性（随机/未初始化/竞态），
+    **抓不住**"跨帧才漂移"的那类（拖尾 governor 就是 —— 负向对照里两次连续渲染它还没反应过来，
+    所以自检**没响** ✗）。所以新增量时仍要人问一句"它会不会因为机器快几毫秒而变"，
+    再按 ④ 第一条钉死。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`

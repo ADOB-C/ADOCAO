@@ -2,6 +2,8 @@
 // 这些访问器在 #1 前后都存在（#1 只动三个派生数组），所以这一个工具在两个状态下都能编。
 #include "core/level/LevelData.hpp"
 #include "core/timeline/Timeline.hpp"
+#include "core/timeline/PositionSolver.hpp"
+#include <glm/glm.hpp>
 #include <cstdio>
 #include <string>
 using namespace adofai;
@@ -19,6 +21,12 @@ int main(int argc, char** argv) {
                     (double)tl.tileBPMs()[i], tl.tileIsCW()[i] ? 1 : 0,
                     i < tl.tileDisappearTimes().size() ? tl.tileDisappearTimes()[i] : 0.0,
                     i < tl.tileAppearTimes().size() ? tl.tileAppearTimes()[i] : 0.0);
+    // 真正画到屏幕上的是这个：逐层的行星位置（PositionSolver 的输出）。
+    for (size_t i = 0; i < st.size(); ++i) {
+        glm::dvec2 red(0.0), blue(0.0);
+        PositionSolver::positionAtTile(tl, (double)st[i], (int)i, red, blue);
+        std::printf("pos %zu %.17g %.17g %.17g %.17g\n", i, red.x, red.y, blue.x, blue.y);
+    }
     const auto ts = tl.getHitsoundTimestamps();
     std::printf("# hitsounds=%zu\n", ts.size());
     for (size_t i = 0; i < ts.size() && i < 100000; ++i) std::printf("hs %zu %.17g\n", i, ts[i]);

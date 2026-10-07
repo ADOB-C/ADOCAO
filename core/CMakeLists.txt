@@ -44,9 +44,12 @@ else()
 endif()
 
 target_include_directories(adocao_core PUBLIC ${CMAKE_SOURCE_DIR})
-target_link_libraries(adocao_core
-    PUBLIC glm::glm miniz
-)
+if(ADOCAO_ASSET_ZIP)
+    target_compile_definitions(adocao_core PRIVATE ADOCAO_HAVE_MINIZ=1)
+    target_link_libraries(adocao_core PUBLIC glm::glm miniz)
+else()
+    target_link_libraries(adocao_core PUBLIC glm::glm)
+endif()
 
 # RapidJSON is header-only; expose its include directory to consumers that use
 # LevelData.hpp (which includes <rapidjson/document.h>).

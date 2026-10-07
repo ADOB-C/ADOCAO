@@ -2,35 +2,7 @@
 
 #include "core/util/Logger.hpp"
 
-// 有系统 zlib 就用它 —— 已验证：同一份数据 zlib 2.0s 跑完且逐字节正确，
-// 而 miniz 的 mz_deflate 在 NO_FLUSH 下会吞入整行却不吐输出（1024 行 >120s）。
-// 没有 zlib 时退回 miniz（CI 的 Windows 就是这种情形，可编译即可）。
-#if defined(ADOCAO_HAVE_ZLIB)
-  #include <zlib.h>
-
-
-  using mz_ulong = uLong;
-  #define mz_stream               z_stream
-  #define mz_deflateInit2         deflateInit2
-  #define mz_deflate              deflate
-  #define mz_deflateEnd           deflateEnd
-  #define mz_adler32              adler32
-  #define mz_crc32                crc32
-  #define MZ_OK                   Z_OK
-  #define MZ_STREAM_END           Z_STREAM_END
-  #define MZ_BUF_ERROR            Z_BUF_ERROR
-  #define MZ_DEFLATED             Z_DEFLATED
-  #define MZ_NO_FLUSH             Z_NO_FLUSH
-  #define MZ_FULL_FLUSH           Z_FULL_FLUSH
-  #define MZ_FINISH               Z_FINISH
-  #define MZ_DEFAULT_COMPRESSION  Z_DEFAULT_COMPRESSION
-  #define MZ_DEFAULT_STRATEGY     Z_DEFAULT_STRATEGY
-  #define MZ_CRC32_INIT           crc32(0L, Z_NULL, 0)
-  #define MZ_DEFAULT_WINDOW_BITS  15
-#else
-  #error "分带并行 PNG 写出需要系统 zlib（core/CMakeLists.txt 在找不到时会 FetchContent 取一份）。\
- miniz 的 mz_deflate/mz_inflate 在这条用法下会吞行、也解不开自己写的流 —— 硬错误好过静默写坏 PNG。"
-#endif
+#include "core/map/PngDeflate.hpp"   // PNG 的 deflate 层（统一 zlib）
 
 #include <atomic>
 #include <condition_variable>

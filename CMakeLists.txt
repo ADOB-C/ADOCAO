@@ -139,15 +139,20 @@ set(STEAMAUDIO_LIBRARY "STEAMAUDIO_LIBRARY-NOTFOUND" CACHE FILEPATH "" FORCE)
 FetchContent_MakeAvailable(miniaudio)
 
 # miniz (single-file zip library, public domain)
-FetchContent_Declare(
-    miniz
-    GIT_REPOSITORY https://github.com/richgel999/miniz.git
-    GIT_TAG 3.0.2
-    GIT_SHALLOW TRUE
-)
-set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-FetchContent_MakeAvailable(miniz)
-target_include_directories(miniz PUBLIC ${miniz_SOURCE_DIR})
+# 只服务"资产打成一个 zip"那条路（ADOCAO-data.zip）。ADOFAI.Lib 里它对应
+# ADOFAI_LIB_ASSET_ZIP=OFF：库默认零产品布局、也不背 miniz。
+option(ADOCAO_ASSET_ZIP "资产 zip 支持（私有链 miniz，OFF 则只从磁盘找资产）" ON)
+if(ADOCAO_ASSET_ZIP)
+    FetchContent_Declare(
+        miniz
+        GIT_REPOSITORY https://github.com/richgel999/miniz.git
+        GIT_TAG 3.0.2
+        GIT_SHALLOW TRUE
+    )
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+    FetchContent_MakeAvailable(miniz)
+    target_include_directories(miniz PUBLIC ${miniz_SOURCE_DIR})
+endif()
 
 # tinyfiledialogs (single-header C library)
 FetchContent_Declare(

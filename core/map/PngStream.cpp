@@ -4,8 +4,8 @@
 
 #include <cstring>
 
-// miniz 的底层 deflate API（依赖里已经有了；audio 用它做 zip，core 用来做 PNG）
-#include "miniz.h"
+// deflate 走共用垫片（zlib）—— 与 PngBand 同一套名字，源码里的 mz_* 调用不用改
+#include "core/map/PngDeflate.hpp"
 
 
 

@@ -1,7 +1,10 @@
 #include "DataFile.hpp"
 #include "AssetPaths.hpp"
 #include "Logger.hpp"
-#include "miniz.h"
+
+#ifdef ADOCAO_HAVE_MINIZ
+#  include "miniz.h"
+#endif
 
 #include <fstream>
 #include <cstring>
@@ -28,6 +31,7 @@ std::vector<uint8_t> readDataFile(const std::string& relativePath) {
 
     // 1) 配了 zip 就先在 zip 里找。zip 自己**也按搜索根找**（旧行为只认当前目录，
     //    于是从别的目录启动就找不到 exe 旁边的 ADOCAO-data.zip）。
+#ifdef ADOCAO_HAVE_MINIZ
     if (!opts.zipName.empty()) {
         const std::string zipPath = resolveAsset(opts.zipName);
         mz_zip_archive zip;
@@ -44,6 +48,10 @@ std::vector<uint8_t> readDataFile(const std::string& relativePath) {
             }
         }
     }
+#else
+    // 这个构建没编 miniz：跳过 zip 那条路，直接走 dataDir / 搜索根 / 直接路径
+    // （行为与调用方把 zipName 留空完全一致）。
+#endif
 
     // 2) <dataDir>/<相对路径>（也按搜索根找）
     if (!opts.dataDir.empty()) {

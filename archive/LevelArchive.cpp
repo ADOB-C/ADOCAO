@@ -187,134 +187,163 @@ bool decompressLevelArchive(const char* data, size_t length, LevelArchiveKind ki
 }
 
 // ---------------------------------------------------------------- 流式解压（乒乓半窗）
+// 三方状态（lzma_stream / ZSTD_DStream / 半窗缓冲）全部藏在这里：公共头因此零三方依赖，
+// 只链 adocao_archive 的消费者不必配 lzma/zstd 的头文件路径（ADOCAO 的 app 就是这种）。
+struct ArchiveStream::Impl {
+    std::vector<char> store;
+    char* buf[2] = {nullptr, nullptr};
+    size_t half = 0, len = 0, carry = 0, cur = 0;
+    bool eof = false, failed = false, stuck = false, started = false;
+    bool finalDelivered = false;   // 只含 carry 的尾块是否已经交付过
+    std::string error;
+    const char* in = nullptr;
+    size_t inLen = 0;
+    LevelArchiveKind kind = LevelArchiveKind::Plain;
+    lzma_stream strm = LZMA_STREAM_INIT;
+    ZSTD_DStream* ds = nullptr;
+    ZSTD_inBuffer zin{nullptr, 0, 0};
+    bool frameDone = false;
+};
+
+ArchiveStream::ArchiveStream() : m_impl(new Impl()) {}
+
 ArchiveStream::~ArchiveStream() { release(); }
 
 void ArchiveStream::release() {
-    if (m_kind == LevelArchiveKind::Xz && m_started) lzma_end(&m_strm);
-    if (m_ds) { ZSTD_freeDStream(m_ds); m_ds = nullptr; }
-    m_started = false;
+    if (m_impl->kind == LevelArchiveKind::Xz && m_impl->started) lzma_end(&m_impl->strm);
+    if (m_impl->ds) { ZSTD_freeDStream(m_impl->ds); m_impl->ds = nullptr; }
+    m_impl->started = false;
 }
 
 bool ArchiveStream::open(const char* data, size_t length, LevelArchiveKind kind, size_t halfSize) {
     release();
     if (kind == LevelArchiveKind::Plain || halfSize < 4096) {
-        m_error = "streaming requires a compressed container and halfSize >= 4 KiB";
-        m_failed = true;
+        m_impl->error = "streaming requires a compressed container and halfSize >= 4 KiB";
+        m_impl->failed = true;
         return false;
     }
-    m_kind = kind;
-    m_half = halfSize;
-    m_store.assign(m_half * 2, 0);          // 一次分配，两块半窗地址固定
-    m_buf[0] = m_store.data();
-    m_buf[1] = m_store.data() + m_half;
-    m_in = data;
-    m_inLen = length;
-    m_len = m_carry = m_cur = 0;
-    m_eof = m_failed = m_stuck = m_started = false;
-    m_finalDelivered = false;
+    m_impl->kind = kind;
+    m_impl->half = halfSize;
+    m_impl->store.assign(m_impl->half * 2, 0);          // 一次分配，两块半窗地址固定
+    m_impl->buf[0] = m_impl->store.data();
+    m_impl->buf[1] = m_impl->store.data() + m_impl->half;
+    m_impl->in = data;
+    m_impl->inLen = length;
+    m_impl->len = m_impl->carry = m_impl->cur = 0;
+    m_impl->eof = m_impl->failed = m_impl->stuck = m_impl->started = false;
+    m_impl->finalDelivered = false;
 
     if (kind == LevelArchiveKind::Xz) {
-        lzma_ret r = xzDecoderInit(&m_strm);
-        if (r != LZMA_OK) { m_error = lzmaReason(r); m_failed = true; return false; }
-        m_strm.next_in = reinterpret_cast<const uint8_t*>(m_in);
-        m_strm.avail_in = m_inLen;
+        lzma_ret r = xzDecoderInit(&m_impl->strm);
+        if (r != LZMA_OK) { m_impl->error = lzmaReason(r); m_impl->failed = true; return false; }
+        m_impl->strm.next_in = reinterpret_cast<const uint8_t*>(m_impl->in);
+        m_impl->strm.avail_in = m_impl->inLen;
     } else {
-        m_ds = ZSTD_createDStream();
-        if (!m_ds) { m_error = "out of memory"; m_failed = true; return false; }
-        size_t zr = ZSTD_initDStream(m_ds);
-        if (ZSTD_isError(zr)) { m_error = ZSTD_getErrorName(zr); m_failed = true; return false; }
-        m_zin = ZSTD_inBuffer{m_in, m_inLen, 0};
-        m_frameDone = false;
+        m_impl->ds = ZSTD_createDStream();
+        if (!m_impl->ds) { m_impl->error = "out of memory"; m_impl->failed = true; return false; }
+        size_t zr = ZSTD_initDStream(m_impl->ds);
+        if (ZSTD_isError(zr)) { m_impl->error = ZSTD_getErrorName(zr); m_impl->failed = true; return false; }
+        m_impl->zin = ZSTD_inBuffer{m_impl->in, m_impl->inLen, 0};
+        m_impl->frameDone = false;
     }
-    m_started = true;
+    m_impl->started = true;
     return true;
 }
 
 bool ArchiveStream::pump(size_t carry) {
-    const size_t space = m_half - carry;
+    const size_t space = m_impl->half - carry;
     if (space == 0) return false;
-    char* dst = m_buf[m_cur] + carry;
+    char* dst = m_impl->buf[m_impl->cur] + carry;
 
-    if (m_kind == LevelArchiveKind::Xz) {
-        m_strm.next_out = reinterpret_cast<uint8_t*>(dst);
-        m_strm.avail_out = space;
+    if (m_impl->kind == LevelArchiveKind::Xz) {
+        m_impl->strm.next_out = reinterpret_cast<uint8_t*>(dst);
+        m_impl->strm.avail_out = space;
         for (;;) {
-            const size_t outBefore = m_strm.avail_out;
-            const size_t inBefore = m_strm.avail_in;
-            lzma_ret r = lzma_code(&m_strm, LZMA_FINISH);
-            if (r == LZMA_STREAM_END) { m_eof = true; break; }
-            if (r != LZMA_OK) { m_error = lzmaReason(r); m_failed = true; return false; }
-            if (m_strm.avail_out == 0) break;                 // 半窗满，剩下的下次再解
+            const size_t outBefore = m_impl->strm.avail_out;
+            const size_t inBefore = m_impl->strm.avail_in;
+            lzma_ret r = lzma_code(&m_impl->strm, LZMA_FINISH);
+            if (r == LZMA_STREAM_END) { m_impl->eof = true; break; }
+            if (r != LZMA_OK) { m_impl->error = lzmaReason(r); m_impl->failed = true; return false; }
+            if (m_impl->strm.avail_out == 0) break;                 // 半窗满，剩下的下次再解
             // 输入吃完又没产出：流被截断了，别再空转
-            if (m_strm.avail_in == inBefore && m_strm.avail_out == outBefore) {
-                m_error = "truncated xz data"; m_failed = true; return false;
+            if (m_impl->strm.avail_in == inBefore && m_impl->strm.avail_out == outBefore) {
+                m_impl->error = "truncated xz data"; m_impl->failed = true; return false;
             }
         }
-        m_len = carry + (space - m_strm.avail_out);
+        m_impl->len = carry + (space - m_impl->strm.avail_out);
         return true;
     }
 
     ZSTD_outBuffer ob{dst, space, 0};
     for (;;) {
         // 上一帧已经收尾、输入也吃完了：不要再喂（再喂会去读下一帧的帧头，被误判截断）
-        if (m_frameDone && m_zin.pos >= m_zin.size) { m_eof = true; break; }
-        const size_t remaining = ZSTD_decompressStream(m_ds, &ob, &m_zin);
-        if (ZSTD_isError(remaining)) { m_error = ZSTD_getErrorName(remaining); m_failed = true; return false; }
-        m_frameDone = (remaining == 0);                      // 0 = 当前帧结束（后面可能还有帧）
+        if (m_impl->frameDone && m_impl->zin.pos >= m_impl->zin.size) { m_impl->eof = true; break; }
+        const size_t remaining = ZSTD_decompressStream(m_impl->ds, &ob, &m_impl->zin);
+        if (ZSTD_isError(remaining)) { m_impl->error = ZSTD_getErrorName(remaining); m_impl->failed = true; return false; }
+        m_impl->frameDone = (remaining == 0);                      // 0 = 当前帧结束（后面可能还有帧）
         if (ob.pos == ob.size) break;                        // 半窗满，剩下的下次再解
-        if (m_zin.pos >= m_zin.size) {                       // 输入吃完
-            if (!m_frameDone) { m_error = "truncated zstd data"; m_failed = true; return false; }
-            m_eof = true;
+        if (m_impl->zin.pos >= m_impl->zin.size) {                       // 输入吃完
+            if (!m_impl->frameDone) { m_impl->error = "truncated zstd data"; m_impl->failed = true; return false; }
+            m_impl->eof = true;
             break;
         }
     }
-    m_len = carry + ob.pos;
+    m_impl->len = carry + ob.pos;
     return true;
 }
 
 bool ArchiveStream::next() {
-    if (m_failed) return false;
-    if (m_failed || (m_eof && m_carry == 0)) return false;
+    if (m_impl->failed) return false;
+    if (m_impl->failed || (m_impl->eof && m_impl->carry == 0)) return false;
 
-    const size_t carry = m_carry;
+    const size_t carry = m_impl->carry;
     // 残缺值本身就把半窗占满了：消费者一点都吃不进去，再给也没用
-    if (carry >= m_half) {
-        if (!m_eof) m_stuck = true;
+    if (carry >= m_impl->half) {
+        if (!m_impl->eof) m_impl->stuck = true;
         return false;
     }
-    const size_t prev = m_cur;
-    m_cur = 1 - m_cur;                      // 换到另一半
+    const size_t prev = m_impl->cur;
+    m_impl->cur = 1 - m_impl->cur;                      // 换到另一半
     if (carry > 0) {
         // 上一块末尾那 carry 个字节是残缺值，拷到新块开头，再接着解压
-        if (carry > m_len) { m_error = "carry beyond window"; m_failed = true; return false; }
-        std::memmove(m_buf[m_cur], m_buf[prev] + (m_len - carry), carry);
+        if (carry > m_impl->len) { m_impl->error = "carry beyond window"; m_impl->failed = true; return false; }
+        std::memmove(m_impl->buf[m_impl->cur], m_impl->buf[prev] + (m_impl->len - carry), carry);
     }
-    m_carry = 0;
+    m_impl->carry = 0;
     if (!pump(carry)) return false;
     // 一个新字节都没解出来：消费者上次连一个完整值都凑不齐 -> 单个值比半窗还大
     // （流刚好结束时也算：同样的字节再给一遍也还是吃不下，必须让调用方退回整份解压）
-    if (m_len == carry) {
+    if (m_impl->len == carry) {
         // 一个新字节都没解出来，而消费者上次连一个完整值都没凑齐。
-        if (m_eof) {
+        if (m_impl->eof) {
             // 流已经结束：这一块只含 carry。必须**交付一次**，否则这几个字节就永远丢了
             // （典型场景：帧结束时半窗正好填满，eof 要等下一次调用才发现）。
-            if (m_finalDelivered) return false;
-            m_finalDelivered = true;
+            if (m_impl->finalDelivered) return false;
+            m_impl->finalDelivered = true;
             return true;
         }
         // 流还没结束 = 单个值比半窗还大 -> stuck，调用方退回整份解压
-        m_stuck = true;
+        m_impl->stuck = true;
         return false;
     }
     return true;
 }
 
 void ArchiveStream::consume(size_t completeBytes) {
-    if (completeBytes > m_len) completeBytes = m_len;
-    m_carry = m_len - completeBytes;
+    if (completeBytes > m_impl->len) completeBytes = m_impl->len;
+    m_impl->carry = m_impl->len - completeBytes;
 }
 
 // ---------------- core 的后端钩子实现（依赖倒置的"实现"这一侧）----------------
+
+// 访问器都在这里定义（Impl 在头里是不完整类型，没法内联）
+const char* ArchiveStream::data() const { return m_impl->buf[m_impl->cur]; }
+size_t ArchiveStream::size() const { return m_impl->len; }
+bool ArchiveStream::failed() const { return m_impl->failed; }
+bool ArchiveStream::stuck() const { return m_impl->stuck; }
+bool ArchiveStream::eof() const { return m_impl->eof; }
+size_t ArchiveStream::halfSize() const { return m_impl->half; }
+const std::string& ArchiveStream::error() const { return m_impl->error; }
 
 namespace archive {
 

@@ -30,6 +30,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `assets/hitsoundsKick.wav`（P1 真踩过，而且**像素门槛全程 `--no-hitsound` 看不见**）。现在拼接统一走
   `withTrailingSlash()`；门槛也补了守卫：清单里带 `+hitsounds` 的状态会真的加载 WAV，且对**所有**状态断言
   日志里没有 `Hitsound: Cannot open` / `Failed to read WAV`（负向对照验过：打断补斜杠那步立刻变红）。
+- **`archive` 的公共头是 pimpl 的**（2026-10，ADOFAI.Lib 那边提的补丁）：`ArchiveStream` 的三方状态
+  （`lzma_stream`/`ZSTD_DStream`/半窗缓冲）都在 `.cpp` 里的 `struct ArchiveStream::Impl`，头里只有
+  `std::unique_ptr<Impl>` + 7 个访问器声明 → **`archive/LevelArchive.hpp` 不含任何 lzma/zstd 类型**，
+  `adocao_archive` 的 `liblzma libzstd_static` 因此是**真正 PRIVATE**（消费者不必配压缩库头路径）。
+  改 `ArchiveStream` 时新状态一律加进 `Impl`，别往头里塞成员。注意 `tests/level_parse_test.cpp`
+  **自己**在用 lzma/zstd API 造压缩样本（`lzma_easy_buffer_encode` / `ZSTD_compress`），所以那个
+  测试目标的 include 与链接依赖不能跟着删。
+- **`ADOCAO_ASSET_ZIP`**（根 CMake，默认 ON）：OFF 时 `DataFile.cpp` 不编 zip 那条路
+  （`ADOCAO_HAVE_MINIZ`），core 不链 miniz。**这是 OFF 能成立的前提**：PNG 写出统一走 zlib
+  （`core/map/PngDeflate.hpp` 把 zlib 名字映射成 `mz_*`，`PngBand`/`PngStream` 共用），
+  于是 miniz 的唯一使用者只剩 `DataFile`。实测 OFF：core 里 0 个 `mz_` 符号、`adocao image`
+  解码后像素与 ON 完全一致（连 PNG 文件字节数都相同）、门槛子集逐字节相同。
+  注意 `core/map/**` 不进 ADOFAI.Lib（见 PLAN.md），所以库里 OFF 天然成立、也不需要 zlib。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`

@@ -1,14 +1,11 @@
 #pragma once
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <string>
-#include <vector>
 
 #include "core/level/ByteSource.hpp"   // 容器种类 / magic 判断 / WindowSource 接口都在 core
-#include "Install.hpp"                     // install()（本文件带 lzma/zstd 头，别让 app 引它）
-
-#include <lzma.h>
-#include <zstd.h>
+#include "Install.hpp"                 // install()：这个头**不含** lzma/zstd 类型，app 可以放心引
 
 // 谱面容器识别与解压。
 //
@@ -44,40 +41,32 @@ class ArchiveStream : public WindowSource {
 public:
     static constexpr size_t kDefaultHalf = 96u << 20;   // 96 MB（半窗）
 
-    ArchiveStream() = default;
-    ~ArchiveStream();
+    ArchiveStream();
+    ~ArchiveStream() override;
     ArchiveStream(const ArchiveStream&) = delete;
     ArchiveStream& operator=(const ArchiveStream&) = delete;
 
     bool open(const char* data, size_t length, LevelArchiveKind kind,
               size_t halfSize = kDefaultHalf) override;
     bool next() override;              // 装填下一块；false = 结束（或出错/卡住）
-    const char* data() const override { return m_buf[m_cur]; }
-    size_t size() const override { return m_len; }
+    // 访问器都在 .cpp 里定义：Impl 在头里是不完整类型，内联实现没法解引用它。
+    const char* data() const override;
+    size_t size() const override;
     void consume(size_t completeBytes) override;   // 记录残缺尾部长度，下一块补在开头
-    bool failed() const override { return m_failed; }
-    bool stuck() const override { return m_stuck; }   // 单个值 > 半窗，调用方退回整份解压
-    bool eof() const override { return m_eof; }
-    size_t halfSize() const override { return m_half; }
-    const std::string& error() const override { return m_error; }
+    bool failed() const override;
+    bool stuck() const override;       // 单个值 > 半窗，调用方退回整份解压
+    bool eof() const override;
+    size_t halfSize() const override;
+    const std::string& error() const override;
 
 private:
+    // lzma_stream / ZSTD_DStream 等三方状态藏在 Impl 里（pimpl）：这个头因此**不含任何
+    // lzma/zstd 类型**，只 include 它的消费者不必配压缩库的头文件路径。
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
+
     bool pump(size_t carry);
     void release();
-
-    std::vector<char> m_store;
-    char* m_buf[2] = {nullptr, nullptr};
-    size_t m_half = 0, m_len = 0, m_carry = 0, m_cur = 0;
-    bool m_eof = false, m_failed = false, m_stuck = false, m_started = false;
-    bool m_finalDelivered = false;   // 只含 carry 的尾块是否已经交付过
-    std::string m_error;
-    const char* m_in = nullptr;
-    size_t m_inLen = 0;
-    LevelArchiveKind m_kind = LevelArchiveKind::Plain;
-    lzma_stream m_strm = LZMA_STREAM_INIT;
-    ZSTD_DStream* m_ds = nullptr;
-    ZSTD_inBuffer m_zin{nullptr, 0, 0};
-    bool m_frameDone = false;
 };
 
 // archive 模块的入口：注册后端（core 通过 ArchiveBackend 钩子调用这里的实现）

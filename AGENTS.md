@@ -109,6 +109,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   边界的唯一验证手段：本地最大谱（primer 6.84e7 层）只有目标的 **3%**，真造 21 亿层的谱不可能。
   已完成阶段 1–2（"int64 算、收窄前显式判、装不下就喊"）；**阶段 3**（循环索引、`floor` 本身的类型、
   GL 分批）未做，见 `docs/scale-1e8-to-2e9.md` §6.1。
+- **像素/渲染类问题：先出差异图，再谈实验**（2026-10 血的教训）。一个“值逐位相同却 31/51 个抓帧状态
+  变色”的谜，我做了**七个**受控实验（值 / 调用形状 / 串行并行 / 类布局 / FMA 收缩 / 堆分配 / 线程历史）
+  全部否掉，最后**做了一张三联差异图（基线 | 新版 | 差异×N）**，一眼就看到“**只有拖尾不同**”——
+  真因是 `--capture` **没有关掉拖尾的自适应采样率**（它由测得的**帧时间**驱动），于是“快了几毫秒”
+  就画出**不同长度**的拖尾。规则：① 差异先出图；② 抓帧必须确定性（`--capture` 已强制
+  `trailAdaptive=false`），任何“由帧时间反馈决定的量”都不许进抓帧路径。
+  ③ 本沙箱里 `~/.adocao` **不可写** → 重存基线要用工作区内目录（`ADOFAO_GATE_HOME=build/gate-base`）。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`

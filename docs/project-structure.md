@@ -3,7 +3,7 @@
 > 状态：**定稿 v4**——§9 全部决策已拍板并回填正文。本版修订（决策 10）：Easing 与 Camera 同目录、
 > TileGeometry CPU 版废弃改 GLSL、`core/geometry` 取消。
 > **2026-10 补记：决策 10 已落地** —— `render/TileShape.*`（形状表）+ `assets/shaders/tile.vert`（VS 展开）+
-> 图标并入实例流；旧的 CPU 几何改名 `TileGeometryReference.cpp` 只当测试基准。验收口径见 AGENTS.md
+> 图标并入实例流；旧的 CPU 几何改名 `TileGeometryReference.cpp` 只当测试基准。验收口径见 `docs/rendering.md`
 > 的"砖块几何"段（CPU/GPU 逐位 + 像素逐字节三层）。
 > 代码进度：**P1–P5 全部完成** —— P1+P2（目录搬迁 + CMake 拆库）、P3（PlaybackEngine → `core/timeline`）、
 > P4（app 拆分：GameWindow → CameraController/LevelScene；LauncherWindow → `app/wizard/` 分页，见 §4.2/4.3）、

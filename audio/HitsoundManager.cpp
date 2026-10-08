@@ -245,7 +245,7 @@ bool HitsoundManager::preSynthesize(const std::vector<HitsoundTimestampGroup>& g
     // --- Mixing -------------------------------------------------------------
     // ONE mixing path, and it is the authentic one: 16-bit accumulation with the
     // sum clamped on every addition, exactly like the original HitSoundGenerator.
-    // A float path with a soft limiter was tried and deleted (see AGENTS.md): it
+    // A float path with a soft limiter was tried and deleted (see docs/audio.md): it
     // changed 94.5% of the samples and sounded wrong. Only WHERE the work happens
     // changes here, never the result.
     //

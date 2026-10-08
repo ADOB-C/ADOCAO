@@ -279,16 +279,12 @@ void main() { fragColor = vProbe; }
                              c ? "y" : "x", bits(got[c]).c_str(), bits(want[c]).c_str(), dev);
                     }
                 }
-                // 图标 z 的三个常量（砖的 z 恒 0，由实例偏移里的砖 Z 负责）
-                if (s >= kTileSlots) {
-                    int part = (s - kTileSlots) / kIconSlots;
-                    float wantZ = (part == 0) ? kIconZBase : (kIconZBase + kIconZExtra);
-                    if (std::memcmp(&got[2], &wantZ, 4) != 0) {
-                        fail("形状 %zu 图标槽 %d z: GPU %s ≠ %s", base + (size_t)i, s,
-                             bits(got[2]).c_str(), bits(wantZ).c_str());
-                    }
-                } else if (got[2] != 0.0f) {
-                    fail("形状 %zu 砖槽 %d z: GPU %s ≠ 0", base + (size_t)i, s, bits(got[2]).c_str());
+                // 局部 z 一律 0：砖与图标**共面**，砖 Z 由实例偏移里的 tileZ(i,n) 负责，
+                // 图标与砖、图标之间的先后由索引表顺序决定。
+                // （曾经图标抬高 kIconZBase/kIconZExtra = 0.002/0.003，那是 bug：砖与砖的间距
+                //   只有 kMaxTileZ/(n-1)，抬高会让图标穿透前面上千块砖 —— 见 tile.vert 的注释。）
+                if (got[2] != 0.0f) {
+                    fail("形状 %zu 槽 %d z: GPU %s ≠ 0", base + (size_t)i, s, bits(got[2]).c_str());
                 }
             }
         }

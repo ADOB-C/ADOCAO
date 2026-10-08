@@ -64,7 +64,8 @@ constexpr int kFlagTexel = kTexelsPerShape - 1;
 // 图标（`TileMesh.cpp` 的 IR / IS / 三种颜色）
 constexpr float kIconRadius = 0.11f;
 constexpr int   kIconSegments = 16;
-constexpr float kIconZBase = 0.002f, kIconZExtra = 0.003f;
+// 图标**不再抬高**：与砖共面，谁盖谁由索引表顺序决定（见 assets/shaders/tile.vert 的注释）。
+// （原来这里有两个常量 0.002/0.003，但全仓库无人使用 —— 真正的 z 在 tile.vert 里算。）
 constexpr float kTwirlColor[3] = {0.502f, 0.0f, 0.502f};
 constexpr float kSSUpColor[3]  = {1.0f, 0.0f, 0.0f};
 constexpr float kSSDownColor[3]= {0.0f, 0.0f, 1.0f};

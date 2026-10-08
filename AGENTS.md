@@ -147,6 +147,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `scripts/run.sh --debugger` | `scripts/release.sh`（支持 x.y.z-AlphaN/-BetaN/-RcN）
   `scripts/make-app.sh`（macOS：把 `build/adocao` + `assets/` 打成自包含的 `build/adocao.app`，含 ad-hoc 签名；CI 的 macOS job 也用同一个脚本）
   `build.sh`（已有 build/ 缓存且不带参数 = 增量构建，不提问）
+- **联网只看局部，绝不整份拉进上下文（2026-10 真亏过 3 元）**：要参考实现/资料时，一律
+  `curl -sS -o build/ref/xxx <raw-url>` 落到工作区，再用 `grep`/`sed` 看那几行；**不要** `web_fetch`
+  大文件。尤其 **仓库树/API 列表**：一次 `git/trees?recursive=1` 就是 72 KB / 3.4 万 token（真干过），
+  需要"有哪些文件"时改成 `curl` + `grep -o '"path":"[^"]*"' | sort -u` 在本地筛。
+  GitHub 的 raw 文件路径形如 `https://raw.githubusercontent.com/<owner>/<repo>/main/<path>`。
 
 
 ## 细节文档（AGENTS 只留铁律与索引 —— 按需读，别全文读）

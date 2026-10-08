@@ -44,9 +44,13 @@ out vec4 vProbe;
 uniform vec2 uProbeSize;   // (W, H)：像素画布尺寸
 #endif
 
-// 图标（与 TileMesh.cpp 的 IR/IS/三种颜色/两个 z 偏移一致）
-const float kIconZBase  = 0.002;
-const float kIconZExtra = 0.003;
+// 图标（与 TileMesh.cpp 的 IR/IS/三种颜色一致）
+// z 偏移曾经是 0.002 / 0.003，那是**错的**：砖与砖的间距只有 kMaxTileZ/(n-1)
+// （677 万层时 1.3e-6），抬高 0.002 等于让图标穿透前面约 1500 块砖（5564 层的谱也穿透 1 块多）。
+// 现在与砖**完全共面**：谁盖谁由绘制序决定（索引表：描边 → 填充 → twirl → ssUp → ssDn）——
+// 和砖自己的描边/填服用的是同一套机制（GL_LEQUAL，同深度靠后来者赢）。
+const float kIconZBase  = 0.0;
+const float kIconZExtra = 0.0;
 const vec3  kTwirlColor = vec3(0.502, 0.0, 0.502);
 const vec3  kSSUpColor  = vec3(1.0, 0.0, 0.0);
 const vec3  kSSDownColor= vec3(0.0, 0.0, 1.0);

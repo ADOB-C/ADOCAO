@@ -57,11 +57,25 @@
   - core 侧已有先例：headless 探针直接跑 PositionSolver/sampleTrail（见拖尾调研用的 trailprobe）；缺口在离屏 GL 上下文（headless GLFW / EGL）+ 渲染循环的时间源——无音频设备时不能依赖音频回调推进 m_readCursor，需固定步长驱动
 - [ ] MoveCamera（5 种 relativeTo 模式）——Easing 唯一规划使用方（Camera 缓动）
 - [ ] PositionTrack：relativeTo、rotation、scale、opacity、stickToFloors
-- [ ] Bloom / Flash 特效
+- [ ] **ScaleRadius**（继承状态 + 逐层累积偏移）：官方 `scnGame 1294/1380/758` —— `radiusScale = scale/100`
+      默认 1、继承到下一个事件；`val4 += direction(entryangle) * ((1 - radiusScale) * tileSize)` 逐层累加后
+      加到砖位，**叠加在 PositionTrack 偏移之上**。
+      参照 Re_ADOJAS（本机 `~/Repos/Re_ADOJAS`）`1edfd69`；**幂等陷阱**（他们真踩过，`5a5f5b7`）：
+      这个偏移必须在**每次 `copyTo` 之后恰好应用一次**（`_tileOffsetsApplied` 类标志 + 每次 copyTo 复位），
+      否则会在没有 copyTo 的路径上重复叠加 —— 探针期望 `base+[5,3]`，实际得到 `base+[9,3]`。
+- [ ] **Hold / Release**（DLC 长按事件）：长按带渲染（每个 hold 一个 mesh、uniform 驱动填充）+ `holdLength`
+      预计算与时长 + 手动判定（按下并保持 / 松手即判定 / 提前松手算 fail / 按键跨连续 hold 链保持）+
+      相机跟随滑动（官方 `camy.SetHoldOffset` + `UpdateFollowCam`）+ 带子跟随起点砖的运行时 MoveTrack。
+      参照 Re_ADOJAS `5437c09`（素材+时序）→ `b7f6e2d`（渲染）→ `b480570`/`b7de28d`（判定）→ `3b13075`（相机）→ `de517a9`（MoveTrack）
+- [ ] **MultiPlanet**（N 星布局）：运行时行星池 + 逐砖活动列表 + 2..8 星布局与枢轴模拟；行星数变化时播
+      `VehiclePositive/Negative` 打拍音。
+      参照 Re_ADOJAS `81a04b2`（数据层/枢轴）→ `18761a9`（打拍音）→ `d809709`（池与布局）
+- [ ] Bloom / Flash 特效：官方 Hidden/VideoBloom shader，`MediumAmount` 定标 = **0.28**（参照 Re_ADOJAS `5931618`/`c34dcf6`）
 
 ### 架构
 - [ ] **加载期常驻内存**（"十亿层"的真正瓶颈，2026-10 实测）：MYC 走真无头 `adocao image`
-      （只加载 + 解算、不建 mesh）峰值就是 **1560 MB**，而 mesh 只占 ~430 MB —— 下一仗在
+      （只加载 + 解算、不建 mesh）峰值 **1436 MB / 212 B/层**（2026-10-08 复测；早期记的 1560 MB 已过时），
+      而 mesh 只占 ~430 MB —— 下一仗在
       `Tile`/`tileBPMs`/`FastAction`/timeline 的窗口化与 checkpoint
 - [ ] 帧率上限从编译期常量改为运行时配置（LauncherConfig 选项）
 - [ ] 缩放范围可配置（min/max zoom）

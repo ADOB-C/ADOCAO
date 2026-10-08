@@ -312,6 +312,27 @@ void TileMesh::ensureDrawList(float viewL, float viewR, float viewB, float viewT
         } else {
             cullRange(0, n, vl, vr, vb, vt, camX, camY, m_listTiles, m_listAttr);
         }
+
+        // 窗口相对 Z（2026-10，用户指出）：全局归一化 `kMaxTileZ*(1-i/(n-1))` 的每层间距是
+        // 9/(n-1) —— MYC 677 万层只有 **1.33e-6**，而 24 bit 深度在正交 0.1→200 上的分辨率是
+        // **1.19e-5**：间距只有分辨率的 1/9，于是"相邻砖在深度上等于同一个值"，谁盖谁由
+        // m_drawOrder（unordered_map 迭代序 + 组内降序）决定，**而不是层号** —— 屏幕只画 3 块砖
+        // 也一样（Z 只看全局层号与总层数）。现在改成按**本次可见窗口** [i0,i1] 归一化：可见几百砖
+        // 时每层间距 0.01~0.05（分辨率的 1000 倍），深度测试真正生效、前后由层号决定。
+        // 只在重建列表时算（平移分支不碰 Z），且不增加任何上传 —— offZ 本来就每帧上传。
+        if (!m_listTiles.empty()) {
+            int i0 = (int)m_listTiles[0], i1 = i0;
+            for (uint32_t t : m_listTiles) {
+                const int v = (int)t;
+                if (v < i0) i0 = v;
+                if (v > i1) i1 = v;
+            }
+            const float span = (i1 > i0) ? (float)(i1 - i0) : 1.0f;
+            for (size_t k = 0; k < m_listTiles.size(); k++) {
+                const float u = (float)((int)m_listTiles[k] - i0) / span;   // 0 = 窗口内最早（最近）
+                m_listAttr[k * 5 + 2] = kMaxTileZ * (1.0f - u);
+            }
+        }
         m_vl = viewL; m_vr = viewR; m_vb = viewB; m_vt = viewT;
         m_listValid = true;
         m_listUploaded = false;

@@ -10,7 +10,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 APP="$ROOT/build/adocao"
-if [ ! -x "$APP" ]; then echo "缺少 $APP（先构建）"; exit 1; fi
+if [ ! -x "$APP" ]; then echo "缺少 ${APP}（先构建）"; exit 1; fi
 fail=0
 
 # ① 正向：含 bpmMultiplier: 0.5 的谱必须走快路径

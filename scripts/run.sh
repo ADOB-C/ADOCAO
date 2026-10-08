@@ -46,7 +46,7 @@ if [ -n "$DEBUGGER" ]; then
         fi
     fi
     if ! command -v "$DEBUGGER" >/dev/null 2>&1; then
-        echo "未找到调试器: $DEBUGGER（可用 --debugger lldb / gdb 指定）" >&2
+        echo "未找到调试器: ${DEBUGGER}（可用 --debugger lldb / gdb 指定）" >&2
         exit 1
     fi
     echo "▸ $DEBUGGER $BIN $*"

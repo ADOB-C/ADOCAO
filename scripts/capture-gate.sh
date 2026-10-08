@@ -17,6 +17,14 @@
 #   * 记录墙钟、峰值 RSS、`… unique shapes`、`Built track: … -> K shape groups`（K ≈ 每帧 draw 次数）
 # check 逐字节比对；不一致的状态报告差异像素数（有 Pillow 时，可用 ADOCAO_GATE_PY 指定 python3）
 set -u
+# 可移植性（2026-10 真踩过）：shebang 是 /bin/bash，macOS 自带那只是 **3.2**，它有两处和
+# bash 5 不一样，别"顺手清理"回去：
+#   ① `set -u` 下，展开一个"已 set 但为空"的数组 `"${arr[@]}"` 会报 `arr[@]: unbound variable`
+#      → 一律写成 ${arr[@]+"${arr[@]}"}（两代 bash 都对：空数组时展开成 0 个字段）；
+#   ② 变量名紧跟全角字符（如 `$VAR` 后面直接写全角括号）时，多字节字节会被当成变量名的一部分
+#      （报 `CAPDIR?: unbound variable`）→ 变量一律加花括号写。
+# 症状：按路径调用（`./scripts/capture-gate.sh store`）在不带 brew bash 的机器上直接炸，
+# 而用 `bash scripts/…`（PATH 里是 5.x）永远看不出来。CI 的 Linux 是 5.x，同样看不出来。
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
 BIN=build/adocao
@@ -50,6 +58,9 @@ abs() {   # ~ 开头按 $HOME 展开：清单里的本地谱面一律写 ~ 相�
 
 case "$MODE" in
     store)
+        # ⚠️ `--out` 是唯一入口：环境变量 OUT 在开头就被清空（见 MODE/OUT 那段初始化），
+        # 所以 `OUT=… scripts/capture-gate.sh store` 会被**静默忽略**、直接写官方基线
+        # （2026-10 踩过：本想写 baseline.new，结果就地把旧基线覆盖了）。
         OUT="${OUT:-$GATE_HOME/baseline}"
         mkdir -p "$OUT"; CAPDIR=$(cd "$OUT" && pwd)
         : > "$CAPDIR/_run.txt"
@@ -58,7 +69,7 @@ case "$MODE" in
         # 不给 --against 就用默认基线（~/.adocao/gate/baseline）：store / check 一条龙，
         # 也因此不会因为 /tmp 被清而丢基线（真丢过一次）。
         AGAINST="${AGAINST:-$GATE_HOME/baseline}"
-        [ -d "$AGAINST" ] || { echo "✗ 基线目录不存在：$AGAINST（先 store 一次，或用 --against 指定）"; exit 2; }
+        [ -d "$AGAINST" ] || { echo "✗ 基线目录不存在：${AGAINST}（先 store 一次，或用 --against 指定）"; exit 2; }
         OUT=$(cd "$AGAINST" && pwd)
         # 临时目录留在仓库的 build/ 下：基线要长期保留（放 ~/.adocao），但**临时**的抓帧文件必须
 # 在可写区域内 —— 在受限沙箱里跑时，往工作区外写会被直接拒掉，抓帧会静默不做。
@@ -67,8 +78,8 @@ SCRATCH="${SCRATCH:-build/gate-scratch}"
         ;;
     *) usage ;;
 esac
-[ -x "$BIN" ] || { echo "✗ 没有 $BIN（先 ./build.sh）"; exit 1; }
-[ -f "$STATES" ] || { echo "✗ 没有 $STATES（跑 python3 tests/gen_render_fixtures.py）"; exit 1; }
+[ -x "$BIN" ] || { echo "✗ 没有 ${BIN}（先 ./build.sh）"; exit 1; }
+[ -f "$STATES" ] || { echo "✗ 没有 ${STATES}（跑 python3 tests/gen_render_fixtures.py）"; exit 1; }
 
 run_capture() {   # name chart mode value zoom WxH → 写 $CAPDIR/$name.png；打印一行记录
     local name="$1" chart="$2" mode="$3" value="$4" zoom="$5" size="$6"
@@ -95,13 +106,14 @@ run_capture() {   # name chart mode value zoom WxH → 写 $CAPDIR/$name.png；�
         # `+hitsounds` = 这个状态**加载音色**（默认 --no-hitsound 是为了快与确定，
         # 但那样音色路径就没人覆盖了 —— 真踩过：hitsounds 目录少个尾斜杠只在实玩时暴露）
         local filtered=()
-        for a in "${extra_args[@]}"; do
+        for a in "${extra_args[@]+"${extra_args[@]}"}"; do
             if [ "$a" = "+hitsounds" ]; then hitsound_flag=(); else filtered+=("$a"); fi
         done
-        extra_args=("${filtered[@]}")
+        extra_args=(${filtered[@]+"${filtered[@]}"})
     fi
     /usr/bin/time "$TIME_FLAG" "$BIN" "$chart_abs" --capture "$CAPDIR/$name.png" "${flag[@]}" \
-        --capture-zoom "$zoom" --width "$W" --height "$H" "${hitsound_flag[@]}" "${extra_args[@]}" \
+        --capture-zoom "$zoom" --width "$W" --height "$H" ${hitsound_flag[@]+"${hitsound_flag[@]}"} \
+        ${extra_args[@]+"${extra_args[@]}"} \
         >/dev/null 2>"$CAPDIR/$name.time"
     local rc=$?
     local t1; t1=$(date +%s)
@@ -129,10 +141,10 @@ run_capture() {   # name chart mode value zoom WxH → 写 $CAPDIR/$name.png；�
         echo "FAIL|$name|日志里没有本次 capture 行（拿到的是: ${tline:-空}）"; return 1
     fi
     if [ "$rc" != "0" ] || [ ! -f "$CAPDIR/$name.png" ]; then
-        echo "FAIL|$name|退出码 $rc，没写出 PNG（看 $CAPDIR/$name.time）"; return 1
+        echo "FAIL|$name|退出码 ${rc}，没写出 PNG（看 ${CAPDIR}/${name}.time）"; return 1
     fi
     if [ "$mode" = "tile" ] && [ "$tile" != "$value" ]; then
-        echo "FAIL|$name|抓错砖：tile=$tile 期望 $value（--capture-tile 定点失效）"; return 1
+        echo "FAIL|$name|抓错砖：tile=$tile 期望 ${value}（--capture-tile 定点失效）"; return 1
     fi
     printf 'OK|%s|tile=%s req=%s|zoom=%s|shapes=%s|groups=%s|rss_mb=%s|sec=%s\n' \
         "$name" "${tile:-?}" "${req:-?}" "$zoom" "${shapes:-?}" "${groups:-?}" "${rss:-?}" "$((t1 - t0))"
@@ -189,7 +201,7 @@ done < "$STATES"
 
 echo
 if [ "$MODE" = "store" ]; then
-    echo "基线已存到 $CAPDIR（OK=$((oks)) SKIP=$skips FAIL=$fails）"
+    echo "基线已存到 ${CAPDIR}（OK=$((oks)) SKIP=$skips FAIL=${fails}）"
 else
     echo "capture-gate: 逐字节相同=$oks  不一致=$fails  跳过=$skips"
 fi

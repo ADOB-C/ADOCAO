@@ -16,7 +16,7 @@ BIN="${1:-$BUILD/ADOCAO}"
 APP="$BUILD/ADOCAO.app"
 
 if [ ! -x "$BIN" ]; then
-    echo "❌ 找不到可执行文件: $BIN（先构建：cmake --build build --parallel）" >&2
+    echo "❌ 找不到可执行文件: ${BIN}（先构建：cmake --build build --parallel）" >&2
     exit 1
 fi
 if [ ! -d "$ROOT/assets/shaders" ] || [ ! -d "$ROOT/assets/hitsounds" ]; then

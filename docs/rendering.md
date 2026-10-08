@@ -132,7 +132,7 @@ ADOCAO_TILE_EXACT=1 ./build/tests/adocao_tile_expansion_test tests/charts/shapes
 
 **像素门槛怎么用**（改渲染前先存基线，改完 check）：
 ```
-scripts/capture-gate.sh store                                 # 改动前（默认 ~/.adocao/gate/baseline）
+scripts/capture-gate.sh store                                 # 改动前（默认 ~/Projects/.ADOCAO/gate/baseline）
 # …改代码、重新构建…
 scripts/capture-gate.sh check
 ```
@@ -140,7 +140,7 @@ scripts/capture-gate.sh check
 `<name>|<chart>|<tile|time>|<值>|<zoom>|<WxH>|[额外开关]`。按**砖号**抓帧（`--capture-tile`）而不是按秒 ——
 6 千砖的谱面上按秒给的时刻会随砖时长累积漂移。脚本会断言日志里的 `tile=` 与清单一致（防"抓错时刻"
 这种静默失败），并记录 RSS / `unique shapes` / draw 次数。差异像素统计要 Pillow：
-`ADOCAO_GATE_PY=<带 Pillow 的 python3>`。**基线不入库**（驱动相关），`store` 一次、`check` 多次；默认落在 `$HOME/.adocao/gate/baseline`（`ADOFAO_GATE_HOME` 可改）—— 别写 `/tmp`，会被系统清掉。
+`ADOCAO_GATE_PY=<带 Pillow 的 python3>`。**基线不入库**（驱动相关），`store` 一次、`check` 多次；默认落在 `~/Projects/.ADOCAO/gate/baseline`（`ADOFAO_GATE_HOME` 可改）—— 别写 `/tmp`，会被系统清掉；也别写进仓库，`git clean -xdf` 会连它一起删。
 三条已标定过的灵敏度：砖的绘制顺序反转 → MYC 那帧 278 个像素变；**图标放回拖尾之后**
 （旧 bug 行为）→ 8 个 `*_under_trail` 状态红 13700~29241 个像素（maxdelta ~220）；
 而把一处融合拆成 1 ULP 级扰动 → **7/7 状态完全相同**（8-bit 输出看不出来）—— 所以 ULP 级的

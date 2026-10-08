@@ -30,9 +30,12 @@ ROOT=$(pwd)
 BIN=build/adocao
 STATES=tests/capture_states.txt
 LOG=build/adocao.log
-# 长期保留的东西一律放家目录的统一位置（~/.adocao/）—— /tmp 会被系统定期清掉，
-# 基线丢了就得重存一次（真发生过），重写前的 git 镜像更不能放那儿。
-GATE_HOME="${ADOFAO_GATE_HOME:-$HOME/.adocao/gate}"
+# 长期保留的产物放 `~/Projects/.ADOCAO/`（ADOCAO 系的仓库与镜像都在 `~/Projects` 下，一处收齐）。
+# 两条硬约束：① **别放 `/tmp`** —— 会被系统定期清掉，基线丢了就得重存（真发生过）；
+#            ② **也别放仓库里** —— `git clean -xdf` / `rm -rf build` 会把基线一起删掉，
+#               而基线是**驱动相关、不入库**的东西，重存只会拿"当前输出"当基准，
+#               等于把"改动前"的参照弄丢，门槛就失效了。
+GATE_HOME="${ADOFAO_GATE_HOME:-$HOME/Projects/.ADOCAO/gate}"
 PY="${ADOCAO_GATE_PY:-python3}"
 if /usr/bin/time -l true >/dev/null 2>&1; then TIME_FLAG=-l; else TIME_FLAG=-v; fi
 
@@ -66,12 +69,12 @@ case "$MODE" in
         : > "$CAPDIR/_run.txt"
         ;;
     check)
-        # 不给 --against 就用默认基线（~/.adocao/gate/baseline）：store / check 一条龙，
+        # 不给 --against 就用默认基线（~/Projects/.ADOCAO/gate/baseline）：store / check 一条龙，
         # 也因此不会因为 /tmp 被清而丢基线（真丢过一次）。
         AGAINST="${AGAINST:-$GATE_HOME/baseline}"
         [ -d "$AGAINST" ] || { echo "✗ 基线目录不存在：${AGAINST}（先 store 一次，或用 --against 指定）"; exit 2; }
         OUT=$(cd "$AGAINST" && pwd)
-        # 临时目录留在仓库的 build/ 下：基线要长期保留（放 ~/.adocao），但**临时**的抓帧文件必须
+        # 临时目录留在仓库的 build/ 下：基线要长期保留（放 ~/Projects/.ADOCAO），但**临时**的抓帧文件必须
 # 在可写区域内 —— 在受限沙箱里跑时，往工作区外写会被直接拒掉，抓帧会静默不做。
 SCRATCH="${SCRATCH:-build/gate-scratch}"
         mkdir -p "$SCRATCH"; CAPDIR=$(cd "$SCRATCH" && pwd)

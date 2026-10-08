@@ -16,16 +16,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   （真做过一次：`git filter-repo` 会**移除 origin** 并让分支失去 upstream —— 重写后要
   `git remote add origin …` + `git branch --set-upstream-to=origin/master master`，否则
   `scripts/push-ci.sh` 里的无参 `git push` 会报 "no upstream branch"）。
-- **长期保留的产物统一放 `~/.adocao/`**，别放 `/tmp`（系统会定期清，像素基线就这么丢过一次）：
+- **长期保留的产物统一放 `~/Projects/.ADOCAO/`**（ADOCAO 系的仓库与镜像都在 `~/Projects` 下，一处收齐），
+  两条硬约束：**别放 `/tmp`**（系统会定期清，像素基线就这么丢过一次）；**也别放仓库里** ——
+  `git clean -xdf` / `rm -rf build` 会把基线一起删掉，而基线是**驱动相关、不入库**的，重存只会拿
+  "当前输出"当基准，等于把"改动前"的参照弄丢，门槛就失效了。布局：
   `gate/baseline`（像素门槛基线，`ADOFAO_GATE_HOME` 可改）、`cache/gh`（gh CLI 缓存，
-  沙箱里要用 `XDG_CACHE_HOME=~/.adocao/cache/gh`）、`tools/`（如 git-filter-repo）、`scratch/`（一次性文件）。
+  沙箱里要用 `XDG_CACHE_HOME=~/Projects/.ADOCAO/cache/gh`）、`tools/`（如 git-filter-repo）、`scratch/`（一次性文件）。
   重写历史前的镜像**单独放** `~/Projects/.ADOCAO-Backup-1`（352 提交 / 21 标签，**里面仍含用户名**，
   这正是它作为回退手段的意义）：它的 origin 已被移除，**不要**把它 fetch/pull 回主仓库 ——
   那会把清理掉的旧历史原样带回来。不需要时 `rm -rf` 即可（同目录有 BACKUP-README.txt 说明）。
   **但临时抓帧文件必须留在工作区内**（门槛默认 `build/gate-scratch`）：受限沙箱里往工作区外**写**会被拒，
   于是 `/usr/bin/time` 的重定向失败、抓帧静默不发生，`check` 会报出一整片假的"不一致"（真踩过：
-  把 `gate/check` 也放进 `~/.adocao` 后，51 个状态全报不一致，其实一张新图都没生成）。
-  规则：**基线（只读）可以放 `~/.adocao`，临时/中间产物一律放工作区内**。
+  把 `gate/check` 也放进长期目录（当时是 `~/.adocao`）后，51 个状态全报不一致，其实一张新图都没生成）。
+  规则：**基线（只读）放 `~/Projects/.ADOCAO`，临时/中间产物一律放工作区内**。
 - **库侧公共 API 都在 `adofai::` 里**（2026-10 起，为抽出 ADOFAI.Lib 做准备）：core/audio/render 的
   头文件与实现都包在 `namespace adofai { … }` 里；app/tests 侧的文件用
   `using namespace adofai;`（消费方当然也直接写 `adofai::X`）。两条相关规矩：
@@ -115,7 +118,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   真因是 `--capture` **没有关掉拖尾的自适应采样率**（它由测得的**帧时间**驱动），于是“快了几毫秒”
   就画出**不同长度**的拖尾。规则：① 差异先出图；② 抓帧必须确定性（`--capture` 已强制
   `trailAdaptive=false`），任何“由帧时间反馈决定的量”都不许进抓帧路径。
-  ③ 本沙箱里 `~/.adocao` **不可写** → 重存基线要用工作区内目录（`ADOFAO_GATE_HOME=build/gate-base`）。
+  ③ 沙箱边界：工作区外**默认不可写** —— 受限沙箱里 `store` 写基线要一次提权（2026-10 提权跑过，可行）；
+     **但临时抓帧文件必须留在工作区内**（见上面那条），别为了"整齐"把它挪到基线旁边。
   ④ **两层兜底 + 日志前缀**（各自的边界要说清 ✗）：
   * **钉死 + 守卫**（今天这个 bug 的解法）：`--capture` 时 `trailAdaptive=false`，并在抓帧块里
     自检 `trailAdaptive`，为 true 就 `LOG_E`。**负向对照验过**：故意打开 → 日志确实出现
@@ -133,7 +137,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 几何测试（三层，2026-10 起）：`tests/tile_geometry_test.cpp`（中旋五边形不变量 + 调用点护栏）→
   `tests/tile_expansion_test.cpp`（**CPU 逐位**：形状表展开 vs 参考实现，168491 形状 / 3.3e7 坐标）→
   `tests/geom_probe_test.cpp`（**GPU 逐位**：真跑 `assets/shaders/tile.vert`，4.7e7 坐标；无显示时 SKIP）
-  → `scripts/capture-gate.sh store|check`（**像素逐字节**，51 个状态，基线默认 `~/.adocao/gate/baseline`、不入库；带 `+hitsounds` 的状态会真的加载音色）；
+  → `scripts/capture-gate.sh store|check`（**像素逐字节**，51 个状态，基线默认 `~/Projects/.ADOCAO/gate/baseline`、不入库；带 `+hitsounds` 的状态会真的加载音色）；
   默认口径是几何尺度容差 1e-5 砖，`ADOCAO_TILE_EXACT=1` 才要求逐位（见 `docs/rendering.md` 的"砖块几何"段）
 - shader 一致性：`scripts/check-shader-fallback.sh`（`render/Shaders.hpp` 的内嵌回退 GLSL 必须与
   `assets/shaders/*` 逐字相同）

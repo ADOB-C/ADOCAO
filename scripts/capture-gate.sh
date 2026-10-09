@@ -153,8 +153,11 @@ run_capture() {   # name chart mode value zoom WxH → 写 $CAPDIR/$name.png；�
         "$name" "${tile:-?}" "${req:-?}" "$zoom" "${shapes:-?}" "${groups:-?}" "${rss:-?}" "$((t1 - t0))"
 }
 
-pixel_diff() {  # a.png b.png → "diff=N maxdelta=M"
-    "$PY" - "$1" "$2" <<'PYEOF' 2>/dev/null || echo "diff=?（像素统计失败）"
+pixel_diff() {  # a.png b.png [diffout.png] → "diff=N maxdelta=M"
+    # **diff 图必须写在 scratch（工作区）里**：基线在工作区外，受限沙箱下往基线旁边写会被拒，
+    # Python 抛异常 → 只剩一句"像素统计失败"（2026-10-08 查清：以前这里还 2>/dev/null 吞掉了原因，
+    # 于是 51 个状态全变成没有幅度的 DIFF）。现在 stderr 不吞，出问题能看见。
+    "$PY" - "$1" "$2" "${3:-}" <<'PYEOF' || echo "diff=?（像素统计失败，见上面的报错）"
 import sys
 try:
     from PIL import Image, ImageChops
@@ -169,7 +172,7 @@ if a.size != b.size:
     sys.exit(0)
 arr = np.asarray(ImageChops.difference(a, b))
 n = int((arr.sum(axis=2) > 0).sum())
-out = sys.argv[1].replace(".png", "") + ".diff.png"
+out = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else sys.argv[2].replace(".png", "") + ".diff.png"
 if n:
     Image.fromarray(arr.clip(0, 255).astype("uint8")).save(out)
 print("diff=%d maxdelta=%d%s" % (n, int(arr.max()), (" → " + out) if n else ""))
@@ -197,7 +200,7 @@ while IFS='|' read -r name chart mode value zoom size extra; do
         if cmp -s "$base" "$cur"; then
             oks=$((oks + 1)); echo "     OK   逐字节相同"
         else
-            fails=$((fails + 1)); echo "     DIFF $(pixel_diff "$base" "$cur")"
+            fails=$((fails + 1)); echo "     DIFF $(pixel_diff "$base" "$cur" "$CAPDIR/${name}.diff.png")"
         fi
     fi
 done < "$STATES"

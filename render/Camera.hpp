@@ -23,7 +23,9 @@ public:
     float zoom() const { return m_zoom; }
     double targetX() const { return m_targetX; }
     double targetY() const { return m_targetY; }
-    void frustumBounds(float& left, float& right, float& bottom, float& top) const;
+    // **double**：视锥边界是世界坐标。用 float 会在 x≈6.8e7（primer）上被量化到 8 砖，
+    // 剔除边界跟着错（半宽半高本身很小，double 里算没有代价）。
+    void frustumBounds(double& left, double& right, double& bottom, double& top) const;
 
 private:
     float m_zoom   = 100.0f;

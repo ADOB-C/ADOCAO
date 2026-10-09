@@ -45,7 +45,8 @@ public:
     // 不透明的、拖尾是半透明混合，于是图标会把拖尾"擦"掉一块 —— 那是 bug（用户 2026-10 指出）。
     // 现在图标跟着砖走，在拖尾之前，拖尾正常盖在图标上。这个修复会让"图标与拖尾重叠"的像素
     // 与旧版不同（The Moon t=1s / MYC t=30s 等），是**预期内**的差异，基线已按新行为重存。
-    void draw(float viewL, float viewR, float viewB, float viewT, double camX, double camY) const;
+    // 视锥边界是**世界坐标** → double（float 在 x≈6.8e7 上会被量化到 8 砖，剔除边界跟着错）
+    void draw(double viewL, double viewR, double viewB, double viewT, double camX, double camY) const;
     void drawHighlightedTile(int tileIdx, double camX, double camY) const;
     void setVisibleThreshold(int lastVisible);
     void updateVisibleRange(int startTile, int endTile, bool visible);
@@ -63,7 +64,7 @@ private:
     void destroy();
     void buildStaticGL();
     void destroyStaticGL();
-    void ensureDrawList(float vl, float vr, float vb, float vt, double camX, double camY) const;
+    void ensureDrawList(double vl, double vr, double vb, double vt, double camX, double camY) const;
     void uploadIfNeeded() const;
     void cullRange(size_t begin, size_t end, double vl, double vr, double vb, double vt,
                    double camX, double camY, std::vector<uint32_t>& outTiles,

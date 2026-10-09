@@ -42,12 +42,12 @@ glm::mat4 Camera::viewProj() const {
     return m_projView;
 }
 
-void Camera::frustumBounds(float& left, float& right, float& bottom, float& top) const {
+void Camera::frustumBounds(double& left, double& right, double& bottom, double& top) const {
     if (m_projDirty) updateProj();
-    left   = (float)(m_targetX - (double)m_halfW);
-    right  = (float)(m_targetX + (double)m_halfW);
-    bottom = (float)(m_targetY - (double)m_halfH);
-    top    = (float)(m_targetY + (double)m_halfH);
+    left   = m_targetX - (double)m_halfW;
+    right  = m_targetX + (double)m_halfW;
+    bottom = m_targetY - (double)m_halfH;
+    top    = m_targetY + (double)m_halfH;
 }
 
 }  // namespace adofai

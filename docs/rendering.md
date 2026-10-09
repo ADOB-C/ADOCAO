@@ -29,6 +29,9 @@ posX=[0.0, 68411076.0]  posY=[0.0, 0.0]   float ulp @ 末端 = 8 砖
   上传时才 `(float)(tileX(t) - camX)`。代价 16 B/块 = **0.00024 B/砖**。
 * **行星位置存 double**（`Planet::position` 是 `glm::dvec3`），相机相对化在 `Planet::draw` 里做完再窄化。
 * 拖尾本来就是对的：`PlanetTrail::setPoints(const double*)`，内部按自身中心重定心。
+* **视锥边界也是 world → double**：`Camera::frustumBounds` 与 `TileMesh::draw/ensureDrawList`
+  都收 `double`，`frustumChanged` 的 0.5 阈值也在 double 里比。改成 double 后 primer 抓帧逐字节不变
+  （20 砖的边距本来兜住了 8 砖的量化），但它挡的是 2^31 档：float 的 ulp 会涨到 256，**把边距整个吞掉**。
 
 **别退回去**：`(float)pos - (float)cam`（各自窄化再相减）会叠加两次舍入；`glm::vec3((float)x, …)`
 存绝对坐标同理。判据很简单 —— 只要某个值可能是 1e7 量级的世界坐标，它就不能是 float。

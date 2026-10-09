@@ -272,7 +272,7 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     // Track appear/disappear animation
     updateTileVisibility(timeline, timeInLevel, playing);
 
-    float vl, vr, vb, vt;
+    double vl, vr, vb, vt;      // 世界坐标 → double（见 docs/rendering.md 坐标约定）
     camera.frustumBounds(vl, vr, vb, vt);
 
     // 轨道（砖 + 图标，一次 draw；颜色走 uniform —— 改造前是逐实例颜色 VBO，28 B/实例）

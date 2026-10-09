@@ -292,14 +292,16 @@ void TileMesh::cullRange(size_t begin, size_t end, double vl, double vr, double 
     }
 }
 
-void TileMesh::ensureDrawList(float viewL, float viewR, float viewB, float viewT,
+void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double viewT,
                               double camX, double camY) const {
     const double m = 20.0;   // 与改造前同一个视锥外扩
     const double vl = viewL - m, vr = viewR + m, vb = viewB - m, vt = viewT + m;
+    // 一律 double 比：float 在 x≈6.8e7 上 ulp 就是 8，`> 0.5f` 会退化成"只要变了就重建"
+    // （虽然结果碰巧对，但边界与被比较的量都该是 double —— 见 docs/rendering.md 坐标约定）
     const bool frustumChanged =
-        !m_listValid || std::abs((float)m_vl - viewL) > 0.5f ||
-        std::abs((float)m_vr - viewR) > 0.5f || std::abs((float)m_vb - viewB) > 0.5f ||
-        std::abs((float)m_vt - viewT) > 0.5f;
+        !m_listValid || std::abs(m_vl - viewL) > 0.5 ||
+        std::abs(m_vr - viewR) > 0.5 || std::abs(m_vb - viewB) > 0.5 ||
+        std::abs(m_vt - viewT) > 0.5;
     if (frustumChanged) {
         m_listTiles.clear();
         m_listAttr.clear();
@@ -379,7 +381,7 @@ void TileMesh::uploadIfNeeded() const {
     m_listUploaded = true;
 }
 
-void TileMesh::draw(float viewL, float viewR, float viewB, float viewT,
+void TileMesh::draw(double viewL, double viewR, double viewB, double viewT,
                     double camX, double camY) const {
     m_lastDrawn = 0;
     if (empty() || !m_vao) return;

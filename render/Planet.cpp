@@ -120,7 +120,8 @@ bool Planet::buildGPU() {
 void Planet::draw(Shader& shader, const Camera& camera, double camX, double camY) const {
     if (!m_vao) return;
 
-    glm::vec3 relPos((float)((double)position.x - camX), (float)((double)position.y - camY), position.z);
+    // position 是 double（见 .hpp）：相机相对化在 double 里算完再窄化一次
+    glm::vec3 relPos((float)(position.x - camX), (float)(position.y - camY), (float)position.z);
     auto model = glm::translate(glm::mat4(1.0f), relPos);
     auto mvp = camera.viewProj() * model;
 

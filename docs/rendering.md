@@ -5,7 +5,33 @@
 
 ## Coordinate System
 
-OpenGL world space: X right, Y up. View matrix always at origin — camera-relative offsets computed in double, converted to float for GPU.
+OpenGL world space: X right, Y up. View matrix always at origin —— 相机相对偏移在 **double** 里算完，
+**只窄化一次**再上传 float。
+
+**绝对世界坐标绝不进 float**（2026-10-08 修的一个真 bug，血的教训）。`Tile::position` 是 double，
+但 `TileMesh` 曾经把它直接窄化成 float 存下来；primer-final（一条 `y=0`、x 从 0 直走到 6.84e7 的
+直线谱，68,411,077 砖）实测：
+
+```
+posX=[0.0, 68411076.0]  posY=[0.0, 0.0]   float ulp @ 末端 = 8 砖
+相邻砖对在 float32 里是同一个点：34,693,868 / 68,411,077 = 50.7%
+```
+
+表现就是"**轨道不渲染**"：zoom 260 下可见 49 块砖，量化后塌成约 6 个位置（用户截图里只剩几块大板）。
+行星是同一个病的第二处：`LevelScene` 把 double 的 `frame.redPosition` 窄化成 float 存进
+`Planet::position` 再减相机 → 砖与行星各自量化到**不同**格点（实测红色行星整颗丢失、蓝色行星偏一格；
+`tile=65000000` 的抓帧 **22,344 px / 9.70%** 不同，最大通道差 255）。
+
+现在的规矩：
+
+* **砖位置按块存相对 float**：`TileMesh` 每 `kPosChunkShift=16`（65536）砖记一个 double 原点
+  （`m_chunkX/m_chunkY`），块内偏移用 float（块内 ulp ≤ 0.008 砖），一切读取走 `tileX()/tileY()`，
+  上传时才 `(float)(tileX(t) - camX)`。代价 16 B/块 = **0.00024 B/砖**。
+* **行星位置存 double**（`Planet::position` 是 `glm::dvec3`），相机相对化在 `Planet::draw` 里做完再窄化。
+* 拖尾本来就是对的：`PlanetTrail::setPoints(const double*)`，内部按自身中心重定心。
+
+**别退回去**：`(float)pos - (float)cam`（各自窄化再相减）会叠加两次舍入；`glm::vec3((float)x, …)`
+存绝对坐标同理。判据很简单 —— 只要某个值可能是 1e7 量级的世界坐标，它就不能是 float。
 
 ## Rendering
 

@@ -193,8 +193,11 @@ void LevelScene::setMeasuredFrameMs(double workMs) {
 void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline) {
     if (!m_redPlanet || !m_bluePlanet) return;
 
-    m_redPlanet->position = glm::vec3((float)frame.redPosition.x, (float)frame.redPosition.y, 9.5f);
-    m_bluePlanet->position = glm::vec3((float)frame.bluePosition.x, (float)frame.bluePosition.y, 9.5f);
+    // **不要**在这里窄化成 float：绝对世界坐标到 6.84e7 时 float ulp = 8 砖（primer-final），
+    // 行星会被量化到与砖块不同的格点上（用户实测"行星也不对了"）。Planet 现在存 double，
+    // 相机相对化在 Planet::draw 里用 double 做完再窄化。
+    m_redPlanet->position = glm::dvec3(frame.redPosition.x, frame.redPosition.y, 9.5);
+    m_bluePlanet->position = glm::dvec3(frame.bluePosition.x, frame.bluePosition.y, 9.5);
 
     if (!m_showTrail || !m_redPlanet->trail || !m_bluePlanet->trail) return;
 

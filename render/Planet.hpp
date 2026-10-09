@@ -12,7 +12,9 @@ class Camera;
 
 class Planet {
 public:
-    glm::vec3 position{0.0f};
+    // **double**：世界坐标到 6.84e7（primer）时 float 的 ulp 是 8 砖，存 float 会让行星与
+    // 砖块各自量化到不同格点（2026-10-08 用户实测"行星也不对了"）。相机相对化在 draw() 里做。
+    glm::dvec3 position{0.0};
     glm::vec3 color{1.0f};
     float radius = 0.25f;
 

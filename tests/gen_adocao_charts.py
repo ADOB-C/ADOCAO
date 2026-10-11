@@ -202,78 +202,86 @@ CHORD_SECONDS = 2.5
 CHORD_NOTES = (261.63, 329.63, 392.00)   # C4 E4 G4 —— 十二平均律的 Do-Mi-Gol
 CHORD_MIN_GAP = 0.00035      # 比这更近的并集点直接并掉（<0.35 ms 耳朵分不开）
 
-# ---- Kick 和弦的"正确方法"：**恒定 BPM + Twirl 选边**（用户 2026-10-11 指出的） ----
+# ---- Kick 和弦的"正确方法"：**恒定 BPM + Twirl 固定大体方向** ----
 #
 # 参考谱实测（`The Moon - Coal/level.adofai`，就是"能听到和弦"那一族）：
 #   BPM 14817.6 **恒定**、600,538 砖、**303,540 个 Twirl**（约每 2 砖一个）、
 #   每砖时长中位 4.56 ms（≈ 1 拍）、几何转角均值 92.7°、angleData 均值 157。
-#   它既没有逐砖 SetSpeed，也没有逐采样音量 —— 音高就是**击打频率**（中位 ~220 Hz）。
 #
-# 机制（`Timeline.cpp:63-83`，设 `t = 几何转角`、`delta = (180 - t) mod 360`）：
+# 机制（`Timeline.cpp:63-83`，设 `t` = 几何转角、`delta = (180 - t) mod 360`）：
 #     CW  : duration = delta/(3 x BPM)     = (180 - t)/(3B)
 #     CCW : duration = (360 - delta)/(3B)  = (180 + t)/(3B)
-# 也就是说**同一对角度**（同样的 |t| = 同样的"直不直"）在 Twirl 的两侧给出
-#   载波 ± 偏差：`d = c ± |t|/(3B)`，`c = 60/BPM` 是载波（一拍）。
-# 于是：**Twirl 是"偏差的符号位"** —— 想让音偏高（d < c）走 CW、想让它偏低就走 CCW，
-# 而 |t| 只由偏差的**大小**决定。这样就能在
-#   * **恒定 BPM**（不碰 SetSpeed → 别的按拍计时的东西全都不受影响）、
-#   * **转角同一方向**（|t| 小 → 砖路舒展，不来回抖）
-# 的前提下，把任意击打间隔精确写出来。
+# 同一对角度（同样的 |t|）在 Twirl 两侧给出 `d = c ± |t|/(3B)`（c = 60/BPM 是载波 = 一拍）。
+# 于是：**|t| 只由"差多少"决定，符号由 Twirl 决定** —— 恒定 BPM 下就能精确写出任意间隔。
+#
+# 和弦这里还有一个结构性便利（用户 2026-10-11 指出）：三音取**纯律 4:5:6** 时它们有
+# **精确的公共周期**（最小公倍数）T = 1/f0（f0 = 65.4075 Hz → T = 15.2888 ms，周期内
+# 4+5+6-1 = 11 个点 / 12 段）。把 Twirl 的符号模式也做成**逐周期重复**，并让每个周期的
+# 净转角 = 0，那么：**每个 LCM 边界处朝向都回到同一个值**，砖路成了"逐周期平移"的规则图形
+# （"比较规律"），而把整体角度平移一下就能让 **LCM 边界正好落在 180°**（用户要求）。
+CHORD_F0 = 261.63 / 4.0                                   # 纯律 4:5:6 的根音 65.4075 Hz
+CHORD_NOTES = (4.0 * CHORD_F0, 5.0 * CHORD_F0, 6.0 * CHORD_F0)   # 261.63 / 327.04 / 392.44
+CHORD_PERIOD = 1.0 / CHORD_F0                             # 公共周期 15.2888 ms
 CHORD_BPM = 31200.0        # 一拍 c = 60/B = 1.923 ms；单砖最长 2 拍 = 3.846 ms ≥ 最大间隙 3.822
 CHORD_SECONDS = 2.5
-CHORD_NOTES = (261.63, 329.63, 392.00)   # C4 E4 G4 —— 十二平均律的 Do-Mi-Gol
-CHORD_MIN_GAP = 0.00035    # 比这更近的并集点直接并掉（<0.35 ms 耳朵分不开）
+
+
+def _chord_period_gaps():
+    """一个公共周期内的并集网格（含回绕的那一段）。"""
+    pts = set()
+    for k in (4, 5, 6):
+        for j in range(1, k):
+            pts.add(round(j * CHORD_PERIOD / k, 12))
+    pts = sorted(pts)
+    return ([pts[0]] + [pts[i] - pts[i - 1] for i in range(1, len(pts))] +
+            [CHORD_PERIOD - pts[-1]])
+
+
+def _chord_period_signs(gaps):
+    """逐周期的 Twirl 符号模式：要求 Σ ±|180-u| = 0（净转角 0 → 朝向回到原值）。"""
+    B = CHORD_BPM
+    base = [180.0 - 3.0 * B * g for g in gaps]
+    n = len(base)
+    for mask in range(1 << n):
+        tot = 0.0
+        for i in range(n):
+            tot += base[i] if (mask >> i) & 1 else -base[i]
+        if abs(tot) < 1e-6:
+            return [1 if (mask >> i) & 1 else -1 for i in range(n)]
+    raise AssertionError("找不到让一个周期净转角为 0 的符号组合")
 
 
 def chart_chord(seed=0x8808):
-    """拿 Kick 打出来的 Do-Mi-Gol 和弦：**恒定 BPM + Twirl 固定大体方向**。
-
-    每砖一击，时刻精确落在三个频率网格的**并集**上；音高 = 击打频率。
-    角度只负责"偏差的绝对值"（|t| = 3B|d - c|），Twirl 负责两件事：
-      * **偏差的符号**（同一对角度在 CW/CCW 两侧给出 c ± |t|/(3B)）；
-      * 于是可以**bang-bang 把累计朝向拉回目标方向** —— 想左转就左转、想右转就右转，
-        路径于是沿一个固定方向铺开（实测包围盒 1059 x 29 砖），而不是卷成一朵花；
-      * 目标方向取 0，等价于**平均角度 ≈ 180**（存储角就落在 180 附近）。
-    """
+    """拿 Kick 打出来的 Do-Mi-Gol 和弦：恒定 BPM + Twirl（逐 LCM 周期重复）。"""
     del seed
-    times = set()
-    for f in CHORD_NOTES:
-        k = 0
-        while k / f <= CHORD_SECONDS:
-            times.add(round(k / f, 9))
-            k += 1
-    ts = sorted(times)
-    keep = [ts[0]]
-    for t in ts[1:]:
-        if t - keep[-1] >= CHORD_MIN_GAP:
-            keep.append(t)
-
+    gaps = _chord_period_gaps()
+    signs = _chord_period_signs(gaps)
     B = CHORD_BPM
-    c = 60.0 / B                       # 载波 = 一拍
+    per = len(gaps)
+    reps = int(round(CHORD_SECONDS / CHORD_PERIOD))
+
     angles = [0.0]
     twirls = []
-    cw = True                          # 与 Timeline 的初值一致
-    heading = 0.0                      # 累计朝向（bang-bang 的目标是 0）
-    for i in range(1, len(keep)):
-        d = keep[i] - keep[i - 1]
-        u = 3.0 * B * d                # 这一砖总共要转多少度
-        tCw = 180.0 - u                # CW 分支下的几何转角（带符号）
-        # 不夹：u 必须落在 (0,360) 里（= 单砖最长 2 拍）。B 是照着最大间隙选的，
-        # 一旦有人调 B/加音，这里要立刻响，而不是悄悄削掉时长（那会让整片时刻漂移）。
-        assert 0.0 < u < 359.5, f"gap {d*1e3:.4f} ms 超出 BPM {B} 的可达范围（u={u:.1f}）"
-        # bang-bang：累计朝向偏了就转回来（Twirl 给符号，角度给定大小）
-        want = -1.0 if heading > 0.0 else 1.0
-        useCW = (1.0 if tCw > 0.0 else -1.0) == want
-        delta = u if useCW else (360.0 - u)
-        if useCW != cw:
-            twirls.append(i)
-            cw = useCW
-        angles.append(round((angles[-1] + 180.0 - delta) % 360.0, 6))
-        heading += tCw if useCW else -tCw
-        heading = ((heading + 180.0) % 360.0) - 180.0
+    cw = True                                  # 与 Timeline 的初值一致
+    for r in range(reps):
+        for i, g in enumerate(gaps):
+            u = 3.0 * B * g                    # 这一砖总共要转多少度
+            tCw = 180.0 - u                    # CW 分支下的几何转角（带符号）
+            # 不夹：u 必须落在 (0,360) 里（单砖最长 2 拍）。B 是照着最大间隙选的，
+            # 一旦有人调 B/加音，这里要立刻响，而不是悄悄削掉时长（会让整片时刻漂移）。
+            assert 0.0 < u < 359.5, f"gap {g*1e3:.4f} ms 超出 BPM {B} 的可达范围（u={u:.1f}）"
+            want = float(signs[i])
+            useCW = (1.0 if tCw > 0.0 else -1.0) == want
+            delta = u if useCW else (360.0 - u)
+            if useCW != cw:
+                twirls.append(len(angles))     # Twirl 写在**这一砖**上（floor = 砖号）
+                cw = useCW
+            angles.append(round((angles[-1] + 180.0 - delta) % 360.0, 6))
 
-    # 尾砖：让**最后一个网格点**也有砖起跳（上一砖是"结束"在它上面）
-    angles.append(round((angles[-1] + 180.0 - 90.0) % 360.0, 6))
+    # 整体平移：让**每个 LCM 边界**正好落在 180°（用户要求"最小公倍数的位置靠近 180 度"）
+    boundary = angles[per]                     # 第一个周期结束那一砖
+    shift = (180.0 - boundary) % 360.0
+    angles = [round((a + shift) % 360.0, 6) for a in angles]
 
     actions = [{"floor": f, "eventType": "Twirl"} for f in twirls]
     return angles, actions

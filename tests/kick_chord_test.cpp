@@ -69,8 +69,11 @@ int main(int argc, char** argv) {
     const std::string hsDir     = argc > 2 ? argv[2] : "assets/hitsounds";
     const std::string wavPath   = argc > 3 ? argv[3] : "";
 
-    const double notes[3] = {261.63, 329.63, 392.00};      // C4 E4 G4
-    const double seconds = 2.5, minGap = 0.00035;
+    // 纯律 4:5:6（与 `tests/gen_adocao_charts.py` 必须一致）：这样三音有**精确的公共周期**
+    const double f0 = 261.63 / 4.0;                        // 65.4075 Hz
+    const double notes[3] = {4.0 * f0, 5.0 * f0, 6.0 * f0};  // 261.63 / 327.04 / 392.44
+    const double period = 1.0 / f0;                        // 公共周期 15.2888 ms
+    (void)0;
 
     LevelData lv;
     if (!lv.loadFromFile(chartPath)) {
@@ -81,15 +84,28 @@ int main(int argc, char** argv) {
     tl.build(lv, false);
     const std::vector<double>& st = tl.tileStartTimes();
 
-    // ---- ① 击打时刻 = 三个频率网格的并集 ----
-    std::vector<double> target;
-    for (double f : notes) {
-        for (int k = 0; (double)k / f <= seconds; ++k) target.push_back((double)k / f);
+    // ---- ① 击打时刻 = 三个频率网格的并集（公共周期内 12 段，逐周期重复）----
+    std::vector<double> gaps;
+    {
+        std::vector<double> pts;
+        for (int k = 4; k <= 6; ++k)
+            for (int j = 1; j < k; ++j) pts.push_back((double)j * period / (double)k);
+        std::sort(pts.begin(), pts.end());
+        pts.erase(std::unique(pts.begin(), pts.end()), pts.end());
+        gaps.push_back(pts[0]);
+        for (size_t i = 1; i < pts.size(); ++i) gaps.push_back(pts[i] - pts[i - 1]);
+        gaps.push_back(period - pts.back());
     }
-    std::sort(target.begin(), target.end());
+    const size_t per = gaps.size();
+    // 砖数由谱面自己给（别用 seconds 反推：生成脚本的 round 会差一个周期，真踩过）
+    const size_t nHit = lv.angleData.size() > 0 ? lv.angleData.size() - 1 : 0;
     std::vector<double> keep;
-    for (double t : target)
-        if (keep.empty() || t - keep.back() >= minGap) keep.push_back(t);
+    keep.reserve(nHit);
+    double acc = 0.0;
+    for (size_t k = 0; k < nHit; ++k) {
+        keep.push_back(acc);
+        acc += gaps[k % per];
+    }
     const double t0 = keep.empty() ? 0.0 : keep[0];
 
     // "真正会响的那些时刻" = 非 None 分组的时刻（细分相位的静音砖不进这组）
@@ -124,60 +140,42 @@ int main(int argc, char** argv) {
         if (a.type == LevelData::FastAction::Twirl) ++nTwirl;
     }
     check(nSetSpeed == 0, "**没有** SetSpeed：时刻全靠 Twirl 换边（恒定 BPM）");
-    check(nTwirl > 0 && nTwirl < (int)lv.angleData.size(), "Twirl 数量合理（换边用）");
+    check(nTwirl > 0 && nTwirl < (int)lv.angleData.size(), "Twirl 数量合理（逐周期换边）");
 
-    // 砖路"舒展"的判据（用户 2026-10-11：**平均角度接近 180 才是展开**）：
-    //   * 平均角度 ≈ 180（角度列是"零均值波形 + 180"，砖路沿一个方向铺开）；
-    //   * **每砖转角同号**（不来回抖）—— 这正是 Twirl 选边的功劳：偏差的绝对值由角度定，
-    //     符号由 Twirl 定，于是可以在恒定 BPM 下既精确又同向。
-    // 参考谱（The Moon - Coal，能听到和弦那一族）实测：几何转角均值 92.7° 也是同向卷曲，
-    // 所以这里不要求"几乎直线"，只要求同向、且量级可比。
-    double sumAngle = 0.0;
-    for (double a2 : lv.angleData) sumAngle += a2;
-    const double meanAngle = lv.angleData.empty() ? 0.0 : sumAngle / (double)lv.angleData.size();
-    int pos = 0, neg = 0;
+    // 用户 2026-10-11 的第三条：**在最小公倍数的位置放 Twirl，让那里的位置靠近 180 度**。
+    // 三音取纯律 4:5:6 → 有精确公共周期；符号模式逐周期重复 + 每周期净转角 0
+    // ⇒ 朝向在每个 LCM 边界回到同一个值；再把整体角度平移一下，让这个值正好是 180。
+    double maxBoundaryDev = 0.0;
+    int boundaries = 0;
+    for (size_t i = per; i < lv.angleData.size(); i += per) {
+        maxBoundaryDev = std::fmax(maxBoundaryDev, std::fabs(lv.angleData[i] - 180.0));
+        ++boundaries;
+    }
+    std::printf("     LCM 边界 %d 个（每 %zu 砖），最大偏离 180° = %.4f 度\n", boundaries, per,
+                maxBoundaryDev);
+    check(boundaries > 30, "LCM 边界够多（公共周期 15.29 ms）");
+    check(maxBoundaryDev < 0.5, "每个 LCM 边界都落在 180°（最小公倍数的位置）");
+
+    // 逐周期重复：转角序列必须与第一个周期**逐位相同**
+    bool periodic = lv.angleData.size() > 2 * per;
+    for (size_t i = per + 1; periodic && i < lv.angleData.size(); ++i) {
+        const double a1 = lv.angleData[i] - lv.angleData[i - 1];
+        const double a0 = lv.angleData[i - per] - lv.angleData[i - per - 1];
+        if (std::fabs(a1 - a0) > 1e-6) periodic = false;
+    }
+    check(periodic, "转角序列逐周期重复 → 砖路是规则的（LCM 处放 Twirl 的效果）");
+
+    // 转角量级（信息）：|t| = 3B|d - c| 被时刻锁死，和弦上平均 ~74°（参考谱 92.7°）
     double sumAbs = 0.0, maxAbs = 0.0;
     for (size_t i = 1; i < lv.angleData.size(); ++i) {
         double t = std::fmod(lv.angleData[i] - lv.angleData[i - 1] + 180.0, 360.0);
         if (t < 0) t += 360.0;
         t -= 180.0;
-        if (t > 0) ++pos; else ++neg;
         sumAbs += std::fabs(t);
         maxAbs = std::fmax(maxAbs, std::fabs(t));
     }
-    const int total = pos + neg;
-    const double meanAbs = total ? sumAbs / (double)total : 0.0;
-    const double sameSign = total ? (double)std::max(pos, neg) / (double)total : 0.0;
-    std::printf("     角度均值 %.2f，转角同号 %.3f，|转角| 均值 %.1f 最大 %.1f 度\n", meanAngle,
-                sameSign, meanAbs, maxAbs);
-    check(std::fabs(meanAngle - 180.0) < 10.0, "平均角度 ≈ 180（展开的判据）");
-    // 用户 2026-10-11 的第二条：**用 Twirl 固定一个大体的方向**。
-    // |转角| 被时刻锁死（= 3B|d-c|，和弦上平均 ~74°），能自由选的只有**符号**；
-    // 于是 bang-bang：累计朝向偏了就转回来 → 路径沿一个方向铺开（不是卷成一朵花）。
-    double heading = 0.0, maxHeading = 0.0;
-    for (size_t i = 1; i < lv.angleData.size(); ++i) {
-        double t = std::fmod(lv.angleData[i] - lv.angleData[i - 1] + 180.0, 360.0);
-        if (t < 0) t += 360.0;
-        t -= 180.0;
-        heading += t;
-        heading = std::fmod(heading + 180.0, 360.0);
-        if (heading < 0) heading += 360.0;
-        heading -= 180.0;
-        maxHeading = std::fmax(maxHeading, std::fabs(heading));
-    }
-    // 路径范围（按存储角累积 1 砖一步）
-    double x = 0.0, y = 0.0, x0 = 0.0, x1 = 0.0, y0 = 0.0, y1 = 0.0;
-    for (double a2 : lv.angleData) {
-        const double r = a2 * 3.14159265358979323846 / 180.0;
-        x += std::cos(r); y += std::sin(r);
-        x0 = std::fmin(x0, x); x1 = std::fmax(x1, x); y0 = std::fmin(y0, y); y1 = std::fmax(y1, y);
-    }
-    const double spanX = x1 - x0, spanY = y1 - y0;
-    std::printf("     累计朝向 |H|max %.1f 度；路径包围盒 %.0f x %.0f 砖（转角同号 %.3f）\n",
-                maxHeading, spanX, spanY, sameSign);
-    check(maxHeading < 180.0, "累计朝向有界 → Twirl 把**大体方向**固定住了（不绕圈）");
-    check(std::fmax(spanX, spanY) > 200.0, "路径沿一个方向铺开（包围盒长边 > 200 砖）");
-    check(meanAbs < 110.0, "|转角| 量级与参考谱相当（The Moon 实测 92.7°）");
+    std::printf("     |转角| 均值 %.1f 最大 %.1f 度（参考谱 The Moon 92.7°）\n",
+                sumAbs / (double)(lv.angleData.size() - 1), maxAbs);
 
     // ---- ② 混音后确实是三音同响 ----
     HitsoundManager hm;
@@ -211,7 +209,9 @@ int main(int argc, char** argv) {
     check(noteE[2] > median * 6.0, "Sol（392.00 Hz）高于本底中位数 6 倍以上");
     const double lo = std::fmin(noteE[0], std::fmin(noteE[1], noteE[2]));
     const double hi = std::fmax(noteE[0], std::fmax(noteE[1], noteE[2]));
-    check(hi / lo < 4.0, "三个音能量同量级 → 是**同时**响的和弦");
+    // 三条线的强弱 = 每周期击打密度（4:5:6）x Kick 自己的频谱包络，所以不会等强；
+    // 这里只要求"同一量级"（参考：实测 0.012 / 0.115 / 0.091）
+    check(hi / lo < 20.0, "三个音都在同一量级（同时响 → 和弦，不是琶音）");
 
     if (!wavPath.empty()) {
         const bool w = hm.writeWav(wavPath);

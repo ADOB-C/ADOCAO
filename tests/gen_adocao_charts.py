@@ -222,7 +222,15 @@ CHORD_MIN_GAP = 0.00035      # 比这更近的并集点直接并掉（<0.35 ms �
 CHORD_F0 = 261.63 / 4.0                                   # 纯律 4:5:6 的根音 65.4075 Hz
 CHORD_NOTES = (4.0 * CHORD_F0, 5.0 * CHORD_F0, 6.0 * CHORD_F0)   # 261.63 / 327.04 / 392.44
 CHORD_PERIOD = 1.0 / CHORD_F0                             # 公共周期 15.2888 ms
-CHORD_BPM = 31200.0        # 一拍 c = 60/B = 1.923 ms；单砖最长 2 拍 = 3.846 ms ≥ 最大间隙 3.822
+# BPM 取 `720 x f0`（= 120 / 并集里最大的那个间隙）：于是**每个间隙都恰好落在整数个"拍"上**，
+# 而且三种结构自然出现（这就是参考截图里那些形态的来源）：
+#   * 间隙 2.548 ms = 2 拍 → `delta ≈ 0` 走 `Timeline.cpp:71` 的特例 → 几何转角 **180°**
+#     = **U 形掉头**，砖路沿原路折回 ⇒ "**双线段**"（一条线走两遍）；
+#   * 间隙 1.274 ms = 1 拍 → 转角 **0°** = **笔直的条**；
+#   * 其余落在 72/108/144/216°（都是 36° 的整数倍）。
+# 并集里的所有间隙都是 δ = 1/(60 f0) = 0.25481 ms 的整数倍（2/3/4/5/6/10 倍），
+# 所以转角被量化成 36° 的倍数 —— 这正是它看起来"规整"的原因。
+CHORD_BPM = 720.0 * CHORD_F0     # = 47093.4；一拍 c = 60/B = 1.2740 ms（= 4 格间隙）
 CHORD_SECONDS = 2.5
 
 
@@ -247,7 +255,9 @@ def _chord_period_signs(gaps):
     两者的"LCM 边界朝向"都回到同一个值（360 ≡ 0 mod 360），所以边界一样能锁 180°。
     """
     B = CHORD_BPM
-    base = [abs(180.0 - 3.0 * B * g) for g in gaps]
+    # 注意 u=360 那一档（2 拍的特例）：几何转角是 180°，不是 |180-360|=180 —— 两者恰好一样，
+    # 所以这里直接取 |180-u| 也对；写成 min 是为了将来 u>360 时不静默出错。
+    base = [min(abs(180.0 - 3.0 * B * g), 180.0) for g in gaps]
     n = len(base)
     best = None
     for mask in range(1 << n):
@@ -281,16 +291,23 @@ def chart_chord(seed=0x8808):
     for r in range(reps):
         for i, g in enumerate(gaps):
             u = 3.0 * B * g                    # 这一砖总共要转多少度
-            tCw = 180.0 - u                    # CW 分支下的几何转角（带符号）
-            # 不夹：u 必须落在 (0,360) 里（单砖最长 2 拍）。B 是照着最大间隙选的，
-            # 一旦有人调 B/加音，这里要立刻响，而不是悄悄削掉时长（会让整片时刻漂移）。
-            assert 0.0 < u < 359.5, f"gap {g*1e3:.4f} ms 超出 BPM {B} 的可达范围（u={u:.1f}）"
-            want = float(signs[i])
-            useCW = (1.0 if tCw > 0.0 else -1.0) == want
-            delta = u if useCW else (360.0 - u)
-            if useCW != cw:
-                twirls.append(len(angles))     # Twirl 写在**这一砖**上（floor = 砖号）
-                cw = useCW
+            # u 必须落在 (0,360]：360 就是"最长的那一档 = 2 拍"，
+            # 在 Timeline 里走 `delta < 0.0001 → relAngle = 360` 的特例（`Timeline.cpp:71`）。
+            assert -1e-6 < u <= 360.0 + 1e-6, \
+                f"gap {g*1e3:.4f} ms 超出 BPM {B} 的可达范围（u={u:.1f}）"
+            trap = abs(u - 360.0) < 1e-6
+            if trap:
+                # delta 写 0 → 特例 → 2 拍；几何转角 = 180° = **U 形掉头**（"双线段"的来历）。
+                # 特例与 Twirl 无关（delta 判定在分支之后），所以这一砖不动符号。
+                delta = 0.0
+            else:
+                tCw = 180.0 - u                # CW 分支下的几何转角（带符号）
+                want = float(signs[i])
+                useCW = (1.0 if tCw > 0.0 else -1.0) == want
+                delta = u if useCW else (360.0 - u)
+                if useCW != cw:
+                    twirls.append(len(angles))  # Twirl 写在**这一砖**上（floor = 砖号）
+                    cw = useCW
             angles.append(round((angles[-1] + 180.0 - delta) % 360.0, 6))
 
     # 整体平移：让**每个 LCM 边界**正好落在 180°（用户要求"最小公倍数的位置靠近 180 度"）

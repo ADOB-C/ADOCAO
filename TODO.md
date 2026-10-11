@@ -57,6 +57,10 @@
   - core 侧已有先例：headless 探针直接跑 PositionSolver/sampleTrail（见拖尾调研用的 trailprobe）；缺口在离屏 GL 上下文（headless GLFW / EGL）+ 渲染循环的时间源——无音频设备时不能依赖音频回调推进 m_readCursor，需固定步长驱动
 - [ ] MoveCamera（5 种 relativeTo 模式）——Easing 唯一规划使用方（Camera 缓动）
 - [ ] PositionTrack：relativeTo、rotation、scale、opacity、stickToFloors
+      （`justThisTile` **已完成** 2026-10-11：官方语义 = false 继承到之后所有层 / Enabled·true·1 只作用于本层；
+      消费侧实现在 `applyPositionTrackOffsets()`，回归用例 `tests/position_offset_test.cpp`。
+      剩下这几项的官方对照点：状态类字段在 `justThisTile` 时**不更新持续状态**；`relativeTo` 的目标层要用
+      官方 `vector` = 累积的非 justThisTile 偏移 —— 见 `~/Repos/Re_ADOJAS/src/lib/Player/PositionTrackManager.ts`）
 - [ ] **ScaleRadius**（继承状态 + 逐层累积偏移）：官方 `scnGame 1294/1380/758` —— `radiusScale = scale/100`
       默认 1、继承到下一个事件；`val4 += direction(entryangle) * ((1 - radiusScale) * tileSize)` 逐层累加后
       加到砖位，**叠加在 PositionTrack 偏移之上**。

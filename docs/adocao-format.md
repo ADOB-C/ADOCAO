@@ -653,11 +653,16 @@ for (i = 0..n) { while (event at floor i) { cumX += offX; cumY += offY; } tiles[
    "`applyRadiusScaleOffsets` 在没有 `copyTo` 的情况下又跑了一遍"，探针期望 `base+[5,3]`、实际 `base+[9,3]`；
 3. **窗口的事件扫描必须包含 `floor == i0` 的事件**（若将来实现"单层事件"）。
 
-**前置语义（排在实现之前）**：`justThisTile` 现在被解析进 `FastAction::flag`
-（`LevelData.cpp:435-447, 473`），但 `applyPositionTrackOffsets()` **从不读它** → 今天所有偏移都被当成
-永久继承，`justThisTile: true` 的谱（TUFPLAY_VER 40 处、某张 `level.adofai` 64 处）位置**静默错位**。
-它决定不变量 1 够不够、还是必须靠不变量 3 —— 所以先定它的语义（对照本机 `~/Repos/Re_ADOJAS`
-与官方 `scnGame`），再定快照结构。
+**前置语义已定并已实现（2026-10-11，`f139d01`）**：`justThisTile` 的官方语义是
+**false（缺省/`"Disabled"`）= 偏移继承到本层及之后所有层；`"Enabled"`/`"true"`/1 = 只作用于本层**；
+状态类字段（`scale`/`rotation`/`opacity`/`stickToFloors`）在 `justThisTile` 时**只给当前砖赋值、不更新持续状态**；
+`relativeTo` 用官方的 `vector`（累积的非 justThisTile 偏移）解析目标层。
+此前解析对了但消费方从不读 `flag` → 该事件被当成永久偏移（The Moon 64 处让整条轨道平移，抓帧 50.5% 像素不同）。
+
+**对快照的结论**：一次性效果**不跨块边界** → 快照**不需要**额外字段（不必存"边界上有没有未完成的一次性事件"）；
+但它把**不变量 3 从"若将来实现"变成"现在就必须"** —— 窗口/块的事件扫描必须含 `floor == i0`，
+否则边界那一层的点加会丢。继承状态（`cumX/cumY` + 将来的 `curScale/curRot/curOpacity/curStick`）才进快照，
+由不变量 1 负责。两条不变量各有归属，缺一不可。
 
 **与分块同界**：checkpoint 间隔 = 分块间隔 = 4096 层 → "数据块 = 窗口 = checkpoint" 三者同界。
 

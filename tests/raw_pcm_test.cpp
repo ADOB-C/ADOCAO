@@ -82,7 +82,8 @@ int main(int argc, char** argv) {
                 lv.angleData.size());
     check(ok, "audio-as-chart 被 buildRawPcm 认出来");
     if (!ok) return 1;
-    check(std::fabs(rate - 4000.0) < 1e-6, "采样率 = bpm/60 = 4000 Hz");
+    // 采样率 = bpm/60，由谱面自己决定（别硬编码：换个采样率就会误报，真踩过）
+    check(std::fabs(rate - lv.settings.bpm / 60.0) < 1e-6, "采样率 = bpm/60");
     check(pcm.size() == lv.angleData.size() + 1, "1 层 = 1 采样（含末尾那块 extra 砖）");
 
     // 时间轴必须与采样时钟一致：每砖恰好一拍，否则画面与声音会错开

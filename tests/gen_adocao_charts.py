@@ -364,6 +364,39 @@ def chart_duet(seed=0x9922):
     return angles
 
 
+# ---- "花瓣扇"：间隙只用 1 拍和 2 拍 ----
+#
+# 载波 c = 60/BPM，转角 Δa = 180 x (1 - gap/c)：
+#     gap = 1 拍 → Δa = 0°     （直段）
+#     gap = 2 拍 → u = 360 → 走 `delta≈0` 特例 → Δa = 180°（U 形掉头 = 花瓣的尖）
+# 所以只要谱面里**只有这两种间隙**，砖路就只会"直着走"和"折返" —— 直段 + 折返 =
+# 一片花瓣；段里如果**每砖还有一点小转角**（跑动的音不是载波那个音），花瓣就会扇开成扇形。
+#
+# 载波取 `1/(4 f0)`（= 4f0 的周期，261.63 Hz 那一档）：
+#   * 尖：用 **2f0**（130.81 Hz，低一个八度）→ 周期 2 拍 → U 形掉头 ✓
+#   * 直段：用 **5f0 / 6f0** → 0.8 / 0.667 拍 → 每砖 36° / 60°（段内恒速 ⇒ 弧线）
+Petal_BPM = 240.0 * CHORD_F0          # 一拍 = 1/(4 f0) = 3.8222 ms
+
+
+def chart_petals(seed=0x9933):
+    """花瓣扇：每片花瓣 = 6 块 5f0 的砖（每砖 36°）+ 1 块 2f0 的尖（2 拍 → U 形掉头）。
+
+    一片花瓣的净转角 = 6x36 + 180 = 396 ≡ **36°**（mod 360）⇒ 每片相对上一片转过 36°
+    ⇒ 10 片正好铺满一圈 = 扇形；花瓣本身细长（段内每砖只转 36°、来回沿同一条窄带）。
+    """
+    del seed
+    B = Petal_BPM
+    runTiles, petals = 6, 10
+    angles = [0.0]
+    u_run = 3.0 * B / (5.0 * CHORD_F0)      # 5f0 → 144 → Δa = 36°
+    for _ in range(petals):
+        for _ in range(runTiles):
+            angles.append(round((angles[-1] + 180.0 - u_run) % 360.0, 6))
+        angles.append(round((angles[-1] + 180.0 - 0.0) % 360.0, 6))     # 尖：delta=0 → 2 拍
+    angles.append(round((angles[-1] + 180.0 - 90.0) % 360.0, 6))
+    return angles
+
+
 def chart_chord(seed=0x8808):
     """拿 Kick 打出来的 Do-Mi-Gol 和弦：恒定 BPM + Twirl（逐 LCM 周期重复）。"""
     del seed
@@ -447,7 +480,8 @@ def chart_wav_rate(seed=0x9909):
 
 # 这些谱的 BPM 由别的东西决定，不能按"目标时长"反推
 FIXED_BPM = {"diag_chord": CHORD_BPM, "diag_wav_rate": WAV_RATE * 60.0,
-             "diag_arpeggio": 240.0 * CHORD_F0, "diag_duet": DUET_BPM}
+             "diag_arpeggio": 240.0 * CHORD_F0, "diag_duet": DUET_BPM,
+             "diag_petals": Petal_BPM}
 
 CHARTS = {
     "diag_dict": chart_dict,
@@ -461,6 +495,7 @@ CHARTS = {
     "diag_wav_rate": chart_wav_rate,
     "diag_arpeggio": chart_arpeggio,
     "diag_duet": chart_duet,
+    "diag_petals": chart_petals,
 }
 
 # 谱面骨架：只要 angleData + settings 就能加载（见 tests/charts/fastpath_decimal.adofai）
@@ -517,7 +552,7 @@ def main():
         if bpm is None:
             bpm = args.bpm if args.bpm > 0 else round(n * 60.0 / args.seconds)
         # audio-as-chart 要"整谱默认静音 + 逐砖给样值"（第 0 层没事件 → 取默认值）
-        if name in ("diag_chord", "diag_arpeggio", "diag_duet"):
+        if name in ("diag_chord", "diag_arpeggio", "diag_duet", "diag_petals"):
             # 每砖一击 → 音色与音量写在 settings 里就够（arpeggio 连事件都没有）
             extra = {"hitsound": "Kick", "hitsoundVolume": 50}
         elif actions:

@@ -40,77 +40,33 @@ Do/Mi/Sol 三个频率的能量**同时**远高于对照频率（实测 0.296/0.
 ### "拿 Kick 打出和弦"（相位编码节奏）
 每砖放的是同一段打击音色，音高**不由音色决定，而由重复频率决定**（137 下/秒听起来就是 137 Hz 的
 "蚊子声"）。所以要让耳朵听到 Do-Mi-Gol：把击打时刻放在三个频率网格的**并集**上（三条脉冲列相加
-= 三条谱线）。时刻由角度控制（`Timeline.cpp:63-83`，CW）：
+= 三条谱线）。
+
+**关键：时刻与"看相"必须解耦**（两轮实测换来的）。角度控制时刻的公式是
+（`Timeline.cpp:63-83`，CW）：
 
     delta    = (angleData[i-1] + 180 - angleData[i]) mod 360
     duration = (delta/360) x 2 x (60/BPM)          （delta≈0 特例成 360 → 两拍）
-    ⇒ 反解   angleData[i] = (angleData[i-1] + 180 - 3 x BPM x gap_i) mod 360
 
-于是**角度序列 = 相位的累积**，砖路画成一圈圈花环 —— 这就是"别人那几张能听到和弦的谱"的样子。
+于是：
 
-* 音高只看击打时刻，**与 BPM 无关**；BPM 只决定"每砖最多能占多久"和**看相**。
-* 实测（`tests/kick_chord_test.cpp`，ctest `kick_chord`，谱 `tests/charts/diag_chord.adofai`）：
-  1953 击落在并集网格上（误差 **0.1 us**）、混音后三条谱线各高于本底中位数 **70 倍**、
-  三音能量同量级 = 同时响（和弦，不是琶音）✓。
-* **想"展开"要调低 BPM**（反直觉，别搞反）：转角 = `3 x BPM x 该砖时长`，BPM 30000 时最大间隙
-  要转 344° → 方向几乎每砖翻一圈、画成一坨实心饼；BPM 1000 时同一间隙只转 ~9° → 半径几十砖的
-  舒展花环（实测每砖最大转角 **8.7°**）。
+* **"展开"= delta ≈ 180**（砖走直线；用户的说法是"平均角度接近 180"）。若用角度管时刻，
+  delta ≈ 180 就等价于"每砖恰好一拍"→ **击打间隔恒定** → 只有**一个音高**，出不了和弦；
+  要出和弦，间隔得在 2.5~3.8 ms 之间变 → delta 跟着变 ±25% → 砖路必然卷成一坨
+  （BPM 30000 时最大间隙要转 344°，画出来就是实心饼；BPM 1000 只是卷得小一点，仍然卷）。
+* 所以分成两件事（`tests/gen_adocao_charts.py` 的 `chart_chord`）：
+  **角度写一条慢速和弦波形**（均值 180、相邻差小 → 舒展的波形砖路），
+  **时刻走逐砖 `SetSpeed`**，而且 BPM 要**按 delta 反算补偿**：
+  `BPM_i = delta_i / (3 x gap_i)`（`duration = delta/(3 x BPM)`）—— 不补偿的话时长会被
+  角度差缩放掉（实测短 1.4~7%，命中时刻整片偏移）。
 
-### Music
-`ma_decoder` (miniaudio) — supports AIFF, OGG, WAV, FLAC. File read into memory + `ma_decoder_init_memory()`. Output: stereo f32 @ 48000Hz. Device period: 1024 frames (~23ms) for best quality. `m_fileData` kept alive for decoder lifetime. Pause stops the audio device (not just sets a flag).
+**实测**（`tests/kick_chord_test.cpp`，ctest `kick_chord`，谱 `tests/charts/diag_chord.adofai`）：
 
-### Hitsounds
-**Two product rules, both learned the hard way — do not relax them:**
-1. **Every hit in the chart is mixed.** Do NOT adopt `ADOFAI_HitSound`'s Nyquist
-   de-duplication (dropping hits < 41.7 µs apart). Measured: it is 20x faster on dense
-   charts but changes 95% of the output samples, so it is a different sound.
-2. **16-bit accumulation with the sum clamped on every addition** (`HitSoundGenerator`
-   semantics) is the ONLY mixing path. A float path with a soft limiter and a global
-   gain was tried and deleted: it changed 94.5% of the samples, and in listening the
-   loud sections became a distorted plateau while quiet sections lost level. Peak or
-   1/sqrt(N) normalisation also lets the densest moment set the gain — the quiet 10 s
-   of the test chart fell from -26 dBFS to -78 dBFS. Faithfulness wins; the only thing
-   allowed to change is *where* the work happens, never the result.
+* 1953 击落在 261.63 / 329.63 / 392.00 Hz 三网格的并集上，最大时刻误差 **0.0 us**；
+* 混音后三条谱线各高于本底中位数 **70 倍**、三音能量同量级 = **同时**响（和弦，不是琶音）；
+* 角度均值 **181.2**、每砖偏离直线 平均 **2.2°** / 最大 **13.3°** → 砖路是一条舒展的波形
+  （不是卷曲的团）。
 
-What may change (and did):
-- Mixing is restructured in three output-neutral ways, all verified byte-identical
-  against a coarse single-thread reference (`ADOCAO_MIX_THREADS=1`) and against a
-  repeat synthesis in one process:
-  1. the per-sample scale `(int)(sample * volume)` is hoisted out of the hit loop and
-     computed once per group (millions of hits reuse the same 11k scaled samples);
-  2. the accumulation buffer is MONO — in the authentic mix both channels always hold
-     the same value, so one channel plus a final duplicate is exact and halves the
-     read-modify-write traffic;
-  3. the output is swept in L2-sized blocks that only visit the hits overlapping them,
-     and blocks are handed to worker threads (`ThreadPool`), each writing only its own
-     range and visiting hits in timestamp order.
-  The inner loop is a saturating int16 add — `vqaddq_s16` (NEON) / `_mm_adds_epi16`
-  (SSE2), with a scalar fallback — which is exactly the per-addition clamp, so SIMD
-  costs no fidelity. Blocks are scheduled by a local `std::thread` loop, not by
-  `core/util/ThreadPool`, so `adocao_audio` stays free of that dependency and external
-  harnesses that compile this file alone (HitSoundBench's `adocao_gen`) keep working.
-  Falls back to an int32 path when a scaled sample does not fit in int16 (volume > 100).
-  Measured synthesis: 6.77M-hit chart 36.3 s -> 0.74 s (49x), Tempest 207 ms -> 18 ms.
-  HitSoundBench, same machine, 3 runs, both sides -O2:
-    Tempest  total 263.4 ms vs ref 404.6 ms  -> we are 1.54x FASTER (synth 17.9 vs 286.6)
-    level    total 3669 ms  vs ref 2192 ms   -> we are 1.67x slower, and the whole gap
-             is now the PARSER (2580 vs 1385 ms) plus timeline (251 ms): our synthesis
-             is already faster than the reference's (738 vs 807 ms) while mixing 11.8x
-             more hits. Next lever if wanted: the level JSON parse.
-- Fixed a cache bug that made any *second* synthesis in one process wrong: `readWav`'s
-  cache-hit path reported `channels = 1` while the cache keeps the file's layout, so a
-  cached stereo hit became 2x too long (buffer 217.582 s instead of 217.350 s) and had
-  its interleaved L/R mixed as consecutive frames. The cache now stores and returns the
-  real (rate, channels).
-- Multi-type support via `TimestampGroup` (SetHitsound events), 27 hit types
-- Case-insensitive type matching (ADOFAI levels may use mixed case)
-- Unknown type fallback: redirects to default type if WAV not found
-- `--force-hitsound`: override "None" type → "Kick" (GUI: "Force HS" checkbox)
-- Per-group WAV loading with volume scaling, cached in `s_wavCache` + `s_wavRawCache`
-- `preSynthesize()` → stereo float buffer → streamed via `attachExternal()`
-- Export: 向导的 Export 按钮，或 `adocao export --level <谱>`（写出 `<level>_hitsounds.wav`）。
-  **`adocao export` 必须给 `--music`**（导出的是 hitsound **混音**）：不给会**明确报错并退 2**，
-  不再是崩（2026-10 真崩过：`exportOnly=true` 的加载不建 `tiles`，而导出分支去读
-  `tiles[i-1].direction` → EXC_BAD_ACCESS，且日志只写文件、终端看不见）。
-  另外注意产物**很大**：3 分钟的谱就是 ~1 GB WAV —— 别留在仓库里。
-
+另一条路是 audio-as-chart（`diag_wav_rate`）：角度列也写波形（`180 + 180 x 样值`），
+声音走 `hitsoundVolume` + raw-PCM 直通/高频 Kick 叠加 —— 真谱（Unity.wav_rate 一族，44.1~192 kHz）
+用的就是这条，采样率高时相邻样值差很小，砖路自然舒展。

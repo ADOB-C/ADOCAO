@@ -198,17 +198,30 @@ def chart_overlay(n=N_OVERLAY, seed=0x7707):
 #   BPM = 30000 → 最大间隙 3.8 ms 要转 344° → 方向几乎每砖翻一圈 → 画成一坨实心饼；
 #   BPM =  1000 → 同一间隙只转 11.5° → 半径 ~5 砖的花环，一圈圈铺开（参考谱的样子）。
 # 音高只看击打时刻，跟 BPM 无关 —— 所以调 BPM 只改"看相"，不改"听感"。
-CHORD_BPM = 1000.0
 CHORD_SECONDS = 2.5
 CHORD_NOTES = (261.63, 329.63, 392.00)   # C4 E4 G4 —— 十二平均律的 Do-Mi-Gol
 CHORD_MIN_GAP = 0.00035      # 比这更近的并集点直接并掉（<0.35 ms 耳朵分不开）
 
+# 砖路画什么：一条**慢速版**的和弦波形（Hz，比真正的和弦低 5 个八度）。
+# 它只决定"看相"，不影响声音；取这么低是为了让相邻砖的角度差很小（→ 砖路舒展）。
+# 实测过的教训：想让砖路舒展，**不是**把 BPM 调高，而是让"每砖转角 ≈ 180°（= 走直线）"，
+# 也就是**把时刻从角度里拿出来**（逐砖 SetSpeed），角度只负责画画。
+CHORD_DRAW_NOTES = (4.1, 5.15, 6.1)
+
 
 def chart_chord(seed=0x8808):
-    """拿 Kick 打出来的 Do-Mi-Gol 和弦（相位编码节奏）。
+    """拿 Kick 打出来的 Do-Mi-Gol 和弦：**角度画画、逐砖 SetSpeed 管时刻**。
 
-    每砖一击，时刻精确落在三个频率网格的**并集**上（实测误差 < 0.1 us）；
-    砖路 = 相位的累积，BPM 取得低（每砖 ~10°）所以画成一圈圈舒展的花环。
+    为什么不能"角度管时刻"（两轮实测换来的）：
+      * 时长公式 `duration = (delta/360) x 2 x (60/BPM)`，其中
+        `delta = (angleData[i-1] + 180 - angleData[i]) mod 360`；
+      * "每砖走直线"（delta ≈ 180，即**平均角度 ≈ 180**）等价于**每砖恰好一拍**
+        → 击打间隔恒定 → 只有**一个音高**，出不了和弦；
+      * 和弦要求间隔在 2.5~3.8 ms 间变 → delta 得跟着变 ±25% → 砖路必然卷起来
+        （之前那两张"没展开"的图就是这么来的）。
+    所以两件事分开：角度写一条**慢速和弦波形**（均值 180、相邻差小 → 舒展花环），
+    时刻交给逐砖 `SetSpeed` —— 而且 BPM 要**按 delta 反算补偿**
+    （`BPM_i = delta_i / (3 x gap_i)`，见下面注释），否则时长会被角度差缩放掉。
     """
     del seed
     times = set()
@@ -222,15 +235,29 @@ def chart_chord(seed=0x8808):
     for t in ts[1:]:
         if t - keep[-1] >= CHORD_MIN_GAP:
             keep.append(t)
+    n = len(keep)
 
-    angles = [0.0]
-    for a, b in zip(keep, keep[1:]):
-        rel = 3.0 * CHORD_BPM * (b - a)          # 度：duration = rel/(3 x BPM)
-        angles.append(round((angles[-1] + 180.0 - rel) % 360.0, 6))
-    # 最后一个网格点：上一砖"结束"在它上面，所以补一砖"尾砖"从它起跳（这才是最后那一击）
-    rel = 3.0 * CHORD_BPM * CHORD_MIN_GAP
-    angles.append(round((angles[-1] + 180.0 - rel) % 360.0, 6))
-    return angles
+    def drawn(t):
+        smp = sum(math.sin(2.0 * math.pi * f * t) for f in CHORD_DRAW_NOTES) / len(CHORD_DRAW_NOTES)
+        return round(180.0 + 180.0 * 0.9 * smp, 6)
+
+    def delta(a_prev, a_cur):
+        d = (a_prev + 180.0 - a_cur) % 360.0
+        return 360.0 if d < 0.0001 else d          # 与 Timeline 的特例一致
+
+    # n+1 块：tile i 的**起点**是 keep[i]（0 起算）→ 最后一个网格点也有砖起跳
+    angles = [drawn(t) for t in keep]
+    angles.append(drawn(keep[-1] + 1.0 / CHORD_NOTES[-1]))
+
+    # tile i（1..n）的时长应当是 gap_{i-1} = keep[i] - keep[i-1]：
+    #   duration = delta_i/(3 x BPM_i)  ⇒  BPM_i = delta_i / (3 x gap)
+    actions = []
+    for i in range(1, n):
+        gap = keep[i] - keep[i - 1]
+        d = delta(angles[i - 1], angles[i])
+        actions.append({"floor": i, "eventType": "SetSpeed", "speedType": "Bpm",
+                        "beatsPerMinute": round(d / (3.0 * gap), 6)})
+    return angles, actions
 
 
 # ② `diag_wav_rate`：audio-as-chart（raw-PCM 直通）—— 整谱就是波形本身。
@@ -238,27 +265,41 @@ def chart_chord(seed=0x8808):
 #    角度取**恒定** 90：实测只有"相对转角 0"才是恰好一拍，时间轴才与采样时钟一致。
 #    注意这条路要显式开 `--force-hitsound raw-pcm`（或启动器里选 raw-pcm），
 #    不像 ① 那样直接就能听。
-WAV_RATE = 4000.0
-WAV_SECONDS = 0.5
+# 采样率要**高**：角度列写的是波形，相邻砖的转角就是相邻采样的差 ——
+# 44.1 kHz 时一个采样只差 ~9°，砖路才是"展开"的波形；4 kHz 时一砖差 ~100°，
+# 画出来是粗锯齿（而且时间轴会明显偏离"每砖一拍"）。真谱（Unity.wav_rate 一族）
+# 就是 44.1/48/96/192 kHz。这里取 16 kHz 折中（0.4 s = 6400 砖，文件 ~200 KB）。
+WAV_RATE = 16000.0
+WAV_SECONDS = 0.4
 WAV_NOTES = CHORD_NOTES
 
 
 def chart_wav_rate(seed=0x9909):
-    """audio-as-chart 的 Do-Mi-Gol：每砖一个采样，音量列就是波形。"""
+    """audio-as-chart 的 Do-Mi-Gol：每砖一个采样。
+
+    **两列都写波形**（参考谱就是这么写的）：
+      * `hitsoundVolume` = 样值 → 声音（Kick 按采样率叠出来 = 波形；raw-pcm 直通更是原样）；
+      * `angleData` = **180 + 180 x 样值** → 砖路把波形画出来，而且**平均角度 ≈ 180**
+        （波形的均值是 0）—— 这就是"展开"的判据：转角 = 180 - 相邻样值差，
+        采样率高时相邻差很小，于是砖路是一条舒展的波形曲线，而不是一坨乱线。
+    """
     del seed
     n = int(WAV_RATE * WAV_SECONDS)
-    actions = []
-    for i in range(1, n):
+    angles, actions = [], []
+    for i in range(n):
         t = i / WAV_RATE
         env = min(1.0, t / 0.02, (WAV_SECONDS - t) / 0.02)
         smp = sum(math.sin(2.0 * math.pi * f * t) for f in WAV_NOTES) / len(WAV_NOTES)
-        actions.append({"floor": i, "eventType": "SetHitsound",
-                        "hitsoundVolume": round(smp * 0.9 * 50.0 * max(0.0, env), 3)})
-    return [90.0] * n, actions
+        smp *= 0.9 * max(0.0, env)
+        angles.append(round(180.0 + 180.0 * smp, 6))
+        if i > 0:
+            actions.append({"floor": i, "eventType": "SetHitsound",
+                            "hitsoundVolume": round(smp * 50.0, 3)})
+    return angles, actions
 
 
 # 这些谱的 BPM 由别的东西决定，不能按"目标时长"反推
-FIXED_BPM = {"diag_chord": CHORD_BPM, "diag_wav_rate": WAV_RATE * 60.0}
+FIXED_BPM = {"diag_chord": 1000.0, "diag_wav_rate": WAV_RATE * 60.0}
 
 CHARTS = {
     "diag_dict": chart_dict,
@@ -321,9 +362,6 @@ def main():
     for name, fn in CHARTS.items():
         out = fn()
         angles, actions = out if isinstance(out, tuple) else (out, None)
-        hits = None
-        if isinstance(actions, list) and name == "diag_chord":
-            hits, actions = actions, None
         n = len(angles)
         bpm = FIXED_BPM.get(name)
         if bpm is None:

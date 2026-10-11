@@ -114,21 +114,26 @@ int main(int argc, char** argv) {
     check(audible.size() == keep.size(), "会响的击数 = 并集点数（一击不多一击不少）");
     check(pairs > 1500, "配上的击打数够");
     check(maxErr < 0.00005, "每一击都落在和弦的并集网格上（< 50 us）");
-    // 砖路"舒展"的判据：**每砖转角小**（半径 = 1/(2 sin(θ/2))，转 10° 才有几十砖的半径；
-    // 转 300° 就成了一坨实心饼）。转角 = 3 x BPM x 该砖时长，所以是**低 BPM** 让它舒展的。
-    // 注意转角不是"两个存储角度之差"：`Timeline.cpp:63` 是
-    //     delta = fmod(angle[i-1] + 180 - angle[i], 360)
-    // 存储角每砖都会加 180，所以差值恒在 180 附近，真正的"转了多少"是它偏离 180 的量。
-    double maxTurn = 0.0;
+    // 砖路"舒展"的判据（用户 2026-10-11 的说法：**平均角度接近 180 才是展开**）：
+    //   * 平均角度 ≈ 180：角度列写的是"零均值波形 + 180"，于是砖路沿一个方向铺开；
+    //   * 每砖**几乎走直线**：delta = fmod(a[i-1] + 180 - a[i], 360) ≈ 180，
+    //     等价于 delta 与 180 的偏差（= 相邻角度差）很小 → 半径大、不卷。
+    // 注意时刻**不靠**角度（靠逐砖 SetSpeed），所以这两条可以独立于音高成立。
+    double sumAngle = 0.0;
+    for (double a : lv.angleData) sumAngle += a;
+    const double meanAngle = lv.angleData.empty() ? 0.0 : sumAngle / (double)lv.angleData.size();
+    double maxDev = 0.0, sumDev = 0.0;
     for (size_t i = 1; i < lv.angleData.size(); ++i) {
         double d = std::fmod(lv.angleData[i - 1] + 180.0 - lv.angleData[i], 360.0);
         if (d < 0.0) d += 360.0;
-        maxTurn = std::fmax(maxTurn, d);
+        const double dev = std::fabs(d - 180.0);
+        maxDev = std::fmax(maxDev, dev);
+        sumDev += dev;
     }
-    std::printf("     每砖最大转角 %.1f 度\n", maxTurn);
-    check(maxTurn < 15.0, "每砖转角 < 15° → 砖路舒展（展开的傅里叶谱）");
-    check(lv.settings.bpm < 5000.0,
-          "BPM 取得低 → 每砖转角小 → 砖路舒展（提高 BPM 反而卷成一坨实心饼）");
+    const double meanDev = lv.angleData.size() > 1 ? sumDev / (double)(lv.angleData.size() - 1) : 0.0;
+    std::printf("     角度均值 %.2f，每砖偏离直线 平均 %.1f 最大 %.1f 度\n", meanAngle, meanDev, maxDev);
+    check(std::fabs(meanAngle - 180.0) < 10.0, "平均角度 ≈ 180（展开的判据）");
+    check(meanDev < 15.0 && maxDev < 40.0, "每砖几乎走直线 → 砖路舒展（不是卷成一坨）");
 
     // ---- ② 混音后确实是三音同响 ----
     HitsoundManager hm;

@@ -226,10 +226,14 @@ CHORD_MIN_GAP = 0.00035    # 比这更近的并集点直接并掉（<0.35 ms 耳
 
 
 def chart_chord(seed=0x8808):
-    """拿 Kick 打出来的 Do-Mi-Gol 和弦：**恒定 BPM + Twirl 选边**（不用 SetSpeed）。
+    """拿 Kick 打出来的 Do-Mi-Gol 和弦：**恒定 BPM + Twirl 固定大体方向**。
 
     每砖一击，时刻精确落在三个频率网格的**并集**上；音高 = 击打频率。
-    角度只负责"偏差的绝对值"，Twirl 负责"偏差的符号"（见文件头的推导）。
+    角度只负责"偏差的绝对值"（|t| = 3B|d - c|），Twirl 负责两件事：
+      * **偏差的符号**（同一对角度在 CW/CCW 两侧给出 c ± |t|/(3B)）；
+      * 于是可以**bang-bang 把累计朝向拉回目标方向** —— 想左转就左转、想右转就右转，
+        路径于是沿一个固定方向铺开（实测包围盒 1059 x 29 砖），而不是卷成一朵花；
+      * 目标方向取 0，等价于**平均角度 ≈ 180**（存储角就落在 180 附近）。
     """
     del seed
     times = set()
@@ -245,25 +249,31 @@ def chart_chord(seed=0x8808):
             keep.append(t)
 
     B = CHORD_BPM
-    c = 60.0 / B                      # 载波 = 一拍
+    c = 60.0 / B                       # 载波 = 一拍
     angles = [0.0]
     twirls = []
     cw = True                          # 与 Timeline 的初值一致
+    heading = 0.0                      # 累计朝向（bang-bang 的目标是 0）
     for i in range(1, len(keep)):
         d = keep[i] - keep[i - 1]
-        mag = 3.0 * B * abs(d - c)     # |几何转角| = 偏差大小 x 3B
-        # 不夹：mag 必须 < 180（= 单砖最长 2 拍）。B 是照着"最大间隙"选的，
+        u = 3.0 * B * d                # 这一砖总共要转多少度
+        tCw = 180.0 - u                # CW 分支下的几何转角（带符号）
+        # 不夹：u 必须落在 (0,360) 里（= 单砖最长 2 拍）。B 是照着最大间隙选的，
         # 一旦有人调 B/加音，这里要立刻响，而不是悄悄削掉时长（那会让整片时刻漂移）。
-        assert mag < 179.5, f"gap {d*1e3:.4f} ms 超出 BPM {B} 的可达范围（mag={mag:.1f}）"
-        wantCW = (d <= c)              # 同向转（t>0）时：d<c 必须 CW、d>c 必须 CCW
-        if wantCW != cw:
-            twirls.append(i)           # 只在这一砖"换边"
-            cw = wantCW
-        delta = (180.0 - mag) % 360.0  # 统一取同向（t = +mag）
+        assert 0.0 < u < 359.5, f"gap {d*1e3:.4f} ms 超出 BPM {B} 的可达范围（u={u:.1f}）"
+        # bang-bang：累计朝向偏了就转回来（Twirl 给符号，角度给定大小）
+        want = -1.0 if heading > 0.0 else 1.0
+        useCW = (1.0 if tCw > 0.0 else -1.0) == want
+        delta = u if useCW else (360.0 - u)
+        if useCW != cw:
+            twirls.append(i)
+            cw = useCW
         angles.append(round((angles[-1] + 180.0 - delta) % 360.0, 6))
+        heading += tCw if useCW else -tCw
+        heading = ((heading + 180.0) % 360.0) - 180.0
 
     # 尾砖：让**最后一个网格点**也有砖起跳（上一砖是"结束"在它上面）
-    angles.append(round((angles[-1] + 180.0 - (180.0 - 90.0)) % 360.0, 6))
+    angles.append(round((angles[-1] + 180.0 - 90.0) % 360.0, 6))
 
     actions = [{"floor": f, "eventType": "Twirl"} for f in twirls]
     return angles, actions

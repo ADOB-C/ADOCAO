@@ -151,7 +151,32 @@ int main(int argc, char** argv) {
     std::printf("     角度均值 %.2f，转角同号 %.3f，|转角| 均值 %.1f 最大 %.1f 度\n", meanAngle,
                 sameSign, meanAbs, maxAbs);
     check(std::fabs(meanAngle - 180.0) < 10.0, "平均角度 ≈ 180（展开的判据）");
-    check(sameSign > 0.999, "转角全部同号 → 同向卷曲，不来回抖");
+    // 用户 2026-10-11 的第二条：**用 Twirl 固定一个大体的方向**。
+    // |转角| 被时刻锁死（= 3B|d-c|，和弦上平均 ~74°），能自由选的只有**符号**；
+    // 于是 bang-bang：累计朝向偏了就转回来 → 路径沿一个方向铺开（不是卷成一朵花）。
+    double heading = 0.0, maxHeading = 0.0;
+    for (size_t i = 1; i < lv.angleData.size(); ++i) {
+        double t = std::fmod(lv.angleData[i] - lv.angleData[i - 1] + 180.0, 360.0);
+        if (t < 0) t += 360.0;
+        t -= 180.0;
+        heading += t;
+        heading = std::fmod(heading + 180.0, 360.0);
+        if (heading < 0) heading += 360.0;
+        heading -= 180.0;
+        maxHeading = std::fmax(maxHeading, std::fabs(heading));
+    }
+    // 路径范围（按存储角累积 1 砖一步）
+    double x = 0.0, y = 0.0, x0 = 0.0, x1 = 0.0, y0 = 0.0, y1 = 0.0;
+    for (double a2 : lv.angleData) {
+        const double r = a2 * 3.14159265358979323846 / 180.0;
+        x += std::cos(r); y += std::sin(r);
+        x0 = std::fmin(x0, x); x1 = std::fmax(x1, x); y0 = std::fmin(y0, y); y1 = std::fmax(y1, y);
+    }
+    const double spanX = x1 - x0, spanY = y1 - y0;
+    std::printf("     累计朝向 |H|max %.1f 度；路径包围盒 %.0f x %.0f 砖（转角同号 %.3f）\n",
+                maxHeading, spanX, spanY, sameSign);
+    check(maxHeading < 180.0, "累计朝向有界 → Twirl 把**大体方向**固定住了（不绕圈）");
+    check(std::fmax(spanX, spanY) > 200.0, "路径沿一个方向铺开（包围盒长边 > 200 砖）");
     check(meanAbs < 110.0, "|转角| 量级与参考谱相当（The Moon 实测 92.7°）");
 
     // ---- ② 混音后确实是三音同响 ----

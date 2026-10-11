@@ -86,3 +86,9 @@ add_test(NAME geom_probe
          COMMAND adocao_geom_probe_test
                  "${CMAKE_CURRENT_SOURCE_DIR}/charts/angles360.adofai"
                  "${CMAKE_CURRENT_SOURCE_DIR}/charts/shapes_exhaustive.adofai")
+
+# PositionTrack 的 justThisTile 消费侧语义（点加 vs 后缀加 + 负向对照）
+add_executable(adocao_position_offset_test position_offset_test.cpp)
+target_include_directories(adocao_position_offset_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(adocao_position_offset_test PRIVATE adocao_core)
+add_test(NAME position_offset COMMAND adocao_position_offset_test)

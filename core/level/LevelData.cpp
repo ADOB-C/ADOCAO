@@ -1629,14 +1629,25 @@ void LevelData::applyPositionTrackOffsets() {
     std::sort(sorted.begin(), sorted.end(), [](auto& a, auto& b) { return a.first < b.first; });
     size_t oi = 0;
 
+    // justThisTile 的语义（2026-10-11 对照 Re_ADOJAS 的官方移植确认）：
+    //   false（默认）→ **继承**：偏移作用于本层**及其之后所有层**（累积，进 cumX/cumY）
+    //   true         → **只作用于本层**（点加，只进本层的 px/py，不进累积）
+    // 以前 flag 从不读，justThisTile 事件被当成永久偏移 —— 它自己那层对，**后面整条轨道被平移**。
+    // The Moon 有 64 处这种事件（层 120812~120929、positionOffset 全非零），影响 [120812, n)。
+    // 顺带：官方的 `vector`（累积的非 justThisTile 偏移）只用于 relativeTo，我们还没实现 relativeTo。
     for (int i = 0; i < n; i++) {
+        double px = 0.0, py = 0.0;      // 本层的"一次性"偏移（多个同层事件累加）
         while (oi < sorted.size() && sorted[oi].first == i) {
-            cumX += sorted[oi].second.offsetX;
-            cumY += sorted[oi].second.offsetY;
+            const TilePositionOffset& o = sorted[oi].second;
+            if (o.justThisTile) {
+                px += o.offsetX; py += o.offsetY;
+            } else {
+                cumX += o.offsetX; cumY += o.offsetY;
+            }
             oi++;
         }
-        tiles[i].position[0] += cumX;
-        tiles[i].position[1] += cumY;
+        tiles[i].position[0] += cumX + px;
+        tiles[i].position[1] += cumY + py;
     }
 }
 

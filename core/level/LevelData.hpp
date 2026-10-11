@@ -79,6 +79,8 @@ struct LevelData {
     struct TilePositionOffset {
         float offsetX = 0.0f;
         float offsetY = 0.0f;
+        // 官方语义（对照 Re_ADOJAS 的移植确认）：false = 偏移**继承**到之后所有层；
+        // true = **只作用于本层**。消费方见 applyPositionTrackOffsets()。
         bool  justThisTile = false;
     };
 

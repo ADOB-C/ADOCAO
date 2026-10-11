@@ -59,9 +59,10 @@ std::vector<double> glide(int n, double base = 0.0, double amp = 3.0, double per
     return out;
 }
 
+// 纯律大七和弦 C-E-G-B：谐波号 2/4/8/10/12/15，公共周期 120（= 120/h），与生成脚本一致
 std::vector<double> fourier(int n, bool quantize) {
-    const double periods[6] = {96.0, 48.0, 32.0, 24.0, 16.0, 12.0};
-    const double amps[6] = {30.0, 20.0, 12.0, 8.0, 5.0, 3.0};
+    const double periods[6] = {60.0, 30.0, 15.0, 12.0, 10.0, 8.0};
+    const double amps[6] = {30.0, 18.0, 24.0, 20.0, 14.0, 10.0};
     std::vector<double> out;
     out.reserve((size_t)n);
     for (int i = 0; i < n; ++i) {
@@ -174,17 +175,17 @@ int main() {
         check(d.gridExp10 < 0, "十进制网格判定也不许误报");
     }
 
-    // ⑤ 傅里叶：量化到 1e-6、公共周期 96 → 窗口唯一数真的塌到 96
+    // ⑤ 傅里叶（大七和弦）：量化到 1e-6、公共周期 120 → 窗口唯一数真的塌到 120
     {
         const int n = 16384;
         const std::vector<double> q = fourier(n, true);
         ColumnDiagnostics d;
         diagnoseDoubles(q, ang, opt, d);
-        std::printf("     傅里叶（量化）：值集 %llu，窗口唯一 %llu/%llu@p%d，周期 %d(%.3f)\n",
+        std::printf("     傅里叶/大七和弦（量化）：值集 %llu，窗口唯一 %llu/%llu@p%d，周期 %d(%.3f)\n",
                     (unsigned long long)d.distinct, (unsigned long long)d.windowUnique,
                     (unsigned long long)d.windowCount, d.motifPeriod, d.period, d.periodPeak);
-        check(d.motifPeriod == 96, "窗口唯一数塌在 p=96（谐波的公共周期）");
-        check(d.windowUnique <= 128, "窗口唯一数 ≤ 128（真的在逐位重复）");
+        check(d.motifPeriod == 120, "窗口唯一数塌在 p=120（大七和弦的公共周期）");
+        check(d.windowUnique <= 160, "窗口唯一数 ≤ 160（真的在逐位重复）");
 
         // 同一份波形**不量化**：每层差 1 ULP → 窗口永不重复。这是"Motif 的前提"的负向对照。
         const std::vector<double> raw = fourier(n, false);
@@ -193,7 +194,7 @@ int main() {
         std::printf("     傅里叶（全精度）：值集 %llu，窗口唯一 %llu/%llu@p%d\n",
                     (unsigned long long)dr.distinct, (unsigned long long)dr.windowUnique,
                     (unsigned long long)dr.windowCount, dr.motifPeriod);
-        check(dr.distinct > 4000, "全精度下值集远大于量化版（95）");
+        check(dr.distinct > 4000, "全精度下值集远大于量化版（~105）");
         check(d.gridExp10 == 6, "量化到 1e-6 → 判成 10^-6 网格");
         check(dr.motifPeriod == 0, "全精度下没有可用的 Motif 周期（逐位重复才是前提）");
     }

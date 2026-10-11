@@ -10,6 +10,8 @@ add_library(adocao_archive STATIC
     AdocaoWriter.cpp
     # `.adocao` 读取方（unpack）：填 LevelData 但不做收尾（收尾与两条 JSON 路径共用）
     AdocaoReader.cpp
+    # v3 的判据统计（`--codec-report` 的"为什么"）：纯诊断，不参与任何编码决策
+    AdocaoDiagnostics.cpp
 )
 
 target_include_directories(adocao_archive PUBLIC ${CMAKE_SOURCE_DIR})

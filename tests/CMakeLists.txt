@@ -38,6 +38,13 @@ add_executable(adocao_columns_test adocao_columns_test.cpp)
 target_link_libraries(adocao_columns_test PRIVATE adocao_archive)
 add_test(NAME adocao_columns COMMAND adocao_columns_test)
 
+# `.adocao` v3 判据统计（§8.4）：哨兵掩码 + 差分基数（raw vs wrapped）。
+# 关键断言是**负向对照**：不掩码时中旋哨兵会把"环绕率"抬成假象；全精度正弦的窗口永远不重复
+# （即 `Motif` 要的是**逐位重复**）。只链 archive（列编码器不用压缩库）。
+add_executable(adocao_diagnostics_test adocao_diagnostics_test.cpp)
+target_link_libraries(adocao_diagnostics_test PRIVATE adocao_archive)
+add_test(NAME adocao_diagnostics COMMAND adocao_diagnostics_test)
+
 # 砖块几何自测：中旋砖（angleData=999）必须是五边形（尖角朝来路、面积 3w²）；带负向对照。
 # TileGeometryReference.cpp（改造前的 CPU 几何，现在的 A/B 基准）只需要 <vector>/<cmath>，
 # 直接编进测试，不碰 GL。

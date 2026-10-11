@@ -106,6 +106,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   解开后与两条 JSON 路径**共用同一个 `finishLoad()`**；`.adocao` 与 JSON 出的图逐字节相同（MYC 677 万层验过）。
   实测：MYC 611.18 MB → **6,120 B**（10.5 万倍）、v300 300.95 MB → 6,128 B、The Moon 15.60 MB → 3,544 B、
   angles360（人工谱）→ 9,344 B（字典主导）。规范 + 逐项实测分析见 `docs/adocao-format.md`（§5.1–§5.11）。
+  **v3 判据统计已落地**（`archive/AdocaoDiagnostics.{hpp,cpp}`，纯诊断、不参与编码）：`adocao pack --codec-report`
+  会打印"每列长什么样"（环绕率 raw/masked、值集/差分基数、**整数域 Δ² 的 varint 字节数**、窗口唯一数、
+  粗网格判定、空间自重叠率）。两条别踩的口径：**残差只在整数域算**（浮点域的 Δ² 被量化噪声淹没）、
+  **十进制网格要精确判定 `k/10^e == v`**；测试谱七张 `tests/charts/diag_*.adofai`（生成器
+  `tests/gen_adocao_charts.py`，确定性），自测 ctest `adocao_diagnostics`。详见 `docs/adocao-format.md` §8.4。
 - **2^31−1 层目标的 32 位边界（#0，2026-10）**：计数/长度一律 **int64**，只在必须交给 32 位 API
   （`GLsizei`、`int` 参数）时收窄，而且**必须**走 `core/util/CountLimits.hpp` 的 `fitsInt32()` /
   `toInt32Checked()` —— **绝不静默截断**。纯函数 + `tests/limits_test.cpp`（ctest `limits`）是这条

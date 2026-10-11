@@ -2,6 +2,7 @@
 #include "core/util/Progress.hpp"
 #include "core/level/LevelData.hpp"
 #include "archive/AdocaoWriter.hpp"     // `adocao pack`：把已加载的谱打成 .adocao
+#include "archive/AdocaoDiagnostics.hpp"  // `--codec-report`：§8.4 的判据统计（纯诊断）
 #include <fstream>
 #include "core/level/LevelPath.hpp"
 #include "Application.hpp"
@@ -392,6 +393,63 @@ int main(int argc, char* argv[]) {
                              (unsigned long long)c.rawBytes, (unsigned long long)c.encodedBytes,
                              c.elements ? (double)c.encodedBytes / (double)c.elements : 0.0,
                              (unsigned long long)c.dictEntries, c.bits);
+            }
+
+            // ---- §8.4 判据统计：每列长什么样（纯诊断，不参与上面的编码决策）----
+            std::vector<adocao::ColumnDiagnostics> diag;
+            std::string derr;
+            if (adocao::diagnoseLevel(lv, adocao::DiagOptions{}, diag, derr)) {
+                std::fprintf(stderr,
+                             "\n  判据（§8.4；只管说明为什么，与上面选中的编码无关；"
+                             "建议是**未计段级 zstd** 的裸估算，只有实编才是权威）：\n"
+                             "    列              n          值集    游程   1阶基数 原始/环绕"
+                             "   2阶基数 原始/环绕   环绕率 原始→掩码  网格     周期(相关)      "
+                             "窗口唯一@p        建议\n"
+                             "    整数域（残差只在整数域里算，§8.2①）：scale / Δ² varint B 原始→环绕 / "
+                             "|Δ²|max 原始→环绕\n");
+                bool sampledAny = false;
+                for (const adocao::ColumnDiagnostics& d : diag) {
+                    const bool sampled = d.n != d.nTotal;
+                    sampledAny = sampledAny || sampled;
+                    char period[32] = "-";
+                    if (d.period)
+                        std::snprintf(period, sizeof(period), "%d(%.2f)", d.period, d.periodPeak);
+                    char win[48] = "-";
+                    if (d.motifPeriod)
+                        std::snprintf(win, sizeof(win), "%llu/%llu@p%d",
+                                      (unsigned long long)d.windowUnique,
+                                      (unsigned long long)d.windowCount, d.motifPeriod);
+                    char grid[16] = "-";
+                    if (d.gridExp2 >= 0) std::snprintf(grid, sizeof(grid), "2^-%d", d.gridExp2);
+                    else if (d.gridExp10 >= 0) std::snprintf(grid, sizeof(grid), "10^-%d", d.gridExp10);
+                    char name[24];
+                    std::snprintf(name, sizeof(name), "%s%s", d.name.c_str(), sampled ? "*" : "");
+                    std::fprintf(stderr,
+                                 "    %-14s %-10llu %7llu %7llu  %9llu/%-9llu %9llu/%-9llu  "
+                                 "%6.3f→%-6.3f %-8s %-14s %-17s %s\n",
+                                 name, (unsigned long long)d.n,
+                                 (unsigned long long)d.distinct, (unsigned long long)d.runs,
+                                 (unsigned long long)d.d1Raw, (unsigned long long)d.d1Wrapped,
+                                 (unsigned long long)d.d2Raw, (unsigned long long)d.d2Wrapped,
+                                 d.wrapRateRaw, d.wrapRateMasked, grid, period, win, d.verdict);
+                    if (d.gridScale > 0.0 || d.d2WrapBytes > 0.0)
+                        std::fprintf(stderr,
+                                     "                   └ 整数域 scale=%g（10^%d）：Δ² varint "
+                                     "%.2f→%.2f B/值，|Δ²|max %lld→%lld\n",
+                                     d.gridScale, d.gridExp10, d.d2RawBytes, d.d2WrapBytes,
+                                     (long long)d.d2RawMax, (long long)d.d2WrapMax);
+                    if (!d.note.empty())
+                        std::fprintf(stderr, "                   └ %s\n", d.note.c_str());
+                    if (d.name == "tiles.position")
+                        std::fprintf(stderr, "                   └ 空间自重叠率 %.4f（1 砖格子）\n",
+                                     d.overlap);
+                }
+                if (sampledAny)
+                    std::fprintf(stderr,
+                                 "    注：n 带 * = 该列更长，只统计了前缀样本"
+                                 "（环绕率/差分基数建立在相邻对上，跨步抽样会破坏它）。\n");
+            } else {
+                std::fprintf(stderr, "  判据统计失败: %s\n", derr.c_str());
             }
         }
         return 0;

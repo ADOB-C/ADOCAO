@@ -121,7 +121,7 @@ target_link_libraries(adocao_kick_chord_test PRIVATE adocao_core adocao_audio)
 # "自然弯曲"档的护栏：纯 angleData 的赫兹谱（零事件 + 载波 ≥ 最大间隙 + 击打落在音符网格）
 add_executable(adocao_hz_grid_test hz_grid_test.cpp)
 target_include_directories(adocao_hz_grid_test PRIVATE ${CMAKE_SOURCE_DIR})
-target_link_libraries(adocao_hz_grid_test PRIVATE adocao_core)
+target_link_libraries(adocao_hz_grid_test PRIVATE adocao_core adocao_audio)
 add_test(NAME hz_grid
          COMMAND adocao_hz_grid_test
                  "${CMAKE_CURRENT_SOURCE_DIR}/charts/diag_arpeggio.adofai"

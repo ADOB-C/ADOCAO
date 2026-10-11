@@ -7,10 +7,13 @@
 //   ③ **击打落在音符网格上**：这些谱的音都是 f0 的整数倍（4/5/6 f0），
 //      所以每个击打时刻 t 必须满足 `t x 60 f0 ∈ ℤ`（公共格 1/(60 f0) = 0.2548 ms）。
 //
-// 用法：adocao_hz_grid_test <谱> [<谱2> ...]
+// 用法：adocao_hz_grid_test <谱> [<谱2> ...] [--wav 输出.wav] [--hitsounds 目录]
+//   --wav：把这张（最后一张）谱的打拍音混成 WAV 存下来 —— 这一族谱的"音高就是击打频率"，
+//          想听就得听混音结果（Kick 以音符速率叠出来）。
 
 #include "core/level/LevelData.hpp"
 #include "core/timeline/Timeline.hpp"
+#include "audio/HitsoundManager.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -37,12 +40,20 @@ const double kF0 = 261.63 / 4.0;    // 与 tests/gen_adocao_charts.py 一致（�
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::printf("用法: adocao_hz_grid_test <谱> [<谱2> ...]\n");
+    std::vector<std::string> charts;
+    std::string wavPath, hsDir = "assets/hitsounds";
+    for (int i = 1; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--wav" && i + 1 < argc) { wavPath = argv[++i]; }
+        else if (a == "--hitsounds" && i + 1 < argc) { hsDir = argv[++i]; }
+        else charts.push_back(a);
+    }
+    if (charts.empty()) {
+        std::printf("用法: adocao_hz_grid_test <谱> [<谱2> ...] [--wav 输出.wav] [--hitsounds 目录]\n");
         return 1;
     }
-    for (int arg = 1; arg < argc; ++arg) {
-        const std::string path = argv[arg];
+    for (size_t ci = 0; ci < charts.size(); ++ci) {
+        const std::string path = charts[ci];
         LevelData lv;
         if (!lv.loadFromFile(path)) {
             std::printf("FAIL 加载 %s\n", path.c_str());
@@ -104,6 +115,19 @@ int main(int argc, char** argv) {
         std::printf("     角度反推总时长 %.4f ms vs 时间轴 %.4f ms（差 %.2f us）\n", acc * 1e3,
                     span * 1e3, (acc - span) * 1e6);
         check(std::fabs(acc - span) < 5e-5, "  角度 ↔ 时刻 总量自洽（< 50 us）");
+
+        // 想听：把打拍音混成 WAV（音高 = 击打频率，所以必须听混音结果）
+        if (!wavPath.empty() && ci + 1 == charts.size()) {
+            HitsoundManager hm;
+            hm.init(hsDir);
+            hm.setEnabled(true);
+            const bool mixed = hm.preSynthesize(tl.getHitsoundTimestampGroups(),
+                                               (float)tl.totalDuration());
+            const bool wrote = mixed && hm.writeWav(wavPath);
+            std::printf("     %s %s（%d 击 / %.2f s 缓冲）\n", wrote ? "已写出" : "写不出",
+                        wavPath.c_str(), hm.lastMixedHits(), tl.totalDuration());
+            check(wrote, "  混音并写出 WAV");
+        }
     }
     if (g_fail) {
         std::printf("\n%d 项失败\n", g_fail);

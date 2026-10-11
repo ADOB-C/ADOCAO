@@ -177,15 +177,23 @@ SETTINGS = {
     "version": 15,
     "song": "adocao diagnostics",
     "artist": "generated",
-    "bpm": 120.0,
+    "bpm": 120.0,     # 由 write_chart() 按 --seconds/--bpm 覆盖
     "offset": 0,
     "trackColor": "debb7b",
     "backgroundColor": "000000",
 }
 
+# 默认让每张谱**整谱 120 秒**。为什么不是 120 BPM：这些谱没有音频文件，播放器于是走
+# "把整谱的打拍音预混成一段 PCM"那条路（`HitsoundManager::preSynthesize`），缓冲区大小
+# 正比于**总时长** —— 16384 层 @120 BPM = 8192 s → 实测峰值 RSS **2.26 GB**（抓帧探针量过），
+# 而且要先算完那一大段才出声。按目标时长反推 BPM（BPM = 层数 × 60 / 秒数）后整谱 120 s、
+# 缓冲 ~21 MB，按下播放立刻能听见；每下的间隔 7.3 ms（密，但是**能听见**）。
+DEFAULT_SECONDS = 120.0
 
-def write_chart(path, angles):
-    obj = {"angleData": angles, "settings": SETTINGS, "actions": [], "decorations": []}
+
+def write_chart(path, angles, bpm):
+    obj = {"angleData": angles, "settings": dict(SETTINGS, bpm=bpm),
+           "actions": [], "decorations": []}
     # separators 去掉多余空格；float 走 repr（shortest round-trip），于是"量化过的值"
     # 打出来的字符串也短（22.5 而不是 22.500000000000000）
     text = json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
@@ -198,18 +206,25 @@ def main():
     ap = argparse.ArgumentParser()
     default_out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts")
     ap.add_argument("--out", default=default_out, help="输出目录（默认 tests/charts/）")
+    ap.add_argument("--seconds", type=float, default=DEFAULT_SECONDS,
+                    help=f"目标整谱时长（默认 {DEFAULT_SECONDS:g} s；BPM = 层数 x 60 / seconds）")
+    ap.add_argument("--bpm", type=float, default=0.0,
+                    help="直接给 BPM（给了就忽略 --seconds）")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
-    print(f"{'谱':<16} {'层数':>7} {'不同值':>8} {'文件':>10}  说明")
+    print(f"{'谱':<16} {'层数':>7} {'BPM':>9} {'时长':>8} {'不同值':>8} {'文件':>10}  说明")
     for name, fn in CHARTS.items():
         angles = fn()
+        n = len(angles)
+        bpm = args.bpm if args.bpm > 0 else round(n * 60.0 / args.seconds)
         path = os.path.join(args.out, name + ".adofai")
-        size = write_chart(path, angles)
+        size = write_chart(path, angles, bpm)
         distinct = len(set(angles))
         sentinels = sum(1 for a in angles if a == 999.0)
+        secs = n * 60.0 / bpm
         note = f"哨兵 {sentinels}" if sentinels else ""
-        print(f"{name:<16} {len(angles):>7} {distinct:>8} {size:>9} B  {note}")
+        print(f"{name:<16} {n:>7} {bpm:>9.0f} {secs:>7.1f}s {distinct:>8} {size:>9} B  {note}")
     print(f"\n→ {args.out}")
 
 

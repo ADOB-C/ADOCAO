@@ -146,6 +146,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 脚本：`scripts/push-ci.sh`（push → gh run watch；`--watch` 默认输出平台耗时/产物）
   `scripts/run.sh --debugger` | `scripts/release.sh`（支持 x.y.z-AlphaN/-BetaN/-RcN）
   `scripts/make-app.sh`（macOS：把 `build/adocao` + `assets/` 打成自包含的 `build/adocao.app`，含 ad-hoc 签名；CI 的 macOS job 也用同一个脚本）
+  **注意 `.app` 是快照**：`./build.sh` 之后它不会自动更新 —— 验收/试玩前要么直跑 `build/adocao`，
+  要么先跑一次 `make-app.sh`。判断"跑的是哪个"看日志路径：写进可执行文件旁边 = 直跑；
+  写进 `~/Library/Logs/ADOCAO/` = 跑的是 `.app`（2026-10-11 用户对着 4 天前的旧包怀疑人生过一次）。
   `build.sh`（已有 build/ 缓存且不带参数 = 增量构建，不提问）
 - **联网只看局部，绝不整份拉进上下文（2026-10 真亏过 3 元）**：要参考实现/资料时，一律
   `curl -sS -o build/ref/xxx <raw-url>` 落到工作区，再用 `grep`/`sed` 看那几行；**不要** `web_fetch`
@@ -180,9 +183,19 @@ A native C++ / OpenGL "A Dance of Fire and Ice" (冰与火之舞) level viewer. 
 
 A Vulkan port exists at `../ADOCAV/` (same game logic, Vulkan 1.2 backend).
 
+**权威顺序（用户 2026-10-11 拍板，铁律）**：**`Re_ADOJAS`（作者 Xbodwf）是最权威的来源** ——
+它**与官方游戏、编辑器指南、任何其他实现冲突时，一律以 Re_ADOJAS 为准**，不需要再找第三方裁决。
+本机的克隆在 **`~/Repos/Re_ADOJAS`**（下面那些 `../xxx/` 路径是旧机器的写法，本机只有这一个存在，
+别照抄路径；要用就先 `git -C ~/Repos/Re_ADOJAS log -1` 确认是不是最新，**别拿过期快照当现状**）。
+反例（2026-10-11，我犯过）：`justThisTile` 明明 Re_ADOJAS 实现成"点加"，我却用"我觉得原版画面更像累积"
+把它否掉、来回改了两遍 —— 最后量了一个**尺度无关的比值**（花瓣环半径 ÷ 星半径：实测 1.5~2.2，
+点加预测 1.46/2.28 ✓、累积 3.38/4.79 ✗）才定案，Re_ADOJAS 是对的。
+**推论**：① 要"官方语义"先读 `~/Repos/Re_ADOJAS/src/**`；② 不许用"像不像/官方应该如此"推翻它；
+③ 要对齐它的实现，仍照常走验收（逐位对拍 + 像素门槛），但**裁决权在它**。
+
 Reference implementations:
 - `../ADOFAI-JS/` — Core angle parsing
-- `../Re_ADOJAS/` — Three.js web player (hitsound, camera, decorations)
+- `../Re_ADOJAS/` — Three.js web player (hitsound, camera, decorations) ← **本机实际在 `~/Repos/Re_ADOJAS`；权威顺序见上**
 - `../ADOFAN_PIXI/` — PixiJS web player
 - `../ADOFAI/A Dance of Fire and Ice/` — Original Unity game. Decompile `Assembly-CSharp.dll` with:
   `../ADOFAI/dnSpy/dnSpy.Console.exe -o ../ADOFAI/decomp_game "../ADOFAI/A Dance of Fire and Ice/A Dance of Fire and Ice_Data/Managed/Assembly-CSharp.dll"`

@@ -101,9 +101,10 @@ int main(int argc, char** argv) {
 
     size_t pairs = 0;
     double maxErr = 0.0;
+    // tile i 的起点是 keep[i-1]，命中从 tile 1 开始 → audible[k] 对应 keep[k]
     for (size_t k = 0; k < audible.size() && k < keep.size(); ++k) {
         const double got = audible[k] - audible[0];
-        const double want = keep[k] - t0;
+        const double want = keep[k] - keep[0];
         maxErr = std::fmax(maxErr, std::fabs(got - want));
         ++pairs;
     }
@@ -114,26 +115,44 @@ int main(int argc, char** argv) {
     check(audible.size() == keep.size(), "会响的击数 = 并集点数（一击不多一击不少）");
     check(pairs > 1500, "配上的击打数够");
     check(maxErr < 0.00005, "每一击都落在和弦的并集网格上（< 50 us）");
-    // 砖路"舒展"的判据（用户 2026-10-11 的说法：**平均角度接近 180 才是展开**）：
-    //   * 平均角度 ≈ 180：角度列写的是"零均值波形 + 180"，于是砖路沿一个方向铺开；
-    //   * 每砖**几乎走直线**：delta = fmod(a[i-1] + 180 - a[i], 360) ≈ 180，
-    //     等价于 delta 与 180 的偏差（= 相邻角度差）很小 → 半径大、不卷。
-    // 注意时刻**不靠**角度（靠逐砖 SetSpeed），所以这两条可以独立于音高成立。
-    double sumAngle = 0.0;
-    for (double a : lv.angleData) sumAngle += a;
-    const double meanAngle = lv.angleData.empty() ? 0.0 : sumAngle / (double)lv.angleData.size();
-    double maxDev = 0.0, sumDev = 0.0;
-    for (size_t i = 1; i < lv.angleData.size(); ++i) {
-        double d = std::fmod(lv.angleData[i - 1] + 180.0 - lv.angleData[i], 360.0);
-        if (d < 0.0) d += 360.0;
-        const double dev = std::fabs(d - 180.0);
-        maxDev = std::fmax(maxDev, dev);
-        sumDev += dev;
+    // 时刻的"干净度"（用户 2026-10-11 指出的）：**恒定 BPM + Twirl 选边**，
+    // 不用逐砖 SetSpeed —— 那样会连累所有按拍计时的东西（BPM 显示、beatsAhead/Behind、
+    // 采样率 bpm/60 等等），而且 21 亿层目标下每砖一个事件也吃不消。
+    int nSetSpeed = 0, nTwirl = 0;
+    for (const LevelData::FastAction& a : lv.actions) {
+        if (a.type == LevelData::FastAction::SetSpeed) ++nSetSpeed;
+        if (a.type == LevelData::FastAction::Twirl) ++nTwirl;
     }
-    const double meanDev = lv.angleData.size() > 1 ? sumDev / (double)(lv.angleData.size() - 1) : 0.0;
-    std::printf("     角度均值 %.2f，每砖偏离直线 平均 %.1f 最大 %.1f 度\n", meanAngle, meanDev, maxDev);
+    check(nSetSpeed == 0, "**没有** SetSpeed：时刻全靠 Twirl 换边（恒定 BPM）");
+    check(nTwirl > 0 && nTwirl < (int)lv.angleData.size(), "Twirl 数量合理（换边用）");
+
+    // 砖路"舒展"的判据（用户 2026-10-11：**平均角度接近 180 才是展开**）：
+    //   * 平均角度 ≈ 180（角度列是"零均值波形 + 180"，砖路沿一个方向铺开）；
+    //   * **每砖转角同号**（不来回抖）—— 这正是 Twirl 选边的功劳：偏差的绝对值由角度定，
+    //     符号由 Twirl 定，于是可以在恒定 BPM 下既精确又同向。
+    // 参考谱（The Moon - Coal，能听到和弦那一族）实测：几何转角均值 92.7° 也是同向卷曲，
+    // 所以这里不要求"几乎直线"，只要求同向、且量级可比。
+    double sumAngle = 0.0;
+    for (double a2 : lv.angleData) sumAngle += a2;
+    const double meanAngle = lv.angleData.empty() ? 0.0 : sumAngle / (double)lv.angleData.size();
+    int pos = 0, neg = 0;
+    double sumAbs = 0.0, maxAbs = 0.0;
+    for (size_t i = 1; i < lv.angleData.size(); ++i) {
+        double t = std::fmod(lv.angleData[i] - lv.angleData[i - 1] + 180.0, 360.0);
+        if (t < 0) t += 360.0;
+        t -= 180.0;
+        if (t > 0) ++pos; else ++neg;
+        sumAbs += std::fabs(t);
+        maxAbs = std::fmax(maxAbs, std::fabs(t));
+    }
+    const int total = pos + neg;
+    const double meanAbs = total ? sumAbs / (double)total : 0.0;
+    const double sameSign = total ? (double)std::max(pos, neg) / (double)total : 0.0;
+    std::printf("     角度均值 %.2f，转角同号 %.3f，|转角| 均值 %.1f 最大 %.1f 度\n", meanAngle,
+                sameSign, meanAbs, maxAbs);
     check(std::fabs(meanAngle - 180.0) < 10.0, "平均角度 ≈ 180（展开的判据）");
-    check(meanDev < 15.0 && maxDev < 40.0, "每砖几乎走直线 → 砖路舒展（不是卷成一坨）");
+    check(sameSign > 0.999, "转角全部同号 → 同向卷曲，不来回抖");
+    check(meanAbs < 110.0, "|转角| 量级与参考谱相当（The Moon 实测 92.7°）");
 
     // ---- ② 混音后确实是三音同响 ----
     HitsoundManager hm;

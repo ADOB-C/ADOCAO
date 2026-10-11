@@ -202,26 +202,34 @@ CHORD_SECONDS = 2.5
 CHORD_NOTES = (261.63, 329.63, 392.00)   # C4 E4 G4 —— 十二平均律的 Do-Mi-Gol
 CHORD_MIN_GAP = 0.00035      # 比这更近的并集点直接并掉（<0.35 ms 耳朵分不开）
 
-# 砖路画什么：一条**慢速版**的和弦波形（Hz，比真正的和弦低 5 个八度）。
-# 它只决定"看相"，不影响声音；取这么低是为了让相邻砖的角度差很小（→ 砖路舒展）。
-# 实测过的教训：想让砖路舒展，**不是**把 BPM 调高，而是让"每砖转角 ≈ 180°（= 走直线）"，
-# 也就是**把时刻从角度里拿出来**（逐砖 SetSpeed），角度只负责画画。
-CHORD_DRAW_NOTES = (4.1, 5.15, 6.1)
+# ---- Kick 和弦的"正确方法"：**恒定 BPM + Twirl 选边**（用户 2026-10-11 指出的） ----
+#
+# 参考谱实测（`The Moon - Coal/level.adofai`，就是"能听到和弦"那一族）：
+#   BPM 14817.6 **恒定**、600,538 砖、**303,540 个 Twirl**（约每 2 砖一个）、
+#   每砖时长中位 4.56 ms（≈ 1 拍）、几何转角均值 92.7°、angleData 均值 157。
+#   它既没有逐砖 SetSpeed，也没有逐采样音量 —— 音高就是**击打频率**（中位 ~220 Hz）。
+#
+# 机制（`Timeline.cpp:63-83`，设 `t = 几何转角`、`delta = (180 - t) mod 360`）：
+#     CW  : duration = delta/(3 x BPM)     = (180 - t)/(3B)
+#     CCW : duration = (360 - delta)/(3B)  = (180 + t)/(3B)
+# 也就是说**同一对角度**（同样的 |t| = 同样的"直不直"）在 Twirl 的两侧给出
+#   载波 ± 偏差：`d = c ± |t|/(3B)`，`c = 60/BPM` 是载波（一拍）。
+# 于是：**Twirl 是"偏差的符号位"** —— 想让音偏高（d < c）走 CW、想让它偏低就走 CCW，
+# 而 |t| 只由偏差的**大小**决定。这样就能在
+#   * **恒定 BPM**（不碰 SetSpeed → 别的按拍计时的东西全都不受影响）、
+#   * **转角同一方向**（|t| 小 → 砖路舒展，不来回抖）
+# 的前提下，把任意击打间隔精确写出来。
+CHORD_BPM = 31200.0        # 一拍 c = 60/B = 1.923 ms；单砖最长 2 拍 = 3.846 ms ≥ 最大间隙 3.822
+CHORD_SECONDS = 2.5
+CHORD_NOTES = (261.63, 329.63, 392.00)   # C4 E4 G4 —— 十二平均律的 Do-Mi-Gol
+CHORD_MIN_GAP = 0.00035    # 比这更近的并集点直接并掉（<0.35 ms 耳朵分不开）
 
 
 def chart_chord(seed=0x8808):
-    """拿 Kick 打出来的 Do-Mi-Gol 和弦：**角度画画、逐砖 SetSpeed 管时刻**。
+    """拿 Kick 打出来的 Do-Mi-Gol 和弦：**恒定 BPM + Twirl 选边**（不用 SetSpeed）。
 
-    为什么不能"角度管时刻"（两轮实测换来的）：
-      * 时长公式 `duration = (delta/360) x 2 x (60/BPM)`，其中
-        `delta = (angleData[i-1] + 180 - angleData[i]) mod 360`；
-      * "每砖走直线"（delta ≈ 180，即**平均角度 ≈ 180**）等价于**每砖恰好一拍**
-        → 击打间隔恒定 → 只有**一个音高**，出不了和弦；
-      * 和弦要求间隔在 2.5~3.8 ms 间变 → delta 得跟着变 ±25% → 砖路必然卷起来
-        （之前那两张"没展开"的图就是这么来的）。
-    所以两件事分开：角度写一条**慢速和弦波形**（均值 180、相邻差小 → 舒展花环），
-    时刻交给逐砖 `SetSpeed` —— 而且 BPM 要**按 delta 反算补偿**
-    （`BPM_i = delta_i / (3 x gap_i)`，见下面注释），否则时长会被角度差缩放掉。
+    每砖一击，时刻精确落在三个频率网格的**并集**上；音高 = 击打频率。
+    角度只负责"偏差的绝对值"，Twirl 负责"偏差的符号"（见文件头的推导）。
     """
     del seed
     times = set()
@@ -235,28 +243,29 @@ def chart_chord(seed=0x8808):
     for t in ts[1:]:
         if t - keep[-1] >= CHORD_MIN_GAP:
             keep.append(t)
-    n = len(keep)
 
-    def drawn(t):
-        smp = sum(math.sin(2.0 * math.pi * f * t) for f in CHORD_DRAW_NOTES) / len(CHORD_DRAW_NOTES)
-        return round(180.0 + 180.0 * 0.9 * smp, 6)
+    B = CHORD_BPM
+    c = 60.0 / B                      # 载波 = 一拍
+    angles = [0.0]
+    twirls = []
+    cw = True                          # 与 Timeline 的初值一致
+    for i in range(1, len(keep)):
+        d = keep[i] - keep[i - 1]
+        mag = 3.0 * B * abs(d - c)     # |几何转角| = 偏差大小 x 3B
+        # 不夹：mag 必须 < 180（= 单砖最长 2 拍）。B 是照着"最大间隙"选的，
+        # 一旦有人调 B/加音，这里要立刻响，而不是悄悄削掉时长（那会让整片时刻漂移）。
+        assert mag < 179.5, f"gap {d*1e3:.4f} ms 超出 BPM {B} 的可达范围（mag={mag:.1f}）"
+        wantCW = (d <= c)              # 同向转（t>0）时：d<c 必须 CW、d>c 必须 CCW
+        if wantCW != cw:
+            twirls.append(i)           # 只在这一砖"换边"
+            cw = wantCW
+        delta = (180.0 - mag) % 360.0  # 统一取同向（t = +mag）
+        angles.append(round((angles[-1] + 180.0 - delta) % 360.0, 6))
 
-    def delta(a_prev, a_cur):
-        d = (a_prev + 180.0 - a_cur) % 360.0
-        return 360.0 if d < 0.0001 else d          # 与 Timeline 的特例一致
+    # 尾砖：让**最后一个网格点**也有砖起跳（上一砖是"结束"在它上面）
+    angles.append(round((angles[-1] + 180.0 - (180.0 - 90.0)) % 360.0, 6))
 
-    # n+1 块：tile i 的**起点**是 keep[i]（0 起算）→ 最后一个网格点也有砖起跳
-    angles = [drawn(t) for t in keep]
-    angles.append(drawn(keep[-1] + 1.0 / CHORD_NOTES[-1]))
-
-    # tile i（1..n）的时长应当是 gap_{i-1} = keep[i] - keep[i-1]：
-    #   duration = delta_i/(3 x BPM_i)  ⇒  BPM_i = delta_i / (3 x gap)
-    actions = []
-    for i in range(1, n):
-        gap = keep[i] - keep[i - 1]
-        d = delta(angles[i - 1], angles[i])
-        actions.append({"floor": i, "eventType": "SetSpeed", "speedType": "Bpm",
-                        "beatsPerMinute": round(d / (3.0 * gap), 6)})
+    actions = [{"floor": f, "eventType": "Twirl"} for f in twirls]
     return angles, actions
 
 
@@ -299,7 +308,7 @@ def chart_wav_rate(seed=0x9909):
 
 
 # 这些谱的 BPM 由别的东西决定，不能按"目标时长"反推
-FIXED_BPM = {"diag_chord": 1000.0, "diag_wav_rate": WAV_RATE * 60.0}
+FIXED_BPM = {"diag_chord": CHORD_BPM, "diag_wav_rate": WAV_RATE * 60.0}
 
 CHARTS = {
     "diag_dict": chart_dict,
@@ -368,8 +377,8 @@ def main():
             bpm = args.bpm if args.bpm > 0 else round(n * 60.0 / args.seconds)
         # audio-as-chart 要"整谱默认静音 + 逐砖给样值"（第 0 层没事件 → 取默认值）
         if name == "diag_chord":
-            # 每砖一击 → 音色与音量直接写在 settings 里就够（不用逐砖事件）
-            extra = {"hitsound": "Kick", "hitsoundVolume": 8}
+            # 每砖一击 → 音色与音量写在 settings 里就够；逐砖只发 Twirl（换边）
+            extra = {"hitsound": "Kick", "hitsoundVolume": 50}
         elif actions:
             extra = {"hitsoundVolume": 0}                        # audio-as-chart：默认静音
         else:

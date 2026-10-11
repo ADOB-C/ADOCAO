@@ -310,6 +310,60 @@ def chart_arpeggio(seed=0x9911):
     return angles
 
 
+# ---- "双线"：两个声部各自持音 + 各自独奏/合奏（参考视频的形态） ----
+#
+# 为什么这样才有"自然弯曲"：
+#   * 载波（一拍 c = 60/BPM）取在**最低音**的周期上 ⇒ 并集里**所有间隙 ≤ c** ⇒
+#     转角 Δa = 180 x (1 - gap/c) **全部同号** ⇒ 砖路同向弯（不需要任何 Twirl）；
+#   * **持音**（一个音保持若干击）⇒ 一段之内速率恒定 ⇒ 转角恒定 ⇒ 一段直/一段 36°/一段 60°
+#     = 长直段 + 规律花环（独奏段落）；
+#   * 两个声部**同时**时两条网格交织 ⇒ 间隙变小 ⇒ 转角变大（36~144°）⇒ 密网/小叉
+#     —— 参考截图里那几种形态，本质就是"独奏段"与"合奏段"的交替。
+DUET_BPM = 240.0 * CHORD_F0          # 一拍 = 4f0 的周期 = 3.8222 ms = 并集里最大的间隙
+DUET_HOLD = 8                        # 每个音保持几击
+# 段落：(活跃声部, 音高序列)  —— 音高用下标 0/1/2 = 4f0/5f0/6f0
+DUET_SECTIONS = (
+    ("A",  (0, 1, 2, 1)),
+    ("AB", (0, 1, 2, 1)),
+    ("B",  (0, 1, 2, 1)),
+    ("AB", (2, 1, 0, 1)),
+    ("A",  (2, 1, 0, 1)),
+    ("AB", (1, 0, 1, 2)),
+)
+
+
+def chart_duet(seed=0x9922):
+    """双线赫兹：两个声部各自持音，独奏/合奏交替 —— 零事件（纯 angleData）。"""
+    del seed
+    notes = (4.0 * CHORD_F0, 5.0 * CHORD_F0, 6.0 * CHORD_F0)
+    B = DUET_BPM
+    c = 60.0 / B
+    # 1) 逐声部把击打时刻铺出来
+    voice_times = {"A": [], "B": []}
+    for who, motif in DUET_SECTIONS:
+        for v in who:
+            t0 = voice_times[v][-1] + 1.0 / notes[motif[0]] if voice_times[v] else 0.0
+            for idx in motif:
+                f = notes[idx]
+                for k in range(DUET_HOLD):
+                    t = t0 + k / f
+                    if not voice_times[v] or t > voice_times[v][-1] + 1e-9:
+                        voice_times[v].append(t)
+                t0 += DUET_HOLD / f - 1.0 / f + 1.0 / f   # 下一音从本音最后一击之后接上
+            voice_times[v] = sorted(set(round(x, 12) for x in voice_times[v]))
+    # 2) 合并（一条时间轴 = 一个 planet 的击打序列）
+    hits = sorted(set(voice_times["A"]) | set(voice_times["B"]))
+    # 3) 间隙 → 角度：Δa = 180 - 3B x gap（所有间隙 ≤ c ⇒ 转角全部同号）
+    angles = [0.0]
+    for a, b in zip(hits, hits[1:]):
+        g = b - a
+        u = 3.0 * B * g
+        assert 0.0 < u <= 180.0 + 1e-6, f"间隙 {g*1e3:.4f} ms 超出载波（u={u:.2f}）"
+        angles.append(round((angles[-1] + 180.0 - u) % 360.0, 6))
+    angles.append(round((angles[-1] + 180.0 - 90.0) % 360.0, 6))     # 尾砖
+    return angles
+
+
 def chart_chord(seed=0x8808):
     """拿 Kick 打出来的 Do-Mi-Gol 和弦：恒定 BPM + Twirl（逐 LCM 周期重复）。"""
     del seed
@@ -393,7 +447,7 @@ def chart_wav_rate(seed=0x9909):
 
 # 这些谱的 BPM 由别的东西决定，不能按"目标时长"反推
 FIXED_BPM = {"diag_chord": CHORD_BPM, "diag_wav_rate": WAV_RATE * 60.0,
-             "diag_arpeggio": 240.0 * CHORD_F0}
+             "diag_arpeggio": 240.0 * CHORD_F0, "diag_duet": DUET_BPM}
 
 CHARTS = {
     "diag_dict": chart_dict,
@@ -406,6 +460,7 @@ CHARTS = {
     "diag_chord": chart_chord,
     "diag_wav_rate": chart_wav_rate,
     "diag_arpeggio": chart_arpeggio,
+    "diag_duet": chart_duet,
 }
 
 # 谱面骨架：只要 angleData + settings 就能加载（见 tests/charts/fastpath_decimal.adofai）
@@ -462,7 +517,7 @@ def main():
         if bpm is None:
             bpm = args.bpm if args.bpm > 0 else round(n * 60.0 / args.seconds)
         # audio-as-chart 要"整谱默认静音 + 逐砖给样值"（第 0 层没事件 → 取默认值）
-        if name in ("diag_chord", "diag_arpeggio"):
+        if name in ("diag_chord", "diag_arpeggio", "diag_duet"):
             # 每砖一击 → 音色与音量写在 settings 里就够（arpeggio 连事件都没有）
             extra = {"hitsound": "Kick", "hitsoundVolume": 50}
         elif actions:

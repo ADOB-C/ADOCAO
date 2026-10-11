@@ -653,26 +653,26 @@ for (i = 0..n) { while (event at floor i) { cumX += offX; cumY += offY; } tiles[
    "`applyRadiusScaleOffsets` 在没有 `copyTo` 的情况下又跑了一遍"，探针期望 `base+[5,3]`、实际 `base+[9,3]`；
 3. **窗口的事件扫描必须包含 `floor == i0` 的事件**（若将来实现"单层事件"）。
 
-**前置语义：冲突未决（2026-10-11 查证，别照单一实现改）**。三份证据不一致：
+**前置语义已定：`justThisTile` = 只作用于本层（点加）**。三份来源一致（2026-10-11 定案）：
 
 | 证据 | 说法 |
 |---|---|
-| 编辑器指南（adofaieditor.gitbook.io → Position Track → "Only change this tile"）| **"If enabled, all settings from this event will only affect the event tile"** → 点加 |
-| Re_ADOJAS 移植（`PositionTrackManager.ts`）| `justThisTile` → `pointX[floor] += …` → 点加 |
-| **官方对 The Moon 的实际渲染** | **累积（后缀加）** |
+| 编辑器指南（adofaieditor.gitbook.io → Position Track → "Only change this tile"）| "If enabled, all settings from this event will only affect the event tile" → **点加** |
+| Re_ADOJAS 移植（`PositionTrackManager.ts`）| `justThisTile` → `pointX[floor] += …`；非 justThisTile 才 `bitAdd`（后缀加）→ **点加** |
+| The Moon 那段的渲染（量出来的）| 花瓣环离星心 **1.5~2.2 倍星半径**；点加模型预测中位 **1.46** / 最大 **2.28** ✓；"一律累积"会把花瓣甩到 **3~5 倍**外 ✗ |
 
-判定方法是量出来的：The Moon 有 **64 个 `Enabled` 且 `positionOffset` 非零**的事件，分成 **4 组 × 16 个**，
-每组偏移方向**每步转 22.5°（16 步整整一圈）**、模长 ≈1.1 砖。**累积**这 16 个旋转向量 → 半径 ≈2.8 砖的环
-（环径 ≈5 砖，与原版画面里那 4 个"花结"逐个吻合）；**点加** → 只有 ≈3 砖的一坨。标尺用"一块砖 = 1 砖"校准。
+**实现**（`applyPositionTrackOffsets()`）：`Enabled`（= `"Enabled"`/`"true"`/1）只把偏移加到本层；
+缺省 / `"Disabled"` 才累进 `cumX/cumY`、作用于本层及之后所有层。回归用例 `tests/position_offset_test.cpp`
+（Enabled +[3,0] 在 floor 2 → floor 3 必须回到基础位置；Disabled +[0,2] 在 floor 4 → 一直继承到末尾 extra 砖）。
 
-**当前决定**：`positionOffset` **一律后缀加**（与官方画面一致；`f139d01` 那次"点加"改动已回退）。
-`tests/position_offset_test.cpp` 把这个决定钉住 —— 谁要翻案，得先拿出**原版定点实验**（最小谱面：
-一个 `Enabled` + 非零 offset，看**下一块砖**是否跟着动），否则用例会红。
-`flag` 是否只作用于 `rotation`/`scale`/`opacity`/`stickToFloors`（我们尚未实现）仍未知。
+**过程中的教训（别再犯）**：我一度按"眼看上去哪张图更像"下了"累积"的结论，并把 Re_ADOJAS 判为错；
+后来把**尺度无关的量**（花瓣环半径 ÷ 星半径）量出来才定案。**结论必须落在可量的量上，别用"像不像"**。
+另外：**不要与 `scripts/capture-gate.sh` 并发跑抓帧** —— 两者共用 `build/ADOCAO.log`，门槛核对 `capture:` 行时
+会被另一次抓帧污染，报出一整片假的"不一致"（那次 22/51，单独重跑就是 51/51）。
 
-**对快照的结论（分两支）**：按当前决定（一律累积），偏移**只**表现为累积状态 → 快照只需存 `cumX/cumY`，
-**不变量 1 就够**。若将来证实"点加"，则一次性效果会出现、且**不跨块边界** → 快照仍不需要额外字段，
-但**不变量 3（窗口/块的事件扫描必须含 `floor == i0`）从"可选"变成"必须"**。
+**对快照的结论**：点加 = 一次性效果，**不跨块边界** → 快照不需要额外字段（不必存"边界上有没有未完成的一次性事件"），
+但**不变量 3（窗口/块的事件扫描必须含 `floor == i0`）是必需的**，否则边界那一层的点加会丢。
+继承状态（`cumX/cumY`、将来的 `curScale/curRot/curOpacity/curStick`）进快照，由不变量 1 负责。
 
 **与分块同界**：checkpoint 间隔 = 分块间隔 = 4096 层 → "数据块 = 窗口 = checkpoint" 三者同界。
 

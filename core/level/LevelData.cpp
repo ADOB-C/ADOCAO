@@ -1629,23 +1629,28 @@ void LevelData::applyPositionTrackOffsets() {
     std::sort(sorted.begin(), sorted.end(), [](auto& a, auto& b) { return a.first < b.first; });
     size_t oi = 0;
 
-    // justThisTile 对 positionOffset 的作用**未定**（2026-10-11 查证后仍冲突，别照单一实现改）：
+    // justThisTile 的语义 = **只作用于本层**（点加），三份来源一致：
     //   * 编辑器指南（adofaieditor.gitbook.io → Position Track → "Only change this tile"）：
-    //     "If enabled, all settings from this event will only affect the event tile" → 点加；
-    //   * Re_ADOJAS 的移植（src/lib/Player/PositionTrackManager.ts）也把 Enabled 实现成点加；
-    //   * **但官方对 The Moon 的实际渲染是"累积"**：该谱 64 个 Enabled 且 positionOffset 非零的事件
-    //     分成 4 组 × 16 个，每组偏移方向每步转 22.5°（16 步整整一圈）——**累积这 16 个旋转向量正好画出一个环**，
-    //     与原版画面里那 4 个"花结"逐个吻合（环径 ≈ 5 砖，按"一块砖 = 1 砖"校准）；点加只会得到 ≈3 砖的一坨。
-    // 所以这里保持"一律后缀加"（与官方画面一致）。`flag` 是否只作用于
-    // rotation/scale/opacity/stickToFloors 那几路（我们尚未实现）仍待原版定点实验确认。
+    //     "If enabled, all settings from this event will only affect the event tile"；
+    //   * Re_ADOJAS 的移植（src/lib/Player/PositionTrackManager.ts）：justThisTile → pointX[floor] += …
+    //     （非 justThisTile 才是 bitAdd 后缀加）；
+    //   * 它在 The Moon 那段上的渲染量出来也对得上：花瓣环离星心 1.5~2.2 倍星半径，
+    //     正好落在点加模型的预测内（点加中位 1.46 / 最大 2.28），而"一律累积"会把花瓣甩到 3~5 倍外。
+    // 非 justThisTile（缺省/"Disabled"）= 后缀加：本层及之后所有层都吃到（累进 cumX/cumY）。
+    // 注：官方的 `vector`（累积偏移）只用于 relativeTo，我们还没实现 relativeTo。
     for (int i = 0; i < n; i++) {
+        double px = 0.0, py = 0.0;       // 本层的"一次性"偏移（同层多个事件累加）
         while (oi < sorted.size() && sorted[oi].first == i) {
-            cumX += sorted[oi].second.offsetX;
-            cumY += sorted[oi].second.offsetY;
+            const TilePositionOffset& o = sorted[oi].second;
+            if (o.justThisTile) {
+                px += o.offsetX; py += o.offsetY;
+            } else {
+                cumX += o.offsetX; cumY += o.offsetY;
+            }
             oi++;
         }
-        tiles[i].position[0] += cumX;
-        tiles[i].position[1] += cumY;
+        tiles[i].position[0] += cumX + px;
+        tiles[i].position[1] += cumY + py;
     }
 }
 

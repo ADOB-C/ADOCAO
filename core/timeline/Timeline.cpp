@@ -431,9 +431,20 @@ bool Timeline::buildRawPcm(std::vector<float>& out, double& sampleRateOut) const
     return true;
 }
 
+// 真实层数 = 谱面里的砖数。`m_tileStartTimes` 的**最后一格是合成砖**
+// （`calculateTilePositions()` 追加的"无限旋转参考"，见 AGENTS 里那条 extra 砖的说明），
+// 它不是谱面里的砖 —— 打拍音不能给它排一击（曾经末尾会多响一下，Kick 和弦那种
+// "一击不多一击不少"的谱上直接量得出来）。
+int Timeline::realTileCount() const {
+    int n = (int)m_tileStartTimes.size();
+    if (m_level && !m_level->angleData.empty() && (int)m_level->angleData.size() < n)
+        n = (int)m_level->angleData.size();
+    return n;
+}
+
 std::vector<double> Timeline::getHitsoundTimestamps() const {
     std::vector<double> timestamps;
-    int n = (int)m_tileStartTimes.size();
+    int n = realTileCount();
     if (n < 2) return timestamps;
     float offsetSec = m_level->settings.offset / 1000.0f;
     for (int i = 1; i < n; i++)
@@ -443,7 +454,7 @@ std::vector<double> Timeline::getHitsoundTimestamps() const {
 
 std::vector<HitsoundTimestampGroup> Timeline::getHitsoundTimestampGroups() const {
     std::vector<HitsoundTimestampGroup> groups;
-    int n = (int)m_tileStartTimes.size();
+    int n = realTileCount();
     if (n < 2) return groups;
 
     float countdown = (float)m_level->settings.countdownTicks * (60.0f / m_level->settings.bpm);

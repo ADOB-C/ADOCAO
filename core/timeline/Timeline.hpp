@@ -64,6 +64,10 @@ public:
     int findTileIndex(double timeInLevel) const;
     double totalDuration() const;
 
+    // 谱面里的**真实**砖数（排除 `calculateTilePositions()` 追加的合成 extra 砖）。
+    // 打拍音/逐层音量都按它来排；直接数 `tileStartTimes().size()` 会多出末尾那一击。
+    int realTileCount() const;
+
     // audio-as-chart 直通：把"每层音量"当 PCM 采样值导出（1 层 = 1 采样，采样率 = bpm/60）。
     // 映射与 Song.adofai 的编码严格互逆：编码是 volume = int16 / 655.36 → 采样 = volume * 655.36。
     // 返回 false = 这张谱不适合直通（没有逐层音量 / BPM 不恒定），调用方应回退到 hitsound 混音。

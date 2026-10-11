@@ -181,6 +181,85 @@ def chart_overlay(n=N_OVERLAY, seed=0x7707):
     return [unit[i % 4] for i in range(n)]
 
 
+# ---- 两种"能听见和弦"的写法 ----
+#
+# ① `diag_chord`：**拿 Kick 做对**（跟别人那张"能听到和弦"的谱一路子）。
+#    打拍音每砖一次，听感音高 = **重复频率**，所以要出和弦就得让击打时刻落在
+#    三个频率网格的**并集**上（三条脉冲列相加 = 三条谱线）。
+#    时刻怎么控制？`Timeline.cpp:63-83` 给了公式（CW 时）：
+#        delta    = (angleData[i-1] + 180 - angleData[i]) mod 360
+#        duration = (delta/360) x 2 x (60/BPM)         （delta≈0 特例成 360，即两拍）
+#    反解就是 angleData[i] = (angleData[i-1] + 180 - 3 x BPM x gap_i) mod 360。
+#    于是**角度序列 = 相位的累积**：方向转得快的地方 = 音高，转得慢的地方 = 低音；
+#    砖路自然画成一圈圈花环（这正是参考谱的样子），而耳朵听到的就是那段和弦。
+# BPM 决定"每砖能转多少"：duration = (delta/360) x 2 x (60/BPM)，反解
+#     delta(度) = 3 x BPM x gap
+# 所以 **BPM 越低，每砖转角越小、砖路越舒展**（不是提高 BPM！）：
+#   BPM = 30000 → 最大间隙 3.8 ms 要转 344° → 方向几乎每砖翻一圈 → 画成一坨实心饼；
+#   BPM =  1000 → 同一间隙只转 11.5° → 半径 ~5 砖的花环，一圈圈铺开（参考谱的样子）。
+# 音高只看击打时刻，跟 BPM 无关 —— 所以调 BPM 只改"看相"，不改"听感"。
+CHORD_BPM = 1000.0
+CHORD_SECONDS = 2.5
+CHORD_NOTES = (261.63, 329.63, 392.00)   # C4 E4 G4 —— 十二平均律的 Do-Mi-Gol
+CHORD_MIN_GAP = 0.00035      # 比这更近的并集点直接并掉（<0.35 ms 耳朵分不开）
+
+
+def chart_chord(seed=0x8808):
+    """拿 Kick 打出来的 Do-Mi-Gol 和弦（相位编码节奏）。
+
+    每砖一击，时刻精确落在三个频率网格的**并集**上（实测误差 < 0.1 us）；
+    砖路 = 相位的累积，BPM 取得低（每砖 ~10°）所以画成一圈圈舒展的花环。
+    """
+    del seed
+    times = set()
+    for f in CHORD_NOTES:
+        k = 0
+        while k / f <= CHORD_SECONDS:
+            times.add(round(k / f, 9))
+            k += 1
+    ts = sorted(times)
+    keep = [ts[0]]
+    for t in ts[1:]:
+        if t - keep[-1] >= CHORD_MIN_GAP:
+            keep.append(t)
+
+    angles = [0.0]
+    for a, b in zip(keep, keep[1:]):
+        rel = 3.0 * CHORD_BPM * (b - a)          # 度：duration = rel/(3 x BPM)
+        angles.append(round((angles[-1] + 180.0 - rel) % 360.0, 6))
+    # 最后一个网格点：上一砖"结束"在它上面，所以补一砖"尾砖"从它起跳（这才是最后那一击）
+    rel = 3.0 * CHORD_BPM * CHORD_MIN_GAP
+    angles.append(round((angles[-1] + 180.0 - rel) % 360.0, 6))
+    return angles
+
+
+# ② `diag_wav_rate`：audio-as-chart（raw-PCM 直通）—— 整谱就是波形本身。
+#    1 层 = 1 采样、采样率 = bpm/60、样值 = hitsoundVolume/50（`Timeline::buildRawPcm`）。
+#    角度取**恒定** 90：实测只有"相对转角 0"才是恰好一拍，时间轴才与采样时钟一致。
+#    注意这条路要显式开 `--force-hitsound raw-pcm`（或启动器里选 raw-pcm），
+#    不像 ① 那样直接就能听。
+WAV_RATE = 4000.0
+WAV_SECONDS = 0.5
+WAV_NOTES = CHORD_NOTES
+
+
+def chart_wav_rate(seed=0x9909):
+    """audio-as-chart 的 Do-Mi-Gol：每砖一个采样，音量列就是波形。"""
+    del seed
+    n = int(WAV_RATE * WAV_SECONDS)
+    actions = []
+    for i in range(1, n):
+        t = i / WAV_RATE
+        env = min(1.0, t / 0.02, (WAV_SECONDS - t) / 0.02)
+        smp = sum(math.sin(2.0 * math.pi * f * t) for f in WAV_NOTES) / len(WAV_NOTES)
+        actions.append({"floor": i, "eventType": "SetHitsound",
+                        "hitsoundVolume": round(smp * 0.9 * 50.0 * max(0.0, env), 3)})
+    return [90.0] * n, actions
+
+
+# 这些谱的 BPM 由别的东西决定，不能按"目标时长"反推
+FIXED_BPM = {"diag_chord": CHORD_BPM, "diag_wav_rate": WAV_RATE * 60.0}
+
 CHARTS = {
     "diag_dict": chart_dict,
     "diag_glide": chart_glide,
@@ -189,6 +268,8 @@ CHARTS = {
     "diag_midspin": chart_midspin,
     "diag_mixed": chart_mixed,
     "diag_overlay": chart_overlay,
+    "diag_chord": chart_chord,
+    "diag_wav_rate": chart_wav_rate,
 }
 
 # 谱面骨架：只要 angleData + settings 就能加载（见 tests/charts/fastpath_decimal.adofai）
@@ -211,9 +292,12 @@ SETTINGS = {
 DEFAULT_SECONDS = 180.0
 
 
-def write_chart(path, angles, bpm):
-    obj = {"angleData": angles, "settings": dict(SETTINGS, bpm=bpm),
-           "actions": [], "decorations": []}
+def write_chart(path, angles, bpm, actions=None, extra_settings=None):
+    settings = dict(SETTINGS, bpm=bpm)
+    if extra_settings:
+        settings.update(extra_settings)
+    obj = {"angleData": angles, "settings": settings,
+           "actions": actions or [], "decorations": []}
     # separators 去掉多余空格；float 走 repr（shortest round-trip），于是"量化过的值"
     # 打出来的字符串也短（22.5 而不是 22.500000000000000）
     text = json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
@@ -235,11 +319,25 @@ def main():
 
     print(f"{'谱':<16} {'层数':>7} {'BPM':>9} {'时长':>8} {'不同值':>8} {'文件':>10}  说明")
     for name, fn in CHARTS.items():
-        angles = fn()
+        out = fn()
+        angles, actions = out if isinstance(out, tuple) else (out, None)
+        hits = None
+        if isinstance(actions, list) and name == "diag_chord":
+            hits, actions = actions, None
         n = len(angles)
-        bpm = args.bpm if args.bpm > 0 else round(n * 60.0 / args.seconds)
+        bpm = FIXED_BPM.get(name)
+        if bpm is None:
+            bpm = args.bpm if args.bpm > 0 else round(n * 60.0 / args.seconds)
+        # audio-as-chart 要"整谱默认静音 + 逐砖给样值"（第 0 层没事件 → 取默认值）
+        if name == "diag_chord":
+            # 每砖一击 → 音色与音量直接写在 settings 里就够（不用逐砖事件）
+            extra = {"hitsound": "Kick", "hitsoundVolume": 8}
+        elif actions:
+            extra = {"hitsoundVolume": 0}                        # audio-as-chart：默认静音
+        else:
+            extra = None
         path = os.path.join(args.out, name + ".adofai")
-        size = write_chart(path, angles, bpm)
+        size = write_chart(path, angles, bpm, actions, extra)
         distinct = len(set(angles))
         sentinels = sum(1 for a in angles if a == 999.0)
         secs = n * 60.0 / bpm

@@ -99,3 +99,27 @@ add_executable(adocao_position_offset_test position_offset_test.cpp)
 target_include_directories(adocao_position_offset_test PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(adocao_position_offset_test PRIVATE adocao_core)
 add_test(NAME position_offset COMMAND adocao_position_offset_test)
+
+# audio-as-chart（raw-PCM 直通）：整谱就是波形 —— 这条链决定"能不能听见和弦"（do-mi-sol）。
+# 三层断言：buildRawPcm 认谱 + **负向对照**（普通打拍音谱必须被拒）+ 重采样后三个分音
+# 同时远高于对照频率。要链 audio（HitsoundManager 在这里）。
+add_executable(adocao_raw_pcm_test raw_pcm_test.cpp)
+target_include_directories(adocao_raw_pcm_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(adocao_raw_pcm_test PRIVATE adocao_core adocao_audio)
+add_test(NAME raw_pcm
+         COMMAND adocao_raw_pcm_test
+                 "${CMAKE_CURRENT_SOURCE_DIR}/charts/diag_wav_rate.adofai"
+                 "${CMAKE_CURRENT_SOURCE_DIR}/charts/diag_dict.adofai"
+                 "${CMAKE_BINARY_DIR}/diag/wav_rate.wav")
+
+# "拿 Kick 打出一个和弦"：击打时刻放在 Do/Mi/Sol 三个频率网格的**并集**上
+# （角度序列 = 相位累积 → 砖路画成花环，耳朵听到和弦）。三层断言：时刻对齐并集网格、
+# 混音后三条谱线同时高于本底、能导出 WAV。要链 audio + 读 assets/hitsounds。
+add_executable(adocao_kick_chord_test kick_chord_test.cpp)
+target_include_directories(adocao_kick_chord_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(adocao_kick_chord_test PRIVATE adocao_core adocao_audio)
+add_test(NAME kick_chord
+         COMMAND adocao_kick_chord_test
+                 "${CMAKE_CURRENT_SOURCE_DIR}/charts/diag_chord.adofai"
+                 "${CMAKE_SOURCE_DIR}/assets/hitsounds"
+                 "${CMAKE_BINARY_DIR}/diag/chord_kick.wav")

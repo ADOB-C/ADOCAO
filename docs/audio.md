@@ -27,6 +27,35 @@
 `rawVolumeSemanticsSelfTest()`（负/零音量必须原样落到 `tileHitsoundVolumes`，旧路径+快路径都查），
 并做了负向对照：把 `flag` 改回 `> 0` 时它立刻报 `floor 1: 期望 -33.50，实际 100.00` ✓。
 
+**自测**（2026-10-11）：`tests/raw_pcm_test.cpp`（ctest `raw_pcm`）—— 用 `tests/charts/diag_wav_rate.adofai`
+（**整谱就是 Do-Mi-Sol 波形**，每砖一个采样）验三层：① `buildRawPcm` 认谱（rate/采样数）；
+② **负向对照**：普通打拍音谱必须被拒（否则会被当 PCM 播成噪声）；③ 重采样到设备率后，
+Do/Mi/Sol 三个频率的能量**同时**远高于对照频率（实测 0.296/0.293/0.291 vs ~0）。
+
+**另一个坑（同一天修的）**：`m_tileStartTimes` 的最后一格是 `calculateTilePositions()` 追加的
+**合成 extra 砖**（无限旋转参考），它**不是谱面里的砖，不该产生打拍音** —— 混音循环按
+`tileStartTimes().size()` 排时刻，于是**每张谱末尾都多响一下**（对拍看不见、像素门槛也看不见）。
+现在走 `Timeline::realTileCount()`（真实层数 = `angleData.size()`），两种谱型都按它排。
+
+### "拿 Kick 打出和弦"（相位编码节奏）
+每砖放的是同一段打击音色，音高**不由音色决定，而由重复频率决定**（137 下/秒听起来就是 137 Hz 的
+"蚊子声"）。所以要让耳朵听到 Do-Mi-Gol：把击打时刻放在三个频率网格的**并集**上（三条脉冲列相加
+= 三条谱线）。时刻由角度控制（`Timeline.cpp:63-83`，CW）：
+
+    delta    = (angleData[i-1] + 180 - angleData[i]) mod 360
+    duration = (delta/360) x 2 x (60/BPM)          （delta≈0 特例成 360 → 两拍）
+    ⇒ 反解   angleData[i] = (angleData[i-1] + 180 - 3 x BPM x gap_i) mod 360
+
+于是**角度序列 = 相位的累积**，砖路画成一圈圈花环 —— 这就是"别人那几张能听到和弦的谱"的样子。
+
+* 音高只看击打时刻，**与 BPM 无关**；BPM 只决定"每砖最多能占多久"和**看相**。
+* 实测（`tests/kick_chord_test.cpp`，ctest `kick_chord`，谱 `tests/charts/diag_chord.adofai`）：
+  1953 击落在并集网格上（误差 **0.1 us**）、混音后三条谱线各高于本底中位数 **70 倍**、
+  三音能量同量级 = 同时响（和弦，不是琶音）✓。
+* **想"展开"要调低 BPM**（反直觉，别搞反）：转角 = `3 x BPM x 该砖时长`，BPM 30000 时最大间隙
+  要转 344° → 方向几乎每砖翻一圈、画成一坨实心饼；BPM 1000 时同一间隙只转 ~9° → 半径几十砖的
+  舒展花环（实测每砖最大转角 **8.7°**）。
+
 ### Music
 `ma_decoder` (miniaudio) — supports AIFF, OGG, WAV, FLAC. File read into memory + `ma_decoder_init_memory()`. Output: stereo f32 @ 48000Hz. Device period: 1024 frames (~23ms) for best quality. `m_fileData` kept alive for decoder lifetime. Pause stops the audio device (not just sets a flag).
 

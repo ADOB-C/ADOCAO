@@ -238,17 +238,32 @@ def _chord_period_gaps():
 
 
 def _chord_period_signs(gaps):
-    """逐周期的 Twirl 符号模式：要求 Σ ±|180-u| = 0（净转角 0 → 朝向回到原值）。"""
+    """逐周期的 Twirl 符号模式。
+
+    目标是**净转角 = ±360°（绕一整圈）**，而不是 0：
+      * ±360 → 每个公共周期收成一个**闭合的环**（参考视频里就是一串环：见
+        `build/ref/f_11.png`，一圈约 14 砖），环之间沿一个方向漂移 → 弧线；
+      * 0 → 每周期净转角为 0，砖路是一条笔直的锯齿线（我们上一版就是这样）。
+    两者的"LCM 边界朝向"都回到同一个值（360 ≡ 0 mod 360），所以边界一样能锁 180°。
+    """
     B = CHORD_BPM
-    base = [180.0 - 3.0 * B * g for g in gaps]
+    base = [abs(180.0 - 3.0 * B * g) for g in gaps]
     n = len(base)
+    best = None
     for mask in range(1 << n):
         tot = 0.0
         for i in range(n):
             tot += base[i] if (mask >> i) & 1 else -base[i]
-        if abs(tot) < 1e-6:
-            return [1 if (mask >> i) & 1 else -1 for i in range(n)]
-    raise AssertionError("找不到让一个周期净转角为 0 的符号组合")
+        for tgt in (360.0, -360.0, 0.0):
+            err = abs(tot - tgt)
+            if err < 1e-6:
+                key = (abs(tgt), -err)          # 先要"整整一圈"，再要误差小
+                if best is None or key > best[0]:
+                    best = (key, mask)
+    if best is None:
+        raise AssertionError("找不到让一个周期净转角为 0/±360 的符号组合")
+    mask = best[1]
+    return [1 if (mask >> i) & 1 else -1 for i in range(n)]
 
 
 def chart_chord(seed=0x8808):

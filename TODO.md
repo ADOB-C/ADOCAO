@@ -65,6 +65,12 @@
 - [ ] PositionTrack 剩下的官方对照点：状态类字段（rotation/scale/opacity/stickToFloors）在 `justThisTile` 时
       是否**不更新持续状态**（编辑器指南说 Enabled = "only affect the event tile"）；`relativeTo` 的目标层要用
       官方 `vector`（累积偏移）—— 见 `~/Repos/Re_ADOJAS/src/lib/Player/PositionTrackManager.ts`
+- [ ] **PositionTrack 同层多事件只生效最后一个**（潜在 fidelity bug）：`tilePositionOffsets` 是
+      `unordered_map<int, TilePositionOffset>`（`LevelData.hpp:101`），而 `LevelData.cpp:1558` 是**赋值** ——
+      同一层出现两个 PositionTrack 时前者被覆盖，于是"文件里最后一条赢"。
+      官方向照：真值应是**每个事件各作用一次**（Re_ADOJAS 的 `pointX[floor] += …` / `bitAdd` 是逐事件的）。
+      顺带：`applyPositionTrackOffsets()` 里"同层多个事件累加"那句注释与实际数据结构不符。
+      影响面：v3 checkpoint 的不变量 3（边界层 `floor == i0` 撞上多事件会少算）。
 - [ ] **ScaleRadius**（继承状态 + 逐层累积偏移）：官方 `scnGame 1294/1380/758` —— `radiusScale = scale/100`
       默认 1、继承到下一个事件；`val4 += direction(entryangle) * ((1 - radiusScale) * tileSize)` 逐层累加后
       加到砖位，**叠加在 PositionTrack 偏移之上**。
@@ -96,17 +102,30 @@
 > 编完解回来逐位 `memcmp`，不一致就丢候选）——**加候选最坏是零收益，不会让任何谱变差**。
 
 - [ ] ① `--codec-report` 加**判据统计**（纯诊断、不改行为）：环绕率 / 值集基数 / 一阶与二阶差分基数 /
-      p-窗口唯一数 + 自相关主峰 / 定点网格判定 / 游程数 / 空间自重叠率（叠加度）
+      p-窗口唯一数 + 自相关主峰 / 定点网格判定 / 游程数 / 空间自重叠率（叠加度）/
+      **块间字典复用率 + 分块前后体积比** / **哨兵占比（`angleData == 999`）**
+- [ ] ①' **哨兵掩码先行**（②③的前置，**不做则判据与 `WrapDelta` 一起错**）：`angleData` 列混着 midspin 的
+      `999`（`LevelData.cpp:1427-1430`、`1509`），`999 mod 360 = 279` 是假角度、且制造假的 `|Δ|>180`。
+      规则：`WrapDelta`/diff 类变换**只作用在掩码后的真角度流上**，哨兵另存（1 bit 位图或单开一列）
 - [ ] ② **`WrapDelta(mod 360)`**（滑音/螺旋：环上的量）—— 实测 13.60 MB → **0.62 MB（22×）**，
       且**没有它 `Dict` 反而更大（18.03 > 13.60）**；抖动谱退到 1.6~3.2×
+- [ ] ②' **新增正交整数后端 `Varint` / `RleVarint`**（**不做差分**）：v2 的 `DeltaVarint` 自己会再差一次
+      （`AdocaoColumns.cpp:383`），拿它接已差分/残差流 = 二阶/三阶差分、语义错位；§8.2④ 的"zigzag varint"
+      指的就是这两个新后端
 - [ ] ③ **`Motif`（窗口字典）**（傅里叶/epicycle/单元重复）—— 合成实测 **75~220×**
-- [ ] ④ **`Predict(k)` + 残差后端**（漂移+周期毛刺 **86×**）；残差只在**整数域**算、**闭链**、**每块复位**
+- [ ] ④ **`Predict(k)` + 残差后端**（漂移+周期毛刺 **86×**）；残差只在**整数域**算、**闭链**、**每块复位**；
+      定点缩放的溢出要显式判（`|v| > INT64_MAX/S` 就放弃该候选，别走进 UB）
 - [ ] ⑤ `FixedPoint`（二进制网格 100×+）/ `XorFloat`（全精度平滑漂移 ~1.9×）
 - [ ] ⑥ **分块**（块自包含 + 块内自选，间隔与 checkpoint 对齐 4096）—— 分段型实测 **1.66~3.29×**，
-      同时是"可按层号 seek"的前提
+      同时是"可按层号 seek"的前提。两条待定：**块大小按列定**（字典按块重开会重复付费，
+      §8.3 那组实测**没覆盖** `Dict` 主导的列）；**压缩帧大小与 seek 粒度解耦**
+      （每块一帧 zstd 在 2.1e9 层下仅帧头 ≈ **65 MB**，改成 64 KB~1 MB 一帧、seek 定位所属帧）
 - [ ] ⑦ `Preserved`（未知成员原样保留 → ADOCAO-E 无损回写）
 - [ ] ⑧ `Derived` = **checkpoint：PositionTrack 累积量优先**（详见 `docs/adocao-format.md` §8.8；
-      前置是查清 `justThisTile` 语义 —— 它现在被解析进 `flag` 但 `applyPositionTrackOffsets()` 从不读）
+      前置的 `justThisTile` 语义**已定案并落地**（见本文件上面那条 PositionTrack：
+      **只作用于本层 = 点加**，`applyPositionTrackOffsets()` 已读 `o.justThisTile`）→
+      点加是**一次性**效果、不跨块，快照里**不需要**额外字段；必需的只有"窗口事件扫描必须含 `floor == i0`"。
+      **快照种子一律 f64**（`radiusScale`/`bpm`/最后一个真角度，f32 过不了逐位对拍）。字段表见 §8.8）
 - [ ] ⑨ 段级后端取 `min(zstd, xz)`；零拷贝（`Raw` + 对齐直读）
 - [x] ~~已实测否掉，别再提~~：赫兹隐式位图（差 13×）、手写熵编码下标流、朴素 `Δ²` 作用在 double 上
       （16.9~20.4 MB，负收益）、`Dict` 打高基数（18.06 vs 13.60）、LPC+varint 残差、`XorFloat` 打随机

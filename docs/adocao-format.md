@@ -653,16 +653,26 @@ for (i = 0..n) { while (event at floor i) { cumX += offX; cumY += offY; } tiles[
    "`applyRadiusScaleOffsets` 在没有 `copyTo` 的情况下又跑了一遍"，探针期望 `base+[5,3]`、实际 `base+[9,3]`；
 3. **窗口的事件扫描必须包含 `floor == i0` 的事件**（若将来实现"单层事件"）。
 
-**前置语义已定并已实现（2026-10-11，`f139d01`）**：`justThisTile` 的官方语义是
-**false（缺省/`"Disabled"`）= 偏移继承到本层及之后所有层；`"Enabled"`/`"true"`/1 = 只作用于本层**；
-状态类字段（`scale`/`rotation`/`opacity`/`stickToFloors`）在 `justThisTile` 时**只给当前砖赋值、不更新持续状态**；
-`relativeTo` 用官方的 `vector`（累积的非 justThisTile 偏移）解析目标层。
-此前解析对了但消费方从不读 `flag` → 该事件被当成永久偏移（The Moon 64 处让整条轨道平移，抓帧 50.5% 像素不同）。
+**前置语义：冲突未决（2026-10-11 查证，别照单一实现改）**。三份证据不一致：
 
-**对快照的结论**：一次性效果**不跨块边界** → 快照**不需要**额外字段（不必存"边界上有没有未完成的一次性事件"）；
-但它把**不变量 3 从"若将来实现"变成"现在就必须"** —— 窗口/块的事件扫描必须含 `floor == i0`，
-否则边界那一层的点加会丢。继承状态（`cumX/cumY` + 将来的 `curScale/curRot/curOpacity/curStick`）才进快照，
-由不变量 1 负责。两条不变量各有归属，缺一不可。
+| 证据 | 说法 |
+|---|---|
+| 编辑器指南（adofaieditor.gitbook.io → Position Track → "Only change this tile"）| **"If enabled, all settings from this event will only affect the event tile"** → 点加 |
+| Re_ADOJAS 移植（`PositionTrackManager.ts`）| `justThisTile` → `pointX[floor] += …` → 点加 |
+| **官方对 The Moon 的实际渲染** | **累积（后缀加）** |
+
+判定方法是量出来的：The Moon 有 **64 个 `Enabled` 且 `positionOffset` 非零**的事件，分成 **4 组 × 16 个**，
+每组偏移方向**每步转 22.5°（16 步整整一圈）**、模长 ≈1.1 砖。**累积**这 16 个旋转向量 → 半径 ≈2.8 砖的环
+（环径 ≈5 砖，与原版画面里那 4 个"花结"逐个吻合）；**点加** → 只有 ≈3 砖的一坨。标尺用"一块砖 = 1 砖"校准。
+
+**当前决定**：`positionOffset` **一律后缀加**（与官方画面一致；`f139d01` 那次"点加"改动已回退）。
+`tests/position_offset_test.cpp` 把这个决定钉住 —— 谁要翻案，得先拿出**原版定点实验**（最小谱面：
+一个 `Enabled` + 非零 offset，看**下一块砖**是否跟着动），否则用例会红。
+`flag` 是否只作用于 `rotation`/`scale`/`opacity`/`stickToFloors`（我们尚未实现）仍未知。
+
+**对快照的结论（分两支）**：按当前决定（一律累积），偏移**只**表现为累积状态 → 快照只需存 `cumX/cumY`，
+**不变量 1 就够**。若将来证实"点加"，则一次性效果会出现、且**不跨块边界** → 快照仍不需要额外字段，
+但**不变量 3（窗口/块的事件扫描必须含 `floor == i0`）从"可选"变成"必须"**。
 
 **与分块同界**：checkpoint 间隔 = 分块间隔 = 4096 层 → "数据块 = 窗口 = checkpoint" 三者同界。
 

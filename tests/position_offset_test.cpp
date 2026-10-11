@@ -1,23 +1,25 @@
-// PositionTrack 的 justThisTile 消费侧语义（官方：false=**继承**到之后所有层；true=**只作用于本层**）
+// PositionTrack 的 `justThisTile`：**当前决定**与"为什么还没翻案"
 //
-// 为什么需要它：解析器一直把 justThisTile 读进 `FastAction::flag` → `TilePositionOffset::justThisTile`，
-// 但 `applyPositionTrackOffsets()` **从不读它**，于是 justThisTile 事件被当成永久偏移 ——
-// 事件自己那层是对的，**后面整条轨道被平移**。The Moon 有 64 处这种事件（层 120812~120929，
-// positionOffset 全非零），实测抓帧 50.5% 像素不同、砖块被"扇形铺开"。
-// 解析侧早有 fixture（f24 覆盖 "Enabled"/"true"/1/"Disabled" 四种写法），缺的就是这个消费侧用例。
+// 本用例钉的是"positionOffset 一律后缀加（累积）"，不是"点加"。这不是因为点加没道理，而是因为
+// 两边的证据冲突、而**画面站在累积这一边**（2026-10-11 查证）：
 //
-// 断言的两件事 + 负向对照：
-//   1. Enabled/true/1 → 点加（只动本层）；2. 缺省/Disabled → 后缀加（本层及其后所有层）；
-//   3. 负向对照：按旧的"一律继承"算，floor 3 必须**过不了**同一条断言（否则断言没牙）。
+//   * 编辑器指南（adofaieditor.gitbook.io → Position Track → "Only change this tile"）说
+//     "If enabled, all settings from this event will only affect the event tile" → 支持点加；
+//   * Re_ADOJAS 的移植（src/lib/Player/PositionTrackManager.ts）也把 Enabled 实现成点加；
+//   * **但官方对 The Moon 的实际渲染是累积**：该谱 64 个 Enabled 且 positionOffset 非零的事件，
+//     分成 4 组 × 16 个，每组偏移方向每步转 22.5°（16 步整整一圈）——累积这 16 个旋转向量
+//     **正好画出一个环**，与原版画面里那 4 个"花结"逐个吻合（环径 ≈ 5 砖）。点加只会得到 ≈3 砖的一坨。
+//
+// 所以：本用例把"画面一致的行为"钉住 —— 谁要改成点加，必须先拿到原版的**定点实验**证据
+// （最小谱面：一个 Enabled + 非零 positionOffset，看**下一块砖**有没有跟着动），否则这个用例会红，
+// 强制做一次有意识的决定。
 //
 // 用法：`ctest --test-dir build`（或直接跑 build/tests/adocao_position_offset_test）
 
 #include "core/level/LevelData.hpp"
 
-#include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <string>
 
 using namespace adofai;
 
@@ -47,7 +49,7 @@ int main() {
     }
     std::printf("# n=%zu（angleData 6 项 + 末尾 extra 砖）\n", lv.tiles.size());
 
-    // 解析侧：两种写法都要被认出来（`justThisTile` 是 flag 的来源）
+    // 解析侧：两种写法都要被认出来（`justThisTile` 是 flag 的来源，语义待定但解析必须在）
     if (lv.tilePositionOffsets.size() != 2) {
         std::printf("✗ tilePositionOffsets 应有 2 条，实际 %zu\n", lv.tilePositionOffsets.size());
         return 1;
@@ -57,30 +59,22 @@ int main() {
         return 1;
     }
 
-    // ① 基础：没有偏移的层
+    // 基础：无偏移的层
     expectPos(lv, 0, 0.0, 0.0, "起点");
     expectPos(lv, 1, 1.0, 0.0, "基础前缀和");
 
-    // ② Enabled（floor 2，+[3,0]）→ 点加：本层位移，**下一层不带**
-    expectPos(lv, 2, 5.0, 0.0, "justThisTile 只作用于本层");
-    expectPos(lv, 3, 3.0, 0.0, "justThisTile **不许**继承到下一层（本用例的核心断言）");
+    // Enabled（floor 2，+[3,0]）：当前决定 = 后缀加 → 本层与**之后所有层**都吃到这 3
+    expectPos(lv, 2, 5.0, 0.0, "事件砖本身");
+    expectPos(lv, 3, 6.0, 0.0, "positionOffset 累积（画面一致的行为；点加的话这里是 (3,0)）");
 
-    // ③ Disabled（floor 4，+[0,2]）→ 后缀加：本层及其后所有层（含末尾 extra 砖）
-    expectPos(lv, 4, 4.0, 2.0, "非 justThisTile 作用于本层");
-    expectPos(lv, 5, 5.0, 2.0, "非 justThisTile 继承到下一层");
-    expectPos(lv, 6, 6.0, 2.0, "继承一直延伸到末尾 extra 砖");
+    // Disabled（floor 4，+[0,2]）：同样后缀加
+    expectPos(lv, 4, 7.0, 2.0, "第二个事件砖");
+    expectPos(lv, 5, 8.0, 2.0, "累积继续");
+    expectPos(lv, 6, 9.0, 2.0, "一直延伸到末尾 extra 砖");
 
-    // ④ 负向对照：复刻"一律继承"的旧行为，它必须在 floor 3 上过不了同一条断言
-    {
-        const double oldAt3 = 3.0 + 3.0;   // 基础 (3,0) + 累积 3（floor 2 的偏移被永久叠加）
-        if (oldAt3 == 3.0) {
-            std::printf("  ✗ 负向对照失效：旧行为竟然也算出 (3,0)，说明断言没牙\n");
-            failures++;
-        } else {
-            std::printf("  负向对照：旧行为在 floor 3 得到 (%.1f, 0.0) ≠ (3.0, 0.0) → 断言有牙 ✓\n", oldAt3);
-        }
-    }
+    // 把"另一种读法"的数值摆出来：翻案时这两个数就是判别式
+    std::printf("  点加读法会得到：floor 3 = (3.0, 0.0)、floor 4 = (4.0, 2.0)（本用例故意不采用）\n");
 
-    if (failures == 0) std::printf("position_offset: OK\n");
+    if (failures == 0) std::printf("position_offset: OK（positionOffset = 一律后缀加）\n");
     return failures == 0 ? 0 : 1;
 }

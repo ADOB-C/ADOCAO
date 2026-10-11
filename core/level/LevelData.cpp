@@ -1629,25 +1629,23 @@ void LevelData::applyPositionTrackOffsets() {
     std::sort(sorted.begin(), sorted.end(), [](auto& a, auto& b) { return a.first < b.first; });
     size_t oi = 0;
 
-    // justThisTile 的语义（2026-10-11 对照 Re_ADOJAS 的官方移植确认）：
-    //   false（默认）→ **继承**：偏移作用于本层**及其之后所有层**（累积，进 cumX/cumY）
-    //   true         → **只作用于本层**（点加，只进本层的 px/py，不进累积）
-    // 以前 flag 从不读，justThisTile 事件被当成永久偏移 —— 它自己那层对，**后面整条轨道被平移**。
-    // The Moon 有 64 处这种事件（层 120812~120929、positionOffset 全非零），影响 [120812, n)。
-    // 顺带：官方的 `vector`（累积的非 justThisTile 偏移）只用于 relativeTo，我们还没实现 relativeTo。
+    // justThisTile 对 positionOffset 的作用**未定**（2026-10-11 查证后仍冲突，别照单一实现改）：
+    //   * 编辑器指南（adofaieditor.gitbook.io → Position Track → "Only change this tile"）：
+    //     "If enabled, all settings from this event will only affect the event tile" → 点加；
+    //   * Re_ADOJAS 的移植（src/lib/Player/PositionTrackManager.ts）也把 Enabled 实现成点加；
+    //   * **但官方对 The Moon 的实际渲染是"累积"**：该谱 64 个 Enabled 且 positionOffset 非零的事件
+    //     分成 4 组 × 16 个，每组偏移方向每步转 22.5°（16 步整整一圈）——**累积这 16 个旋转向量正好画出一个环**，
+    //     与原版画面里那 4 个"花结"逐个吻合（环径 ≈ 5 砖，按"一块砖 = 1 砖"校准）；点加只会得到 ≈3 砖的一坨。
+    // 所以这里保持"一律后缀加"（与官方画面一致）。`flag` 是否只作用于
+    // rotation/scale/opacity/stickToFloors 那几路（我们尚未实现）仍待原版定点实验确认。
     for (int i = 0; i < n; i++) {
-        double px = 0.0, py = 0.0;      // 本层的"一次性"偏移（多个同层事件累加）
         while (oi < sorted.size() && sorted[oi].first == i) {
-            const TilePositionOffset& o = sorted[oi].second;
-            if (o.justThisTile) {
-                px += o.offsetX; py += o.offsetY;
-            } else {
-                cumX += o.offsetX; cumY += o.offsetY;
-            }
+            cumX += sorted[oi].second.offsetX;
+            cumY += sorted[oi].second.offsetY;
             oi++;
         }
-        tiles[i].position[0] += cumX + px;
-        tiles[i].position[1] += cumY + py;
+        tiles[i].position[0] += cumX;
+        tiles[i].position[1] += cumY;
     }
 }
 

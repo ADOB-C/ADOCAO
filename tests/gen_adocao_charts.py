@@ -276,6 +276,40 @@ def _chord_period_signs(gaps):
     return [1 if (mask >> i) & 1 else -1 for i in range(n)]
 
 
+def chart_arpeggio(seed=0x9911):
+    """**零事件**版本：只有 angleData，没有 Twirl / SetSpeed（回答"他们为什么不用事件"）。
+
+    因为（`Timeline.cpp:63-83`，固定不 Twirl 时）：
+
+        delta    = (180 - Δa) mod 360
+        duration = delta/(3B)                  （delta≈0 特例 → 2 拍）
+
+    也就是**时长是角度的纯函数**：给定一拍 c = 60/B，任意 ≤ 2 拍的间隙都能用一个角度写出来，
+    不需要任何事件。代价是"往哪边转"也被一起定死了：
+
+        Δa = 180 - 3B x gap      → gap < c 时 Δa > 0，gap > c 时 Δa < 0
+
+    所以只要**把所有间隙都放在载波同侧**（这里取 c = 4f0 的周期 = 最大间隙），
+    所有砖就同向弯 ⇒ 砖路自然是一条**平滑的弧**，弧上按间隙大小弯 0°/36°/60° —— 就是
+    参考截图里"长弧 + 规律小弯"的形态，而且一行事件都不需要。
+
+    BPM = 240 x f0 → 一拍 = 4f0 的周期（261.63 Hz）：
+        4f0 段 → 1 拍 → Δa = 0°（笔直）    5f0 → 0.8 拍 → 36°     6f0 → 2/3 拍 → 60°
+    """
+    del seed
+    B = 240.0 * CHORD_F0
+    notes = (4.0 * CHORD_F0, 5.0 * CHORD_F0, 6.0 * CHORD_F0)
+    hold = 8
+    angles = [0.0]
+    for n in notes * 4:
+        g = 1.0 / n
+        u = 3.0 * B * g
+        assert 0.0 < u < 359.5, f"{n:.2f} Hz 的间隙 {g*1e3:.4f} ms 超出 BPM {B} 可达范围"
+        for _ in range(hold):
+            angles.append(round((angles[-1] + 180.0 - u) % 360.0, 6))
+    return angles
+
+
 def chart_chord(seed=0x8808):
     """拿 Kick 打出来的 Do-Mi-Gol 和弦：恒定 BPM + Twirl（逐 LCM 周期重复）。"""
     del seed
@@ -358,7 +392,8 @@ def chart_wav_rate(seed=0x9909):
 
 
 # 这些谱的 BPM 由别的东西决定，不能按"目标时长"反推
-FIXED_BPM = {"diag_chord": CHORD_BPM, "diag_wav_rate": WAV_RATE * 60.0}
+FIXED_BPM = {"diag_chord": CHORD_BPM, "diag_wav_rate": WAV_RATE * 60.0,
+             "diag_arpeggio": 240.0 * CHORD_F0}
 
 CHARTS = {
     "diag_dict": chart_dict,
@@ -370,6 +405,7 @@ CHARTS = {
     "diag_overlay": chart_overlay,
     "diag_chord": chart_chord,
     "diag_wav_rate": chart_wav_rate,
+    "diag_arpeggio": chart_arpeggio,
 }
 
 # 谱面骨架：只要 angleData + settings 就能加载（见 tests/charts/fastpath_decimal.adofai）
@@ -426,8 +462,8 @@ def main():
         if bpm is None:
             bpm = args.bpm if args.bpm > 0 else round(n * 60.0 / args.seconds)
         # audio-as-chart 要"整谱默认静音 + 逐砖给样值"（第 0 层没事件 → 取默认值）
-        if name == "diag_chord":
-            # 每砖一击 → 音色与音量写在 settings 里就够；逐砖只发 Twirl（换边）
+        if name in ("diag_chord", "diag_arpeggio"):
+            # 每砖一击 → 音色与音量写在 settings 里就够（arpeggio 连事件都没有）
             extra = {"hitsound": "Kick", "hitsoundVolume": 50}
         elif actions:
             extra = {"hitsoundVolume": 0}                        # audio-as-chart：默认静音

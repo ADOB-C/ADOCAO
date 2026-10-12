@@ -95,7 +95,7 @@ All dependencies are fetched automatically via CMake `FetchContent`:
 | GLFW | 3.4 | Window + input |
 | glm | 1.0.1 | Math |
 | RapidJSON | master | .adofai parsing |
-| Dear ImGui | 1.91.9 | Launcher UI |
+| Dear ImGui | 1.92.9b | Launcher UI (`v` 前缀是上游 tag，见 `CMakeLists.txt`) |
 | miniaudio | 0.11.22 | Audio playback |
 | stb_vorbis | latest | OGG decoding |
 | miniz | 3.0.2 | Zip archive reading (DataFile) |

@@ -1,5 +1,7 @@
 #include "WizardChrome.hpp"
 
+#include "app/FontSetup.hpp"           // 字体候选表 + "只认真正加载成功"的加载器
+#include "core/util/Logger.hpp"     // CJK 字体加载失败要喊一声（否则只看到 `????`）
 #include "glad/gl_core.hpp"
 #include <GLFW/glfw3.h>
 #include <imgui.h>
@@ -95,66 +97,16 @@ bool createChrome(Chrome& chrome) {
     ImFont* titleFont = nullptr;
     {
         ImGuiIO& io = ImGui::GetIO();
-        const char* cjkFonts[] = {
-#ifdef _WIN32
-            "C:/Windows/Fonts/malgun.ttf",
-            "C:/Windows/Fonts/NanumGothic.ttf",
-            "C:/Windows/Fonts/gulim.ttc",
-            "C:/Windows/Fonts/batang.ttc",
-            "C:/Windows/Fonts/msyh.ttc",
-            "C:/Windows/Fonts/msgothic.ttc",
-            "C:/Windows/Fonts/simhei.ttf",
-#elif defined(__APPLE__)
-            "/System/Library/Fonts/PingFang.ttc",
-            "/System/Library/Fonts/STHeiti Light.ttc",
-            "/System/Library/Fonts/Hiragino Sans GB.ttc",
-            "/System/Library/Fonts/Supplemental/Songti.ttc",
-#else
-            "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
-            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-            "/usr/share/fonts/nanum/NanumGothic.ttf",
-            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-#endif
-        };
 
         // Main Latin font
         {
-            const char* latinFonts[] = {
-#ifdef _WIN32
-                "C:/Windows/Fonts/segoeui.ttf",
-                "C:/Windows/Fonts/arial.ttf",
-#elif defined(__APPLE__)
-                "/System/Library/Fonts/Helvetica.ttc",
-                "/System/Library/Fonts/SFNS.ttf",
-#endif
-            };
-            bool latinLoaded = false;
-            for (const char* path : latinFonts) {
-                FILE* f = fopen(path, "rb");
-                if (f) { fclose(f); mainFont = io.Fonts->AddFontFromFileTTF(path, fontSize, &baseCfg); latinLoaded = true; break; }
-            }
-            if (!latinLoaded) mainFont = io.Fonts->AddFontDefault(&baseCfg);
+            mainFont = fonts::addFirstAvailableFont(fonts::latinCandidates(), fontSize, &baseCfg);
+            if (!mainFont) mainFont = io.Fonts->AddFontDefault(&baseCfg);
         }
 
         // Title font (bigger, Latin only)
         {
-            const char* latinFonts[] = {
-#ifdef _WIN32
-                "C:/Windows/Fonts/segoeui.ttf",
-                "C:/Windows/Fonts/arial.ttf",
-#elif defined(__APPLE__)
-                "/System/Library/Fonts/Helvetica.ttc",
-                "/System/Library/Fonts/SFNS.ttf",
-#endif
-            };
-            for (const char* path : latinFonts) {
-                FILE* f = fopen(path, "rb");
-                if (f) { fclose(f); titleFont = io.Fonts->AddFontFromFileTTF(path, fontSize * 1.8f, &baseCfg); break; }
-            }
+            titleFont = fonts::addFirstAvailableFont(fonts::latinCandidates(), fontSize * 1.8f, &baseCfg);
             if (!titleFont) titleFont = mainFont;
         }
 
@@ -162,10 +114,8 @@ bool createChrome(Chrome& chrome) {
         ImFontConfig cfg;
         cfg.MergeMode = true;
         cfg.RasterizerDensity = dpiScale;      // 1.92：字形按需光栅化，不用再预烘 CJK 区段
-        for (const char* path : cjkFonts) {
-            FILE* f = fopen(path, "rb");
-            if (f) { fclose(f); io.Fonts->AddFontFromFileTTF(path, fontSize, &cfg); break; }
-        }
+        const int cjkSources = fonts::mergeAllAvailableFonts(fonts::cjkCandidates(), fontSize, &cfg);
+        if (cjkSources == 0) LOG_W("CJK 字体一个都没加载成功，中日韩字符会显示成 `????`");
     }
 
     // 1.92 起不需要 FontGlobalScale：逻辑字号 + RasterizerDensity 已经是"布局按逻辑、字形按密度"。

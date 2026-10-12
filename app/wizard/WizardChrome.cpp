@@ -88,35 +88,11 @@ bool createChrome(Chrome& chrome) {
     }
     // 1.92：字号是**逻辑**尺寸，清晰度由 ImFontConfig::RasterizerDensity 决定
     // （旧写法是"按物理像素烘字体 + FontGlobalScale 反缩放回逻辑尺寸"，已废弃）
-    float fontSize = 12.0f;
-    ImFontConfig baseCfg;
-    baseCfg.RasterizerDensity = dpiScale;
-
-    // Fonts: main (with CJK merge) + a larger title font (Latin only)
-    ImFont* mainFont = nullptr;
-    ImFont* titleFont = nullptr;
-    {
-        ImGuiIO& io = ImGui::GetIO();
-
-        // Main Latin font
-        {
-            mainFont = fonts::addFirstAvailableFont(fonts::latinCandidates(), fontSize, &baseCfg);
-            if (!mainFont) mainFont = io.Fonts->AddFontDefault(&baseCfg);
-        }
-
-        // Title font (bigger, Latin only)
-        {
-            titleFont = fonts::addFirstAvailableFont(fonts::latinCandidates(), fontSize * 1.8f, &baseCfg);
-            if (!titleFont) titleFont = mainFont;
-        }
-
-        // Merge CJK into the main font
-        ImFontConfig cfg;
-        cfg.MergeMode = true;
-        cfg.RasterizerDensity = dpiScale;      // 1.92：字形按需光栅化，不用再预烘 CJK 区段
-        const int cjkSources = fonts::mergeAllAvailableFonts(fonts::cjkCandidates(), fontSize, &cfg);
-        if (cjkSources == 0) LOG_W("CJK 字体一个都没加载成功，中日韩字符会显示成 `????`");
-    }
+    // Fonts：正文（含 CJK 合并源）+ 大标题（1.8x）；主字体同时设为默认字体
+    const fonts::UiFonts f = fonts::setupUiFonts(dpiScale);
+    ImFont* mainFont = f.main;
+    ImFont* titleFont = f.title;
+    if (f.cjkSources == 0) LOG_W("CJK 字体一个都没加载成功，中日韩字符会显示成 `????`");
 
     // 1.92 起不需要 FontGlobalScale：逻辑字号 + RasterizerDensity 已经是"布局按逻辑、字形按密度"。
 

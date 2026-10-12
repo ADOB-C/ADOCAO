@@ -103,23 +103,9 @@ void showLoadingWindow(std::function<void(LoadingProgress&)> loader, bool cliOnl
     }
     // 1.92：字号是**逻辑**尺寸，清晰度由 ImFontConfig::RasterizerDensity 决定
     // （旧写法是"按物理像素烘字体 + FontGlobalScale 反缩放回逻辑尺寸"，已废弃）
-    float fontSize = 12.0f;
-    ImFontConfig baseCfg;
-    baseCfg.RasterizerDensity = dpiScale;
-
-    // Load CJK font
-    {
-        ImGuiIO& io = ImGui::GetIO();
-        {
-            if (!fonts::addFirstAvailableFont(fonts::latinCandidates(), fontSize, &baseCfg))
-                io.Fonts->AddFontDefault(&baseCfg);
-        }
-        ImFontConfig cfg;
-        cfg.MergeMode = true;
-        cfg.RasterizerDensity = dpiScale;      // 1.92：字形按需光栅化，不用再预烘 CJK 区段
-        const int cjkSources = fonts::mergeAllAvailableFonts(fonts::cjkCandidates(), fontSize, &cfg);
-        if (cjkSources == 0) LOG_W("CJK 字体一个都没加载成功，中日韩字符会显示成 `????`");
-    }
+    // Fonts：正文（含 CJK 合并源）；主字体同时设为默认字体（否则没 PushFont 的控件看不到 CJK）
+    const fonts::UiFonts f = fonts::setupUiFonts(dpiScale);
+    if (f.cjkSources == 0) LOG_W("CJK 字体一个都没加载成功，中日韩字符会显示成 `????`");
 
     // 1.92 起不需要 FontGlobalScale：逻辑字号 + RasterizerDensity 已经是"布局按逻辑、字形按密度"。
 

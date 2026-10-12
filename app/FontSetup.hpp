@@ -103,5 +103,41 @@ inline int mergeAllAvailableFonts(const char* const* paths, float size, const Im
     return loaded;
 }
 
+// ---- 启动器/向导/加载窗统一的一套字体 ----
+struct UiFonts {
+    ImFont* main = nullptr;      // 正文（含 CJK 合并源）
+    ImFont* title = nullptr;     // 大标题（1.8x，拉丁即可）
+    int cjkSources = 0;          // 成功合并进来的 CJK 源数（0 = 中日韩会变 `????`，调用方应 LOG_W）
+};
+
+// `dpiScale` = Retina 之类的显示器缩放；字号是**逻辑**尺寸，清晰度由 RasterizerDensity 决定。
+inline UiFonts setupUiFonts(float dpiScale, float baseSize = 12.0f) {
+    ImGuiIO& io = ImGui::GetIO();
+    ImFontConfig baseCfg;
+    baseCfg.RasterizerDensity = dpiScale;
+
+    UiFonts out;
+    out.main = addFirstAvailableFont(latinCandidates(), baseSize, &baseCfg);
+    if (!out.main) out.main = io.Fonts->AddFontDefault(&baseCfg);
+
+    // ⚠️ 合并必须**紧跟主字体**：ImGui 的 MergeMode 是往"最近加入的那支字体"里塞源，
+    //    所以 main → title → merge 的写法会把 CJK 合并进**标题字体**，主字体/默认字体
+    //    依旧没有中日韩字形（这是 `????` 的第二个根因；1.91 时代就这么写着，一直没暴露）。
+    ImFontConfig cfg;
+    cfg.MergeMode = true;
+    cfg.RasterizerDensity = dpiScale;
+    out.cjkSources = mergeAllAvailableFonts(cjkCandidates(), baseSize, &cfg);
+
+    out.title = addFirstAvailableFont(latinCandidates(), baseSize * 1.8f, &baseCfg);
+    if (!out.title) out.title = out.main;
+
+    // ★ 必须把主字体设成**默认字体**：不显式 PushFont 的控件（路径 InputText、Checkbox 之类）
+    //   默认用 `io.FontDefault`，为 NULL 时退回 ImGui 内建的 ProggyClean —— 那个字体
+    //   **没有中日韩字形**，于是 CJK 一律渲染成缺字回退字符 `?`。
+    //   （2026-10-11 的 `????` 就是这个：CJK 源明明合并进了 mainFont，但路径框根本没在用 mainFont。）
+    io.FontDefault = out.main;
+    return out;
+}
+
 }  // namespace fonts
 }  // namespace adofai

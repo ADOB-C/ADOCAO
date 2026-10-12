@@ -13,17 +13,18 @@
 
 #include "app/FontSetup.hpp"
 
+#include <cmath>
 #include <cstdio>
 
 
 int main() {
     // 先看看这台机器上有哪些候选文件真实存在
     int present = 0;
-    for (int i = 0; adocao::fonts::cjkCandidates()[i]; ++i) {
-        if (FILE* f = std::fopen(adocao::fonts::cjkCandidates()[i], "rb")) {
+    for (int i = 0; adofai::fonts::cjkCandidates()[i]; ++i) {
+        if (FILE* f = std::fopen(adofai::fonts::cjkCandidates()[i], "rb")) {
             std::fclose(f);
             ++present;
-            std::printf("候选存在: %s\n", adocao::fonts::cjkCandidates()[i]);
+            std::printf("候选存在: %s\n", adofai::fonts::cjkCandidates()[i]);
         }
     }
     if (present == 0) {
@@ -34,8 +35,8 @@ int main() {
     ImGui::CreateContext();
     ImFontConfig cfg;
     cfg.MergeMode = true;                       // 与向导一致：合并到主字体上
-    ImFont* latin = adocao::fonts::addFirstAvailableFont(adocao::fonts::latinCandidates(), 12.0f, nullptr);
-    const int sources = adocao::fonts::mergeAllAvailableFonts(adocao::fonts::cjkCandidates(), 12.0f, &cfg);
+    ImFont* latin = adofai::fonts::addFirstAvailableFont(adofai::fonts::latinCandidates(), 12.0f, nullptr);
+    const int sources = adofai::fonts::mergeAllAvailableFonts(adofai::fonts::cjkCandidates(), 12.0f, &cfg);
     ImFont* cjk = ImGui::GetIO().Fonts->Fonts.empty() ? nullptr : ImGui::GetIO().Fonts->Fonts[0];
 
     int fail = 0;
@@ -54,6 +55,36 @@ int main() {
         check(cjk->IsGlyphInFont(0xAC00),
               "有韩文 가（U+AC00）—— 靠多源合并拿到的（Hiragino 没有，Arial Unicode 才有）");
     }
+    // PushFont 的语义（1.92 必填 size）——大标题缩水就是踩在这里：
+    //   0.0f       = **保持当前字号**（于是"推入大字体"什么也没变 ✗）
+    //   LegacySize = 用 AddFontFromFileTTF 时给的字号（1.92 之前的默认行为 ✓）
+    if (latin == nullptr) latin = ImGui::GetIO().Fonts->AddFontDefault();
+    ImFont* big = nullptr;
+    {
+        FILE* f = std::fopen(adofai::fonts::latinCandidates()[0], "rb");
+        if (f) { std::fclose(f); big = ImGui::GetIO().Fonts->AddFontFromFileTTF(adofai::fonts::latinCandidates()[0], 21.6f); }
+    }
+    if (big && latin) {
+        // 先显式推一个已知字号当基线（没跑过 NewFrame 时 g.FontSize 还是 0，拿它当基线没有意义）
+        ImGui::PushFont(latin, 12.0f);
+        const float base = ImGui::GetFontSize();
+        ImGui::PushFont(big, 0.0f);
+        const float kept = ImGui::GetFontSize();
+        ImGui::PopFont();
+        ImGui::PushFont(big, big->LegacySize);
+        const float used = ImGui::GetFontSize();
+        ImGui::PopFont();
+        ImGui::PopFont();
+        std::printf("PushFont: 基线(12)=%.2f  0.0f→%.2f  LegacySize(%.2f)→%.2f\n", base, kept,
+                    big->LegacySize, used);
+        check(std::fabs(base - 12.0f) < 0.01f, "显式 PushFont(font, 12) 基线与请求一致");
+        check(std::fabs(kept - base) < 0.01f, "PushFont(font, 0.0f) = 保持当前字号（大标题缩水就是踩这里）");
+        check(std::fabs(used - big->LegacySize) < 1.5f,
+              "PushFont(font, font->LegacySize) = 用字体自己的字号（大标题要的是这个）");
+    } else {
+        std::printf("SKIP: 拿不到拉丁字体，跳过 PushFont 语义检查\n");
+    }
+
     ImGui::DestroyContext();
     if (fail) {
         std::printf("\n%d 项失败\n", fail);

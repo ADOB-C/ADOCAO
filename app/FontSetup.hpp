@@ -13,7 +13,7 @@
 
 #include <cstdio>
 
-namespace adocao {
+namespace adofai {
 namespace fonts {
 
 // ---- 候选表（按优先级；平台内建字体，不走 assets）----

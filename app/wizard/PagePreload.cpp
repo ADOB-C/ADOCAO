@@ -21,7 +21,7 @@ void drawPreloadPage(State& st, const Chrome& ch) {
     ImGui::Spacing();
     float barW = contentW;
     ImGui::SetCursorPosX(padX);
-    if (ch.mainFont) ImGui::PushFont(ch.mainFont, 0.0f);   // 1.92: size 必填；0 = 保持当前字号
+    if (ch.mainFont) ImGui::PushFont(ch.mainFont, ch.mainFont->LegacySize);   // 1.92：用字体自己的字号
     ImVec2 t0 = ImGui::CalcTextSize("Preloading level...");
     ImGui::SetCursorPosX(((float)winW - t0.x) / 2.0f);
     ImGui::Text("Preloading level...");

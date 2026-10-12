@@ -24,7 +24,9 @@ void drawWelcomePage(State& st, const Chrome& ch) {
     float titleY = 70.0f * S;
     ImGui::SetCursorPosY(titleY);
     const char* title = "Welcome to ADOCAO";
-    if (ch.titleFont) ImGui::PushFont(ch.titleFont, 0.0f);   // 1.92: size 必填；0 = 保持当前字号
+    // 1.92：size 必填。`0.0f` 是"保持当前字号"（于是大标题会变成正文大小 ✗），
+    // 要复刻 1.92 之前的行为（用 AddFontFromFileTTF 时给的那个字号）就传 `LegacySize`。
+    if (ch.titleFont) ImGui::PushFont(ch.titleFont, ch.titleFont->LegacySize);
     ImVec2 ts = ImGui::CalcTextSize(title);
     ImGui::SetCursorPosX((float)(winW - (int)ts.x) / 2.0f);
     ImGui::Text("%s", title);

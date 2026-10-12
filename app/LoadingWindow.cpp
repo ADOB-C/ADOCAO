@@ -87,9 +87,9 @@ void showLoadingWindow(std::function<void(LoadingProgress&)> loader, bool cliOnl
     }
 
     // DPI-aware sizing: scale all UI elements, load fonts at native resolution
-    // High-DPI fonts: rasterize glyphs at physical resolution (Retina = 2x),
-    // then scale layout back to logical size via FontGlobalScale (ImGui DPI
-    // guidelines). Window size stays in logical points.
+    // High-DPI fonts（1.92 写法：字号用逻辑尺寸 + ImFontConfig::RasterizerDensity 决定清晰度；
+    // 旧的"按物理像素烘字体 + FontGlobalScale 反缩放"已废弃 —— 见 ImGui 1.92 迁移说明）。
+    // Window size stays in logical points.
     float dpiScale = 1.0f;
     {
         GLFWmonitor* mon = glfwGetPrimaryMonitor();
@@ -99,7 +99,11 @@ void showLoadingWindow(std::function<void(LoadingProgress&)> loader, bool cliOnl
             dpiScale = std::max(sx, sy);
         }
     }
-    float fontSize = 12.0f * dpiScale;
+    // 1.92：字号是**逻辑**尺寸，清晰度由 ImFontConfig::RasterizerDensity 决定
+    // （旧写法是"按物理像素烘字体 + FontGlobalScale 反缩放回逻辑尺寸"，已废弃）
+    float fontSize = 12.0f;
+    ImFontConfig baseCfg;
+    baseCfg.RasterizerDensity = dpiScale;
 
     // Load CJK font
     {
@@ -129,11 +133,6 @@ void showLoadingWindow(std::function<void(LoadingProgress&)> loader, bool cliOnl
             "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
 #endif
         };
-        static const ImWchar cjkRanges[] = {
-            0x2000, 0x206F, 0x3000, 0x303F, 0x3040, 0x309F,
-            0x30A0, 0x30FF, 0x3130, 0x318F, 0x4E00, 0x9FFF,
-            0xAC00, 0xD7AF, 0xFF00, 0xFFEF, 0,
-        };
         {
             const char* latinFonts[] = {
 #ifdef _WIN32
@@ -147,21 +146,21 @@ void showLoadingWindow(std::function<void(LoadingProgress&)> loader, bool cliOnl
             bool latinLoaded = false;
             for (const char* path : latinFonts) {
                 FILE* f = fopen(path, "rb");
-                if (f) { fclose(f); io.Fonts->AddFontFromFileTTF(path, fontSize); latinLoaded = true; break; }
+                if (f) { fclose(f); io.Fonts->AddFontFromFileTTF(path, fontSize, &baseCfg); latinLoaded = true; break; }
             }
-            if (!latinLoaded) io.Fonts->AddFontDefault();
+            if (!latinLoaded) io.Fonts->AddFontDefault(&baseCfg);
         }
         ImFontConfig cfg;
         cfg.MergeMode = true;
+        cfg.RasterizerDensity = dpiScale;      // 1.92：字形按需光栅化，不用再预烘 CJK 区段
         bool loaded = false;
         for (const char* path : cjkFonts) {
             FILE* f = fopen(path, "rb");
-            if (f) { fclose(f); io.Fonts->AddFontFromFileTTF(path, fontSize, &cfg, cjkRanges); loaded = true; break; }
+            if (f) { fclose(f); io.Fonts->AddFontFromFileTTF(path, fontSize, &cfg); loaded = true; break; }
         }
     }
 
-    // Scale layout back to logical size; glyphs stay crisp at physical res.
-    ImGui::GetIO().FontGlobalScale = 1.0f / dpiScale;
+    // 1.92 起不需要 FontGlobalScale：逻辑字号 + RasterizerDensity 已经是"布局按逻辑、字形按密度"。
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 330 core");

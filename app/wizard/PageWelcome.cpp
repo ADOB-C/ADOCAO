@@ -24,7 +24,7 @@ void drawWelcomePage(State& st, const Chrome& ch) {
     float titleY = 70.0f * S;
     ImGui::SetCursorPosY(titleY);
     const char* title = "Welcome to ADOCAO";
-    if (ch.titleFont) ImGui::PushFont(ch.titleFont);
+    if (ch.titleFont) ImGui::PushFont(ch.titleFont, 0.0f);   // 1.92: size 必填；0 = 保持当前字号
     ImVec2 ts = ImGui::CalcTextSize(title);
     ImGui::SetCursorPosX((float)(winW - (int)ts.x) / 2.0f);
     ImGui::Text("%s", title);

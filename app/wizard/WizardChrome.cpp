@@ -73,8 +73,8 @@ bool createChrome(Chrome& chrome) {
         st.TabRounding       = 4.0f;
     }
 
-    // High-DPI fonts: rasterize glyphs at physical resolution (Retina = 2x),
-    // then scale layout back to logical size via FontGlobalScale.
+    // High-DPI fonts: 字号用**逻辑**尺寸，字形按 RasterizerDensity（Retina = 2）光栅化 ——
+    // 布局与清晰度就解耦了（1.92 起不再需要 FontGlobalScale 那套反缩放）。
     float dpiScale = 1.0f;
     {
         GLFWmonitor* mon = glfwGetPrimaryMonitor();
@@ -84,7 +84,11 @@ bool createChrome(Chrome& chrome) {
             dpiScale = std::max(sx, sy);
         }
     }
-    float fontSize = 12.0f * dpiScale;
+    // 1.92：字号是**逻辑**尺寸，清晰度由 ImFontConfig::RasterizerDensity 决定
+    // （旧写法是"按物理像素烘字体 + FontGlobalScale 反缩放回逻辑尺寸"，已废弃）
+    float fontSize = 12.0f;
+    ImFontConfig baseCfg;
+    baseCfg.RasterizerDensity = dpiScale;
 
     // Fonts: main (with CJK merge) + a larger title font (Latin only)
     ImFont* mainFont = nullptr;
@@ -116,11 +120,6 @@ bool createChrome(Chrome& chrome) {
             "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
 #endif
         };
-        static const ImWchar cjkRanges[] = {
-            0x2000, 0x206F, 0x3000, 0x303F, 0x3040, 0x309F,
-            0x30A0, 0x30FF, 0x3130, 0x318F, 0x4E00, 0x9FFF,
-            0xAC00, 0xD7AF, 0xFF00, 0xFFEF, 0,
-        };
 
         // Main Latin font
         {
@@ -136,9 +135,9 @@ bool createChrome(Chrome& chrome) {
             bool latinLoaded = false;
             for (const char* path : latinFonts) {
                 FILE* f = fopen(path, "rb");
-                if (f) { fclose(f); mainFont = io.Fonts->AddFontFromFileTTF(path, fontSize); latinLoaded = true; break; }
+                if (f) { fclose(f); mainFont = io.Fonts->AddFontFromFileTTF(path, fontSize, &baseCfg); latinLoaded = true; break; }
             }
-            if (!latinLoaded) mainFont = io.Fonts->AddFontDefault();
+            if (!latinLoaded) mainFont = io.Fonts->AddFontDefault(&baseCfg);
         }
 
         // Title font (bigger, Latin only)
@@ -154,7 +153,7 @@ bool createChrome(Chrome& chrome) {
             };
             for (const char* path : latinFonts) {
                 FILE* f = fopen(path, "rb");
-                if (f) { fclose(f); titleFont = io.Fonts->AddFontFromFileTTF(path, fontSize * 1.8f); break; }
+                if (f) { fclose(f); titleFont = io.Fonts->AddFontFromFileTTF(path, fontSize * 1.8f, &baseCfg); break; }
             }
             if (!titleFont) titleFont = mainFont;
         }
@@ -162,14 +161,14 @@ bool createChrome(Chrome& chrome) {
         // Merge CJK into the main font
         ImFontConfig cfg;
         cfg.MergeMode = true;
+        cfg.RasterizerDensity = dpiScale;      // 1.92：字形按需光栅化，不用再预烘 CJK 区段
         for (const char* path : cjkFonts) {
             FILE* f = fopen(path, "rb");
-            if (f) { fclose(f); io.Fonts->AddFontFromFileTTF(path, fontSize, &cfg, cjkRanges); break; }
+            if (f) { fclose(f); io.Fonts->AddFontFromFileTTF(path, fontSize, &cfg); break; }
         }
     }
 
-    // Scale layout back to logical size; glyphs stay crisp at physical res.
-    ImGui::GetIO().FontGlobalScale = 1.0f / dpiScale;
+    // 1.92 起不需要 FontGlobalScale：逻辑字号 + RasterizerDensity 已经是"布局按逻辑、字形按密度"。
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 330 core");

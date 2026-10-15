@@ -1067,6 +1067,28 @@ u32 stride(=4096) | u32 reserved | u64 count | count × u64 firstAction
   加上 §8.12 的 checkpoint（≈9.8 MB）**仍在 §2 的 19.4 MB 索引预算内**；
 * 对拍：`The Moon` 147 块 / `MYC` 1654 块，区间**全部**与"全量扫描一遍 actions"一致。
 
+### 逐层的"事件派生表"也窗口化（③ 的最后一块表）
+
+`LevelData::processActions` 里的表分两类，**能不能窗口化取决于它是"逐层的"还是"跨层前缀"**：
+
+| 表 | 性质 | 窗口化 |
+|---|---|---|
+| `tileHasTwirl` / `tileHasSetSpeed` | 逐层 | ✅ 进 `FloorWindow` |
+| `atStates`（AnimateTrack）| 逐层（缺省值全来自 settings）| ✅ 进 `FloorWindow`，键是**相对窗口起点**的层号 |
+| `tileBPMs` | 跨层前缀（SetSpeed 继承）| ✅ 靠 checkpoint 的 `bpm` 起步 |
+| `tilePositionOffsets` | 跨层继承 + 本层点加 | ✅ 已在位置那条里处理 |
+| `tileHitsounds` / `tileHitsoundVolumes` | **跨层前缀**（"当前 hitsound" = `floor <= i` 的最后一个 SetHitsound）| ❌ **故意不做**：要再往 checkpoint 加两个字段；而且它们的消费方是音频（`docs/2e9.md` 把音频列为独立的另一道墙），不是窗口化渲染 |
+| `bookmarkFloors` | **全局**语义（无条件补第 0 层与最后一层做跳转目标）| ❌ 不是一个"窗口内的表" |
+
+对拍（`adocao_window_test "<谱>"`）除了位置/BPM/时间，还比这三张表，并且**带非空转守卫**
+（把"真的比过多少条"打出来，否则"0 不一致"可能只是两边都空）：
+`15. Singularity` 244 块 —— Twirl 40,156 层 / SetSpeed 1,046 层 / AnimateTrack 2 条、
+The Moon 147 块 —— Twirl 303,540 层 / SetSpeed 8,457 层、MYC 1654 块 —— Twirl 6,155,053 层 /
+SetSpeed 314 层，**全部 0 不一致**。
+
+**反面对照（不变量 3 的靶子）**：把 `floor == i0` 的事件整批拿掉 → 三张表**同时变红**
+（Twirl/SetSpeed/AnimateTrack 都落在 4096 上；窗口不自己处理它们就丢一层）。
+
 ### `FloorWindowSource`：**从容器按块取数据**（③ 的装配）
 
 `unpackLevel()` 是全量的（要把整份 LevelData 解出来）。窗口化要的是"给一块，别的都不碰"，
@@ -1079,6 +1101,11 @@ u32 stride(=4096) | u32 reserved | u64 count | count × u64 firstAction
   做到 O(1) —— 否则只能从第 0 个 action 数起（索引条目因此是 32 B/块，实测 MYC 53 KB 裸 → 段级 zstd 后几 KB）；
 * `ADOCAO_FORCE_BLOCK_KB=<n>` 是测试钩子：真谱按体积本来会选单块布局，窗口化验收必须跑在
   **分块布局**上，所以用它把强制阈值调小来造容器。
+* ⚠️ **段级 layout 与列级 layout 是两件事**：列可以是分块容器，而**段**仍选 legacy
+  （段级比较的是"packed vs plain+zstd"，小列/常量级列上 plain 更小）。`FloorWindowSource`
+  对 legacy 段走"整段解一次再切"的退回路径（仍然正确、只是少了那一侧的内存收益），
+  并由 `actionsWindowable()` 如实报出来 —— 这条是被 `15. Singularity` 的
+  `readBlock(0)` 失败逼出来的（action 只有 578 条 → 段级选了 legacy）。
 
 **验收（`adocao_window_test "<谱>"`，与全量加载逐位比）**：
 

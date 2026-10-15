@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "archive/AdocaoBlocked.hpp"
+#include "archive/AdocaoColumns.hpp"   // legacy 段的裸列解码（窗口化的退回路径）
 #include "core/util/Logger.hpp"
 
 namespace adofai {
@@ -123,6 +126,25 @@ bool FloorWindowSource::open(const uint8_t* data, size_t length, std::string& er
     }
     (void)getSectionView(data, length, (uint8_t)SectionId::Derived, m_derivedSec, e);
     (void)getSectionView(data, length, (uint8_t)SectionId::ActionIndex, m_indexSec, e);
+    // 字符串池：`atStates` 的动画名要用（格式 = u32 count + 每项 u32 len + bytes）
+    if (getSectionView(data, length, (uint8_t)SectionId::StringPool, m_poolSec, e)) {
+        const uint8_t* p = m_poolSec.p;
+        const size_t n = m_poolSec.size;
+        if (haveW(n, 0, 4)) {
+            const uint32_t cnt = rdU32w(p);
+            size_t off = 4;
+            bool ok = cnt > 0 && cnt <= 1000000u;
+            for (uint32_t i = 0; ok && i < cnt; ++i) {
+                if (!haveW(n, off, 4)) { ok = false; break; }
+                const uint32_t len = rdU32w(p + off);
+                off += 4;
+                if (!haveW(n, off, len)) { ok = false; break; }
+                m_strings.emplace_back((const char*)p + off, len);
+                off += len;
+            }
+            if (!ok) { err = "窗口化：字符串池解析失败"; return false; }
+        }
+    }
 
     // v3 的列容器（不是 legacy 裸列）才谈得上"按块寻址"
     const bool angleV3 = (m_angleSec.flags & kFlagLegacyColumns) == 0;
@@ -173,7 +195,19 @@ bool FloorWindowSource::open(const uint8_t* data, size_t length, std::string& er
                 }
                 c.blocked = c.view.blocked;
             } else {
+                // legacy 段：整段解一次（退回路径）。仍然正确，只是少了这一侧的内存收益。
                 c.whole.assign(col, col + colN);
+                if (i == 0) {
+                    if (!decodeIntColumn(c.whole.data(), c.whole.size(), c.wholeI)) {
+                        err = "窗口化：legacy actions.floor 解码失败";
+                        return false;
+                    }
+                } else {
+                    if (!decodeU32Column(c.whole.data(), c.whole.size(), c.wholeU)) {
+                        err = "窗口化：legacy actions 列 " + std::to_string(i) + " 解码失败";
+                        return false;
+                    }
+                }
             }
         }
     }
@@ -258,19 +292,47 @@ bool FloorWindowSource::readBlock(uint64_t block, FloorBlock& out, std::string& 
     std::vector<int64_t> floors;
     std::vector<uint32_t> types, flags, strs, v1, v2;
     auto need = [&](int i) -> const ActionColumn& { return m_cols[i]; };
-    if (!gatherI(need(0).view, a0, a1, floors, &m_bytesDecoded) ||
-        !gatherU(need(1).view, a0, a1, types, &m_bytesDecoded) ||
-        !gatherU(need(3).view, a0, a1, flags, &m_bytesDecoded)) {
-        err = "窗口化：actions 稠密列取区间失败";
-        return false;
+    const bool dbg = std::getenv("ADOCAO_WINDOW_DBG") != nullptr;
+    auto diag = [&](int col, uint64_t f, uint64_t t, bool ok) {
+        if (!dbg || ok) return;
+        const ActionColumn& c = m_cols[col];
+        std::fprintf(stderr, "[win] 取区间失败 col=%d [%llu,%llu) blocked=%d total=%llu "
+                             "blocks=%llu\n", col, (unsigned long long)f, (unsigned long long)t,
+                     (int)c.view.blocked, (unsigned long long)c.view.total,
+                     (unsigned long long)(c.view.blocked
+                         ? (c.view.total + c.view.blockElems - 1) / c.view.blockElems : 1));
+    };
+    // 稠密列：v3 容器按块取；legacy 段从"整段解出来的那份"里切（仍然正确）
+    auto takeI = [&](int i, uint64_t f, uint64_t t, std::vector<int64_t>& out) {
+        const ActionColumn& c = need(i);
+        if (m_actionsV3) return gatherI(c.view, f, t, out, &m_bytesDecoded);
+        if (t > c.wholeI.size() || t < f) return false;
+        out.assign(c.wholeI.begin() + (size_t)f, c.wholeI.begin() + (size_t)t);
+        return true;
+    };
+    auto takeU = [&](int i, uint64_t f, uint64_t t, std::vector<uint32_t>& out) {
+        const ActionColumn& c = need(i);
+        if (m_actionsV3) return gatherU(c.view, f, t, out, &m_bytesDecoded);
+        if (t > c.wholeU.size() || t < f) return false;
+        out.assign(c.wholeU.begin() + (size_t)f, c.wholeU.begin() + (size_t)t);
+        return true;
+    };
+    if (!takeI(0, a0, a1, floors)) {
+        diag(0, a0, a1, false); err = "窗口化：actions.floor 取区间失败"; return false;
     }
-    if (need(2).sparse && !gatherU(need(2).view, uStr0, uStr1, strs, &m_bytesDecoded)) {
+    if (!takeU(1, a0, a1, types)) {
+        diag(1, a0, a1, false); err = "窗口化：actions.type 取区间失败"; return false;
+    }
+    if (!takeU(3, a0, a1, flags)) {
+        diag(3, a0, a1, false); err = "窗口化：actions.flag 取区间失败"; return false;
+    }
+    if (need(2).sparse && !takeU(2, uStr0, uStr1, strs)) {
         err = "窗口化：actions.strId 取区间失败"; return false;
     }
-    if (need(4).sparse && !gatherU(need(4).view, uV10, uV11, v1, &m_bytesDecoded)) {
+    if (need(4).sparse && !takeU(4, uV10, uV11, v1)) {
         err = "窗口化：actions.val1 取区间失败"; return false;
     }
-    if (need(5).sparse && !gatherU(need(5).view, uV20, uV21, v2, &m_bytesDecoded)) {
+    if (need(5).sparse && !takeU(5, uV20, uV21, v2)) {
         err = "窗口化：actions.val2 取区间失败"; return false;
     }
     const size_t m = floors.size();
@@ -329,6 +391,10 @@ bool computeFloorWindow(const LevelData::Settings& settings, const FloorWindowIn
     out.tiles.assign(n, LevelData::Tile{});
     out.tileBPMs.assign(n, 0.0f);
     out.tileStartTimes.assign(n, 0.0);
+    out.tileHasTwirl.assign(n, false);
+    out.tileHasSetSpeed.assign(n, false);
+    out.atStates.clear();
+    out.hasAtStates = false;
 
     // 事件按 floor 稳定排序（同层保持文件顺序 —— 与 processActions/Timeline 的迭代顺序一致）。
     // PositionTrack 是"同层最后一个胜出"（`tilePositionOffsets[floor] = {...}` 覆盖），
@@ -370,12 +436,30 @@ bool computeFloorWindow(const LevelData::Settings& settings, const FloorWindowIn
         while (ei < ev.size() && (uint64_t)ev[ei]->floor == i) {
             const LevelData::FastAction& a = *ev[ei];
             switch (a.type) {
-            case LevelData::FastAction::Twirl:   isCW = !isCW; break;
+            case LevelData::FastAction::Twirl:
+                isCW = !isCW;
+                out.tileHasTwirl[k] = true;
+                break;
             case LevelData::FastAction::SetSpeed:
+                out.tileHasSetSpeed[k] = true;
                 if (a.flag) currentBPM *= a.val1; else currentBPM = a.val1;
                 break;
             case LevelData::FastAction::Pause:   extraRotation += a.val1 / 2.0f; break;
             case LevelData::FastAction::PositionTrack: lastPos = &a; break;
+            case LevelData::FastAction::AnimateTrack: {
+                // 与 `LevelData::processActions` 逐字同一条表达式（缺省值全来自 settings）。
+                // 键用**相对窗口起点**的层号 —— 窗口的消费方按窗口索引寻址。
+                const std::vector<std::string>* strs = in.strings;
+                const std::string& s0 = (strs && a.strId < strs->size()) ? (*strs)[a.strId]
+                                                                        : std::string();
+                out.hasAtStates = true;
+                out.atStates[(int)k] = {s0.empty() ? settings.trackDisappearAnimation : s0,
+                                        settings.trackAnimation,
+                                        a.val1 >= 0 ? a.val1 : settings.beatsBehind,
+                                        a.val2 >= 0 ? a.val2 : settings.beatsAhead,
+                                        a.flag};
+                break;
+            }
             default: break;
             }
             ++ei;

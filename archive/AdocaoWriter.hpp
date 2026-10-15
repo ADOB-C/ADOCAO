@@ -32,6 +32,13 @@ struct ColumnReport {
     uint64_t encodedBytes = 0;  // 列头 + 载荷
     uint64_t dictEntries = 0;
     int bits = 0;
+    // —— v3 分块（§8.3）：单块与分块**各自的实测存储字节**，用来量"分块赚了多少" ——
+    bool     blocked = false;
+    bool     forced = false;      // true = 触发了"强制分块"（裸数据 ≥ 阈值，窗口化的要求）
+    uint64_t blocks = 0;
+    uint64_t frames = 0;
+    uint64_t singleBytes = 0;
+    uint64_t blockedBytes = 0;
 };
 
 struct PackResult {

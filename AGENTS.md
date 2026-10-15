@@ -99,13 +99,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   旧路径 → 永远绿；② 所以 `ADOCAO_FAST_REQUIRE=1` 这类钩子**必须验它真的会触发**（拿一个"本该放弃"
   的输入做负向对照），否则它形同虚设 —— 本次它曾对所有真实谱都返回 declined；③ A/B 要把**整个改动**
   一起回退，只回退其中一行会得出错误结论（本次就因此错误地排除了自己的改动）。
-- **`.adocao`（自研二进制容器，v2）**：列式 + **每列按其取值基数选编码**
+- **`.adocao`（自研二进制容器，v3）**：列式 + **每列按其取值基数选编码**
   （`Dict`/`Const`/`DeltaVarint`/`BitPack`/`Rle`/`DeltaRleVarint`/`Raw` + 段级 zstd），**逐位无损**、
   坏数据明确失败、编码器自检（编完解回来逐位比，最坏退回 `Raw`）。CLI：`adocao pack <谱> <out.adocao> [--codec-report]`。
   接入方式：core 只按 magic `ADO1` 分派（`ArchiveBackend::decodeAdocao` 钩子，**core 依旧不依赖 archive**），
   解开后与两条 JSON 路径**共用同一个 `finishLoad()`**；`.adocao` 与 JSON 出的图逐字节相同（MYC 677 万层验过）。
   实测：MYC 611.18 MB → **6,120 B**（10.5 万倍）、v300 300.95 MB → 6,128 B、The Moon 15.60 MB → 3,544 B、
   angles360（人工谱）→ 9,344 B（字典主导）。规范 + 逐项实测分析见 `docs/adocao-format.md`（§5.1–§5.11）。
+  **v3 ⑥ 分块已落地**（`archive/AdocaoBlocked.*`：4096 一块、块内自选、帧级 zstd 与 seek 粒度解耦；
+  段级"实编取最小"→ **v3 文件大小与 v2 完全相同**，裸数据 ≥128 MB 才**强制分块**；详见 `docs/adocao-format.md` §8.11）。
   **v3 判据统计已落地**（`archive/AdocaoDiagnostics.{hpp,cpp}`，纯诊断、不参与编码）：`adocao pack --codec-report`
   会打印"每列长什么样"（环绕率 raw/masked、值集/差分基数、**整数域 Δ² 的 varint 字节数**、窗口唯一数、
   粗网格判定、空间自重叠率）。两条别踩的口径：**残差只在整数域算**（浮点域的 Δ² 被量化噪声淹没）、

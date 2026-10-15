@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include "archive/AdocaoBlocked.hpp"
 #include "archive/AdocaoColumns.hpp"
 #include "core/level/LevelData.hpp"
 
@@ -74,10 +75,30 @@ void writerCommitBytes(uint8_t out[20]) {
 #endif
 }
 
+// 段级压缩后的实际存储字节（与下面的段级 zstd 决策同一口径）
+size_t sectionStoredBytes(const std::vector<uint8_t>& blob) {
+    if (blob.size() < 256) return blob.size();
+    std::vector<uint8_t> z(ZSTD_compressBound(blob.size()));
+    const size_t got = ZSTD_compress(z.data(), z.size(), blob.data(), blob.size(), 19);
+    if (ZSTD_isError(got) || got >= blob.size()) return blob.size();
+    return got;
+}
+
+// 报告里的布局名（"为什么这列大/小"必须一眼看得出来）
+std::string layoutName(const ColumnLayoutStats& st, bool sectionPacked) {
+    if (!sectionPacked) return "LegacyV2";              // 与 v2 逐字节等价：裸列字节 + 段级 zstd
+    if (st.forced) return "Blocked(forced)";
+    return st.blocked ? "Blocked" : "Single+zstd";
+}
+
 struct Section {
     uint8_t id = 0;
+    uint16_t flags = 0;
     uint64_t elements = 0;
     std::vector<uint8_t> blob;
+    // true = blob 已经是**最终存储字节**（列容器自己压过：帧就是 seek 的单位，§8.3），
+    // 段级不再包一层 zstd。
+    bool preStored = false;
 };
 
 // 字符串池：v[0] 必须是空串（strId = 0 的约定）。actionStrTable 的**原序**必须保留
@@ -141,18 +162,45 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         putBytes(poolBlob, s.data(), s.size());
     }
 
-    // ---- ③ angleData：一列 double（字典是主编码）----
-    std::vector<uint8_t> angleBlob;
+    // ---- ③④ 列段：**两种候选都真编一遍，按"实际存储字节"取最小** ----
+    //
+    //   plain  = 各列 SingleRaw + **段级** zstd  —— 与 v2 逐字节等价（回归兜底）
+    //   packed = 各列在 SingleZstd / Blocked 里取小，段级不再压（帧 = seek 单位，§8.3）
+    //
+    // 为什么决策放在**段级**而不是列级：v2 是把整个 Actions 段（6 列一起）压成一帧，
+    // 跨列共享熵表、少 6 个帧头，实测比"每列各压一帧"更省（The Moon 3544 B vs 3992 B）。
+    // 两个候选都真编出来取小的那个，于是 **v3 的文件永远 ≤ v2 的文件**（§8.0-2）。
+    std::vector<uint8_t> angleBlob, actionsBlob;
+    std::vector<ColumnLayoutStats> angleStats, actionStats;
+    bool anglePacked = false, actionsPacked = false;
     {
-        ColumnStats st;
-        encodeDoubleColumn(level.angleData, angleBlob, &st);
-        rep.columns.push_back({"angleData", st.codec, level.angleData.size(), st.rawBytes,
-                               st.encodedBytes, st.dictEntries, st.bits});
+        // ---- angleData：一列 double（字典是主编码）----
+        std::vector<uint8_t> anglePlain, anglePackedBytes;
+        ColumnLayoutStats stPlain{}, stPacked{};
+        if (!encodeColumnV3(ColKind::Double, level.angleData.data(), level.angleData.size(),
+                            ColumnStorage::LegacyV2, anglePlain, &stPlain) ||
+            !encodeColumnV3(ColKind::Double, level.angleData.data(), level.angleData.size(),
+                            ColumnStorage::BestSelf, anglePackedBytes, &stPacked)) {
+            err = "angleData 列编码失败（内部错误）";
+            return false;
+        }
+        (void)stPlain;
+        const size_t plainStored = sectionStoredBytes(anglePlain);
+        // 强制分块的列**必须**让整段走 packed：否则列级白算一通，段级又落回 LegacyV2，
+        // ③ 拿到的还是"不可寻址"的段（2026-10-15 真踩过：文件大小一模一样，报告却说强制分块）
+        if (stPacked.forced || anglePackedBytes.size() < plainStored) {
+            angleBlob = std::move(anglePackedBytes);
+            anglePacked = true;
+        } else {
+            angleBlob = std::move(anglePlain);
+            anglePacked = false;
+        }
+        // 报告**一律用 packed 那次**的统计：它同时含"单块+自压"与"分块"两档数字，
+        // 于是"分块到底赚了还是亏了"在任何情况下都看得见（LegacyV2 那次不尝试分块）。
+        angleStats.push_back(stPacked);
     }
-
-    // ---- ④ actions：列式（floor 差分、type/strId/flag 位打包、val1/val2 按 float 位模式）----
-    std::vector<uint8_t> actionsBlob;
     {
+        // ---- actions：列式（floor 差分、type/strId/flag 位打包、val1/val2 按 float 位模式）----
         const size_t n = level.actions.size();
         std::vector<int64_t> floors;
         std::vector<uint32_t> types, strIds, flags, v1, v2;
@@ -166,48 +214,104 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
             std::memcpy(&x, &a.val1, 4); v1.push_back(x);
             std::memcpy(&x, &a.val2, 4); v2.push_back(x);
         }
-        putU32(actionsBlob, 6);                       // 列数
-        auto pushColumn = [&](const char* name, const std::vector<uint8_t>& enc, const ColumnStats& st,
-                              size_t elements, size_t rawBytes) {
-            putU64(actionsBlob, enc.size());           // u64：允许单列 > 4 GB
-            putBytes(actionsBlob, enc.data(), enc.size());
-            rep.columns.push_back({name, st.codec, elements, rawBytes, enc.size(), st.dictEntries, st.bits});
-        };
-        auto addI = [&](const char* name, const std::vector<int64_t>& col) {
-            std::vector<uint8_t> enc; ColumnStats st;
-            encodeIntColumn(col, enc, &st);
-            pushColumn(name, enc, st, col.size(), col.size() * 8);
-        };
-        auto addU = [&](const char* name, const std::vector<uint32_t>& col) {
-            std::vector<uint8_t> enc; ColumnStats st;
-            encodeU32Column(col, enc, &st);
-            pushColumn(name, enc, st, col.size(), col.size() * 4);
-        };
-        // 稀疏列：u32 掩码 + u64 实际条数 + 一列（只含掩码内的类型）
-        auto addSparseU = [&](const char* name, const std::vector<uint32_t>& col) {
-            const uint32_t mask = sparseMask(types, col);
+        // 稀疏列（strId/val1/val2）：只写"该类型真的用到这一列"的事件；掩码自描述
+        auto sparseUsed = [&](const std::vector<uint32_t>& col, uint32_t& mask) {
+            mask = sparseMask(types, col);
             std::vector<uint32_t> used;
             used.reserve(col.size() / 4 + 16);
             for (size_t i = 0; i < col.size(); ++i)
                 if (mask & (1u << (types[i] & 31u))) used.push_back(col[i]);
-            std::vector<uint8_t> enc; ColumnStats st;
-            encodeU32Column(used, enc, &st);
-            std::vector<uint8_t> blob;
-            putU32(blob, mask);
-            putU64(blob, used.size());
-            putBytes(blob, enc.data(), enc.size());
-            putU64(actionsBlob, blob.size());
-            putBytes(actionsBlob, blob.data(), blob.size());
-            rep.columns.push_back({name, st.codec, used.size(), col.size() * 4, blob.size(),
-                                   st.dictEntries, st.bits});
+            return used;
         };
-        addI("actions.floor", floors);
-        addU("actions.type", types);
-        addSparseU("actions.strId", strIds);
-        addU("actions.flag", flags);
-        addSparseU("actions.val1", v1);
-        addSparseU("actions.val2", v2);
+        uint32_t mStr = 0, mV1 = 0, mV2 = 0;
+        const std::vector<uint32_t> usedStr = sparseUsed(strIds, mStr);
+        const std::vector<uint32_t> usedV1  = sparseUsed(v1, mV1);
+        const std::vector<uint32_t> usedV2  = sparseUsed(v2, mV2);
+
+        struct ColPlan {
+            const char* name;
+            ColKind kind;
+            const void* data;
+            size_t count;
+            size_t rawBytes;      // 朴素表示（报告用）
+            bool sparse;
+            uint32_t mask;
+            uint64_t usedCount;
+        };
+        const ColPlan plans[] = {
+            {"actions.floor", ColKind::Int64, floors.data(), floors.size(), floors.size() * 8, false, 0, 0},
+            {"actions.type",  ColKind::U32,   types.data(),  types.size(),  types.size() * 4,  false, 0, 0},
+            {"actions.strId", ColKind::U32,   usedStr.data(), usedStr.size(), strIds.size() * 4, true, mStr, usedStr.size()},
+            {"actions.flag",  ColKind::U32,   flags.data(),  flags.size(),  flags.size() * 4,  false, 0, 0},
+            {"actions.val1",  ColKind::U32,   usedV1.data(), usedV1.size(), v1.size() * 4,      true, mV1, usedV1.size()},
+            {"actions.val2",  ColKind::U32,   usedV2.data(), usedV2.size(), v2.size() * 4,      true, mV2, usedV2.size()},
+        };
+
+        auto buildActions = [&](ColumnStorage mode, std::vector<uint8_t>& dst,
+                                std::vector<ColumnLayoutStats>* stats) -> bool {
+            dst.clear();
+            putU32(dst, 6);                      // 列数
+            for (const ColPlan& c : plans) {
+                std::vector<uint8_t> enc; ColumnLayoutStats st;
+                if (!encodeColumnV3(c.kind, c.data, c.count, mode, enc, &st)) return false;
+                std::vector<uint8_t> col;
+                if (c.sparse) { putU32(col, c.mask); putU64(col, c.usedCount); }
+                putBytes(col, enc.data(), enc.size());
+                putU64(dst, col.size());         // u64：允许单列 > 4 GB
+                putBytes(dst, col.data(), col.size());
+                if (stats) stats->push_back(st);
+            }
+            return true;
+        };
+
+        std::vector<uint8_t> actPlain, actPacked;
+        std::vector<ColumnLayoutStats> statsPlain, statsPacked;
+        if (!buildActions(ColumnStorage::LegacyV2, actPlain, &statsPlain) ||
+            !buildActions(ColumnStorage::BestSelf, actPacked, &statsPacked)) {
+            err = "actions 列编码失败（内部错误）";
+            return false;
+        }
+        bool anyForced = false;
+        for (const ColumnLayoutStats& cst : statsPacked) anyForced = anyForced || cst.forced;
+        if (anyForced || actPacked.size() < sectionStoredBytes(actPlain)) {
+            actionsBlob = std::move(actPacked);
+            actionsPacked = true;
+        } else {
+            actionsBlob = std::move(actPlain);
+            actionsPacked = false;
+        }
+        (void)statsPlain;
+        actionStats = std::move(statsPacked);   // 同上：报告用 packed 那次的统计
         (void)n;
+    }
+    // 报告：angleData 在前，然后按 actions 的固定列序（顺序必须稳定，--codec-report 靠它对照）
+    {
+        const ColumnLayoutStats& st = angleStats[0];
+        rep.columns.push_back({"angleData", layoutName(st, anglePacked),
+                               (uint64_t)level.angleData.size(),
+                               (uint64_t)level.angleData.size() * 8,
+                               (uint64_t)angleBlob.size(), 0, 0,
+                               st.blocked, st.forced, st.blocks, st.frames,
+                               st.singleBytes, st.blockedBytes});
+    }
+    {
+        static const char* kNames[] = {"actions.floor", "actions.type", "actions.strId",
+                                       "actions.flag", "actions.val1", "actions.val2"};
+        const uint64_t elems[] = {(uint64_t)level.actions.size(), (uint64_t)level.actions.size(),
+                                  (uint64_t)actionStats.size() ? (uint64_t)level.actions.size() : 0,
+                                  (uint64_t)level.actions.size(), (uint64_t)level.actions.size(),
+                                  (uint64_t)level.actions.size()};
+        const uint64_t rawPer[] = {(uint64_t)level.actions.size() * 8, (uint64_t)level.actions.size() * 4,
+                                   (uint64_t)level.actions.size() * 4, (uint64_t)level.actions.size() * 4,
+                                   (uint64_t)level.actions.size() * 4, (uint64_t)level.actions.size() * 4};
+        for (size_t i = 0; i < 6 && i < actionStats.size(); ++i) {
+            const ColumnLayoutStats& st = actionStats[i];
+            rep.columns.push_back({kNames[i], layoutName(st, actionsPacked),
+                                   elems[i], rawPer[i], st.blocked ? st.blockedBytes : st.singleBytes,
+                                   0, 0,
+                                   st.blocked, st.forced, st.blocks, st.frames,
+                                   st.singleBytes, st.blockedBytes});
+        }
     }
 
     // ---- 组装段 ----
@@ -221,10 +325,14 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
     }
     {
         Section s; s.id = (uint8_t)SectionId::AngleData; s.elements = level.angleData.size();
+        s.preStored = anglePacked;
+        if (!anglePacked) s.flags |= kFlagLegacyColumns;
         s.blob = std::move(angleBlob); secs.push_back(std::move(s));
     }
     {
         Section s; s.id = (uint8_t)SectionId::Actions; s.elements = level.actions.size();
+        s.preStored = actionsPacked;
+        if (!actionsPacked) s.flags |= kFlagLegacyColumns;
         s.blob = std::move(actionsBlob); secs.push_back(std::move(s));
     }
     if (!level.pathData.empty()) {
@@ -245,7 +353,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
     for (size_t i = 0; i < secs.size(); ++i) {
         const std::vector<uint8_t>& blob = secs[i].blob;
         stored[i] = blob;
-        if (blob.size() >= 256) {
+        if (!secs[i].preStored && blob.size() >= 256) {
             std::vector<uint8_t> z(ZSTD_compressBound(blob.size()));
             const size_t got = ZSTD_compress(z.data(), z.size(), blob.data(), blob.size(), 19);
             if (!ZSTD_isError(got) && got < blob.size()) {
@@ -259,8 +367,9 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         const std::vector<uint8_t>& st = stored[i];
         SectionEntry e{};
         e.id = s.id;
-        e.codec = (st.size() < s.blob.size()) ? (uint8_t)Codec::SectionZstd : (uint8_t)Codec::Raw;
-        e.flags = 0;
+        e.codec = (!s.preStored && st.size() < s.blob.size()) ? (uint8_t)Codec::SectionZstd
+                                                             : (uint8_t)Codec::Raw;
+        e.flags = s.flags;
         e.offset = off;
         e.compSize = st.size();
         e.rawSize = s.blob.size();

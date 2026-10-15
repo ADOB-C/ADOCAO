@@ -393,6 +393,19 @@ int main(int argc, char* argv[]) {
                              (unsigned long long)c.rawBytes, (unsigned long long)c.encodedBytes,
                              c.elements ? (double)c.encodedBytes / (double)c.elements : 0.0,
                              (unsigned long long)c.dictEntries, c.bits);
+                // v3 分块（§8.3）：单块 vs 分块的**实际存储字节** —— "分块赚了多少 / 亏了多少"
+                // 必须一眼看得出来，否则"块大小按列定"就没有判据（§8.3 的警告）。
+                if (c.singleBytes || c.blockedBytes) {
+                    const double ratio = c.blockedBytes
+                                             ? (double)c.singleBytes / (double)c.blockedBytes : 0.0;
+                    std::fprintf(stderr,
+                                 "    %-14s   └ 分块：单块 %llu B → %llu B（%.3f×）%s  %llu 块 / %llu 帧\n",
+                                 "", (unsigned long long)c.singleBytes,
+                                 (unsigned long long)c.blockedBytes, ratio,
+                                 c.forced ? "✓ 强制分块（窗口化要求）"
+                                          : (c.blocked ? "✓ 分块更小" : "✗ 分块更大"),
+                                 (unsigned long long)c.blocks, (unsigned long long)c.frames);
+                }
             }
 
             // ---- §8.4 判据统计：每列长什么样（纯诊断，不参与上面的编码决策）----

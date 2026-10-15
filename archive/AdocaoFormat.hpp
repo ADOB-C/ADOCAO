@@ -29,7 +29,16 @@ namespace adocao {
 inline constexpr char kMagic[4] = {kAdocaoMagic[0], kAdocaoMagic[1], kAdocaoMagic[2], kAdocaoMagic[3]};
 static_assert(kAdocaoMagic[0] == 'A' && kAdocaoMagic[1] == 'D' && kAdocaoMagic[2] == 'O' &&
               kAdocaoMagic[3] == '1', "core 的 kAdocaoMagic 变了，archive 这边要一起改");
-inline constexpr uint16_t kVersion  = 2;   // v2：Actions 段改成"稀疏载荷列"，新增 Rle/DeltaRleVarint 与段级压缩
+inline constexpr uint16_t kVersion  = 3;   // v3：列改**分块容器**（每 4096 元素一块、块内自选编码、
+                                          //     帧级 zstd 与 seek 粒度解耦，见 AdocaoBlocked.hpp）
+                                          // + Derived 段（PositionTrack/前缀状态 checkpoint，§8.8）
+inline constexpr uint16_t kMinReadVersion = 2;   // 读侧仍认 v2（双读）；更早的版本没有实现过
+
+// `SectionEntry::flags` 的位。v3 起用第 0 位区分"列段用的是哪套列布局"：
+//   置位 = **v2 的裸列字节**（无 v3 容器头）—— 这是兜底：分块没赚到时整段逐字节等于 v2 文件，
+//          于是 **v3 的文件永远 ≤ v2 的文件**（§8.0-2 的"最坏零收益"落在文件层面）；
+//   清零 = v3 的分块列容器（`AdocaoBlocked.hpp`，帧可独立解压 = 可按 4096 层 seek）。
+inline constexpr uint16_t kFlagLegacyColumns = 0x0001;
 
 // 段 id。v1 只用 1..5；6/7 预留（preserved / derived），未知 id 一律跳过（前向兼容）。
 enum class SectionId : uint8_t {
@@ -39,7 +48,7 @@ enum class SectionId : uint8_t {
     StringPool = 4,
     PathData   = 5,
     Preserved  = 6,   // 未识别成员的原始字节（decorations、未知 eventType）—— 供 ADOCAO-E 无损回写
-    Derived    = 7,   // 预计算/检查点 —— v1 不写
+    Derived    = 7,   // checkpoint（每 4096 层的续算状态，§8.8）：v2 不写，v3 起写
 };
 
 // 列/段的编码方式。`ColumnHeader::codec` 与 `SectionEntry::codec` 共用这一套。

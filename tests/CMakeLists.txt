@@ -38,6 +38,14 @@ add_executable(adocao_columns_test adocao_columns_test.cpp)
 target_link_libraries(adocao_columns_test PRIVATE adocao_archive)
 add_test(NAME adocao_columns COMMAND adocao_columns_test)
 
+# `.adocao` v3 分块列容器（§8.3 ⑥）：逐位往返（含 4096 边界附近与 -0.0/NaN/极值）+
+# **分段型收益**（§8.3 的 1.66~3.29× 那一档，数字打印留痕）+ 两个负向对照
+# （同质/字典主导/白噪声列上分块不许赢 → 最坏零收益）+ 按块随机访问（③ 的地基）+
+# 坏数据必须干净失败（截断、帧表越界、kind 不符、blockElems=0、未知 layout）。
+add_executable(adocao_blocked_test adocao_blocked_test.cpp)
+target_link_libraries(adocao_blocked_test PRIVATE adocao_archive)
+add_test(NAME adocao_blocked COMMAND adocao_blocked_test)
+
 # `.adocao` v3 判据统计（§8.4）：哨兵掩码 + 差分基数（raw vs wrapped）。
 # 关键断言是**负向对照**：不掩码时中旋哨兵会把"环绕率"抬成假象；全精度正弦的窗口永远不重复
 # （即 `Motif` 要的是**逐位重复**）。只链 archive（列编码器不用压缩库）。

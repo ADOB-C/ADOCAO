@@ -3,6 +3,7 @@
 #include <cstring>
 #include <vector>
 
+#include "archive/AdocaoBlocked.hpp"
 #include "archive/AdocaoColumns.hpp"
 #include "archive/AdocaoFormat.hpp"
 #include "archive/LevelArchive.hpp"   // 段级解压复用现成的 decompressLevelArchive
@@ -27,6 +28,7 @@ inline bool have(size_t n, size_t off, size_t k) { return off <= n && k <= n - o
 
 struct Sec {
     uint8_t id = 0;
+    uint16_t flags = 0;
     const uint8_t* p = nullptr;
     size_t size = 0;
     uint64_t elems = 0;      // elemCount（元素个数）
@@ -110,11 +112,27 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
         return false;
     }
     const uint16_t version = rdU16(data + 4);
-    if (version != kVersion) {
-        err = "版本不支持：文件是 v" + std::to_string(version) + "，本程序只认 v" +
-              std::to_string(kVersion);
+    // 双读：v3 是当前的写入版本，v2 仍然照读（行为不变）。更早的版本从来没有实现过，
+    // 未知版本**明确失败**（不猜、不退化）—— §8.9：version 是唯一的兼容闸门。
+    if (version < kMinReadVersion || version > kVersion) {
+        err = "版本不支持：文件是 v" + std::to_string(version) + "，本程序认 v" +
+              std::to_string(kMinReadVersion) + "~v" + std::to_string(kVersion);
         return false;
     }
+    // 列容器在 v3 换了布局（分块）。这三个小包装把"v2 裸列 / v3 容器"两套列解码收在一处：
+    // legacy = 段表 flags 置了 kFlagLegacyColumns（写入方在"分块没赚到"时逐字节落回 v2）。
+    auto decD = [&](const uint8_t* p, size_t n, std::vector<double>& o, bool legacy) {
+        return (version >= 3 && !legacy) ? decodeColumnV3(p, n, o)
+                                         : decodeDoubleColumn(p, n, o);
+    };
+    auto decI = [&](const uint8_t* p, size_t n, std::vector<int64_t>& o, bool legacy) {
+        return (version >= 3 && !legacy) ? decodeColumnV3(p, n, o)
+                                         : decodeIntColumn(p, n, o);
+    };
+    auto decU = [&](const uint8_t* p, size_t n, std::vector<uint32_t>& o, bool legacy) {
+        return (version >= 3 && !legacy) ? decodeColumnV3(p, n, o)
+                                         : decodeU32Column(p, n, o);
+    };
     const uint16_t sectionCount = rdU16(data + 8);
     const uint64_t fileSize = rdU64(data + 12);
     if (fileSize > length) {
@@ -143,6 +161,7 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
         const uint8_t* e = data + sizeof(Header) + (size_t)i * sizeof(SectionEntry);
         Sec s;
         s.id = e[0];
+        s.flags = (uint16_t)(e[2] | ((uint16_t)e[3] << 8));
         const uint64_t off = rdU64(e + 4);
         const uint64_t size = rdU64(e + 12);
         s.elems = rdU64(e + 28);
@@ -220,8 +239,9 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
 
     // ③ angleData（一列 double）
     const Sec* angSec = findSec(secs, SectionId::AngleData);
+    const bool angLegacy = angSec && (angSec->flags & kFlagLegacyColumns) != 0;
     if (angSec && angSec->size) {
-        if (!decodeDoubleColumn(angSec->p, angSec->size, out.angleData)) {
+        if (!decD(angSec->p, angSec->size, out.angleData, angLegacy)) {
             err = "angleData 列解码失败";
             return false;
         }
@@ -229,6 +249,7 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
 
     // ④ actions（列式：floor / type / strId / flag / val1 / val2）
     const Sec* actSec = findSec(secs, SectionId::Actions);
+    const bool actLegacy = actSec && (actSec->flags & kFlagLegacyColumns) != 0;
     if (actSec && actSec->size) {
         const uint8_t* p = actSec->p;
         const size_t n = actSec->size;
@@ -262,17 +283,18 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
         std::vector<int64_t> floors;
         std::vector<uint32_t> types, flags;
         // 稀疏列：u32 类型掩码 + u64 实际条数 + 一列（只含掩码内的类型）
-        auto readSparse = [](uint32_t& mask, std::vector<uint32_t>& vals, const uint8_t* c, size_t csz) {
+        auto readSparse = [&](uint32_t& mask, std::vector<uint32_t>& vals,
+                              const uint8_t* c, size_t csz) {
             if (!have(csz, 0, 12)) return false;
             mask = rdU32(c);
             const uint64_t used = rdU64(c + 4);
-            if (!decodeU32Column(c + 12, csz - 12, vals)) return false;
+            if (!decU(c + 12, csz - 12, vals, actLegacy)) return false;
             return vals.size() == used;
         };
         std::vector<uint32_t> strs, v1, v2;
         uint32_t mStr = 0, mV1 = 0, mV2 = 0;
-        if (!decodeIntColumn(cp[0], cn[0], floors) || !decodeU32Column(cp[1], cn[1], types) ||
-            !readSparse(mStr, strs, cp[2], cn[2]) || !decodeU32Column(cp[3], cn[3], flags) ||
+        if (!decI(cp[0], cn[0], floors, actLegacy) || !decU(cp[1], cn[1], types, actLegacy) ||
+            !readSparse(mStr, strs, cp[2], cn[2]) || !decU(cp[3], cn[3], flags, actLegacy) ||
             !readSparse(mV1, v1, cp[4], cn[4]) || !readSparse(mV2, v2, cp[5], cn[5])) {
             err = "actions 某列解码失败";
             return false;

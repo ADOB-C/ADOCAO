@@ -94,6 +94,17 @@
       （只加载 + 解算、不建 mesh）峰值 **1436 MB / 212 B/层**（2026-10-08 复测；早期记的 1560 MB 已过时），
       而 mesh 只占 ~430 MB —— 下一仗在
       `Tile`/`tileBPMs`/`FastAction`/timeline 的窗口化与 checkpoint
+  - [x] **重算侧**（2026-10-15，`archive/AdocaoWindow.*` + `ctest adocao_window`）：从 checkpoint +
+        一块 angleData + 这一块的事件重算出 `Tile::position/direction`、`tileBPMs`、`tileStartTimes`，
+        与全量加载**逐位 memcmp**：The Moon 147 窗 / MYC 1654 窗 **0 不一致**。见 `docs/adocao-format.md` §8.13
+  - [x] **装配侧**（同日）：`FloorWindowSource` 从 `.adocao` **按块**取（段载荷按需解压 + 分块列 +
+        `ActionIndex` 的稀疏列 used 起点），角度窗口/事件窗口/位置/时间/BPM **全部 0 不一致**；
+        `--walk` 实测峰值 RSS：MYC（677 万层）**6.4 MB**、The Moon（60 万层）**5.6 MB**（层数 11×，峰值 +0.8 MB）
+  - [ ] **消费侧（③ 剩下的）**：`LevelData` 仍是全量加载 —— 按需开窗的消费方（渲染 / 剔除 / 时间线 /
+        `TileMesh` 的实例缓冲）还没接，所以 **D1 对"产品常驻内存"还不能宣称**（能宣称的只是"加载路径与 n 解耦"）
+  - [ ] 每砖事件派生结构（`tileHasTwirl`/`tileHasSetSpeed`/`tileHitsounds`/`tileHitsoundVolumes`/
+        `atStates`/`bookmarkFloors`）的窗口化：现在只做了位置/BPM/时间三条前缀和；
+        要做的话得把 `processActions` 的逐事件 switch 抽成可复用核心（**别重抄一份**）
 - [ ] 帧率上限从编译期常量改为运行时配置（LauncherConfig 选项）
 - [ ] 缩放范围可配置（min/max zoom）
 - [ ] 剔除边距可配置
@@ -126,12 +137,24 @@
 - [ ] ④ **`Predict(k)` + 残差后端**（漂移+周期毛刺 **86×**）；残差只在**整数域**算、**闭链**、**每块复位**；
       定点缩放的溢出要显式判（`|v| > INT64_MAX/S` 就放弃该候选，别走进 UB）
 - [ ] ⑤ `FixedPoint`（二进制网格 100×+）/ `XorFloat`（全精度平滑漂移 ~1.9×）
-- [ ] ⑥ **分块**（块自包含 + 块内自选，间隔与 checkpoint 对齐 4096）—— 分段型实测 **1.66~3.29×**，
-      同时是"可按层号 seek"的前提。两条待定：**块大小按列定**（字典按块重开会重复付费，
-      §8.3 那组实测**没覆盖** `Dict` 主导的列）；**压缩帧大小与 seek 粒度解耦**
-      （每块一帧 zstd 在 2.1e9 层下仅帧头 ≈ **65 MB**，改成 64 KB~1 MB 一帧、seek 定位所属帧）
-- [ ] ⑦ `Preserved`（未知成员原样保留 → ADOCAO-E 无损回写）
-- [ ] ⑧ `Derived` = **checkpoint：PositionTrack 累积量优先**（详见 `docs/adocao-format.md` §8.8；
+- [x] ⑥ **分块**（块自包含 + 块内自选，间隔与 checkpoint 对齐 4096）—— **已完成 2026-10-15**
+      （`archive/AdocaoBlocked.*` + `ctest adocao_blocked`，见 `docs/adocao-format.md` §8.11）。
+      两条待定都按"实编取最小"落地了：帧 256 KB / ≤256 块（**压缩帧与 seek 粒度解耦**）；
+      **决策放在段级**（v2 是整个 Actions 段压一帧更省）→ **v3 默认文件大小与 v2 完全相同**
+      （MYC 6120=6120、The Moon 3544=3544、Unity 21,079,240）。
+      ⚠️ **口径要记住**：§8.3 的"分段型 1.66~3.29×"是**编码级**；段级 zstd 会把它在**存储级**吃掉
+      （同族合成列实测编码级 3.87/2.19/1.70×、存储级 1.00/0.97/0.96×），真谱上分块一律更大
+      （The Moon angleData 0.47×、MYC 0.29×、Unity val1 0.67×）→ 所以规则是
+      "**裸数据 ≥128 MB 强制分块**（窗口化是要求不是优化）、其下取最小"。
+      **中间规模（1e7 层）想要可寻址性，得先做 §8.3 选项②：字典段跨块共享 + 下标流按块**
+- [x] ⑦ `Preserved`（未知成员原样保留 → ADOCAO-E 无损回写）—— **仍未做**（下面 ⑧ 已做）
+- [x] ⑧ `Derived` = **checkpoint：PositionTrack 累积量优先** —— **已完成 2026-10-15**
+      （`archive/AdocaoCheckpoints.*` + `ctest adocao_checkpoints`，见 `docs/adocao-format.md` §8.12；
+      `adocao pack --checkpoints`，**默认关** —— 快照天生 O(n/4096)，实测 MYC 0.0045 B/层、2³¹ 外推 ≈9.8 MB）。
+      **验收 = §8.10⑥ 的逐位 memcmp**：The Moon 147 条 / 重算 602,112 层 0 不一致、MYC 1654 条 /
+      重算 6,774,784 层 0 不一致；**反面对照**：baseX 动 1 ULP → 1697/4096 层立刻变红。
+      记录 96 B（比 §8.8 估的 88 B 多 8 B：中旋跨窗要 `sentinelRun`）。
+      原设计说明（保留）：详见 `docs/adocao-format.md` §8.8；
       前置的 `justThisTile` 语义**已定案并落地**（见本文件上面那条 PositionTrack：
       **只作用于本层 = 点加**，`applyPositionTrackOffsets()` 已读 `o.justThisTile`）→
       点加是**一次性**效果、不跨块，快照里**不需要**额外字段；必需的只有"窗口事件扫描必须含 `floor == i0`"。

@@ -29,8 +29,22 @@ struct DerivedInfo {
     // 长度 = 块数 + 1（最后一条是哨兵 = actions.size()），所以第 b 块的事件区间是
     // `[firstAction[b], firstAction[b+1])`。写入方保证 actions 按 floor 非递减，否则这一段不写。
     uint32_t actionStride = 0;
-    std::vector<uint64_t> firstAction;
+    std::vector<ActionIndexEntry> firstAction;
 };
+
+// 单个段的**载荷视图**（③ 的窗口化加载按块取数据要用它：不该为了一个块把整份谱所有段都摊开）。
+// `storage` 非空时表示这一段是段级压缩的，`p` 指向 `storage`（调用方要让它活着）；
+// 否则 `p` 直接指向传入的文件字节（调用方必须让那份缓冲活着）。
+struct SectionView {
+    const uint8_t* p = nullptr;
+    size_t size = 0;
+    uint16_t flags = 0;
+    std::string storage;
+};
+
+// 取某一段的载荷（校验头/表/CRC 与这一段自己的 CRC；段级压缩在这里解开）。
+bool getSectionView(const uint8_t* data, size_t length, uint8_t sectionId,
+                    SectionView& out, std::string& err);
 
 // data/length 是整个 `.adocao` 文件。失败时 err 是原因（**明确失败，绝不静默回退**）。
 // derived 非空时顺带把 `Derived` 段解出来（没有该段则保持为空，不算错误）。

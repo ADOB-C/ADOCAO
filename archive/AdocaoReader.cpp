@@ -28,12 +28,137 @@ inline bool have(size_t n, size_t off, size_t k) { return off <= n && k <= n - o
 
 struct Sec {
     uint8_t id = 0;
+    uint8_t codec = 0;       // Codec（Raw / SectionZstd / SectionXz）
     uint16_t flags = 0;
     const uint8_t* p = nullptr;
     size_t size = 0;
     uint64_t elems = 0;      // elemCount（元素个数）
     size_t elems0Raw = 0;    // 段表里的 rawSize（解压后的长度，用来核对）
+    bool materialized = false;
 };
+
+// 容器的"段表视图"：头/表/CRC 一次校验完，**段载荷按需解压**。
+// 为什么按需：③ 的窗口化加载一次只要"一个段里的一块"，不该顺手把整份谱的所有段都摊开
+// （那也是 O(n) 的瞬时内存，正是 D1 要消掉的东西）。
+struct Container {
+    const uint8_t* data = nullptr;
+    size_t length = 0;
+    uint16_t version = 0;
+    std::vector<Sec> secs;
+    std::vector<std::string> plain;      // 段级解压的后备（decompressLevelArchive 的出参是 string）
+
+    const Sec* find(SectionId id) const {
+        for (const Sec& s : secs) if (s.id == (uint8_t)id) return &s;
+        return nullptr;
+    }
+    size_t indexOf(uint8_t id) const {
+        for (size_t i = 0; i < secs.size(); ++i) if (secs[i].id == id) return i;
+        return (size_t)-1;
+    }
+    bool materialize(size_t i, std::string& err) {
+        if (i >= secs.size()) { err = "段下标越界"; return false; }
+        Sec& s = secs[i];
+        if (s.materialized) return true;
+        if (s.codec == (uint8_t)Codec::Raw) { s.materialized = true; return true; }
+        LevelArchiveKind kind;
+        if (s.codec == (uint8_t)Codec::SectionZstd) kind = LevelArchiveKind::Zstd;
+        else if (s.codec == (uint8_t)Codec::SectionXz) kind = LevelArchiveKind::Xz;
+        else {
+            err = "段 " + std::to_string(s.id) + " 的编码 " + std::to_string(s.codec) + " 不认识";
+            return false;
+        }
+        std::string& dst = plain[i];
+        std::string why;
+        if (!decompressLevelArchive((const char*)s.p, s.size, kind, dst, why)) {
+            err = "段 " + std::to_string(s.id) + " 解压失败: " + why;
+            return false;
+        }
+        if (dst.size() != s.elems0Raw) {   // 解压出来的长度必须与段表里写的一致
+            err = "段 " + std::to_string(s.id) + " 解压后长度与段表不符（文件损坏）";
+            return false;
+        }
+        s.p = (const uint8_t*)dst.data();
+        s.size = dst.size();
+        s.materialized = true;
+        return true;
+    }
+    bool materializeAll(std::string& err) {
+        for (size_t i = 0; i < secs.size(); ++i)
+            if (!materialize(i, err)) return false;
+        return true;
+    }
+};
+
+bool openContainer(const uint8_t* data, size_t length, Container& out, std::string& err) {
+    out = Container{};
+    out.data = data;
+    out.length = length;
+    if (!data || !have(length, 0, sizeof(Header))) {
+        err = "文件太短（连文件头都不完整）";
+        return false;
+    }
+    if (std::memcmp(data, kMagic, 4) != 0) {
+        err = "magic 不符（不是 .adocao）";
+        return false;
+    }
+    const uint16_t version = rdU16(data + 4);
+    // 双读：v3 是当前的写入版本，v2 仍然照读（行为不变）。更早的版本从来没有实现过，
+    // 未知版本**明确失败**（不猜、不退化）—— §8.9：version 是唯一的兼容闸门。
+    if (version < kMinReadVersion || version > kVersion) {
+        err = "版本不支持：文件是 v" + std::to_string(version) + "，本程序认 v" +
+              std::to_string(kMinReadVersion) + "~v" + std::to_string(kVersion);
+        return false;
+    }
+    out.version = version;
+    const uint16_t sectionCount = rdU16(data + 8);
+    const uint64_t fileSize = rdU64(data + 12);
+    if (fileSize > length) {
+        err = "文件被截断（头里写着 " + std::to_string(fileSize) + " 字节，实际只有 " +
+              std::to_string(length) + "）";
+        return false;
+    }
+    const size_t tableBytes = sizeof(Header) + (size_t)sectionCount * sizeof(SectionEntry);
+    if (!have(length, 0, tableBytes)) {
+        err = "段表越界";
+        return false;
+    }
+    // headerCrc 覆盖"头（该字段按 0 参与）+ 整张段表"
+    {
+        std::vector<uint8_t> hb(data, data + tableBytes);
+        std::memset(hb.data() + 20, 0, 4);
+        if (crc32c(hb.data(), hb.size()) != rdU32(data + 20)) {
+            err = "headerCrc 校验失败（文件损坏）";
+            return false;
+        }
+    }
+    out.secs.reserve(sectionCount);
+    out.plain.assign(sectionCount, std::string());
+    for (uint16_t i = 0; i < sectionCount; ++i) {
+        const uint8_t* e = data + sizeof(Header) + (size_t)i * sizeof(SectionEntry);
+        Sec s;
+        s.id = e[0];
+        s.codec = e[1];
+        s.flags = (uint16_t)(e[2] | ((uint16_t)e[3] << 8));
+        const uint64_t off = rdU64(e + 4);
+        const uint64_t size = rdU64(e + 12);
+        s.elems = rdU64(e + 28);
+        s.elems0Raw = (size_t)rdU64(e + 20);   // rawSize
+        if (!have(length, (size_t)off, (size_t)size)) {
+            err = "段 " + std::to_string(s.id) + " 越界（偏移 " + std::to_string(off) + " 长度 " +
+                  std::to_string(size) + "）";
+            return false;
+        }
+        s.p = data + off;
+        s.size = (size_t)size;
+        if (crc32c(s.p, s.size) != rdU32(e + 36)) {
+            err = "段 " + std::to_string(s.id) + " 的 crc32c 校验失败（文件损坏）";
+            return false;
+        }
+        s.materialized = (s.codec == (uint8_t)Codec::Raw);
+        out.secs.push_back(s);
+    }
+    return true;
+}
 
 const Sec* findSec(const std::vector<Sec>& v, SectionId id) {
     for (const Sec& s : v)
@@ -101,25 +226,36 @@ bool parsePool(const uint8_t* p, size_t n, std::vector<std::string>& out) {
 
 }  // namespace
 
+bool getSectionView(const uint8_t* data, size_t length, uint8_t sectionId,
+                    SectionView& out, std::string& err) {
+    err.clear();
+    out = SectionView{};
+    Container c;
+    if (!openContainer(data, length, c, err)) return false;
+    const size_t idx = c.indexOf(sectionId);
+    if (idx == (size_t)-1) { err = "没有段 " + std::to_string(sectionId); return false; }
+    if (!c.materialize(idx, err)) return false;
+    const Sec& s = c.secs[idx];
+    out.flags = s.flags;
+    out.size = s.size;
+    if (s.codec == (uint8_t)Codec::Raw) {
+        out.p = s.p;                       // 直接指向文件字节（调用方必须让 data 活着）
+    } else {
+        out.storage = std::move(c.plain[idx]);
+        out.p = (const uint8_t*)out.storage.data();
+    }
+    return true;
+}
+
 bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string& err,
                  DerivedInfo* derived) {
     err.clear();
-    if (!data || !have(length, 0, sizeof(Header))) {
-        err = "文件太短（连文件头都不完整）";
-        return false;
-    }
-    if (std::memcmp(data, kMagic, 4) != 0) {
-        err = "magic 不符（不是 .adocao）";
-        return false;
-    }
-    const uint16_t version = rdU16(data + 4);
-    // 双读：v3 是当前的写入版本，v2 仍然照读（行为不变）。更早的版本从来没有实现过，
-    // 未知版本**明确失败**（不猜、不退化）—— §8.9：version 是唯一的兼容闸门。
-    if (version < kMinReadVersion || version > kVersion) {
-        err = "版本不支持：文件是 v" + std::to_string(version) + "，本程序认 v" +
-              std::to_string(kMinReadVersion) + "~v" + std::to_string(kVersion);
-        return false;
-    }
+    Container c;
+    if (!openContainer(data, length, c, err)) return false;
+    if (!c.materializeAll(err)) return false;
+    const uint16_t version = c.version;
+    const std::vector<Sec>& secs = c.secs;
+
     // 列容器在 v3 换了布局（分块）。这三个小包装把"v2 裸列 / v3 容器"两套列解码收在一处：
     // legacy = 段表 flags 置了 kFlagLegacyColumns（写入方在"分块没赚到"时逐字节落回 v2）。
     auto decD = [&](const uint8_t* p, size_t n, std::vector<double>& o, bool legacy) {
@@ -134,78 +270,6 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
         return (version >= 3 && !legacy) ? decodeColumnV3(p, n, o)
                                          : decodeU32Column(p, n, o);
     };
-    const uint16_t sectionCount = rdU16(data + 8);
-    const uint64_t fileSize = rdU64(data + 12);
-    if (fileSize > length) {
-        err = "文件被截断（头里写着 " + std::to_string(fileSize) + " 字节，实际只有 " +
-              std::to_string(length) + "）";
-        return false;
-    }
-    const size_t tableBytes = sizeof(Header) + (size_t)sectionCount * sizeof(SectionEntry);
-    if (!have(length, 0, tableBytes)) {
-        err = "段表越界";
-        return false;
-    }
-    // headerCrc 覆盖"头（该字段按 0 参与）+ 整张段表"
-    {
-        std::vector<uint8_t> hb(data, data + tableBytes);
-        std::memset(hb.data() + 20, 0, 4);
-        if (crc32c(hb.data(), hb.size()) != rdU32(data + 20)) {
-            err = "headerCrc 校验失败（文件损坏）";
-            return false;
-        }
-    }
-
-    std::vector<Sec> secs;
-    secs.reserve(sectionCount);
-    for (uint16_t i = 0; i < sectionCount; ++i) {
-        const uint8_t* e = data + sizeof(Header) + (size_t)i * sizeof(SectionEntry);
-        Sec s;
-        s.id = e[0];
-        s.flags = (uint16_t)(e[2] | ((uint16_t)e[3] << 8));
-        const uint64_t off = rdU64(e + 4);
-        const uint64_t size = rdU64(e + 12);
-        s.elems = rdU64(e + 28);
-        s.elems0Raw = (size_t)rdU64(e + 20);   // rawSize
-        if (!have(length, (size_t)off, (size_t)size)) {
-            err = "段 " + std::to_string(s.id) + " 越界（偏移 " + std::to_string(off) + " 长度 " +
-                  std::to_string(size) + "）";
-            return false;
-        }
-        s.p = data + off;
-        s.size = (size_t)size;
-        if (crc32c(s.p, s.size) != rdU32(e + 36)) {
-            err = "段 " + std::to_string(s.id) + " 的 crc32c 校验失败（文件损坏）";
-            return false;
-        }
-        secs.push_back(s);
-    }
-
-    // 段级解压：crc32c 已在上面校验过**存储字节**，这里再解开。未知段编码 → 明确失败（不猜）。
-    std::vector<std::string> plain(secs.size());   // decompressLevelArchive 的出参是 string
-    for (size_t i = 0; i < secs.size(); ++i) {
-        Sec& s = secs[i];
-        const uint8_t sc = data[sizeof(Header) + i * sizeof(SectionEntry) + 1];
-        if (sc == (uint8_t)Codec::Raw) continue;
-        LevelArchiveKind kind;
-        if (sc == (uint8_t)Codec::SectionZstd) kind = LevelArchiveKind::Zstd;
-        else if (sc == (uint8_t)Codec::SectionXz) kind = LevelArchiveKind::Xz;
-        else {
-            err = "段 " + std::to_string(s.id) + " 的编码 " + std::to_string(sc) + " 不认识";
-            return false;
-        }
-        std::string why;
-        if (!decompressLevelArchive((const char*)s.p, s.size, kind, plain[i], why)) {
-            err = "段 " + std::to_string(s.id) + " 解压失败: " + why;
-            return false;
-        }
-        if (plain[i].size() != s.elems0Raw) {   // 解压出来的长度必须与段表里写的一致
-            err = "段 " + std::to_string(s.id) + " 解压后长度与段表不符（文件损坏）";
-            return false;
-        }
-        s.p = (const uint8_t*)plain[i].data();
-        s.size = plain[i].size();
-    }
 
     // 清干净：调用方可能已经用过这个对象
     out.angleData.clear();

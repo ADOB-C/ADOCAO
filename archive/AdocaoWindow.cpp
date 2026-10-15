@@ -2,6 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+
+#include "archive/AdocaoBlocked.hpp"
+#include "core/util/Logger.hpp"
 
 namespace adofai {
 namespace adocao {
@@ -38,6 +42,266 @@ float rotationDuration(double rawAngleData, float preAngleDir, bool isCW, float 
 }
 
 }  // namespace
+
+
+// ---------------- FloorWindowSource：从容器里按块取数据 ----------------
+
+namespace {
+
+uint32_t rdU32w(const uint8_t* p) {
+    uint32_t v = 0;
+    for (int i = 0; i < 4; ++i) v |= (uint32_t)p[i] << (8 * i);
+    return v;
+}
+uint64_t rdU64w(const uint8_t* p) {
+    uint64_t v = 0;
+    for (int i = 0; i < 8; ++i) v |= (uint64_t)p[i] << (8 * i);
+    return v;
+}
+inline bool haveW(size_t n, size_t off, size_t k) { return off <= n && k <= n - off; }
+
+// 从分块列里取出 [from, to) 这一段值（只解压覆盖到的那些帧）
+template <typename T>
+bool gatherTyped(const ColumnView& v, uint64_t from, uint64_t to, std::vector<T>& out,
+                 uint64_t* bytesDecoded) {
+    out.clear();
+    if (to < from || to > v.total) return false;
+    if (to == from) return true;
+    if (!v.blocked) {
+        std::vector<T> all;
+        if (!decodeColumnV3(v.container, v.containerSize, all)) return false;
+        if (all.size() < to) return false;
+        out.assign(all.begin() + (size_t)from, all.begin() + (size_t)to);
+        if (bytesDecoded) *bytesDecoded += v.containerSize;
+        return true;
+    }
+    const uint64_t firstBlock = from / v.blockElems;
+    const uint64_t lastBlock = (to - 1) / v.blockElems;
+    out.reserve((size_t)(to - from));
+    for (uint64_t b = firstBlock; b <= lastBlock; ++b) {
+        std::vector<T> blk;
+        if (!decodeColumnBlock(v, b, blk)) return false;
+        const uint64_t blockFirst = b * v.blockElems;
+        const uint64_t lo = (from > blockFirst) ? from - blockFirst : 0;
+        const uint64_t hi = std::min<uint64_t>(blk.size(), to - blockFirst);
+        if (lo > hi || hi > blk.size()) return false;
+        out.insert(out.end(), blk.begin() + (size_t)lo, blk.begin() + (size_t)hi);
+        // 记账：这一块所在帧的存储字节（近似"碰了多少"）
+        if (bytesDecoded) {
+            const uint8_t* e = v.frameTable + b / 0 * 0;   // 占位，下面用 locateBlock 拿真实帧
+            (void)e;
+            uint64_t frame = 0, inFrame = 0;
+            if (v.locateBlock(b, frame, inFrame)) {
+                const uint8_t* fe = v.frameTable + frame * kFrameEntry;
+                *bytesDecoded += rdU64w(fe + 24);          // compSize
+            }
+        }
+    }
+    return out.size() == (size_t)(to - from);
+}
+
+bool gatherD(const ColumnView& v, uint64_t from, uint64_t to, std::vector<double>& out,
+             uint64_t* bd) { return gatherTyped<double>(v, from, to, out, bd); }
+bool gatherI(const ColumnView& v, uint64_t from, uint64_t to, std::vector<int64_t>& out,
+             uint64_t* bd) { return gatherTyped<int64_t>(v, from, to, out, bd); }
+bool gatherU(const ColumnView& v, uint64_t from, uint64_t to, std::vector<uint32_t>& out,
+             uint64_t* bd) { return gatherTyped<uint32_t>(v, from, to, out, bd); }
+
+}  // namespace
+
+bool FloorWindowSource::open(const uint8_t* data, size_t length, std::string& err) {
+    m_file = data;
+    m_fileLen = length;
+    std::string e;
+    if (!getSectionView(data, length, (uint8_t)SectionId::AngleData, m_angleSec, e)) {
+        err = "窗口化：取 AngleData 段失败：" + e;
+        return false;
+    }
+    if (!getSectionView(data, length, (uint8_t)SectionId::Actions, m_actionsSec, e)) {
+        err = "窗口化：取 Actions 段失败：" + e;
+        return false;
+    }
+    (void)getSectionView(data, length, (uint8_t)SectionId::Derived, m_derivedSec, e);
+    (void)getSectionView(data, length, (uint8_t)SectionId::ActionIndex, m_indexSec, e);
+
+    // v3 的列容器（不是 legacy 裸列）才谈得上"按块寻址"
+    const bool angleV3 = (m_angleSec.flags & kFlagLegacyColumns) == 0;
+    if (!angleV3 || !openColumnV3(m_angleSec.p, m_angleSec.size, m_angleCol)) {
+        m_why = "AngleData 段是 legacy 裸列（不是分块容器）——只能整列解出来";
+        m_windowable = false;
+    } else if (!m_angleCol.blocked) {
+        m_why = "AngleData 列选了单块布局（分块它更大）——只能整列解出来";
+        m_windowable = false;
+    } else {
+        m_windowable = true;
+    }
+    m_angleBlocked = m_angleCol.blocked;
+    m_stride = m_angleBlocked ? m_angleCol.blockElems : kCheckpointStride;
+    m_floors = m_angleCol.total;
+    m_blocks = (m_floors + m_stride - 1) / m_stride;
+
+    // Actions 段：u32 列数 + 每列 u64 长度 + 载荷（稀疏列前缀 = u32 mask + u64 used）
+    m_actionsV3 = (m_actionsSec.flags & kFlagLegacyColumns) == 0;
+    {
+        const uint8_t* p = m_actionsSec.p;
+        const size_t n = m_actionsSec.size;
+        if (!haveW(n, 0, 4)) { err = "窗口化：Actions 段太短"; return false; }
+        const uint32_t cols = rdU32w(p);
+        if (cols != 6) { err = "窗口化：Actions 列数不是 6"; return false; }
+        size_t off = 4;
+        for (uint32_t i = 0; i < 6; ++i) {
+            if (!haveW(n, off, 8)) { err = "窗口化：Actions 列长度越界"; return false; }
+            const uint64_t len = rdU64w(p + off);
+            off += 8;
+            if (!haveW(n, off, (size_t)len)) { err = "窗口化：Actions 列越界"; return false; }
+            const uint8_t* col = p + off;
+            size_t colN = (size_t)len;
+            off += (size_t)len;
+            ActionColumn& c = m_cols[i];
+            if (i == 2 || i == 4 || i == 5) {          // strId / val1 / val2 是稀疏列
+                if (!haveW(colN, 0, 12)) { err = "窗口化：稀疏列前缀越界"; return false; }
+                c.sparse = true;
+                c.mask = rdU32w(col);
+                c.used = rdU64w(col + 4);
+                col += 12;
+                colN -= 12;
+            }
+            if (m_actionsV3) {
+                if (!openColumnV3(col, colN, c.view)) {
+                    err = "窗口化：actions 第 " + std::to_string(i) + " 列容器解析失败";
+                    return false;
+                }
+                c.blocked = c.view.blocked;
+            } else {
+                c.whole.assign(col, col + colN);
+            }
+        }
+    }
+
+    // Derived（checkpoint）与 ActionIndex
+    if (m_derivedSec.size) {
+        if (!decodeCheckpoints(m_derivedSec.p, m_derivedSec.size, m_ckStride, m_ck)) {
+            err = "窗口化：Derived 段解析失败";
+            return false;
+        }
+    }
+    if (m_indexSec.size) {
+        uint32_t st = 0;
+        if (!decodeActionIndex(m_indexSec.p, m_indexSec.size, st, m_index)) {
+            err = "窗口化：ActionIndex 段解析失败";
+            return false;
+        }
+    }
+    return true;
+}
+
+const FloorCheckpoint* FloorWindowSource::checkpointForBlock(uint64_t block) const {
+    if (m_ck.empty() || m_ckStride == 0) return nullptr;
+    const uint64_t i0 = block * m_stride;
+    const uint64_t want = (i0 / m_ckStride) * m_ckStride;
+    // m_ck 按 floor 递增（decodeCheckpoints 已校验），二分找 <= i0 的最后一条
+    size_t lo = 0, hi = m_ck.size();
+    while (lo < hi) {
+        const size_t mid = lo + (hi - lo) / 2;
+        if (m_ck[mid].floor <= want) lo = mid + 1; else hi = mid;
+    }
+    if (lo == 0) return nullptr;
+    const FloorCheckpoint& c = m_ck[lo - 1];
+    return (c.floor == want) ? &c : nullptr;      // 只接受正好对齐的那一条
+}
+
+bool FloorWindowSource::readBlock(uint64_t block, FloorBlock& out, std::string& err) {
+    out = FloorBlock{};
+    err.clear();
+    if (block >= m_blocks) { err = "块号越界"; return false; }
+    const uint64_t i0 = block * m_stride;
+    const uint64_t i1 = std::min<uint64_t>(i0 + m_stride, m_floors);
+    out.first = i0;
+    out.count = (size_t)(i1 - i0);
+
+    // ---- angleData：分块布局只解这一块的帧 ----
+    if (m_angleBlocked) {
+        if (!decodeColumnBlock(m_angleCol, block, out.angles)) {
+            err = "窗口化：angleData 第 " + std::to_string(block) + " 块解码失败";
+            return false;
+        }
+        uint64_t frame = 0, inFrame = 0;
+        if (m_angleCol.locateBlock(block, frame, inFrame)) {
+            m_bytesDecoded += rdU64w(m_angleCol.frameTable + frame * kFrameEntry + 24);
+        }
+    } else {
+        if (m_angleWhole.empty() &&
+            !decodeColumnV3(m_angleCol.container, m_angleCol.containerSize, m_angleWhole)) {
+            err = "窗口化：angleData 整列解码失败";
+            return false;
+        }
+        if (m_angleWhole.size() < i1) { err = "窗口化：angleData 长度不足"; return false; }
+        out.angles.assign(m_angleWhole.begin() + (size_t)i0, m_angleWhole.begin() + (size_t)i1);
+        m_bytesDecoded += m_angleCol.containerSize;
+    }
+
+    // ---- 事件：靠按层索引取 action 区间 ----
+    uint64_t a0 = 0, a1 = 0;
+    uint64_t uStr0 = 0, uStr1 = 0, uV10 = 0, uV11 = 0, uV20 = 0, uV21 = 0;
+    if (!m_index.empty()) {
+        if (block + 1 >= m_index.size()) { err = "窗口化：按层索引条数不足"; return false; }
+        a0 = m_index[block].firstAction;
+        a1 = m_index[block + 1].firstAction;
+        uStr0 = m_index[block].usedStrId;  uStr1 = m_index[block + 1].usedStrId;
+        uV10 = m_index[block].usedVal1;    uV11 = m_index[block + 1].usedVal1;
+        uV20 = m_index[block].usedVal2;    uV21 = m_index[block + 1].usedVal2;
+    } else {
+        err = "窗口化：没有按层索引（写入方没写 or actions 不是按 floor 有序）";
+        return false;
+    }
+
+    std::vector<int64_t> floors;
+    std::vector<uint32_t> types, flags, strs, v1, v2;
+    auto need = [&](int i) -> const ActionColumn& { return m_cols[i]; };
+    if (!gatherI(need(0).view, a0, a1, floors, &m_bytesDecoded) ||
+        !gatherU(need(1).view, a0, a1, types, &m_bytesDecoded) ||
+        !gatherU(need(3).view, a0, a1, flags, &m_bytesDecoded)) {
+        err = "窗口化：actions 稠密列取区间失败";
+        return false;
+    }
+    if (need(2).sparse && !gatherU(need(2).view, uStr0, uStr1, strs, &m_bytesDecoded)) {
+        err = "窗口化：actions.strId 取区间失败"; return false;
+    }
+    if (need(4).sparse && !gatherU(need(4).view, uV10, uV11, v1, &m_bytesDecoded)) {
+        err = "窗口化：actions.val1 取区间失败"; return false;
+    }
+    if (need(5).sparse && !gatherU(need(5).view, uV20, uV21, v2, &m_bytesDecoded)) {
+        err = "窗口化：actions.val2 取区间失败"; return false;
+    }
+    const size_t m = floors.size();
+    if (types.size() != m || flags.size() != m) { err = "窗口化：actions 列长度不一致"; return false; }
+
+    out.actions.resize(m);
+    size_t ks = 0, k1 = 0, k2 = 0;
+    for (size_t i = 0; i < m; ++i) {
+        LevelData::FastAction& a = out.actions[i];
+        const uint32_t t = types[i];
+        const uint32_t bit = 1u << (t & 31u);
+        a.floor = (int)floors[i];
+        a.type = (LevelData::FastAction::Type)(uint8_t)t;
+        a.strId = (need(2).mask & bit) ? (uint16_t)strs[ks++] : 0;
+        a.flag = (flags[i] != 0);
+        const uint32_t x1 = (need(4).mask & bit) ? v1[k1++] : 0u;
+        const uint32_t x2 = (need(5).mask & bit) ? v2[k2++] : 0u;
+        std::memcpy(&a.val1, &x1, 4);
+        std::memcpy(&a.val2, &x2, 4);
+    }
+    if (ks != strs.size() || k1 != v1.size() || k2 != v2.size()) {
+        err = "窗口化：actions 稀疏列条数与掩码不符";
+        return false;
+    }
+
+    if (const FloorCheckpoint* ck = checkpointForBlock(block)) {
+        out.checkpoint = *ck;
+        out.hasCheckpoint = true;
+    }
+    return true;
+}
 
 float checkpointPrevDirection(const FloorCheckpoint& ck) {
     // `calculateTilePositions`：999 → floats[i] = floats[i-1] + 180（沿用上一个"有效"方向）。

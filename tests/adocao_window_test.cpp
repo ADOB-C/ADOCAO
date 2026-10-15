@@ -8,6 +8,7 @@
 //   ③ SetSpeed 的 **float** 累乘（生产路径是 float，用 double 会在多次乘之后差 ULP）。
 
 #include "archive/AdocaoCheckpoints.hpp"
+#include "archive/AdocaoBlocked.hpp"
 #include "archive/AdocaoWindow.hpp"
 #include "archive/AdocaoReader.hpp"
 #include "archive/AdocaoWriter.hpp"
@@ -292,7 +293,8 @@ void actionIndex(const LevelData& lv, const char* what) {
         }
         if (!seenLo) wantLo = lv.actions.size();
         wantHi = std::max(wantHi, wantLo);
-        if (info.firstAction[b] != wantLo || info.firstAction[b + 1] != wantHi) {
+        if (info.firstAction[b].firstAction != wantLo ||
+            info.firstAction[b + 1].firstAction != wantHi) {
             if (bad == 0) firstBadBlock = b;
             ++bad;
         }
@@ -302,17 +304,155 @@ void actionIndex(const LevelData& lv, const char* what) {
                         bad ? fmt("，首个 @块 %llu", (unsigned long long)firstBadBlock).c_str() : ""));
 }
 
+// ---- ⑥ 从容器按块走一遍：angles/actions/重算结果都要与全量加载一致 --------------
+// 这条才是 ③ 的"地基能不能用"的验收：数据是从 `.adocao` **按块**取的，不是从全量数组切的。
+void containerWalk(const LevelData& lv, const char* what) {
+    std::vector<uint8_t> bytes;
+    std::string err;
+    PackResult rep;
+    PackOptions opts;
+    opts.withCheckpoints = true;
+    if (!packLevel(lv, bytes, err, &rep, opts)) {
+        check(false, fmt("%s：pack 失败 %s", what, err.c_str()));
+        return;
+    }
+    FloorWindowSource ws;
+    if (!ws.open(bytes.data(), bytes.size(), err)) {
+        check(false, fmt("%s：FloorWindowSource::open 失败 %s", what, err.c_str()));
+        return;
+    }
+    if (!ws.windowable()) {
+        check(false, fmt("%s：容器不可窗口化（%s）—— 这条用例要求分块布局", what, ws.notWindowableWhy()));
+        return;
+    }
+    Timeline tl;
+    tl.build(lv, /*exportOnly=*/true);
+    const std::vector<double>& fullTimes = tl.tileStartTimes();
+    const std::vector<float>& fullBPMs = tl.tileBPMs();
+
+    size_t badAngles = 0, badActions = 0, badTiles = 0, badTimes = 0, badBpm = 0;
+    size_t noCk = 0;
+    uint64_t firstBad = 0;
+    for (uint64_t b = 0; b < ws.blockCount(); ++b) {
+        FloorBlock blk;
+        if (!ws.readBlock(b, blk, err)) {
+            check(false, fmt("%s：readBlock(%llu) 失败 %s", what, (unsigned long long)b, err.c_str()));
+            return;
+        }
+        if (!blk.hasCheckpoint) ++noCk;
+        const size_t i0 = (size_t)blk.first;
+        // ① angleData 窗口
+        if (blk.count != std::min<size_t>(ws.stride(), lv.angleData.size() - i0) ||
+            std::memcmp(blk.angles.data(), lv.angleData.data() + i0, blk.count * 8) != 0) {
+            ++badAngles;
+            if (!firstBad) firstBad = i0;
+        }
+        // ② 事件窗口：与"全量数组里 floor ∈ [i0,i1)"逐条比
+        std::vector<LevelData::FastAction> want;
+        for (const LevelData::FastAction& a : lv.actions) {
+            if (a.floor >= 0 && (uint64_t)a.floor >= i0 && (uint64_t)a.floor < i0 + blk.count)
+                want.push_back(a);
+        }
+        if (want.size() != blk.actions.size() ||
+            (want.size() && std::memcmp(want.data(), blk.actions.data(),
+                                        want.size() * sizeof(LevelData::FastAction)) != 0)) {
+            ++badActions;
+            if (!firstBad) firstBad = i0;
+        }
+        // ③ 重算
+        if (blk.hasCheckpoint) {
+            FloorWindowInput in;
+            in.checkpoint = blk.checkpoint;
+            in.angles = &blk.angles;
+            in.events = &blk.actions;
+            FloorWindow w;
+            if (!computeFloorWindow(lv.settings, in, w, err)) {
+                check(false, fmt("%s：computeFloorWindow@%llu 失败 %s", what,
+                                 (unsigned long long)i0, err.c_str()));
+                return;
+            }
+            for (size_t k = 0; k < blk.count; ++k) {
+                const size_t i = i0 + k;
+                if (std::memcmp(&w.tiles[k].position[0], &lv.tiles[i].position[0], 8) != 0 ||
+                    std::memcmp(&w.tiles[k].position[1], &lv.tiles[i].position[1], 8) != 0 ||
+                    std::memcmp(&w.tiles[k].direction, &lv.tiles[i].direction, 4) != 0) {
+                    ++badTiles;
+                    if (!firstBad) firstBad = i;
+                }
+                if (i < fullTimes.size() &&
+                    std::memcmp(&w.tileStartTimes[k], &fullTimes[i], 8) != 0) ++badTimes;
+                if (i < fullBPMs.size() &&
+                    std::memcmp(&w.tileBPMs[k], &fullBPMs[i], 4) != 0) ++badBpm;
+            }
+        }
+    }
+    check(badAngles == 0 && badActions == 0 && badTiles == 0 && badTimes == 0 && badBpm == 0 && noCk == 0,
+          fmt("%s：从容器按块走 %llu 块 —— 角度 %zu / 事件 %zu / 位置方向 %zu / 时间 %zu / BPM %zu 不一致，"
+              "缺快照 %zu 块%s",
+              what, (unsigned long long)ws.blockCount(), badAngles, badActions, badTiles, badTimes,
+              badBpm, noCk, firstBad ? fmt("（首个 @%llu）", (unsigned long long)firstBad).c_str() : ""));
+    std::printf("     %s：容器 %zu B，本次走完累计解码 %llu B（%.2f MB）\n", what, bytes.size(),
+                (unsigned long long)ws.bytesDecoded(), (double)ws.bytesDecoded() / 1048576.0);
+}
+
+// ---- ⑦ 只走窗口（不加载全量）：给"内存与 n 解耦"留实测入口 --------------------
+// 用法：adocao_window_test --walk <file.adocao>；本进程**不**加载明文谱，峰值 RSS 就是
+// "文件 + 索引 + 一个窗口"的量级。
+int walkOnly(const char* path) {
+    FILE* f = std::fopen(path, "rb");
+    if (!f) { std::printf("打不开 %s\n", path); return 1; }
+    std::fseek(f, 0, SEEK_END);
+    const long sz = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    std::vector<uint8_t> bytes((size_t)sz);
+    if (std::fread(bytes.data(), 1, bytes.size(), f) != bytes.size()) { std::fclose(f); return 1; }
+    std::fclose(f);
+
+    FloorWindowSource ws;
+    std::string err;
+    if (!ws.open(bytes.data(), bytes.size(), err)) { std::printf("open 失败: %s\n", err.c_str()); return 1; }
+    LevelData::Settings settings;
+    uint64_t floors = 0, actions = 0;
+    for (uint64_t b = 0; b < ws.blockCount(); ++b) {
+        FloorBlock blk;
+        if (!ws.readBlock(b, blk, err)) { std::printf("readBlock 失败: %s\n", err.c_str()); return 1; }
+        if (!blk.hasCheckpoint) { std::printf("块 %llu 没有 checkpoint\n", (unsigned long long)b); return 1; }
+        FloorWindowInput in;
+        in.checkpoint = blk.checkpoint;
+        in.angles = &blk.angles;
+        in.events = &blk.actions;
+        FloorWindow w;
+        if (!computeFloorWindow(settings, in, w, err)) {
+            std::printf("computeFloorWindow 失败: %s\n", err.c_str());
+            return 1;
+        }
+        floors += blk.count;
+        actions += blk.actions.size();
+    }
+    std::printf("walk: %llu 层 / %llu 个事件 / %llu 块｜文件 %zu B｜累计解码 %llu B (%.2f MB)%s\n",
+                (unsigned long long)floors, (unsigned long long)actions,
+                (unsigned long long)ws.blockCount(), bytes.size(),
+                (unsigned long long)ws.bytesDecoded(),
+                (double)ws.bytesDecoded() / 1048576.0,
+                ws.windowable() ? "" : "（不可窗口化：走了退化路径）");
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     adofai::archive::install();
+    if (argc >= 3 && std::strcmp(argv[1], "--walk") == 0) return walkOnly(argv[2]);
     std::printf("— ③ 每砖结构窗口化自测 —\n");
     plainAngles();
     eventsOnBoundary();
     midspinAcrossBoundary();
     sensitivity();
 
-    // 真谱：窗口重算 + 按层索引都在真实规模上过一遍
+    // 真谱：窗口重算 + 按层索引 + 从容器按块走，都在真实规模上过一遍。
+    // 这里把"强制分块"的阈值调小：真谱的列按体积本来会选单块（分块更大），
+    // 而窗口化要的是**分块布局**，所以这条用例刻意造出那个布局来验。
+    setMustBlockBytesForTest(1u << 20);
     for (int i = 1; i < argc; ++i) {
         LevelData lv;
         if (!lv.loadFromFile(argv[i])) { std::printf("加载失败: %s\n", argv[i]); return 1; }
@@ -324,7 +464,9 @@ int main(int argc, char** argv) {
                         (unsigned long long)d.firstBad).c_str() : " ✓");
         if (d.tiles + d.dirs + d.bpms + d.times) ++g_fail;
         actionIndex(lv, argv[i]);
+        containerWalk(lv, argv[i]);
     }
+    setMustBlockBytesForTest(kMustBlockBytes);
 
     if (g_fail) { std::printf("\n%d 项失败\n", g_fail); return 1; }
     std::printf("\n全部通过\n");

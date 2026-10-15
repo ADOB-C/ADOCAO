@@ -240,31 +240,52 @@ bool decodeCheckpoints(const uint8_t* p, size_t n, uint32_t& stride,
     return true;
 }
 
-bool encodeActionIndex(const std::vector<uint64_t>& firstAction, uint32_t stride,
+bool encodeActionIndex(const std::vector<ActionIndexEntry>& entries, uint32_t stride,
                        std::vector<uint8_t>& out) {
     out.clear();
     putU32(out, stride);
-    putU32(out, 0);
-    putU64(out, firstAction.size());
-    out.reserve(out.size() + firstAction.size() * 8);
-    for (uint64_t v : firstAction) putU64(out, v);
+    putU32(out, 1u);                      // flags bit0 = 32 B 条目（含稀疏列 used 起点）
+    putU64(out, entries.size());
+    out.reserve(out.size() + entries.size() * 32);
+    for (const ActionIndexEntry& e : entries) {
+        putU64(out, e.firstAction);
+        putU64(out, e.usedStrId);
+        putU64(out, e.usedVal1);
+        putU64(out, e.usedVal2);
+    }
     return true;
 }
 
 bool decodeActionIndex(const uint8_t* p, size_t n, uint32_t& stride,
-                       std::vector<uint64_t>& out) {
+                       std::vector<ActionIndexEntry>& out) {
     out.clear();
     if (!p || !have(n, 0, 16)) return false;
     stride = rdU32(p);
     if (stride == 0) return false;
+    const uint32_t flags = rdU32(p + 4);
+    if (flags & ~1u) return false;         // 未知位 → 明确失败（不猜）
     const uint64_t count = rdU64(p + 8);
     if (count > (uint64_t)1 << 40) return false;
-    if (!have(n, 16, (size_t)count * 8)) return false;
+    const size_t entry = (flags & 1u) ? 32u : 8u;
+    if (!have(n, 16, (size_t)count * entry)) return false;
     out.reserve((size_t)count);
     for (uint64_t i = 0; i < count; ++i) {
-        const uint64_t v = rdU64(p + 16 + (size_t)i * 8);
-        if (i > 0 && v < out.back()) return false;      // 必须非递减（坏数据不许蒙混）
-        out.push_back(v);
+        const uint8_t* q = p + 16 + (size_t)i * entry;
+        ActionIndexEntry e;
+        e.firstAction = rdU64(q);
+        if (entry == 32) {
+            e.usedStrId = rdU64(q + 8);
+            e.usedVal1 = rdU64(q + 16);
+            e.usedVal2 = rdU64(q + 24);
+        }
+        if (i > 0) {
+            // 必须非递减（坏数据不许蒙混）；稀疏列的 used 起点同理
+            const ActionIndexEntry& b = out.back();
+            if (e.firstAction < b.firstAction) return false;
+            if (e.usedStrId < b.usedStrId || e.usedVal1 < b.usedVal1 || e.usedVal2 < b.usedVal2)
+                return false;
+        }
+        out.push_back(e);
     }
     return true;
 }

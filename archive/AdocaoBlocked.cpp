@@ -1,5 +1,6 @@
 #include "archive/AdocaoBlocked.hpp"
 
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 
@@ -232,9 +233,16 @@ bool encodeTyped(ColKind kind, const std::vector<T>& v, ColumnStorage storage,
     const bool tried = (n > kBlockElems) && buildBlocked<T>(v, kind, blocked, &s);
     if (!tried) { s.blockedBytes = 0; s.blocks = 0; s.frames = 0; }
 
-    // 强制分块：裸数据过阈值（且单块不是"什么都没有可切"的常量级）→ 分块是要求，不是优化
+    // 强制分块：裸数据过阈值（且单块不是"什么都没有可切"的常量级）→ 分块是要求，不是优化。
+    // 测试钩子 ADOCAO_FORCE_BLOCK_KB=<n>：把阈值改成 n KB，好在**真实规模**上造出分块容器
+    // （真谱按体积本来会选单块）—— 窗口化(③)的验收必须跑在那个布局上。
+    size_t mustBlock = g_mustBlockBytes;
+    if (const char* env = std::getenv("ADOCAO_FORCE_BLOCK_KB")) {
+        const long kb = std::atol(env);
+        if (kb > 0) mustBlock = (size_t)kb * 1024;
+    }
     const bool forced = tried && (storage == ColumnStorage::BestSelf) &&
-                        (n * sizeof(T) >= g_mustBlockBytes) && zs.size() > 64;
+                        (n * sizeof(T) >= mustBlock) && zs.size() > 64;
     const bool useBlocked = forced || ((storage == ColumnStorage::BestSelf) && tried &&
                                        s.blockedBytes < zs.size());
     out = useBlocked ? std::move(blocked) : zs;

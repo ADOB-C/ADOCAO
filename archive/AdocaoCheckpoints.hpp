@@ -81,11 +81,20 @@ bool encodeCheckpoints(const std::vector<FloorCheckpoint>& ck, uint32_t stride,
 bool decodeCheckpoints(const uint8_t* p, size_t n, uint32_t& stride,
                        std::vector<FloorCheckpoint>& out);
 
-// `ActionIndex` 段载荷：u32 stride | u32 reserved | u64 count | count × u64 firstAction
-bool encodeActionIndex(const std::vector<uint64_t>& firstAction, uint32_t stride,
+// `ActionIndex` 段载荷（每 4096 层一条）：
+//   u32 stride | u32 flags | u64 count | count × 条目
+//   flags & 1 → 条目 32 B：{ u64 firstAction, u64 usedStrId, u64 usedVal1, u64 usedVal2 }
+//   否则      → 条目  8 B：{ u64 firstAction }（早期布局，读侧仍认）
+// `usedXxx` 是稀疏列（strId/val1/val2）**按出现次数**编号的起点 —— 窗口要从稀疏列里取
+// action 区间 [a0,a1)，就得知道"第 a0 个 action 之前这一列用了多少个"，否则只能从头数。
+struct ActionIndexEntry {
+    uint64_t firstAction = 0;
+    uint64_t usedStrId = 0, usedVal1 = 0, usedVal2 = 0;
+};
+bool encodeActionIndex(const std::vector<ActionIndexEntry>& entries, uint32_t stride,
                        std::vector<uint8_t>& out);
 bool decodeActionIndex(const uint8_t* p, size_t n, uint32_t& stride,
-                       std::vector<uint64_t>& out);
+                       std::vector<ActionIndexEntry>& out);
 
 // **§8.10⑥ 的对拍**：从 checkpoint 重算 [i0, i1) 的 position，与 `level.tiles[i].position`
 // **逐位**比较（memcmp）。返回不一致的层数；0 = 全同。`firstBad` 给出第一个不一致的层号。

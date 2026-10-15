@@ -299,15 +299,24 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         if (sortedByFloor) {
             const uint64_t nBlocks =
                 (level.angleData.size() + kCheckpointStride - 1) / kCheckpointStride;
-            putU32(actionIndexBlob, kCheckpointStride);
-            putU32(actionIndexBlob, 0);
-            putU64(actionIndexBlob, nBlocks + 1);
-            size_t cur = 0;
+            std::vector<ActionIndexEntry> entries;
+            entries.reserve((size_t)nBlocks + 1);
+            size_t cur = 0, scan = 0;
+            uint64_t uStr = 0, uV1 = 0, uV2 = 0;
             for (uint64_t b = 0; b <= nBlocks; ++b) {
                 const int64_t start = (int64_t)(b * kCheckpointStride);
                 while (cur < floors.size() && floors[cur] < start) ++cur;
-                putU64(actionIndexBlob, (uint64_t)cur);
+                // 稀疏列的 used 游标推到 cur：第 a 个 action 之前的 used 数（按类型掩码数）
+                while (scan < cur) {
+                    const uint32_t bit = 1u << (types[scan] & 31u);
+                    if (mStr & bit) ++uStr;
+                    if (mV1 & bit) ++uV1;
+                    if (mV2 & bit) ++uV2;
+                    ++scan;
+                }
+                entries.push_back({(uint64_t)cur, uStr, uV1, uV2});
             }
+            encodeActionIndex(entries, kCheckpointStride, actionIndexBlob);
             actionIndexOk = true;
         } else {
             LOG_W("adocao pack: actions 不是按 floor 非递减的 —— 不写按层索引（窗口化要退回全扫）");

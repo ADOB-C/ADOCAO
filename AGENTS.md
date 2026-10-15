@@ -174,6 +174,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `docs/image-export.md` | 动 `adocao image`（真无头出图）、瓦片与拼接 |
 | `docs/cli.md` | 加/改命令行开关、拖尾采样参数 |
 | `docs/adocao-format.md` | `.adocao` 容器规范与逐项实测 |
+| `docs/2e9.md` | **项目当前目标**：21 亿层的 DoD（内存与 n 解耦/seek/不掉帧）+ 阶段顺序 + 纪律 —— 动手前先读这份 |
 | `docs/scale-1e8-to-2e9.md` | 十亿层目标的三笔账、实测口径（§5 的记账法、§6.1 的 32 位边界） |
 | `docs/project-structure.md` | 目录 / CMake 结构、历史决策 |
 

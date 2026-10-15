@@ -8,6 +8,10 @@ A native high-performance viewer for [A Dance of Fire and Ice](https://store.ste
 
 A [Vulkan 1.2 port](https://github.com/CHT-1192/ADOCAV) is also available.
 
+> **当前目标：`docs/2e9.md`** —— 约 21 亿层（2³¹−1）的谱面要能加载、能 seek、不掉帧，
+> 而且**常驻内存与层数解耦**（n 从 1e6 长到 2³¹，RSS 基本不变）。目标的可测定义（DoD）、
+> 阶段顺序与纪律都在那份文档里；`docs/scale-1e8-to-2e9.md` 是它的实测分析长文。
+
 ## Features
 
 - Full ADOFAI playback engine with relative angle computation (matches [ADOFAI-JS](https://github.com/adofaiex/ADOFAI-JS))

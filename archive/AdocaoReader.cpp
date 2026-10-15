@@ -101,7 +101,8 @@ bool parsePool(const uint8_t* p, size_t n, std::vector<std::string>& out) {
 
 }  // namespace
 
-bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string& err) {
+bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string& err,
+                 DerivedInfo* derived) {
     err.clear();
     if (!data || !have(length, 0, sizeof(Header))) {
         err = "文件太短（连文件头都不完整）";
@@ -338,6 +339,19 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
             return false;
         }
         out.pathData.assign((const char*)pathSec->p + 8, (size_t)len);
+    }
+
+    // ⑥ Derived（可选）：checkpoint 表。坏数据**明确失败**（它是 ③ 的寻址依据，不许半信半疑）
+    if (derived) {
+        derived->stride = 0;
+        derived->checkpoints.clear();
+        const Sec* dSec = findSec(secs, SectionId::Derived);
+        if (dSec && dSec->size) {
+            if (!decodeCheckpoints(dSec->p, dSec->size, derived->stride, derived->checkpoints)) {
+                err = "Derived 段的 checkpoint 表解析失败（文件损坏）";
+                return false;
+            }
+        }
     }
 
     // 未知段 id 一律跳过（前向兼容）—— 这就是"只读自己认识的段"的实现方式

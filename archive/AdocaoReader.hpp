@@ -10,6 +10,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
+
+#include "archive/AdocaoCheckpoints.hpp"
 
 namespace adofai {
 
@@ -17,8 +20,17 @@ struct LevelData;
 
 namespace adocao {
 
+// `Derived` 段（§8.8 的 checkpoint）解析出来的东西。**可选**：没有这一段时 checkpoints 为空。
+// 现在还没有消费方（③ 才用），但"读得回来 + 能对上"必须先立住，否则写出去的就是没人验的空壳。
+struct DerivedInfo {
+    uint32_t stride = 0;
+    std::vector<FloorCheckpoint> checkpoints;
+};
+
 // data/length 是整个 `.adocao` 文件。失败时 err 是原因（**明确失败，绝不静默回退**）。
-bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string& err);
+// derived 非空时顺带把 `Derived` 段解出来（没有该段则保持为空，不算错误）。
+bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string& err,
+                 DerivedInfo* derived = nullptr);
 
 }  // namespace adocao
 }  // namespace adofai

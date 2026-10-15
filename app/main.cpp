@@ -220,7 +220,8 @@ int main(int argc, char* argv[]) {
     bool native = false, timeColor = false, onePx = false, oneBit = false;
     float padding = -1.0f, thickness = -1.0f;        // <0 = 用默认
     int block = 4096, threads = 0, scale = 1, progressForce = 0;
-    bool codecReport = false;                    // pack：打印每列的体积明细
+    bool codecReport = false;
+    bool packCheckpoints = false;   // pack --checkpoints：写 Derived 段（每 4096 层的续算快照）                    // pack：打印每列的体积明细
 
     // CLI-FLAGS-BEGIN —— scripts/check-cli-help.sh 只在这个区间里找开关名
     for (int i = argStart; i < argc; i++) {
@@ -293,6 +294,7 @@ int main(int argc, char* argv[]) {
         // ── adocao image <out.png> --level <谱> [--1px [--scale N] [--1bit]]
         else if (mode == Mode::Pack) {
             if (std::strcmp(a, "--codec-report") == 0) codecReport = true;
+            else if (std::strcmp(a, "--checkpoints") == 0) packCheckpoints = true;
             else { std::fprintf(stderr, "未知选项: %s（pack 模式）\n", a); return 2; }
         }
         else if (mode == Mode::Image) {
@@ -364,7 +366,9 @@ int main(int argc, char* argv[]) {
         std::vector<uint8_t> bytes;
         std::string err;
         adocao::PackResult rep;
-        if (!adocao::packLevel(lv, bytes, err, &rep)) {
+        adocao::PackOptions popts;
+        popts.withCheckpoints = packCheckpoints;
+        if (!adocao::packLevel(lv, bytes, err, &rep, popts)) {
             std::fprintf(stderr, "打包失败: %s\n", err.c_str());
             return 1;
         }
@@ -382,6 +386,10 @@ int main(int argc, char* argv[]) {
         std::fprintf(stderr, "pack: %zu 层 / %zu 个 action → %.2f MB",
                      lv.angleData.size(), lv.actions.size(), (double)bytes.size() / 1048576.0);
         if (tiles > 0) std::fprintf(stderr, "（%.3f B/层）", (double)bytes.size() / tiles);
+        if (rep.checkpoints)
+            std::fprintf(stderr, "  + checkpoint %llu 条 / %llu B（每 4096 层一条，§8.8）",
+                         (unsigned long long)rep.checkpoints,
+                         (unsigned long long)rep.checkpointBytes);
         std::fprintf(stderr, "\n");
         if (codecReport && tiles > 0) {
             std::fprintf(stderr, "  列明细：\n");

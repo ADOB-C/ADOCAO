@@ -46,6 +46,13 @@ add_executable(adocao_blocked_test adocao_blocked_test.cpp)
 target_link_libraries(adocao_blocked_test PRIVATE adocao_archive)
 add_test(NAME adocao_blocked COMMAND adocao_blocked_test)
 
+# `.adocao` v3 `Derived` 段（§8.8 ⑧）：每 4096 层的续算快照。唯一验收手段是 §8.10⑥ 的
+# "从快照重算 position，与全谱一次算 **逐位** memcmp"（含 PositionTrack 的点加/继承、
+# 中旋 999、以及 **1 ULP 的反面对照**：动一位必须变红）。链 archive。
+add_executable(adocao_checkpoints_test adocao_checkpoints_test.cpp)
+target_link_libraries(adocao_checkpoints_test PRIVATE adocao_archive)
+add_test(NAME adocao_checkpoints COMMAND adocao_checkpoints_test)
+
 # `.adocao` v3 判据统计（§8.4）：哨兵掩码 + 差分基数（raw vs wrapped）。
 # 关键断言是**负向对照**：不掩码时中旋哨兵会把"环绕率"抬成假象；全精度正弦的窗口永远不重复
 # （即 `Motif` 要的是**逐位重复**）。只链 archive（列编码器不用压缩库）。

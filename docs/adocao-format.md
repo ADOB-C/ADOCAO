@@ -754,7 +754,7 @@ MYC 的 `angleData` 判据说 `Motif(p=2, 197/65535)`（0.52 B/值）比 `Dict`�
 与"通用数值区（key → typed column）"合并设计：未知 key 按 `valueType` **原样带走**，
 于是前向兼容与 ADOCAO-E 的无损回写是同一件事（不需要单独一版"未知字节"段）。
 
-### 8.8 `Derived` 段：checkpoint（窗口化的断点）
+### 8.8 `Derived` 段：checkpoint（窗口化的断点）—— ✅ 实现见 §8.12
 
 **★ 优先项：PositionTrack 的累积量快照。** 理由：**基础位置**只是 `angleData` 的前缀和（纯函数，
 窗口内可从断点续算）；而 `cumX/cumY` 是**事件驱动状态** —— 从第 i0 层续算要么扫遍 `floor < i0`
@@ -937,3 +937,67 @@ QuomodocunquizE **108928 = 108928**、Unity.wav_rate **21,079,240 B**（与 v2 �
   正是本项目栽过两次的那一类。现在退回前 `LOG_E`。
 * 坏数据一律干净失败（负向对照）：截断、帧字节范围越界、`blockElems=0`、未知 `layout`、
   `kind` 不符、块号越界。白噪声 / 同质滑音 / 字典主导三族都**不许**被分块选上（最坏零收益）。
+
+---
+
+## 8.12 `Derived` 段的 checkpoint（⑧ —— ✅ 已实现 2026-10-15）
+
+> 实现：`archive/AdocaoCheckpoints.{hpp,cpp}`（计算 / 编解码 / **续算对拍**）；
+> `adocao pack --checkpoints` 写出；`unpackLevel(..., DerivedInfo*)` 读回。
+> 自测：`tests/adocao_checkpoints_test.cpp`（ctest `adocao_checkpoints`）。
+
+### 记录（80 B 定长，全部小端；字段一律 **f64**，不许 f32 —— §8.8 的实测理由）
+
+```
+u32 stride(=4096) | u32 reserved | u64 count | count × 80 B
+每条：u64 floor | f64 baseX,baseY | f64 cumX,cumY | f64 timeSec | f64 bpm |
+      f64 radiusScale | f64 lastAngleDeg | u32 flags | u32 reserved
+```
+
+`flags` 标出"哪些分量真的算过"（稀疏）：`kCkBase / kCkCum / kCkLastAngle / kCkLastSentinel /
+kCkTime / kCkBpm / kCkRadius`。读取方必须按位判，**别把 0 当真值**。
+
+* `baseX/baseY` = `angleData` 前缀和（第 i0 层的基础位置，**不含** PositionTrack 偏移）；
+* `cumX/cumY` = PositionTrack 的**继承量**（§8.8 的★：唯一"不能只靠窗口内数据算出来"的东西）；
+* `timeSec/bpm` = **Timeline** 的 `tileStartTimes[i0]` / `tileBPMs[i0]` —— 用权威实现取，
+  **绝不在这里重抄一份状态机**（重抄必然与生产路径漂移）。代价：pack 期要建一次 Timeline
+  （约 32 B/层，实测 MYC 6.77M 层的整条验证流程峰值 RSS 1.98 GB）；
+* `radiusScale` 预留（本仓库还没实现 ScaleRadius 事件），未实现时 = 1.0 且不置位。
+
+### 三条不变量的落地（§8.8）
+
+1. **闭包语义**：快照 = "`floor < i0` 的事件**全部处理完**"之后的状态。实现上快照在
+   "处理第 i0 层事件**之前**"发出 —— 直接对应 §8.8 不变量 3（窗口必须自己扫 `floor == i0`）。
+2. **从快照重新生成**：`verifyCheckpointResume()` 用 `ck.baseX/baseY`（而不是自己累加）起步，
+   与 `applyPositionTrackOffsets` 的**同一套结合顺序**（`base + (cum + px)`）逐位对齐。
+3. `justThisTile` 是**点加**：不进 `cum`，只在本层加。
+
+### 唯一验收手段：§8.10⑥ 的逐位对拍（`memcmp`，不是容差）
+
+```
+the-moon  600538 层 → 147 条（2937 B / 容器 6528 B）｜从快照重算 602112 层，不一致 0 层
+MYC      6770912 层 → 1654 条（30401 B / 容器 36568 B）｜从快照重算 6774784 层，不一致 0 层
+```
+
+命令（可重跑）：
+
+```bash
+./build/tests/adocao_checkpoints_test "<谱>"      # 单元用例 + 真谱逐条快照对拍
+```
+
+**反面对照（这条最关键）**：把快照的 `baseX` 动 **1 个 ULP**，对拍必须变红 ——
+实测 1697/4096 层被判不一致（不是每一层都变，因为求和会舍入回来；所以断言是"**红**"而不是"全红"）。
+没有这条，"永远绿的对拍"就等于没验（§7 别踩 2）。
+
+其余负向对照：截断 / 连头都不完整 / `stride = 0` / `floor` 不是 stride 倍数 / `floor` 不递增
+→ 全部干净失败。
+
+### 成本与默认口径
+
+* 实测 `MYC`：30,401 B / 6,770,912 层 = **0.0045 B/层**（80 B/条的裸记录被段级 zstd 压掉 4.3×）。
+  按这个比例外推 2³¹−1 层：524,288 条 × 80 B = 42 MB 裸 → **≈ 9.8 MB**（§2 当初的估算是 19.4 MB）。
+* 因为它天生是 O(n/4096) 字节，**默认不写**（`PackOptions::withCheckpoints = false`）——
+  这样默认的 v3 文件仍然与 v2 **逐字节同大小**（§8.11）。要 ③ 的 O(1) seek / 窗口化就
+  `adocao pack <谱> <out> --checkpoints`。
+* ⚠️ 已知缺口（留给 ③）：`timeSec/bpm` 现在**算得出、存得下、验得过**，但**还没有任何消费方**
+  —— 真正的窗口化加载器（③）才是它的第一个用户。在那之前，`preserved` 段（§8.7）仍未实现。

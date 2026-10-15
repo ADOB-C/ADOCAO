@@ -43,12 +43,20 @@ struct ColumnReport {
 
 struct PackResult {
     uint64_t fileBytes = 0;
+    uint64_t checkpoints = 0;       // `Derived` 段的记录条数（= 每 4096 层一条）
+    uint64_t checkpointBytes = 0;   // 落盘字节（段级压缩后）
     std::vector<ColumnReport> columns;
+};
+
+// 是否写 `Derived` 段（每 4096 层的续算快照，§8.8 ⑧）。**默认关**：它天生是 O(n/4096) 字节
+// （2³¹ 层 ≈ 19.4 MB），写进去就不再是"v3 文件大小 == v2"。要 ③ 的 O(1) seek / 窗口化就打开它。
+struct PackOptions {
+    bool withCheckpoints = false;
 };
 
 // 打包。out 是完整的文件字节（含头与段目录）；失败时 err 里是原因。
 bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& err,
-               PackResult* result = nullptr);
+               PackResult* result = nullptr, const PackOptions& opts = PackOptions{});
 
 }  // namespace adocao
 }  // namespace adofai

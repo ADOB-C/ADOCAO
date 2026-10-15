@@ -13,6 +13,9 @@ add_library(adocao_archive STATIC
     AdocaoWriter.cpp
     # `.adocao` 读取方（unpack）：填 LevelData 但不做收尾（收尾与两条 JSON 路径共用）
     AdocaoReader.cpp
+    # v3 的 `Derived` 段：每 4096 层的续算快照（§8.8 ⑧）。它要建一次 Timeline 才能拿到
+    # timeSec/bpm —— **用权威实现，绝不重抄状态机**（所以这个文件依赖 core/timeline）。
+    AdocaoCheckpoints.cpp
     # v3 的判据统计（`--codec-report` 的"为什么"）：纯诊断，不参与任何编码决策
     AdocaoDiagnostics.cpp
 )

@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "archive/AdocaoBlocked.hpp"
+#include "archive/AdocaoCheckpoints.hpp"
 #include "archive/AdocaoColumns.hpp"
 #include "core/level/LevelData.hpp"
 
@@ -142,7 +143,7 @@ void writeSettings(const LevelData::Settings& s, Pool& pool, std::vector<uint8_t
 }  // namespace
 
 bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& err,
-               PackResult* result) {
+               PackResult* result, const PackOptions& opts) {
     out.clear();
     err.clear();
     PackResult rep;
@@ -335,6 +336,24 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         if (!actionsPacked) s.flags |= kFlagLegacyColumns;
         s.blob = std::move(actionsBlob); secs.push_back(std::move(s));
     }
+    // ---- ⑤ Derived：每 4096 层的续算快照（§8.8 ⑧）----
+    // 默认不写（见 PackOptions 的说明）；写的时候用**与生产路径同一套算式**算，所以
+    // "从快照重算 = 全谱一次算"能逐位对上（§8.10⑥ 的对拍就是这么验的）。
+    if (opts.withCheckpoints) {
+        std::vector<FloorCheckpoint> ck;
+        std::string cerr_;
+        if (!computeCheckpoints(level, kCheckpointStride, ck, cerr_)) {
+            err = "checkpoint 计算失败: " + cerr_;
+            return false;
+        }
+        Section s; s.id = (uint8_t)SectionId::Derived; s.elements = ck.size();
+        if (!encodeCheckpoints(ck, kCheckpointStride, s.blob)) {
+            err = "checkpoint 编码失败";
+            return false;
+        }
+        rep.checkpoints = ck.size();
+        secs.push_back(std::move(s));
+    }
     if (!level.pathData.empty()) {
         Section s; s.id = (uint8_t)SectionId::PathData;
         putU64(s.blob, level.pathData.size());
@@ -428,6 +447,8 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         return false;
     }
     rep.fileBytes = fileSize;
+    for (size_t i = 0; i < secs.size(); ++i)
+        if (secs[i].id == (uint8_t)SectionId::Derived) rep.checkpointBytes = stored[i].size();
     if (result) *result = std::move(rep);
     return true;
 }

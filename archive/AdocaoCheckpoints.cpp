@@ -82,11 +82,30 @@ bool computeCheckpoints(const LevelData& level, uint32_t stride,
         bpms = tl.tileBPMs();
     }
 
+    // Timeline Phase 1 的状态（与 `precalculateTiming` 逐字同序：**先处理本层事件、再取状态**）：
+    //   * isCW / currentBPM 在"处理完 floor < i0 的事件"之后的值进快照；
+    //   * angleDir 是"进第 i0 层的方向"，由 angleData[i0-1] 按 ADOFAI-JS 的 999 规则推出来。
+    // 于是窗口的循环必须**自己再处理一遍 floor == i0 的事件**（§8.8 不变量 3），位置那条也同理。
+    std::vector<std::pair<int64_t, const LevelData::FastAction*>> acts;
+    acts.reserve(level.actions.size());
+    for (const LevelData::FastAction& a : level.actions)
+        if (a.floor >= 0) acts.push_back({(int64_t)a.floor, &a});
+    std::stable_sort(acts.begin(), acts.end(),
+                     [](const auto& a, const auto& b) { return a.first < b.first; });
+    size_t ai = 0;
+    // ⚠️ 类型必须与 `Timeline::precalculateTiming` **完全一致**：那边 currentBPM/angleDir 是
+    // **float**（`currentBPM *= a.val1` 每步都舍入回 float）。这里用 double 累加会在多次
+    // SetSpeed 之后与生产路径差出 ULP —— 而"从快照重算 = 全谱一次算"要求逐位相同。
+    bool isCW = true;
+    float currentBPM = level.settings.bpm;
+    float angleDir = 180.0f;
+
     double baseX = 0.0, baseY = 0.0;    // angleData 前缀和（**不含** PositionTrack 偏移）
     double cumX = 0.0, cumY = 0.0;     // PositionTrack 继承量（floor < i0 的全部事件处理完）
     double lastReal = 0.0;             // 最后一个真 angleData 值
     bool haveLast = false;
     bool lastWasSentinel = false;
+    size_t sentinelRun = 0;            // 紧跟当前位置之前连续 999 的个数
 
     const size_t nCk = (nData + stride) / stride;    // i0 = 0, stride, 2*stride, ... < nData
     out.reserve(nCk ? nCk : 1);
@@ -98,10 +117,17 @@ bool computeCheckpoints(const LevelData& level, uint32_t stride,
             ck.baseX = baseX; ck.baseY = baseY;
             ck.cumX = cumX;   ck.cumY = cumY;
             ck.flags = kCkBase | kCkCum;
+            ck.cw = isCW ? 1 : 0;
+            ck.flags |= kCkCw;
+            ck.bpm = (double)currentBPM;
+            ck.flags |= kCkBpm;
+            ck.angleDirDeg = (double)angleDir;      // 存的就是那个 float 值（别用 double 中间量）
+            ck.flags |= kCkAngleDir;
             if (haveLast) { ck.lastAngleDeg = lastReal; ck.flags |= kCkLastAngle; }
             if (lastWasSentinel) ck.flags |= kCkLastSentinel;
+            ck.sentinelRun = (uint32_t)sentinelRun;
+            ck.flags |= kCkSentinelRun;
             if (i < times.size()) { ck.timeSec = times[i]; ck.flags |= kCkTime; }
-            if (i < bpms.size()) { ck.bpm = (double)bpms[i]; ck.flags |= kCkBpm; }
             out.push_back(ck);
         }
 
@@ -112,10 +138,40 @@ bool computeCheckpoints(const LevelData& level, uint32_t stride,
             if (!o.justThisTile) { cumX += o.offsetX; cumY += o.offsetY; }
             ++oi;   // justThisTile 不进 cum（点加，不跨层）
         }
+        // Timeline Phase 1 的同序递推（Twirl / SetSpeed；Pause 是逐层的，不进快照）
+        while (ai < acts.size() && acts[ai].first == (int64_t)i) {
+            const LevelData::FastAction& a = *acts[ai].second;
+            switch (a.type) {
+            case LevelData::FastAction::Twirl: isCW = !isCW; break;
+            case LevelData::FastAction::SetSpeed:
+                if (a.flag) currentBPM *= a.val1; else currentBPM = a.val1;
+                break;
+            default: break;
+            }
+            ++ai;
+        }
+        // 交叉自检（放在这里而不是快照处）：Timeline 的 `m_tileBPM[i]` 是**处理完第 i 层事件之后**
+        // 的值，而快照存的是"处理之前"（窗口要自己再处理一遍，§8.8 不变量 3）。两者都要对得上，
+        // 所以这里比的是"本层事件处理完之后"的 currentBPM —— 它能抓住任何实现漂移（2026-10-15
+        // 就是这条先抓出了 SetSpeed 的 float/double 类型不一致）。
+        if (i < bpms.size() && bpms[i] != currentBPM) {
+            err = "checkpoint 的 bpm 与 Timeline 不一致（实现漂移）@floor " + std::to_string(i);
+            return false;
+        }
 
         const double a = level.angleData[i];
-        if (a == 999.0) lastWasSentinel = true;
-        else { lastReal = a; haveLast = true; lastWasSentinel = false; }
+        if (a == 999.0) { lastWasSentinel = true; ++sentinelRun; }
+        else { lastReal = a; haveLast = true; lastWasSentinel = false; sentinelRun = 0; }
+        // angleDir = "进下一层的方向"（ADOFAI-JS 语义，与 Phase 1 的收尾更新逐字同序）
+        if (a == 999.0) {
+            int minus = 1;
+            while ((int64_t)i - minus >= 0 && level.angleData[i - minus] == 999.0) ++minus;
+            const double realAngle = ((int64_t)i - minus >= 0) ? level.angleData[i - minus] : 0.0;
+            angleDir = (float)std::fmod(realAngle + (minus - 1) * 180.0, 360.0);
+        } else {
+            angleDir = (float)std::fmod(a + 180.0, 360.0);
+        }
+        if (angleDir < 0) angleDir += 360.0f;
 
         const double rad = stepAngleDeg(level, i) * kPi / 180.0;
         baseX += std::cos(rad);
@@ -139,8 +195,11 @@ bool encodeCheckpoints(const std::vector<FloorCheckpoint>& ck, uint32_t stride,
         putF64(out, c.bpm);
         putF64(out, c.radiusScale);
         putF64(out, c.lastAngleDeg);
+        putF64(out, c.angleDirDeg);
         putU32(out, c.flags);
-        putU32(out, c.reserved);
+        putU32(out, c.sentinelRun);
+        out.push_back(c.cw);
+        for (int i = 0; i < 7; ++i) out.push_back(0);
     }
     return true;
 }
@@ -166,14 +225,46 @@ bool decodeCheckpoints(const uint8_t* p, size_t n, uint32_t& stride,
         c.bpm = rdF64(q + 48);
         c.radiusScale = rdF64(q + 56);
         c.lastAngleDeg = rdF64(q + 64);
-        c.flags = rdU32(q + 72);
-        c.reserved = rdU32(q + 76);
+        c.angleDirDeg = rdF64(q + 72);
+        c.flags = rdU32(q + 80);
+        c.sentinelRun = rdU32(q + 84);
+        c.cw = q[88];
+        if (c.cw > 1) return false;
+        for (int i = 89; i < 96; ++i) if (q[i]) return false;   // pad 必须为 0（结构自洽）
         // 结构性自洽：层号必须是 stride 的倍数且严格递增（坏数据不许被当成好数据）
         if (i == 0 && c.floor != 0) return false;
         if (i > 0 && c.floor <= out.back().floor) return false;
         if (c.floor % stride != 0) return false;
-        if ((c.reserved & 0xFFFFFFFFu) != 0) return false;
         out.push_back(c);
+    }
+    return true;
+}
+
+bool encodeActionIndex(const std::vector<uint64_t>& firstAction, uint32_t stride,
+                       std::vector<uint8_t>& out) {
+    out.clear();
+    putU32(out, stride);
+    putU32(out, 0);
+    putU64(out, firstAction.size());
+    out.reserve(out.size() + firstAction.size() * 8);
+    for (uint64_t v : firstAction) putU64(out, v);
+    return true;
+}
+
+bool decodeActionIndex(const uint8_t* p, size_t n, uint32_t& stride,
+                       std::vector<uint64_t>& out) {
+    out.clear();
+    if (!p || !have(n, 0, 16)) return false;
+    stride = rdU32(p);
+    if (stride == 0) return false;
+    const uint64_t count = rdU64(p + 8);
+    if (count > (uint64_t)1 << 40) return false;
+    if (!have(n, 16, (size_t)count * 8)) return false;
+    out.reserve((size_t)count);
+    for (uint64_t i = 0; i < count; ++i) {
+        const uint64_t v = rdU64(p + 16 + (size_t)i * 8);
+        if (i > 0 && v < out.back()) return false;      // 必须非递减（坏数据不许蒙混）
+        out.push_back(v);
     }
     return true;
 }

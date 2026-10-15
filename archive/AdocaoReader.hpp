@@ -25,6 +25,11 @@ namespace adocao {
 struct DerivedInfo {
     uint32_t stride = 0;
     std::vector<FloorCheckpoint> checkpoints;
+    // 按层索引（`ActionIndex` 段，③）：`firstAction[b]` = 第一个 floor >= b*stride 的 action 下标。
+    // 长度 = 块数 + 1（最后一条是哨兵 = actions.size()），所以第 b 块的事件区间是
+    // `[firstAction[b], firstAction[b+1])`。写入方保证 actions 按 floor 非递减，否则这一段不写。
+    uint32_t actionStride = 0;
+    std::vector<uint64_t> firstAction;
 };
 
 // data/length 是整个 `.adocao` 文件。失败时 err 是原因（**明确失败，绝不静默回退**）。

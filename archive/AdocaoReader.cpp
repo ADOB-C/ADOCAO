@@ -345,6 +345,16 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
     if (derived) {
         derived->stride = 0;
         derived->checkpoints.clear();
+        derived->actionStride = 0;
+        derived->firstAction.clear();
+        const Sec* aiSec = findSec(secs, SectionId::ActionIndex);
+        if (aiSec && aiSec->size) {
+            if (!decodeActionIndex(aiSec->p, aiSec->size, derived->actionStride,
+                                   derived->firstAction)) {
+                err = "ActionIndex 段的按层索引解析失败（文件损坏）";
+                return false;
+            }
+        }
         const Sec* dSec = findSec(secs, SectionId::Derived);
         if (dSec && dSec->size) {
             if (!decodeCheckpoints(dSec->p, dSec->size, derived->stride, derived->checkpoints)) {

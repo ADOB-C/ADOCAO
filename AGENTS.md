@@ -108,8 +108,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   angles360（人工谱）→ 9,344 B（字典主导）。规范 + 逐项实测分析见 `docs/adocao-format.md`（§5.1–§5.11）。
   **v3 ⑥ 分块已落地**（`archive/AdocaoBlocked.*`：4096 一块、块内自选、帧级 zstd 与 seek 粒度解耦；
   段级"实编取最小"→ **v3 文件大小与 v2 完全相同**，裸数据 ≥128 MB 才**强制分块**；
-  **v3 ⑧ `Derived` checkpoint 也已落地**（每 4096 层一条 80 B 快照，`adocao pack --checkpoints`，默认关；
+  **v3 ⑧ `Derived` checkpoint 也已落地**（每 4096 层一条 96 B 快照，`adocao pack --checkpoints`，默认关；
   验收 = 从快照重算 position **逐位 memcmp**，含 1 ULP 反面对照；详见 `docs/adocao-format.md` §8.11/§8.12）。
+  **③ 的第一半已落地**（`archive/AdocaoWindow.*`：从 checkpoint + 一块数据重算出窗口的
+  `Tile/tileBPMs/tileStartTimes`，与全量加载**逐位 memcmp**；`ActionIndex` 段 = 按层索引，8 B/4096 层；
+  详见 `docs/adocao-format.md` §8.13。加载器/渲染**还没接**，所以 D1 的 RSS 还不能宣称）。
   **v3 判据统计已落地**（`archive/AdocaoDiagnostics.{hpp,cpp}`，纯诊断、不参与编码）：`adocao pack --codec-report`
   会打印"每列长什么样"（环绕率 raw/masked、值集/差分基数、**整数域 Δ² 的 varint 字节数**、窗口唯一数、
   粗网格判定、空间自重叠率）。两条别踩的口径：**残差只在整数域算**（浮点域的 Δ² 被量化噪声淹没）、

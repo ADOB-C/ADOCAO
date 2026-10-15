@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "archive/AdocaoBlocked.hpp"
+#include "core/util/Logger.hpp"
 #include "archive/AdocaoCheckpoints.hpp"
 #include "archive/AdocaoColumns.hpp"
 #include "core/level/LevelData.hpp"
@@ -174,6 +175,13 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
     std::vector<uint8_t> angleBlob, actionsBlob;
     std::vector<ColumnLayoutStats> angleStats, actionStats;
     bool anglePacked = false, actionsPacked = false;
+    // ---- ⑤' ActionIndex：按层索引（③）----
+    // 每 4096 层一条 `firstAction` = 第一个 floor >= 块起点的 action 下标（末尾多一条哨兵 =
+    // actions.size()）。于是"第 b 块里的事件" = actions[first[b] .. first[b+1])，**不用扫全谱**。
+    // 前提：actions 按 floor **非递减**（写入方校验；不成立就不写这一段，读者必须明确知道）。
+    // 声明在这里、计算在下面的 actions 块里（那里才有 `floors`）、组装段时用。
+    std::vector<uint8_t> actionIndexBlob;
+    bool actionIndexOk = false;
     {
         // ---- angleData：一列 double（字典是主编码）----
         std::vector<uint8_t> anglePlain, anglePackedBytes;
@@ -283,6 +291,29 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         }
         (void)statsPlain;
         actionStats = std::move(statsPacked);   // 同上：报告用 packed 那次的统计
+        // 按层索引（③）：声明在外层，这里只填内容
+        if (!floors.empty()) {
+        bool sortedByFloor = true;
+        for (size_t i = 1; i < floors.size(); ++i)
+            if (floors[i] < floors[i - 1]) { sortedByFloor = false; break; }
+        if (sortedByFloor) {
+            const uint64_t nBlocks =
+                (level.angleData.size() + kCheckpointStride - 1) / kCheckpointStride;
+            putU32(actionIndexBlob, kCheckpointStride);
+            putU32(actionIndexBlob, 0);
+            putU64(actionIndexBlob, nBlocks + 1);
+            size_t cur = 0;
+            for (uint64_t b = 0; b <= nBlocks; ++b) {
+                const int64_t start = (int64_t)(b * kCheckpointStride);
+                while (cur < floors.size() && floors[cur] < start) ++cur;
+                putU64(actionIndexBlob, (uint64_t)cur);
+            }
+            actionIndexOk = true;
+        } else {
+            LOG_W("adocao pack: actions 不是按 floor 非递减的 —— 不写按层索引（窗口化要退回全扫）");
+        }
+    }
+
         (void)n;
     }
     // 报告：angleData 在前，然后按 actions 的固定列序（顺序必须稳定，--codec-report 靠它对照）
@@ -352,6 +383,11 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
             return false;
         }
         rep.checkpoints = ck.size();
+        secs.push_back(std::move(s));
+    }
+    if (actionIndexOk) {
+        Section s; s.id = (uint8_t)SectionId::ActionIndex; s.elements = 0;
+        s.blob = std::move(actionIndexBlob);
         secs.push_back(std::move(s));
     }
     if (!level.pathData.empty()) {

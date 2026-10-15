@@ -946,13 +946,19 @@ QuomodocunquizE **108928 = 108928**、Unity.wav_rate **21,079,240 B**（与 v2 �
 > `adocao pack --checkpoints` 写出；`unpackLevel(..., DerivedInfo*)` 读回。
 > 自测：`tests/adocao_checkpoints_test.cpp`（ctest `adocao_checkpoints`）。
 
-### 记录（80 B 定长，全部小端；字段一律 **f64**，不许 f32 —— §8.8 的实测理由）
+### 记录（96 B 定长，全部小端；字段一律 **f64**，不许 f32 —— §8.8 的实测理由）
 
 ```
-u32 stride(=4096) | u32 reserved | u64 count | count × 80 B
+u32 stride(=4096) | u32 reserved | u64 count | count × 96 B
 每条：u64 floor | f64 baseX,baseY | f64 cumX,cumY | f64 timeSec | f64 bpm |
-      f64 radiusScale | f64 lastAngleDeg | u32 flags | u32 reserved
+      f64 radiusScale | f64 lastAngleDeg | f64 angleDirDeg |
+      u32 flags | u32 sentinelRun | u8 cw | u8 pad[7]
 ```
+
+`angleDirDeg`（进第 i0 层的"角度方向"，ADOFAI-JS 语义；**归一化所以有界**）、`cw`（`tileIsCW` 初值）
+与 `sentinelRun`（紧跟 i0 之前连续 999 的个数）是 ③ 窗口化重算必需的三个初值 ——
+§8.8 当初只列了 `bpm/timeSec`，实测下来这三样缺一不可（中旋跨窗要 `sentinelRun` 才能把
+`floats[i0-1]` 推回来，见 §8.13）。
 
 `flags` 标出"哪些分量真的算过"（稀疏）：`kCkBase / kCkCum / kCkLastAngle / kCkLastSentinel /
 kCkTime / kCkBpm / kCkRadius`。读取方必须按位判，**别把 0 当真值**。
@@ -962,7 +968,8 @@ kCkTime / kCkBpm / kCkRadius`。读取方必须按位判，**别把 0 当真值*
 * `timeSec/bpm` = **Timeline** 的 `tileStartTimes[i0]` / `tileBPMs[i0]` —— 用权威实现取，
   **绝不在这里重抄一份状态机**（重抄必然与生产路径漂移）。代价：pack 期要建一次 Timeline
   （约 32 B/层，实测 MYC 6.77M 层的整条验证流程峰值 RSS 1.98 GB）；
-* `radiusScale` 预留（本仓库还没实现 ScaleRadius 事件），未实现时 = 1.0 且不置位。
+* `radiusScale` 预留（本仓库还没实现 ScaleRadius 事件），未实现时 = 1.0 且不置位；
+* `flags` 还有 `kCkCw / kCkAngleDir / kCkSentinelRun` 三位（③ 用）。
 
 ### 三条不变量的落地（§8.8）
 
@@ -1001,3 +1008,69 @@ MYC      6770912 层 → 1654 条（30401 B / 容器 36568 B）｜从快照重�
   `adocao pack <谱> <out> --checkpoints`。
 * ⚠️ 已知缺口（留给 ③）：`timeSec/bpm` 现在**算得出、存得下、验得过**，但**还没有任何消费方**
   —— 真正的窗口化加载器（③）才是它的第一个用户。在那之前，`preserved` 段（§8.7）仍未实现。
+
+---
+
+## 8.13 窗口化重算（③ 的第一半 —— ✅ 已实现 2026-10-15）
+
+> 实现：`archive/AdocaoWindow.{hpp,cpp}`（`computeFloorWindow`）；
+> `ActionIndex` 段（段 id 8）由 `AdocaoWriter` 写出、`AdocaoReader` 经 `DerivedInfo` 带回。
+> 自测：`tests/adocao_window_test.cpp`（ctest `adocao_window`）。
+
+### ③ 要解决什么
+
+D1 要求"常驻 RSS 不随 n 线性"。位置 / BPM / 时间在加载路径里是**三条串行前缀和**，
+所以"从中间某一层开始算"必须能拿到**起点状态**（②的 checkpoint 就是它）并**逐字复现算式**。
+
+### `computeFloorWindow(settings, {checkpoint, angles[i0..], events[floor∈[i0,i1)]})`
+
+产出一整块的 `Tile::position/direction`、`tileBPMs`、`tileStartTimes`，**不碰任何全谱数组**。
+四条硬口径（每条都对应一次踩坑）：
+
+1. **本层事件（`floor == i0`）由窗口自己处理**（§8.8 不变量 3）：继承型 PositionTrack 算进本层、
+   `justThisTile` 只作用于本层、Twirl/SetSpeed **影响本层**（Timeline 是先处理事件再取状态）。
+2. **PositionTrack 同层"最后一个胜出"**：`processActions` 里是 `tilePositionOffsets[floor] = {…}`
+   的 map 覆盖语义，不是同层累加（我先按累加写，被对拍抓住）。
+3. **浮点类型逐字一致**：`Timeline` 里 `currentBPM/angleDir/tileBPM` 都是 **float**，
+   `tileStartTimes/position` 是 double。用 double 累乘 SetSpeed 会在多次乘之后差 ULP
+   —— 这也意味着 checkpoint 里的 `bpm` 是"float 值存进 double"，**动 1 个 double-ULP 是看不见的**
+   （反面对照因此改成动一个 float 能分辨的量，这条口径写进用例注释）。
+4. **时间只认 `totalAngleAt`/`durationAt`**（生产路径），**不是** `precalcTileRange` 那份
+   A/B 参考实现 —— 两份算式的浮点常量与分支并不完全相同。
+
+### 验收：与全量加载**逐位** memcmp
+
+| 口径 | 结果 |
+|---|---|
+| 合成 9000 层（纯角度 / 块边界事件 / 中旋跨窗） | 位置、方向、BPM、时间 **0 不一致** |
+| `The Moon` 600,538 层 / 147 窗 | **0 不一致** |
+| `MYC` 6,770,912 层 / 1,654 窗 | **0 不一致** |
+
+**反面对照**（证明这条对拍真的会红）：`baseX` 动 1 ULP → 首层位置变红；`bpm` 变 1.5× →
+BPM 与时间都变红；`cw` 翻一位 → 时间变红；checkpoint 抹掉 `time` 分量 → **明确失败**
+（不许拿 0 当时间）。
+
+命令：`./build/tests/adocao_window_test "<谱>"`（单元用例 + 真谱逐窗对拍 + 按层索引对拍）。
+
+### `ActionIndex`（按层索引）：把"第 b 块里有哪些事件"变成 O(1)
+
+```
+u32 stride(=4096) | u32 reserved | u64 count | count × u64 firstAction
+```
+
+`firstAction[b]` = 第一个 `floor >= b*4096` 的 action 下标，**末尾多一条哨兵** = `actions.size()`；
+于是第 b 块的事件区间 = `[firstAction[b], firstAction[b+1])`。前提是 actions 按 floor **非递减**
+（写入方校验；不成立就不写这一段并 `LOG_W`，读者必须明确知道）。
+
+* 实测 `MYC`：1,654 块 → 载荷 13,248 B，段级 zstd 后 **2,218 B**；
+* 成本 **8 B / 4096 层 = 0.002 B/层** → 2³¹−1 层外推 **4.0 MB**（zstd 后约 0.7 MB），
+  加上 §8.12 的 checkpoint（≈9.8 MB）**仍在 §2 的 19.4 MB 索引预算内**；
+* 对拍：`The Moon` 147 块 / `MYC` 1654 块，区间**全部**与"全量扫描一遍 actions"一致。
+
+### 还没做的（③ 的第二半）
+
+* **装配**：现在 `computeFloorWindow` 的事件是**调用方给的**（测试里从全量数组切），
+  还没有"按 `ActionIndex` 从 6 条稀疏列里把这一块的事件取出来"那段胶水（稀疏列的
+  `strId/val1/val2` 是**按出现次数**编号的，取窗口要按块记住各自的 used 起点）。
+* **加载器接入**：`LevelData` 仍是全量加载；"按需开窗"的消费方（渲染/剔除/时间线）还没接。
+  所以 **D1 的 RSS 实测还不能宣称**（这一半只证明了"从快照重算与全谱一次算逐位相同"）。

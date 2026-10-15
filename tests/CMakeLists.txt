@@ -53,6 +53,13 @@ add_executable(adocao_checkpoints_test adocao_checkpoints_test.cpp)
 target_link_libraries(adocao_checkpoints_test PRIVATE adocao_archive)
 add_test(NAME adocao_checkpoints COMMAND adocao_checkpoints_test)
 
+# ③ 每砖结构窗口化：从 checkpoint + 一块数据重算 Tile/tileBPMs/tileStartTimes，必须与全量加载
+# **逐位** memcmp 相同（含块边界事件、中旋跨窗、SetSpeed 的 float 累乘）；外加容器里的按层索引
+# （ActionIndex）与全量扫描逐块对照、以及"动一位必须变红"的四条反面对照。
+add_executable(adocao_window_test adocao_window_test.cpp)
+target_link_libraries(adocao_window_test PRIVATE adocao_archive)
+add_test(NAME adocao_window COMMAND adocao_window_test)
+
 # `.adocao` v3 判据统计（§8.4）：哨兵掩码 + 差分基数（raw vs wrapped）。
 # 关键断言是**负向对照**：不掩码时中旋哨兵会把"环绕率"抬成假象；全精度正弦的窗口永远不重复
 # （即 `Motif` 要的是**逐位重复**）。只链 archive（列编码器不用压缩库）。

@@ -74,3 +74,9 @@ The window/rate maths lives in core (`PositionSolver::trailWindow`,
 
 Without `--level`, falls through to the ImGui launcher.
 
+
+**无头子命令的日志**：`Logger` 的 sink（`ADOCAO.log` 或 `--debug` 的控制台）只有 GUI 的
+`Application` 会 `init()`，所以 `image` / `tiles` / `stitch` / `export` / `pack` 以前把加载与解析
+路径上的 `LOG_W`/`LOG_E` **整个丢掉**，失败时只剩一句 `Failed to load level`。现在没有 sink 时
+**Warning 及以上退回 stderr**（`core/util/Logger.cpp`，Debug/Info 不跟，免得刷屏）——
+`docs/2e9.md` §4 ① 的验收就靠这条能看见"流式窗口放弃（原因）—— 退回整份解压"。

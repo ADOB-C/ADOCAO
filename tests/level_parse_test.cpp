@@ -474,6 +474,93 @@ Digest loadBuffer(const char* data, size_t length) {
     return digest(lv, ok);
 }
 
+// 窗口边界正好落在指数标记 'e' / 'e±' 上（audio-as-chart 的层值全是指数写法，
+// 实测 Unity.wav_rate 上默认 4 MB 半窗 3/3 拒收、8192 KB 才收 —— docs/2e9.md §3）。
+//
+// 旧行为：parseNumber 在这个位置把 q 退回 'e'（"光秃秃的 e 不算指数"），于是
+// ① **提交了一个截断错值**（4.547473508864641 而不是 4.547473508864641e-13），
+// ② 残留的 'e' 被 carry 到下一窗；下一窗的第一个字节是 'e'，一个完整值都凑不出
+//    -> 整窗原样 carry -> 半窗被自己占满 -> ArchiveStream::stuck() -> 静默回退整份解压。
+// 所以这条用例既是值对拍（截断值会被 diffSections 抓住），也是 "窗口不许被放弃" 的负向对照
+// （ADOCAO_WINDOW_REQUIRE=1：一旦回退就直接失败）。
+//
+// 光靠"第一个半窗的末字节是 'e'"这一个相位不够：**任何**数字形式在边界上被切断都可能
+// 悄悄提交半截值，而相位取决于半窗大小与前面的 carry。所以这里再拿一组合成谱
+// （整数 / 小数 / e+ / e- / 1~3 位指数 / 长尾数，200 KB）扫一遍多个半窗大小，
+// 每个都要求"窗口 == 整份解压逐位相同"。这条网在修好之前会在 4 KB 相位上直接失败。
+std::string windowExponentBoundarySelfTest() {
+    // ── ① 定点负向对照：让第一个数的 'e' 正好落在第一窗（4096 B）的最后一个字节
+    {
+        const std::string num0 = "4.547473508864641e-13";
+        const std::string num1 = "7.450580596923828e-09";
+        const std::string prefix = "{\"angleData\":[";
+        const size_t half = 4096;                       // 与 ADOCAO_WINDOW_KB=4 对应
+        const size_t eIdx = num0.find('e');
+        if (eIdx == std::string::npos) return "测试数据里没有指数写法";
+        const size_t firstAt = half - 1 - eIdx;         // 让第一个数的 'e' 落在半窗最后一字节
+        if (firstAt < prefix.size()) return "合成文本的偏移算错了";
+
+        std::string text = prefix;
+        text.append(firstAt - prefix.size(), ' ');      // JSON 允许数组元素前的空白
+        text += num0;
+        for (int i = 1; i < 200000; i++) { text += ','; text += (i % 2) ? num1 : num0; }
+        text += "],\"settings\":{\"bpm\":100.0},\"actions\":[]}";
+
+        std::string packed;
+        if (!compressXz(text, packed)) return "xz 压缩失败";
+        setEnv("ADOCAO_WINDOW_REQUIRE", "1");           // 窗口被放弃 = 直接失败
+        setEnv("ADOCAO_WINDOW_KB", "4");
+        const Digest win = loadBuffer(packed.data(), packed.size());
+        unsetEnv("ADOCAO_WINDOW_KB");
+        unsetEnv("ADOCAO_WINDOW_REQUIRE");
+        if (!win.ok) return "窗口路径拒收（这条用例要求它必须走通）";
+        setEnv("ADOCAO_WHOLE_DECOMPRESS", "1");
+        const Digest whole = loadBuffer(packed.data(), packed.size());
+        unsetEnv("ADOCAO_WHOLE_DECOMPRESS");
+        if (!whole.ok) return "整份解压加载失败";
+        const std::string d = diffSections(whole, win);
+        if (!d.empty()) return "指数边界处窗口路径与整份解压不一致: " + d;
+        const Digest plain = loadBuffer(text.data(), text.size());   // 明文直喂做第三方对照
+        const std::string d2 = diffSections(plain, win);
+        if (!d2.empty()) return "指数边界处窗口路径与明文不一致: " + d2;
+    }
+
+    // ── ② 相位扫描：同一份"数字形式大全"在多种半窗大小下都必须与整份解压逐位相同
+    {
+        static const char* kForms[] = {
+            "4.547473508864641e-13", "7.450580596923828e-09", "1e+2", "5E3", "0.5",
+            "-90", "180", "1.25", "12345678901234567890", "2.5e-300", "9.999999999999999e+15",
+        };
+        const int formCount = (int)(sizeof kForms / sizeof kForms[0]);
+        std::string text = "{\"angleData\":[";
+        for (int i = 0; i < 12000; i++) {
+            if (i) text += ',';
+            text += kForms[i % formCount];
+        }
+        text += "],\"settings\":{\"bpm\":100.0},\"actions\":[]}";
+        std::string packed;
+        if (!compressXz(text, packed)) return "xz 压缩失败";
+        setEnv("ADOCAO_WHOLE_DECOMPRESS", "1");
+        const Digest whole = loadBuffer(packed.data(), packed.size());
+        unsetEnv("ADOCAO_WHOLE_DECOMPRESS");
+        if (!whole.ok) return "整份解压加载失败（相位扫描）";
+
+        for (int kb : {4, 5, 6, 7, 8, 11, 16, 23}) {
+            char buf[16];
+            std::snprintf(buf, sizeof buf, "%d", kb);
+            setEnv("ADOCAO_WINDOW_REQUIRE", "1");
+            setEnv("ADOCAO_WINDOW_KB", buf);
+            const Digest win = loadBuffer(packed.data(), packed.size());
+            unsetEnv("ADOCAO_WINDOW_KB");
+            unsetEnv("ADOCAO_WINDOW_REQUIRE");
+            if (!win.ok) return "半窗 " + std::to_string(kb) + " KB：窗口路径拒收";
+            const std::string d = diffSections(whole, win);
+            if (!d.empty()) return "半窗 " + std::to_string(kb) + " KB：窗口与整份不一致: " + d;
+        }
+    }
+    return {};
+}
+
 // 压缩容器往返：把明文谱在内存里压成 .xz / .zst 再喂回去，必须和明文加载
 // 逐位一致。全部在内存里做，不落任何临时文件（大字面量谱面跳过，压一轮太贵）。
 std::string archiveRoundTrip(const std::string& file, const Digest& plain) {
@@ -630,6 +717,12 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::printf("ok   窗口边界用例（284 KB 合成谱 / 4 KB 半窗，2000 个跨窗 action）\n");
+
+    if (const std::string e = windowExponentBoundarySelfTest(); !e.empty()) {
+        std::printf("FAIL 指数边界用例（边界落在 'e' 上 / 4 KB 半窗）: %s\n", e.c_str());
+        return 1;
+    }
+    std::printf("ok   指数边界用例（半窗末字节正好是 'e'：不许提交截断值、不许放弃窗口）\n");
 
     if (const std::string e = streamSelfTest(); !e.empty()) {
         std::printf("FAIL 半窗流式解压自检: %s\n", e.c_str());

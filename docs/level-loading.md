@@ -33,12 +33,23 @@
   调半窗大小。半窗大小实测（TNR 1.18 GB）：2 MB 1894 ms、4 MB 1928 ms、8 MB 1944 ms、16 MB 1960 ms、
   96 MB 2062 ms——越小越贴缓存，取 **4 MB**（纯速度/内存权衡：窗口大小不再受"单个值多大"限制，
   `skip`/`settings`/`path` 都是可续扫描器，超长 `levelDesc`、超大 `decorations` 数组照样跨窗流过去）。
-- 已验证：39 个 fixture + 284 KB 合成谱（2000 个跨窗 action）在 **4 KB 半窗**下与整份解压逐位一致；
+- 已验证：40 个 fixture + 284 KB 合成谱（2000 个跨窗 action）在 **4 KB 半窗**下与整份解压逐位一致；
   256 KB 不可压伪数据的半窗拼接（0 / 1 B / 1 KB 三种 carry）逐字节一致；"单个值大于半窗"能报
   `stuck()` 而不是死循环；1.18 GB / 1.40 GB 两张真实 `.xz` 在 96 KB / 1 MB / 8 MB 半窗下与整份
   解压**逐位一致**（13 个节的 hash 全同）。`ADOCAO_WINDOW_REQUIRE=1` 把"窗口路径放弃"变成失败，
   用来证明用例真的覆盖到它（这个坑踩过一次：静默回退让测试全绿）；`ADOCAO_FAST_REQUIRE=1` 界定
   "哪些 fixture 本来快路径就吃不下、因此允许两条路都放弃"。
+- **第四个坑（2026-10-15，`docs/2e9.md` §4 ①）：`parseNumber` 的指数回退。** 半窗正好在
+  `e` / `e±` 之后用完时，它退回指数标记、当成"光秃秃的 e 不算指数"，于是 ① 提交了一个
+  **截断错值**（`4.547473508864641` 而不是 `4.547473508864641e-13`）；② 残留的 `e` 被 carry 到
+  下一窗，下一窗第一个字节就是 `e`（`parseNumber` 立刻失败）→ 整窗原样 carry → 半窗被自己占满
+  → `stuck()` → **静默回退整份解压**。`Unity.wav_rate`（逐采样、**全是指数写法**）默认 4 MB 半窗
+  3/3 拒收、8 MB 才收 —— 不是"窗口不够大"，是边界相位恰好绕开了。修法：把"`e`/`e±` 之后就是
+  缓冲区末尾"与"`e` 之后不是数字"分开，前者返回 false（= 这里没有完整数字），由窗口 carry 重放。
+  永久用例 `windowExponentBoundarySelfTest()`：定点相位 + 8 种半窗相位 × 11 种数字形式，
+  **反面对照验过**（回退修复 → 立刻报"窗口路径拒收"）。顺带把回退从静默改成 `LOG_W`。
+  诊断钩子：`ADOCAO_WINDOW_DBG=1` 会打出每窗的 `本次已提交 / 绝对消费 / carry / 首字节`——
+  只看"本次已提交"会误判（窗口中途转移时它是相对本次调用的，不是窗口内偏移）。
 - 覆盖范围：真有事件多样性的谱面也验过——6 张社区谱（Tempest 31.7 万事件、The Moon、Singularity、
   Fledgling、DONE 等）与 641 MB / 618 万事件 / **7 种事件类型**的 MYC，都对每个文件在内存里压成
   xz 与 zstd、再用 **4 KB 半窗 + 禁止回退**走窗口路径，与整份解压逐位一致；两张 `.xz` 巨谱
@@ -212,7 +223,7 @@ strtod 260 ms、DOM+抽取 438 ms、tile 位置 27 ms、`processActions` 50 ms�
 
 **回归测试**：`tests/level_parse_test.cpp` 对每个用例加载三遍（强制旧路径 / 快路径 / 快路径再
 一次），按 13 个节（angleData、actions、settings、tiles、tileBPMs、tileHasTwirl…）比对 FNV
-hash 与元素个数，逐位相同才通过；`ctest --test-dir build`。`tests/level_fixtures/` 里 39 个用例
+hash 与元素个数，逐位相同才通过；`ctest --test-dir build`。`tests/level_fixtures/` 里 40 个用例（跑起来是：36 个逐位通过 + 4 个双方都应拒绝）
 每个对应 cleanJson 的一条规则，另有"双方都应拒绝"的畸形用例。也可以直接喂真实谱面：
 
 ```

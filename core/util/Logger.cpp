@@ -79,6 +79,20 @@ void Logger::log(LogLevel level, const char* fmt, ...) {
         vfprintf(stderr, fmt, args);
         va_end(args);
         fprintf(stderr, "\n");
+        return;
+    }
+
+    // 没有任何 sink（`Logger::init` 只有 GUI 的 Application 调）时退回 stderr —— 只放
+    // Warning 及以上，避免无头运行被 Debug/Info 淹没。为什么必须做：无头子命令
+    // （image / tiles / stitch / export / pack）走**同一套加载与解析代码**，而它的
+    // LOG_W/LOG_E 以前被整个丢掉，用户只看到一句 `Failed to load level`（2026-10-15 真踩过：
+    // "窗口路径静默回退"就是因为这条链上没有可见日志才藏了一轮，见 docs/2e9.md §3）。
+    if (!m_file && level >= LogLevel::Warning) {
+        fprintf(stderr, "%s", prefix.c_str());
+        va_start(args, fmt);
+        vfprintf(stderr, fmt, args);
+        va_end(args);
+        fprintf(stderr, "\n");
     }
 }
 

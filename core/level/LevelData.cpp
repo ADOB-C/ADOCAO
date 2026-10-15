@@ -166,7 +166,18 @@ inline bool parseNumber(const char*& p, const char* e, double& out) {
             ++q;
             if (q < e && (*q == '+' || *q == '-')) ++q;
             if (q < e && *q >= '0' && *q <= '9') { while (q < e && *q >= '0' && *q <= '9') ++q; }
-            else q = save;                      // 光秃秃的 e / e+ 之后没有数字：不算指数
+            else if (q >= e) {
+                // 缓冲区正好在 e / e± 之后用完：**这个数字还没结束**（指数位可以更长），
+                // 绝不能退回到 save 把 "4.547473508864641" 当成终值提交 —— 那是**静默错值**，
+                // 而且残留的 e 会让流式窗口把整窗原样 carry 走（下一窗第一个字节就是 e，
+                // parseNumber 立刻失败 -> carry = 整个半窗）-> stuck -> 静默回退整份解压。
+                // 实测：Unity.wav_rate 默认 4 MB 半窗 3/3 拒收、8192 KB 才收（docs/2e9.md §3）。
+                // 返回 false = "这里没有一个完整的数字"：区间调用方会放弃快路径（走 DOM），
+                // 流式窗口会当作"需要更多数据"把这一项 carry 到下一窗重放。
+                p = start;
+                return false;
+            }
+            else q = save;                      // 光秃秃的 e / e+ 之后不是数字：不算指数
         }
         // 注意：**不能**把"token 触到 e"当成截断。本函数的两个调用方（angleData 区间、action 字段）
         // 传进来的 e 都是**该值/该区间的真实末尾**（来自 skipValue / 区域括号），所以一个
@@ -935,13 +946,20 @@ struct WindowParser {
             const bool resumable = state == State::InSettings || state == State::InPath || state == State::InSkip;
             const char* carryFrom = resumable ? end : itemStart;
             const size_t consumed = (size_t)(carryFrom - p);   // 诊断用：相对本次调用起点
-            if (dbg) std::fprintf(stderr, "[win] 换窗 state=%d 已提交=%zu carry=%zu 窗口=%zu\n",
-                                  (int)state, consumed, stream.size() - consumed, stream.size());
+            if (dbg) {
+                // 两个数都要打：`本次已提交` 相对本次 step 调用起点，`绝对消费` 相对窗口起点。
+                // 只看前者会把"窗口中途转移后 itemStart 落回窗口开头"误读成"一点没消费"。
+                const size_t absConsumed = (size_t)(carryFrom - stream.data());
+                const size_t carryN = stream.size() - absConsumed;
+                const int show = (int)(carryN < 24 ? carryN : 24);
+                std::fprintf(stderr, "[win] 换窗 state=%d 本次已提交=%zu 绝对消费=%zu carry=%zu 窗口=%zu 首=%.*s\n",
+                             (int)state, consumed, absConsumed, carryN, stream.size(), show, carryFrom);
+            }
             // consume() 要的是"窗口内偏移"，不是"相对本次调用起点的字节数"（第一次调用两者
             // 恰好相等，所以这个错被掩盖过：窗口中途状态转移后 carry 会退到已解析对象中间）。
             stream.consume((size_t)(carryFrom - stream.data()));
             if (!stream.next()) {
-                if (dbg) std::fprintf(stderr, "[win] 取下一块失败 state=%d stuck=%d failed=%d err=%s 已消费=%zu 块内=%zu\n",
+                if (dbg) std::fprintf(stderr, "[win] 取下一块失败 state=%d stuck=%d failed=%d err=%s 本次已提交=%zu 块内=%zu\n",
                                       (int)state, (int)stream.stuck(), (int)stream.failed(),
                                       stream.error().c_str(), consumed, stream.size());
                 return stream.failed() ? -1 : 0;
@@ -1124,11 +1142,18 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
                         return finishLoad(onProgress, exportOnly);
                     }
                 }
-                // rc == 0 或 settings 解析失败 -> 落到整份解压，行为与以前完全一致
+                // rc == 0 或 settings 解析失败 -> 落到整份解压，行为与以前完全一致。
+                // 但**不许静默**：回退本身只会在内存峰值与耗时上表现出来，2026-10 那个
+                // "大谱上窗口路径其实一次都没被用上"就是这么藏了一轮（docs/2e9.md §3）。
+                const char* why = wp.failed       ? (wp.failWhy && *wp.failWhy ? wp.failWhy : "结构解析失败")
+                                : stream->stuck() ? "单个值大于半窗"
+                                                  : "流式结构不可解析（需要更多数据 / 已到流末尾）";
                 if (requireWindow) {
-                    LOG_E("windowed parse declined the stream (test hook ADOCAO_WINDOW_REQUIRE)");
+                    LOG_E("windowed parse declined the stream (test hook ADOCAO_WINDOW_REQUIRE): %s", why);
                     return false;
                 }
+                LOG_W("流式窗口放弃（%s）—— 退回整份解压（半窗 %zu KB，多花一份整份文本的内存）",
+                      why, half >> 10);
             }
         }
         if (onProgress) onProgress(0.05f, "Decompressing level...");

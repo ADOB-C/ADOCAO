@@ -497,7 +497,7 @@ floor **DeltaRleVarint** 0.3637 B/值；type **Rle** 105,732 B；flag **Rle** 1,
 val1 **稀疏 n=26,795** + Rle **1,472 B**（原 4.64 MB）；val2 **稀疏 n=26,480** + Rle **162 B**（原 2.32 MB）；
 strId 稀疏后为空。
 
-验收：`.adocao` 与明文 JSON 出的 64×64 PNG **逐字节相同**；39 个 fixture 全部 pack→load→13 节逐位一致；
+验收：`.adocao` 与明文 JSON 出的 64×64 PNG **逐字节相同**；40 个 fixture 全部 pack→load→13 节逐位一致；
 ctest 7/7、core purity、44 开关帮助、7 对 shader、`ADOCAO_TILE_EXACT=1` 几何 2/2、像素门槛 51/51。
 
 **primer 逐列（v2）**：`angleData` **Const 28 B**（6841 万个角度全同）、

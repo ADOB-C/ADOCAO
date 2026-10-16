@@ -110,23 +110,26 @@ void Scheduler::workerLoop() {
     }
 }
 
-Scheduler::Handle Scheduler::submit(Lane lane, std::function<void()> fn) {
+Scheduler::Handle Scheduler::submit(Lane lane, std::function<void(CancelToken)> fn) {
     auto done = std::make_shared<std::atomic<bool>>(false);
-    auto wrapped = [fn = std::move(fn), done]() {
-        fn();
+    CancelToken tok;
+    const CancelToken tokCopy = tok;
+    auto wrapped = [fn = std::move(fn), done, tokCopy]() {
+        if (tokCopy.cancelled()) { done->store(true, std::memory_order_release); return; }
+        fn(tokCopy);
         done->store(true, std::memory_order_release);
     };
     if (serialForced() || inParallel() || m_workers.empty()) {
         InParallelGuard g;
         wrapped();
-        return Handle(done);
+        return Handle(done, tok);
     }
     {
         std::lock_guard<std::mutex> lk(m_mutex);
         m_queue[(int)lane].push_back(std::move(wrapped));
     }
     m_cv.notify_all();
-    return Handle(done);
+    return Handle(done, tok);
 }
 
 void Scheduler::Handle::wait() const {

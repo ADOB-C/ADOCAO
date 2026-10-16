@@ -16,6 +16,7 @@
 #include "core/timeline/PlaybackClock.hpp"
 #include "core/timeline/PositionSolver.hpp"
 #include "core/util/Logger.hpp"
+#include "core/util/Scheduler.hpp"
 #include "core/util/Profile.hpp"
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
@@ -50,6 +51,11 @@ using namespace adofai;      // 库侧公共 API 在 adofai:: 里（P1：为 ADO
 LevelScene::LevelScene() = default;
 
 LevelScene::~LevelScene() {
+    if (m_buildHandle.valid()) {       // 先取消、再等返回（不能让它碰已析构的 this ✗）
+        m_buildHandle.cancel();
+        m_buildHandle.wait();
+        m_buildHandle.clear();
+    }
     // Requires a current GL context (destructed before the window is destroyed).
     delete m_tileMesh;
     delete m_tileShader;
@@ -152,14 +158,21 @@ void LevelScene::setViewportHeightPx(int h) { m_viewportHpx = h; }
 
 bool LevelScene::beginAsyncBuild(const LevelData& level, GLFWwindow* sharedWindow) {
     if (!sharedWindow) return false;
-    m_buildFuture = std::async(std::launch::async, [this, &level, sharedWindow]() {
+    // ④ 后台车道：网格构建走 `Scheduler`（Background），不再自起 `std::async` ✗。
+    // **生命周期**：任务体碰 `this`，所以析构时必须"先取消、再等它真的返回"（等价于原来
+    // `std::future` 析构的 join 语义 ✓，但**可以提前退出** —— `build()` 在块边界查令牌 ✓）。
+    m_buildHandle = Scheduler::instance().submit(Lane::Background, [this, &level, sharedWindow](
+        Scheduler::CancelToken tok) {
         glfwMakeContextCurrent(sharedWindow);
         const size_t rss0 = appmem::currentResidentBytes();
-        m_tileMesh->build(level, m_fillColor, m_strokeColor);
-        logResidentDelta("TileMesh(async)", rss0);
-        if (m_redPlanet) {
-            m_redPlanet->buildGPU();
-            m_bluePlanet->buildGPU();
+        const std::function<bool()> shouldCancel = [tok]() { return tok.cancelled(); };
+        m_tileMesh->build(level, m_fillColor, m_strokeColor, &shouldCancel);   // 块边界查令牌 → 可提前退
+        if (!tok.cancelled()) {
+            logResidentDelta("TileMesh(async)", rss0);
+            if (m_redPlanet) {
+                m_redPlanet->buildGPU();
+                m_bluePlanet->buildGPU();
+            }
         }
         glfwMakeContextCurrent(nullptr);
     });
@@ -167,9 +180,9 @@ bool LevelScene::beginAsyncBuild(const LevelData& level, GLFWwindow* sharedWindo
 }
 
 bool LevelScene::pollAsyncBuild() {
-    if (!m_buildFuture.valid()) return false;
-    if (m_buildFuture.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-        m_buildFuture.get();
+    if (!m_buildHandle.valid()) return false;
+    if (m_buildHandle.ready()) {
+        m_buildHandle.clear();
         m_meshReady = true;
         return true;
     }

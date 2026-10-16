@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/util/Scheduler.hpp"   // Handle 是**按值**成员 → 需要完整类型
+
 #include <future>
 #include <memory>
 #include <string>
@@ -7,7 +9,9 @@
 
 struct GLFWwindow;
 struct LauncherConfig;
-namespace adofai { struct PlaybackFrame; }   // 库侧类型：前置声明也要在 adofai 里
+namespace adofai {
+
+class Scheduler; struct PlaybackFrame; }   // 库侧类型：前置声明也要在 adofai 里
 namespace adofai { class Camera; }   // 库侧类型：前置声明也要在 adofai 里
 namespace adofai { class LevelData; }   // 库侧类型：前置声明也要在 adofai 里
 namespace adofai { class Planet; }   // 库侧类型：前置声明也要在 adofai 里
@@ -103,7 +107,7 @@ private:
     int m_lastHiddenEnd = -1;
     bool m_sgVisibleLatch = false;
 
-    std::future<void> m_buildFuture;
+    adofai::Scheduler::Handle m_buildHandle;   // ④：后台网格构建的句柄（析构时 cancel+wait）
     bool m_meshReady = false;
     int m_viewportHpx = 720;
 };

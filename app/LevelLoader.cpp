@@ -1,6 +1,7 @@
 #include "LevelLoader.hpp"
 
 #include "core/util/Logger.hpp"
+#include "core/util/Scheduler.hpp"
 #include <cstdlib>   // getenv（ADOCAO_FLOOR_WINDOW）
 
 #include "LauncherWindow.hpp"
@@ -61,9 +62,11 @@ void runLevelLoading(const LauncherConfig& cfg, LoadingProgress& progress, LoadR
     report(progress, 0.02f, "Starting audio engine...");
 
     // Start audio init + music loading in background immediately (parallel with level parsing)
-    std::future<void> audioFuture;
+    // ④ 后台车道：音频解码走 `Scheduler`（Background），不再自起 `std::async` ✗。
+    // 任务体只碰 `result`（调用方持有、整个加载期都活着 ✓）→ 生命周期安全 ✓。
+    Scheduler::Handle audioJob;
     if (!cfg.musicPath.empty()) {
-        audioFuture = std::async(std::launch::async, [&]() {
+        audioJob = Scheduler::instance().submit(Lane::Background, [&](Scheduler::CancelToken) {
             result.audio.init();
             result.audio.loadMusic(cfg.musicPath);
         });
@@ -103,9 +106,9 @@ void runLevelLoading(const LauncherConfig& cfg, LoadingProgress& progress, LoadR
     result.timeline->setForceHitsoundType(cfg.forceHitsoundType);
 
     // Wait for background audio init to finish (if started)
-    if (audioFuture.valid()) {
+    if (audioJob.valid()) {
         report(progress, 0.75f, "Finalizing audio...");
-        audioFuture.get();
+        audioJob.wait();
     }
 
     report(progress, 0.80f, "Synthesizing hitsounds...");

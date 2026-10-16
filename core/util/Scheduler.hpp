@@ -99,18 +99,34 @@ public:
         m_doneCv.wait(lk, [&] { return done->load(std::memory_order_acquire) >= chunks; });
     }
 
-    // 一次性后台任务（可等待）。`Handle` 目前只是 future 语义；将来要加 `after()` 依赖链
-    // （DAG）时不动调用方 —— 这是预留的缝之一。
+    // 取消令牌：任务在**块边界**自查（协作式）。不可抢占 —— 文档 §3.4 的"取消"那格。
+    class CancelToken {
+    public:
+        CancelToken() : m_flag(std::make_shared<std::atomic<bool>>(false)) {}
+        bool cancelled() const { return m_flag && m_flag->load(std::memory_order_acquire); }
+        void cancel() const { if (m_flag) m_flag->store(true, std::memory_order_release); }
+    private:
+        std::shared_ptr<std::atomic<bool>> m_flag;
+    };
+
+    // 一次性后台任务（可等待、可取消）。`Handle` 目前只有 ready/wait/cancel；
+    // 将来要加 `after()` 依赖链（DAG）时不动调用方 —— 这是预留的缝之一。
     class Handle {
     public:
         Handle() = default;
-        explicit Handle(std::shared_ptr<std::atomic<bool>> done) : m_done(std::move(done)) {}
+        explicit Handle(std::shared_ptr<std::atomic<bool>> done, CancelToken tok = {})
+            : m_done(std::move(done)), m_tok(std::move(tok)) {}
         void wait() const;
+        bool valid() const { return m_done != nullptr; }
+        void clear() { m_done.reset(); m_tok = CancelToken(); }
         bool ready() const { return !m_done || m_done->load(std::memory_order_acquire); }
+        void cancel() const { m_tok.cancel(); }
+        bool cancelled() const { return m_tok.cancelled(); }
     private:
         std::shared_ptr<std::atomic<bool>> m_done;
+        CancelToken m_tok;
     };
-    Handle submit(Lane lane, std::function<void()> fn);
+    Handle submit(Lane lane, std::function<void(CancelToken)> fn);
 
     ~Scheduler();
 

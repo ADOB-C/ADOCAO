@@ -13,9 +13,16 @@
 * `core/map/PngBand`：它是**生产者/消费者流水线**（worker 压缩、主线程边写边 drain，`maxPending` 是背压），
   fork-join 的 `parallelFor` 表达不了它 ✗（硬换会死锁 ✗）→ 要统一得等"IO/Stream 车道 + `submit` 依赖链"
   那条缝长出来（文档 §3.4）。
-其余（`std::async` 的音频解码/网格构建、裸 `std::thread` 的加载窗/向导预载）待做：它们都是
-**一次性后台任务** ✓ 对应 `Scheduler::submit(Background)`，但涉及 GUI 生命周期（加载窗）与共享 GL 上下文
-（网格构建），要单独一轮做 ✓。
+**④ 后台车道 + 取消（2026-10-16 落地）**：`Scheduler` 加了 **`CancelToken`**（协作式、块边界自查）
+与 `submit(Lane, fn(tok)) → Handle{ready/wait/cancel/valid/clear}` ✓。已迁：
+* `app/LevelLoader` 的**音频解码**（原 `std::async` ✗）→ `submit(Background)`；任务体只碰调用方持有的
+  `result` → 生命周期安全 ✓；
+* `app/LevelScene` 的**网格构建**（原 `std::async` + 共享 GL 上下文）→ `submit(Background)`；
+  **析构时 `cancel()` + `wait()`** —— 等价于原来 `future` 析构的 join 语义 ✓，但任务能在**块边界提前退出**
+  （`TileMesh::build(..., const std::function<bool()>* shouldCancel)`，每 64K 砖查一次 ✓）。
+  注意它默认走同步路径（`Async build: OFF (sync)`），异步路径是开关打开时才走的 ✓。
+**仍未迁**：裸 `std::thread` 的**加载窗**（×2，GUI 生命周期 ✗）与**向导预载** —— 要单独一轮，
+且每一步都要能回退（它们跟窗口销毁/切谱绑在一起）。
 
 | # | 位置 | 机制 | 用途 | 问题 |
 |---|---|---|---|---|

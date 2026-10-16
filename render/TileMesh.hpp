@@ -49,9 +49,11 @@ public:
     TileMesh(TileMesh&&) noexcept;
     TileMesh& operator=(TileMesh&&) noexcept;
 
-    void build(const LevelData& level,
-               const std::string& fillColorHex = "FFFFFF",
-               const std::string& strokeColorHex = "000000");
+    // `shouldCancel`（可选）：后台构建时按块边界自查，返回 true 就提前放弃（④ 取消）。
+    // 用函数指针包装而不是 `Scheduler::CancelToken`，免得 render 头依赖调度器的完整类型。
+    void build(const LevelData& level, const std::string& fillColorHex = "FFFFFF",
+               const std::string& strokeColorHex = "000000",
+               const std::function<bool()>* shouldCancel = nullptr);
     // **一次 draw** 画完砖与图标（图标 part 紧跟在自己那块砖的填充之后）—— 指数的索引表
     // 顺序就是"描边 → 填充 → 三个图标 part"。
     //

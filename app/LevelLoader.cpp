@@ -1,11 +1,13 @@
 #include "LevelLoader.hpp"
 
 #include "core/util/Logger.hpp"
+#include <cstdlib>   // getenv（ADOCAO_FLOOR_WINDOW）
 
 #include "LauncherWindow.hpp"
 #include "LoadingWindow.hpp"
 #include "FileMap.hpp"
 #include "core/level/LevelData.hpp"
+#include "core/level/FloorWindow.hpp"   // kCheckpointStride（③ 切片 4 日志用）
 #include "core/timeline/Timeline.hpp"
 #include "core/timeline/PlaybackClock.hpp"
 #include <cstring>
@@ -119,6 +121,31 @@ void runLevelLoading(const LauncherConfig& cfg, LoadingProgress& progress, LoadR
         if (!result.hitsounds.isSynthesized())
             result.hitsounds.preSynthesize(result.timeline->getHitsoundTimestampGroups(),
                                            result.timeline->totalDuration());
+    }
+
+    // ③ 切片 4：建"按块物化"缓存并**丢掉密集 `tiles`**（MYC 24 B/层 = 162 MB）。
+    // 必须在 `releaseMemory()` **之前**（它按 `tilesWindowed()` 决定是否保留稀疏的
+    // `tilePositionOffsets` —— provider 物化块要用它合成 PositionTrack），
+    // 也必须在 Timeline 丢掉起始时间数组之前（checkpoint 要用它）。
+    // ⚠️ **默认关**：③ 切片 4 的 provider 在**值级**已逐位验收（`floor_window_cache` 测试：
+    // MYC 6,770,913 层 / 1654 块 0 不一致），但**像素门槛在窗口化路径下会变**（51 个状态里 50 个
+    // 不一致，差异图显示"内圈整条弧消失 + 外圈 1~2 px 镶边"）→ 说明问题在网格装配/可见性那一层，
+    // 不在数值上。查清之前不开默认路径，用 `ADOCAO_FLOOR_WINDOW=1` 打开做 A/B。
+    const char* fw = std::getenv("ADOCAO_FLOOR_WINDOW");
+    const bool windowTiles = fw && fw[0] == '1';
+    if (!windowTiles) {
+        LOG_I("floor-window: 关闭（默认；值级已逐位验收但出图有差异，待查 —— 见 AGENTS/TODO）");
+    } else if (result.level && result.timeline) {
+        std::string werr;
+        if (result.level->buildFloorWindowCache(result.timeline->tileStartTimes(),
+                                                result.timeline->tileBPMs(),
+                                                result.timeline->tileIsCW(), &werr)) {
+            const bool dropped = result.level->dropTilesArray();
+            LOG_I("floor-window: 缓存已建（每 %u 层一个 checkpoint）；密集 tiles %s",
+                  (unsigned)adofai::kCheckpointStride, dropped ? "已丢弃（按块物化）" : "保留");
+        } else {
+            LOG_I("floor-window: 未接（%s）→ 保留密集 tiles", werr.c_str());
+        }
     }
 
     // Release data no longer needed (angleData, actions, position offsets)

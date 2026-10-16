@@ -591,3 +591,22 @@ settings 定长记录 → angleData 列 → actions 六列 → pathData；未知
 
 → 加 `Rle` 列编码 + `DeltaRleVarint`；选中的判据必须是**实测字节数最小**
 （不能按列名硬编码：直线的赫兹谱会在 angleData 上选中 RLE，锯齿型则不会）。
+
+## ③ 切片 4：`tiles` 按块物化 provider（代码已落，默认关，差两关）
+
+值级已逐位验收（`ctest floor_window_cache`：angles360 5,565 / diag_glide 1,025 / The Moon 600,539 /
+**MYC 6,770,913 层（1654 块）全部 0 不一致**，含"改角度 → 必须变 / 复原 → 必须回来"的反面对照），
+`LevelData::tilePositionAt/tileDirectionAt` 已全部走访问器。但**两关没过，所以默认关**
+（`ADOCAO_FLOOR_WINDOW=1` 打开做 A/B）：
+
+1. **像素门槛变**（51 个状态 50 个不一致）。差异图显示：**内圈整条弧消失 + 外圈 1~2 px 镶边** →
+   问题在**网格装配/可见性**那一层，不在数值上（数值逐位相同）。方向：A/B `TileMesh` 的
+   `m_posX/m_posY/m_tileShape` 与可见实例列表（`ADOCAO_CULL=scan` 对比），看是 chunk 基点、
+   形状分组还是 cull 阈值不同。
+2. **footprint 反涨**（MYC 493.6 MB → **1.1 GB**，而 live 528 → **150.5 MB**，−174 MB）——
+   差值 ≈ 950 MB 是"已释放但仍占"的页 = **单块缓存抖动**：物化块反复分配/释放 130 KB
+   （窗口 98 KB + 角度 32 KB + 事件）。方向：单块缓存 → **±1 预取窗**，并让 `TileMesh::build`
+   与 `CullIndex::build` **顺序物化**（它们本来就是顺序的）。
+
+处置：先把数值验收与访问器层合入主干（**本文件这节**），provider 挂在 env 开关后面继续修；
+修好两关再默认打开并重新量常驻。

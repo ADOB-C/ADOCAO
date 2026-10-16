@@ -478,7 +478,9 @@ void GameWindow::toggleFullscreen() {
 }
 
 void GameWindow::releaseMeshTemporaries() {
-    std::vector<double>().swap(m_level->angleData);
+    // ③ 切片 4：窗口化时 **不能**释放 `angleData` —— provider 物化块要用它当角度来源
+    // （非窗口化路径照旧释放，保持异步构建那条路的内存特性）
+    if (!m_level->tilesWindowed()) std::vector<double>().swap(m_level->angleData);
     m_level->tileBPMs.clear(); m_level->tileBPMs.shrink_to_fit();
     m_level->tileHasTwirl.clear(); m_level->tileHasTwirl.shrink_to_fit();
     m_level->tileHasSetSpeed.clear(); m_level->tileHasSetSpeed.shrink_to_fit();

@@ -88,6 +88,55 @@ bool computeCheckpoints(const LevelData& level, uint32_t stride,
                         const std::vector<double>& times, const std::vector<float>& bpms,
                         std::vector<FloorCheckpoint>& out, std::string& err);
 
+// ③ 切片 4：每砖数据的**按块物化缓存**。`LevelData` 持有它；`dropTiles()` 成功后
+// `tilePositionAt()/tileDirectionAt()` 就走这里。
+//
+// 关键取舍（实测决定）：物化一块本需要"块内事件"，而 `releaseMemory()` 会释放 `actions`
+// （MYC 实测 6,155,055 条 Twirl = 99 MB 的绝大部分）。所以这里**不读 `actions`**，改成
+// 从**已经保留的每层数组**现造块内事件（每块只有 4096 层）：
+//   * `tileIsCW[i]` 翻转        → 合成一条 Twirl
+//   * `tileBPMs[i]` 变化        → 合成一条 SetSpeed（绝对赋值，flag=false）
+//   * `tilePositionOffsets[i]`  → 合成一条 PositionTrack（val1/val2 = 偏移，flag = justThisTile）
+// 于是喂给**已经逐位验证过的** `computeFloorWindow`（走 `floorRecompute()` 钩子），零新增算式。
+// 有 AnimateTrack 的谱不从这条走（`atStates` 需要事件本体）→ 保留密集数组，行为不变。
+class FloorWindowCache {
+public:
+    FloorWindowCache();
+    ~FloorWindowCache();
+    FloorWindowCache(const FloorWindowCache&) = delete;
+    FloorWindowCache& operator=(const FloorWindowCache&) = delete;
+
+    // 加载收尾（finishLoad 之后、Timeline 建好之后、releaseMemory 之前）调用一次
+    bool init(LevelData& level, const std::vector<double>& startTimes,
+              const std::vector<float>& bpms, const std::vector<bool>& isCW, std::string& err);
+    bool ready() const { return m_ready; }
+    bool windowed() const { return m_windowed; }
+    const char* why() const { return m_why; }
+    size_t blocksMaterialized() const { return m_blocks; }
+    // 第 i 层的 Tile（物化所在块；i == angleData.size() 时是末尾那块合成砖）
+    const LevelData::Tile* tileAt(int64_t i) const;
+    // 丢掉密集 `tiles` 数组（失败则原样不动）
+    bool dropTiles(LevelData& level);
+    // **仅测试用**：让单块缓存失效（反面对照要"改了输入 → 必须重算"，
+    // 而"读另一块挤掉缓存"在目标层恰好就在块 0 时不成立）
+    void invalidateWindowForTest() const { m_block = -1; m_win.clear(); }
+
+private:
+    bool materialize(int64_t block) const;
+
+    LevelData* m_level = nullptr;
+    std::vector<FloorCheckpoint> m_ck;
+    std::vector<bool> m_isCW;
+    LevelData::Tile m_extra{};
+    bool m_hasExtra = false;
+    bool m_ready = false;
+    bool m_windowed = false;
+    const char* m_why = "未初始化";
+    mutable int64_t m_block = -1;
+    mutable std::vector<LevelData::Tile> m_win;
+    mutable size_t m_blocks = 0;
+};
+
 // 从 checkpoint + 一块 angleData + 这一块里的事件，重算出该窗口的每砖数据（不碰任何全谱数组）。
 // 实现由 archive 注册（`archive::install()`）；未注册时返回 false + err。
 using FloorRecomputeFn = bool (*)(const LevelData::Settings& settings, const FloorWindowInput& in,

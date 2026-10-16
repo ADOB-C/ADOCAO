@@ -1,4 +1,5 @@
 #include "LevelData.hpp"
+#include "FloorWindow.hpp"   // ③ 切片 4：按块物化缓存（~LevelData 需要完整类型）
 #include "JsonCleaner.hpp"
 #include "ByteSource.hpp"   // 容器识别 + 解压后端接口（实现见 archive/）
 #include "core/util/Logger.hpp"
@@ -1679,10 +1680,14 @@ void LevelData::applyPositionTrackOffsets() {
     }
 }
 
+LevelData::~LevelData() { delete m_winCache; m_winCache = nullptr; }
+
 void LevelData::releaseMemory() {
     // Free arrays no longer needed after loading completes
     actions.clear(); actions.shrink_to_fit();
-    tilePositionOffsets.clear();
+    // ⚠️ 窗口化时**不能**清 `tilePositionOffsets`：provider 物化块要用它合成 PositionTrack
+    // （MYC 实测 26,480 条 ≈ 1.6 MB；非窗口化时照旧清掉）
+    if (!tilesWindowed()) tilePositionOffsets.clear();
     tileHitsounds.clear();
     tileHitsoundVolumes.clear(); tileHitsoundVolumes.shrink_to_fit();
     // atStates 只有 Timeline::build() 用（它在本函数之前就跑完了），运行时只靠 hasAtStates 判定，

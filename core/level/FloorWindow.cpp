@@ -151,6 +151,179 @@ namespace {
 FloorRecomputeFn g_floorRecompute = nullptr;
 }  // namespace
 
+// ---------------- ③ 切片 4：LevelData 侧的访问器与缓存管理 ----------------
+
+std::array<double, 2> LevelData::tilePositionAt(int64_t i) const {
+    if (m_winCache && m_winCache->windowed()) {
+        const Tile* t = m_winCache->tileAt(i);
+        if (t) return t->position;
+    }
+    return (i >= 0 && (size_t)i < tiles.size()) ? tiles[(size_t)i].position
+                                                : std::array<double, 2>{0.0, 0.0};
+}
+
+float LevelData::tileDirectionAt(int64_t i) const {
+    if (m_winCache && m_winCache->windowed()) {
+        const Tile* t = m_winCache->tileAt(i);
+        if (t) return t->direction;
+    }
+    return (i >= 0 && (size_t)i < tiles.size()) ? tiles[(size_t)i].direction : 0.0f;
+}
+
+bool LevelData::buildFloorWindowCache(const std::vector<double>& startTimes,
+                                      const std::vector<float>& bpms,
+                                      const std::vector<bool>& isCW, std::string* err) {
+    m_winCache = new FloorWindowCache();
+    std::string e;
+    if (m_winCache->init(*this, startTimes, bpms, isCW, e)) return true;
+    if (err) *err = e;
+    delete m_winCache;
+    m_winCache = nullptr;
+    return false;
+}
+
+bool LevelData::dropTilesArray() {
+    if (!m_winCache) return false;
+    return m_winCache->dropTiles(*this);
+}
+
+bool LevelData::tilesWindowed() const { return m_winCache && m_winCache->windowed(); }
+void LevelData::invalidateFloorWindowForTest() {
+    if (m_winCache) m_winCache->invalidateWindowForTest();
+}
+size_t LevelData::windowBlocksMaterialized() const {
+    return m_winCache ? m_winCache->blocksMaterialized() : 0;
+}
+
+// ---------------- ③ 切片 4：按块物化缓存 ----------------
+
+FloorWindowCache::FloorWindowCache() = default;
+FloorWindowCache::~FloorWindowCache() = default;
+
+bool FloorWindowCache::init(LevelData& level, const std::vector<double>& startTimes,
+                            const std::vector<float>& bpms, const std::vector<bool>& isCW,
+                            std::string& err) {
+    m_level = &level;
+    m_ready = false;
+    m_windowed = false;
+    m_block = -1;
+    m_win.clear();
+    m_blocks = 0;
+
+    const size_t nData = level.angleData.size();
+    if (nData == 0 || level.tileCount() < (int64_t)(nData + 1)) {
+        m_why = "tiles 还没算好（需要在 finishLoad 之后调用）";
+        err = m_why;
+        return false;
+    }
+    if (level.hasAtStates) {   // 有 AnimateTrack：atStates 需要事件本体，本条路不适用
+        m_why = "有 AnimateTrack（需要事件本体）";
+        err = m_why;
+        return false;
+    }
+    if (isCW.size() < nData) {
+        m_why = "缺 tileIsCW";
+        err = m_why;
+        return false;
+    }
+    if (!computeCheckpoints(level, kCheckpointStride, startTimes, bpms, m_ck, err)) {
+        m_why = err.c_str();   // 让日志说清楚为什么没接
+        return false;
+    }
+
+    m_isCW.assign(isCW.begin(), isCW.end());     // 位图，0.125 B/层
+    m_extra = level.tiles.back();                // 末尾那块合成砖不在任何窗口里，单独留一份
+    m_hasExtra = (level.tileCount() > (int64_t)nData);
+    m_ready = true;
+    m_why = "可窗口化";
+    return true;
+}
+
+bool FloorWindowCache::materialize(int64_t block) const {
+    if (!m_ready || !m_level) return false;
+    FloorRecomputeFn fn = floorRecompute();
+    if (!fn) return false;                        // 忘记 archive::install()
+    const int64_t nData = (int64_t)m_level->angleData.size();
+    const int64_t i0 = block * kCheckpointStride;
+    const int64_t i1 = std::min(i0 + (int64_t)kCheckpointStride, nData);
+    if (i0 < 0 || i1 <= i0) return false;
+    const size_t bidx = (size_t)(i0 / (int64_t)kCheckpointStride);
+    if (bidx >= m_ck.size() || m_ck[bidx].floor != (uint64_t)i0) return false;
+
+    // 角度窗口：`computeFloorWindow` 以 `angles->size()` 作为窗口长度，所以这里切一块出来
+    // （4096 × 8 B = 32 KB，只在物化那一刻存在）
+    const std::vector<double> angles(m_level->angleData.begin() + (size_t)i0,
+                                     m_level->angleData.begin() + (size_t)i1);
+
+    FloorWindowInput in;
+    in.checkpoint = m_ck[bidx];
+    in.angles = &angles;
+    in.strings = &m_level->actionStrTable;
+
+    // **合成块内事件**：只用已经保留的每层数组 + 稀疏偏移表（不碰已被释放的 actions）
+    std::vector<LevelData::FastAction> ev;
+    ev.reserve(16);
+    for (int64_t i = i0; i < i1; ++i) {
+        if (i > 0 && m_isCW[(size_t)i] != m_isCW[(size_t)(i - 1)]) {
+            LevelData::FastAction a;
+            a.floor = (int)i;
+            a.type = LevelData::FastAction::Twirl;
+            ev.push_back(a);
+        }
+        if (i > 0) {
+            const float b = m_level->tileBPMs[(size_t)i];
+            const float pb = m_level->tileBPMs[(size_t)(i - 1)];
+            if (b != pb) {
+                LevelData::FastAction a;
+                a.floor = (int)i;
+                a.type = LevelData::FastAction::SetSpeed;
+                a.flag = false;                   // 绝对赋值：数组里已经是"结果"
+                a.val1 = b;
+                ev.push_back(a);
+            }
+        }
+        auto it = m_level->tilePositionOffsets.find((int)i);
+        if (it != m_level->tilePositionOffsets.end()) {
+            LevelData::FastAction a;
+            a.floor = (int)i;
+            a.type = LevelData::FastAction::PositionTrack;
+            a.val1 = it->second.offsetX;
+            a.val2 = it->second.offsetY;
+            a.flag = it->second.justThisTile;     // true = 点加（只本层）
+            ev.push_back(a);
+        }
+    }
+    in.events = &ev;
+
+    FloorWindow w;
+    std::string err;
+    if (!fn(m_level->settings, in, w, err)) return false;
+    if ((int64_t)w.tiles.size() != (i1 - i0)) return false;
+    m_win = std::move(w.tiles);
+    m_block = block;
+    ++m_blocks;
+    return true;
+}
+
+const LevelData::Tile* FloorWindowCache::tileAt(int64_t i) const {
+    if (!m_windowed) return nullptr;
+    const int64_t nData = (int64_t)m_level->angleData.size();
+    if (i == nData) return m_hasExtra ? &m_extra : nullptr;
+    if (i < 0 || i >= nData) return nullptr;
+    const int64_t block = i / kCheckpointStride;
+    if (m_block != block && !materialize(block)) return nullptr;
+    const size_t k = (size_t)(i - block * kCheckpointStride);
+    return k < m_win.size() ? &m_win[k] : nullptr;
+}
+
+bool FloorWindowCache::dropTiles(LevelData& level) {
+    if (!m_ready || &level != m_level) return false;
+    std::vector<LevelData::Tile>().swap(level.tiles);
+    m_windowed = true;
+    m_block = -1;
+    return true;
+}
+
 void installFloorRecompute(FloorRecomputeFn fn) { g_floorRecompute = fn; }
 FloorRecomputeFn floorRecompute() { return g_floorRecompute; }
 

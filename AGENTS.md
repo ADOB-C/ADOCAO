@@ -181,6 +181,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     （实测 `drawn=0`、轨道整个消失，用户一眼看出来 ✗）。诊断钩子 `ADOCAO_CULL_LIMIT=0` 可关掉两道闸。
     **不能"超预算就不画"** —— 那会整帧黑屏（只剩行星/拖尾），用户一眼就看出来 ✗；
     两个常量还必须**高于门槛里任何合法状态**（压到 1<<16 → 门槛 50/51 ✗）。效果：最坏帧 → **85.7 ms**。
+- **并行只有一套模型**（2026-10-16 拍板，见 `docs/parallelism.md`）：全库现状有**五套**各管各的机制
+  （`core/util/ThreadPool` 静态单例 / `LevelData` 每次调用新建池 ✗ / `MapExport`+`PngBand` 自造线程 ✗ /
+  `std::async` / 裸 `std::thread`），互相不知情 → **过订阅**、共享窗口缓存只能"主线程 pin"（`sample` 量到
+  单帧 36% 的 `materialize` 就这么被串行化掉 ✗）。模型 = **一个调度器**（`clamp(hw-1,1,8)` worker + 调用
+  线程参与；`Frame`/`Background` 两条车道；嵌套并行就地串行；`ADOCAO_JOBS=1` 全局串行钩子）+ **四条不变式**
+  （并行区内不写共享缓存 / 输出按 index 写 / GL 归上下文所有者 / 确定性优先）。**例外**：`adocao_audio`
+  保持自己的线程（模块规则：单独编 `HitsoundManager.cpp` 的 harness 不能缺源码 ✗），别顺手"统一"。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`
@@ -221,6 +228,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |---|---|
 | `docs/level-loading.md` | 动解析 / 流式窗口 / 快路径回退 / `Timeline::build` / 加载时间与内存 |
 | `docs/rendering.md` | 动渲染、几何、实例流、剔除、图标、坐标约定、**像素门槛怎么用** |
+| `docs/parallelism.md` | **要并行什么、怎么并行**：调度器模型（车道/parallelFor/取消）、四条不变式、逐站点归类、迁移顺序 —— 动任何并行前先读 |
 | `docs/profiling.md` | **要量什么、用什么量**：分段计时（`ADOCAO_PROFILE=1`）、整帧/常驻口径、`sample`/`vmmap`/`xctrace` 配方、已知盲区 |
 | `docs/audio.md` | 动音频、hitsound 混音、导出 WAV、audio-as-chart |
 | `docs/image-export.md` | 动 `adocao image`（真无头出图）、瓦片与拼接 |

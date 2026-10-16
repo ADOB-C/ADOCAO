@@ -6,6 +6,18 @@
 > 未完成清单已定稿（移除：~~GPU compute culling~~——2.0.0 起已不需要，彻底删除；~~Decoration~~）。
 > MoveTrack 保留，归入「遥远的未来」，仅记录不排期。已完成项保留在文末作历史。
 
+## 并行模型（`docs/parallelism.md`，2026-10-16 拍板）
+
+- [ ] ① 调度器骨架（`core/util/Scheduler`：模板 `parallelFor` + 两条车道 + 嵌套护栏 + `ADOCAO_JOBS=1`）
+      并把 `TileMesh` 的剔除迁过去；**窗口物化改成并行预派生只读表**（现在被"主线程 pin"串行化，
+      `sample` 量到 `materialize` 占主线程 36%）→ 预期宽视野重建帧 160~240 ms → 20~30 ms
+- [ ] ② 收编 `LevelData`（每次调用新建池 ✗）与 `MapExport`/`PngBand`（自造线程 ✗）→ 消过订阅
+- [ ] ③ 位置提供者加 **512 层细锚点**（现在每窗要走 4096 层 trig）→ 再 ~8×
+- [ ] ④ 后台车道 + 取消（换谱时掐掉旧网格构建/预载）
+- [ ] ⑤ 加载期并行（位置/时间/图标/索引/角度存储）
+- [ ] ⑥ per-worker 暂存（热点内不再分配，边际优化）
+- [ ] 新增 `tests/scheduler_determinism_test.cpp`（`JOBS=1/2/4/8` 输出逐字节相同）
+
 ## 未完成
 
 ### 打拍音

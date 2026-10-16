@@ -41,6 +41,7 @@ public:
     // context via sharedWindow (context must be current on this thread).
     // Returns false when no background build could be started — fall back to
     // buildSync() in that case. Poll with pollAsyncBuild().
+    void setViewportHeightPx(int h);
     bool beginAsyncBuild(const adofai::LevelData& level, GLFWwindow* sharedWindow);
 
     // Returns true once when the background build just finished; false
@@ -104,4 +105,5 @@ private:
 
     std::future<void> m_buildFuture;
     bool m_meshReady = false;
+    int m_viewportHpx = 720;
 };

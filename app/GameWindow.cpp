@@ -428,6 +428,7 @@ void GameWindow::render() {
     int fbW, fbH;
     glfwGetFramebufferSize(m_window, &fbW, &fbH);
     LetterboxedViewport vp = computeLetterbox(fbW, fbH, m_targetAspect);
+    if (m_scene) m_scene->setViewportHeightPx(vp.h);   // LOD：视口像素高度（每世界单位多少像素）
 
     {
         adofai::profile::Scoped _s("setup");   // 帧头：letterbox + 两次 clear + setAspect

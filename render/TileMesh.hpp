@@ -61,6 +61,8 @@ public:
     // 与旧版不同（The Moon t=1s / MYC t=30s 等），是**预期内**的差异，基线已按新行为重存。
     // 视锥边界是**世界坐标** → double（float 在 x≈6.8e7 上会被量化到 8 砖，剔除边界跟着错）
     void draw(double viewL, double viewR, double viewB, double viewT, double camX, double camY) const;
+    // 视口像素高度（每帧由 app 侧设入；LOD 用它算"每世界单位多少像素"）
+    void setViewportHeightPx(int h) const { m_viewportH = h; }
     void drawHighlightedTile(int tileIdx, double camX, double camY) const;
     void setVisibleThreshold(int lastVisible);
     // ④ 剔除粗块粒度（层/块；0 = 关闭索引走全扫）。必须在 build() 之前设。
@@ -106,7 +108,7 @@ private:
     void uploadIfNeeded() const;
     void cullRange(size_t begin, size_t end, double vl, double vr, double vb, double vt,
                    double camX, double camY, std::vector<uint32_t>& outTiles,
-                   std::vector<float>& outAttr) const;
+                   std::vector<float>& outAttr, size_t stride = 1) const;
 
     // ---- 静态 GL（所有实例共用）----
     GLuint m_vao = 0, m_recipeVbo = 0, m_ebo = 0, m_instVbo = 0, m_shapeTex = 0;
@@ -167,6 +169,8 @@ private:
     mutable std::vector<uint32_t> m_listTiles;
     mutable std::vector<float> m_listAttr;    // 5 float/实例：offX offY offZ shape iconBits
     mutable bool m_listValid = false;
+    mutable int m_viewportH = 720;
+    mutable size_t m_lodStride = 1;      // 当前帧的抽稀步长（1 = 不抽）
     mutable bool m_listUploaded = false;   // 实例缓冲里是不是这一帧的列表
     mutable double m_vl = 0, m_vr = 0, m_vb = 0, m_vt = 0;
     mutable int m_visibleThreshold = 0x7fffffff;

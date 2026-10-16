@@ -146,6 +146,8 @@ void LevelScene::buildSync(const LevelData& level) {
     m_meshReady = true;
 }
 
+void LevelScene::setViewportHeightPx(int h) { m_viewportHpx = h; }
+
 bool LevelScene::beginAsyncBuild(const LevelData& level, GLFWwindow* sharedWindow) {
     if (!sharedWindow) return false;
     m_buildFuture = std::async(std::launch::async, [this, &level, sharedWindow]() {
@@ -322,6 +324,7 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     // Track appear/disappear animation
     { profile::Scoped _s("vis"); updateTileVisibility(timeline, timeInLevel, playing); }
 
+    m_tileMesh->setViewportHeightPx(m_viewportHpx);
     double vl, vr, vb, vt;      // 世界坐标 → double（见 docs/rendering.md 坐标约定）
     camera.frustumBounds(vl, vr, vb, vt);
 

@@ -14,6 +14,16 @@
 namespace adofai {
 
 namespace {
+
+// A/B 钩子：`ADOCAO_CULL=scan` 强制走全扫（索引路径与两段式 LOD 都要认它）
+inline bool cullForceScan() {
+    static const bool f = [] {
+        const char* v = std::getenv("ADOCAO_CULL");
+        return v && std::strcmp(v, "scan") == 0;
+    }();
+    return f;
+}
+
 // 建表耗时（一次性）用；只在这里用，别扩散
 double msSince() {
     using clk = std::chrono::steady_clock;
@@ -411,7 +421,7 @@ void TileMesh::limitWarn(const char* what, size_t n) const {
 
 void TileMesh::cullRange(size_t begin, size_t end, double vl, double vr, double vb, double vt,
                          double camX, double camY, std::vector<uint32_t>& outTiles,
-                         std::vector<float>& outAttr) const {
+                         std::vector<float>& outAttr, size_t stride) const {
     const size_t n = (size_t)m_nTiles;
     if (end > n) end = n;
     if (begin >= end) return;
@@ -435,6 +445,23 @@ void TileMesh::cullRange(size_t begin, size_t end, double vl, double vr, double 
     auto worldX = [&](size_t t) { return m_chunkX[t >> kPosChunkShift] + (double)d->posX[t - base]; };
     auto worldY = [&](size_t t) { return m_chunkY[t >> kPosChunkShift] + (double)d->posY[t - base]; };
     size_t i = w0;
+    if (stride > 1) {
+        // LOD 路径：只测"砖号是 stride 倍数"的砖（确定性、与分块无关）→ 每 ~1 px 抽一块。
+        // 这里用标量（SIMD 4 宽留给 stride==1 的密集情形）：LOD 是"拉远"的场景，测的砖少得多。
+        const size_t first = ((w0 + stride - 1) / stride) * stride;
+        for (size_t t = first; t < w1; t += stride) {
+            if (haveVis && !visAt(t)) continue;
+            const Shape& sh = m_shapes[d->shape[t - base]];
+            const double mnX = sh.localMinX + worldX(t), mxX = sh.localMaxX + worldX(t);
+            const double mnY = sh.localMinY + worldY(t), mxY = sh.localMaxY + worldY(t);
+            if (mxX < vl || mnX > vr || mxY < vb || mnY > vt) continue;
+            outTiles.push_back((uint32_t)t);
+            pushAttr(outAttr, (float)(worldX(t) - camX), (float)(worldY(t) - camY),
+                     tileZForIndex((int)t, m_nTiles), d->shape[t - base], d->icon[t - base]);
+        }
+        w0 = w1;
+        continue;
+    }
     for (; i + (W - 1) < w1; i += W) {
         for (size_t b = 0; b < W; b++) {
             const uint32_t t = (uint32_t)(i + b);   // 下标即砖号
@@ -482,6 +509,22 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
     // 实例属性是 chunk 相对的（与相机无关），所以复用旧列表只是"集合略旧 ≤1 px"（看不见）；
     // 而固定的 0.5 世界单位在拉远时等于 0.01 px（每帧都重建 ✗）、在拉近时又过大 —— 实测
     // 饱和视距下浸泡 p50 因此从 0.17 涨到 19~31 ms（每帧都在做被预算限制的活）。
+    // LOD：砖投影尺寸 < 1 px 时，按砖号**等距抽稀**（确定性、与剔除分块无关）。
+    // 这不是"少画"—— 而是把"亚像素密度"换成"每像素一个采样点"：可视集合**完整且均匀**
+    // （对比：预算顶住时的降级是"按距离挑最近块"，那是有偏的局部 ✗）。
+    const double pxPerUnit = (viewT > viewB) ? (double)m_viewportH / (viewT - viewB) : 1.0;
+    size_t lodStride = 1;
+    if (std::getenv("ADOCAO_LOD") && std::atoi(std::getenv("ADOCAO_LOD")) == 0) {
+        lodStride = 1;                                     // A/B：强制关掉
+    } else if (pxPerUnit < 1.0) {
+        lodStride = (size_t)std::ceil(1.0 / pxPerUnit);    // 每 ~1 px 抽一块
+    }
+    if (lodStride != m_lodStride) {
+        LOG_I("lod: 每单位 %.3f px → 抽稀步长 %zu（此前 %zu）", pxPerUnit, lodStride, m_lodStride);
+        m_listValid = false;                               // 步长一变，列表作废
+        m_lodStride = lodStride;
+    }
+    m_lodStride = lodStride;
     const double tolX = (viewR - viewL) / 1024.0, tolY = (viewT - viewB) / 1024.0;
     const bool frustumChanged =
         !m_listValid || std::abs(m_vl - viewL) > tolX ||
@@ -493,10 +536,7 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
         const size_t n = (size_t)m_nTiles;
         constexpr size_t CHUNK = 32768;
         // A/B 钩子：ADOCAO_CULL=scan 强制走原来的全扫（同一份二进制上对比真实渲染耗时）
-        static const bool forceScan = [] {
-            const char* v = std::getenv("ADOCAO_CULL");
-            return v && std::strcmp(v, "scan") == 0;
-        }();
+        const bool forceScan = cullForceScan();
         if (m_cullIndex.valid() && !forceScan) {
             // ④：**先按块筛**（块 AABB 是块内砖的保守包围盒），再在命中块内做与全扫**同一个**
             // `cullRange` 判定 —— 所以输出与全扫**逐元素相同**（`tests/cull_index_test.cpp` 对拍）。
@@ -516,7 +556,7 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
             // 不能直接不画 —— 那会整帧黑屏（只剩行星/拖尾），实测被用户一眼看出来 ✗。
             const bool limitOff = std::getenv("ADOCAO_CULL_LIMIT") &&
                                   std::atoi(std::getenv("ADOCAO_CULL_LIMIT")) == 0;
-            if (!limitOff && candidates > kMaxCullCandidates) {
+            if (!limitOff && candidates > kMaxCullCandidates * m_lodStride) {
                 limitWarn("cull-candidates", candidates);
                 const size_t before = candidates;
                 // 按层号顺序边剔边收，**可见数够 kMaxInstances 就停** —— 工作量由输出封顶。
@@ -532,7 +572,7 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
                 std::sort(ranges.begin(), ranges.end());
                 for (const auto& r : ranges) {
                     if (m_listTiles.size() >= kMaxInstances) break;
-                    cullRange(r.first, r.second, vl, vr, vb, vt, camX, camY, m_listTiles, m_listAttr);
+                    cullRange(r.first, r.second, vl, vr, vb, vt, camX, camY, m_listTiles, m_listAttr, m_lodStride);
                 }
                 if (m_listTiles.size() > kMaxInstances) {
                     m_listTiles.resize(kMaxInstances);
@@ -568,7 +608,7 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
                     for (size_t k = a; k < b; ++k) {
                         for (size_t r = jobs[k].first; r < jobs[k].second; ++r)
                             cullRange(ranges[r].first, ranges[r].second, vl, vr, vb, vt, camX, camY,
-                                      tiles[k], attr[k]);
+                                      tiles[k], attr[k], m_lodStride);
                     }
                 };
                 Scheduler::instance().parallelFor(jobs.size(), 1, Lane::Frame, jobBody);
@@ -582,7 +622,7 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
                 }
             } else {
                 for (const auto& r : ranges)
-                    cullRange(r.first, r.second, vl, vr, vb, vt, camX, camY, m_listTiles, m_listAttr);
+                    cullRange(r.first, r.second, vl, vr, vb, vt, camX, camY, m_listTiles, m_listAttr, m_lodStride);
             }
         } else if ((n + CHUNK - 1) / CHUNK > 1) {
             const size_t chunks = (n + CHUNK - 1) / CHUNK;
@@ -591,7 +631,7 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
             Scheduler::instance().parallelFor(chunks, 1, Lane::Frame, [&](size_t a, size_t b) {
                 for (size_t c = a; c < b; c++) {
                     size_t lo = c * CHUNK, hi = std::min(lo + CHUNK, n);
-                    cullRange(lo, hi, vl, vr, vb, vt, camX, camY, tiles[c], attr[c]);
+                    cullRange(lo, hi, vl, vr, vb, vt, camX, camY, tiles[c], attr[c], m_lodStride);
                 }
             });
             size_t totalT = 0, totalA = 0;
@@ -603,7 +643,7 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
                 m_listAttr.insert(m_listAttr.end(), attr[c].begin(), attr[c].end());
             }
         } else {
-            cullRange(0, n, vl, vr, vb, vt, camX, camY, m_listTiles, m_listAttr);
+            cullRange(0, n, vl, vr, vb, vt, camX, camY, m_listTiles, m_listAttr, m_lodStride);
         }
 
         // 窗口相对 Z（2026-10，用户指出）：全局归一化 `kMaxTileZ*(1-i/(n-1))` 的每层间距是
@@ -637,6 +677,29 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
             }
         }
         // ⑦ 闸②：可见实例封顶（确定性截断，按砖号取前 N）—— 宁可少画，不能卡死
+        // 两段式 LOD：第一遍按当前步长剔完，若**真实可见数**超预算 → 用
+        // `ceil(可见/预算)` 重剔一遍（确定性、无历史依赖；第二遍只测 可见/步长 ≈ 预算 块砖，
+        // 所以很便宜）。这比"截断列表"好：截断丢掉的是整片区域，抽稀是均匀采样 ✓。
+        if (m_listTiles.size() > kMaxInstances && !limitOffCache() && m_lodStride == lodStride) {
+            const size_t visible1 = m_listTiles.size();
+            const size_t need = (visible1 + kMaxInstances - 1) / kMaxInstances;
+            if (need > m_lodStride) {
+                LOG_I("lod: 可见 %zu > 预算 %zu → 重剔一遍，步长 %zu → %zu", visible1,
+                      (size_t)kMaxInstances, m_lodStride, need);
+                m_lodStride = need;
+                m_listTiles.clear();
+                m_listAttr.clear();
+                if (m_cullIndex.valid() && !cullForceScan()) {   // 索引路径
+                    m_cullIndex.forEachHitBlock(vl, vr, vb, vt, [&](uint32_t f, uint32_t c) {
+                        cullRange((size_t)f, (size_t)f + (size_t)c, vl, vr, vb, vt, camX, camY,
+                                  m_listTiles, m_listAttr, m_lodStride);
+                    });
+                } else {                                    // 全扫路径
+                    cullRange(0, (size_t)m_nTiles, vl, vr, vb, vt, camX, camY, m_listTiles,
+                              m_listAttr, m_lodStride);
+                }
+            }
+        }
         if (m_listTiles.size() > kMaxInstances && !limitOffCache()) {
             limitWarn("visible-instances", m_listTiles.size());
             m_listTiles.resize(kMaxInstances);

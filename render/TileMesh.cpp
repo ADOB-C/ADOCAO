@@ -137,9 +137,9 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     hexToColor3(fillColorHex, m_fill);
     hexToColor3(strokeColorHex, m_stroke);
 
-    const auto& tiles = level.tiles;
-    if (tiles.size() < 2) return;
-    m_nTiles = (int)tiles.size() - 1;
+    if (level.tileCount() < 2) return;
+    // ③ 切片 4：逐步改成顺序流式（现在是顺序访问密集数组，换 provider 时这里不用改）
+    m_nTiles = (int)level.tileCount() - 1;
     const int n = m_nTiles;
     LOG_D("TileMesh::build start: %d tiles (1 实例/砖, GPU 展开)", n);
 
@@ -165,8 +165,8 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     m_chunkX.assign(nChunks, 0.0); m_chunkY.assign(nChunks, 0.0);
     for (size_t c = 0; c < nChunks; c++) {
         const size_t i0 = c * chunkSize;
-        m_chunkX[c] = tiles[i0].position[0];
-        m_chunkY[c] = tiles[i0].position[1];
+        m_chunkX[c] = level.tilePositionAt(i0)[0];
+        m_chunkY[c] = level.tilePositionAt(i0)[1];
     }
     m_iconBits.assign((size_t)n, 0);
     // 剔除/上传都直接按下标取砖，所以这里没有任何"逐砖排列"数组了（见下面绘制顺序的说明）
@@ -179,8 +179,8 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
         for (int i : tileIndices) {
             m_tileShape[(size_t)i] = shapeIdx;
             const size_t ti = (size_t)i, c = ti >> kPosChunkShift;
-            m_posX[ti] = (float)(tiles[ti].position[0] - m_chunkX[c]);
-            m_posY[ti] = (float)(tiles[ti].position[1] - m_chunkY[c]);
+            m_posX[ti] = (float)(level.tilePositionAt(ti)[0] - m_chunkX[c]);
+            m_posY[ti] = (float)(level.tilePositionAt(ti)[1] - m_chunkY[c]);
         }
     }
     // 绘制顺序 = **按砖号（= 层号）升序**（2026-10-15 起）：所以不再需要 `m_drawOrder` 那支

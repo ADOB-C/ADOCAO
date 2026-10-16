@@ -190,14 +190,14 @@ float Timeline::extraRotAt(int64_t i) const {
     return (it != m_pauseRot.end() && it->first == i) ? it->second : 0.0f;
 }
 float Timeline::startAngleAt(int64_t i) const {
-    if (m_level->tiles.empty()) return 0.0f;
+    if (m_level->tileCount() == 0) return 0.0f;
     const int64_t n = (int64_t)m_tileBPM.size();
     if (i <= 0) return (m_level->settings.rotation + 180.0f) * 3.14159265f / 180.0f;
     if (i >= n - 1) return startAngleAt(n - 2);
-    return std::fmod(m_level->tiles[(size_t)(i - 1)].direction + 180.0f, 360.0f) * 3.14159265f / 180.0f;
+    return std::fmod(m_level->tileDirectionAt(i - 1) + 180.0f, 360.0f) * 3.14159265f / 180.0f;
 }
 float Timeline::totalAngleAt(int64_t i) const {
-    if (m_level->tiles.empty()) return 0.0f;
+    if (m_level->tileCount() == 0) return 0.0f;
     const int64_t nAll = (int64_t)m_tileBPM.size();
     if (i >= nAll - 1) return m_lastTotalAngle;
     const auto& ad = m_level->angleData;

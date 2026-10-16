@@ -76,6 +76,17 @@ struct LevelData {
         return a.strId < actionStrTable.size() ? actionStrTable[a.strId] : actionStrTable[0];
     }
 
+    // ③ 切片 4（第 1 步）：**运行期读者不要再直接碰 `tiles[i]`** —— 将来 `tiles` 要按块物化，
+    // 这两个访问器就是那层接口。现在先直读密集数组（行为逐位不变），换 provider 时消费方零改动。
+    int64_t tileCount() const { return (int64_t)tiles.size(); }
+    const std::array<double, 2>& tilePositionAt(int64_t i) const {
+        static const std::array<double, 2> kZero{0.0, 0.0};
+        return (i >= 0 && (size_t)i < tiles.size()) ? tiles[(size_t)i].position : kZero;
+    }
+    float tileDirectionAt(int64_t i) const {
+        return (i >= 0 && (size_t)i < tiles.size()) ? tiles[(size_t)i].direction : 0.0f;
+    }
+
     struct TilePositionOffset {
         float offsetX = 0.0f;
         float offsetY = 0.0f;

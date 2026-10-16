@@ -34,7 +34,7 @@ namespace {
 // Start playback from the given floor (used for Space-from-selected-tile).
 static void jumpToTile(Timeline& timeline, PlaybackClock& clock, AudioEngine& audio, HitsoundManager& hs,
                         const LevelData& level, int floor) {
-    if (floor < 0 || floor >= (int)level.tiles.size()) return;
+    if (floor < 0 || floor >= (int)level.tileCount()) return;
     double targetTime = timeline.startTimeAt(floor);
     float offsetSec = level.settings.offset / 1000.0f;
     float audioPos = (float)(targetTime + offsetSec);
@@ -73,7 +73,7 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     m_hitsoundMgr = &result.hitsounds;
     m_audioEngine = &result.audio;
     m_targetAspect = (float)cfg.resolutionW / (float)cfg.resolutionH;
-    LOG_D("GameWindow::init: %zu tiles, fullscreen=%d exclusive=%d", m_level->tiles.size(), cfg.fullscreen, cfg.exclusiveFullscreen);
+    LOG_D("GameWindow::init: %lld tiles, fullscreen=%d exclusive=%d", (long long)m_level->tileCount(), cfg.fullscreen, cfg.exclusiveFullscreen);
 
     // Create window
     m_exclusiveFullscreen = cfg.exclusiveFullscreen;
@@ -200,9 +200,9 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     }
     m_camCtrl.attach(m_camera);
     m_camera.setZoom(m_level->settings.zoom);
-    if (!m_level->tiles.empty()) {
-        auto& t = m_level->tiles[0];
-        m_camCtrl.snapTo(t.position[0], t.position[1]);
+    if (m_level->tileCount() > 0) {
+        const auto& p0 = m_level->tilePositionAt(0);
+        m_camCtrl.snapTo(p0[0], p0[1]);
     }
 
     // Mesh build: async on a shared GL context (NVIDIA), sync otherwise
@@ -260,9 +260,9 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
 }
 
 void GameWindow::navigateToTile(int floor) {
-    if (floor < 0 || floor >= (int)m_level->tiles.size()) return;
-    auto& t = m_level->tiles[floor];
-    m_camCtrl.snapTo(t.position[0], t.position[1]);
+    if (floor < 0 || floor >= (int)m_level->tileCount()) return;
+    const auto& p = m_level->tilePositionAt(floor);
+    m_camCtrl.snapTo(p[0], p[1]);
     m_selectedTile = floor;
 }
 
@@ -308,9 +308,9 @@ void GameWindow::handleInput() {
                                                    fbW, fbH, m_targetAspect);
 
         int best = -1; double bestDist = 1.0;
-        for (int i = 0; i < (int)m_level->tiles.size()-1; i++) {
-            double dx = m_level->tiles[i].position[0] - world.x;
-            double dy = m_level->tiles[i].position[1] - world.y;
+        for (int i = 0; i < (int)m_level->tileCount()-1; i++) {
+            double dx = m_level->tilePositionAt(i)[0] - world.x;
+            double dy = m_level->tilePositionAt(i)[1] - world.y;
             double d = dx*dx + dy*dy;
             if (d < bestDist*bestDist) { bestDist = std::sqrt(d); best = i; }
         }
@@ -338,10 +338,10 @@ void GameWindow::handleInput() {
                 // No tile selected: anchor on the tile nearest the view centre.
                 double cx = m_camera.targetX(), cy = m_camera.targetY();
                 double bestD = -1.0;
-                int nTiles = (int)m_level->tiles.size() - 1;   // skip synthetic last tile
+                int nTiles = (int)m_level->tileCount() - 1;   // skip synthetic last tile
                 for (int i = 0; i < nTiles; i++) {
-                    double dx = m_level->tiles[i].position[0] - cx;
-                    double dy = m_level->tiles[i].position[1] - cy;
+                    double dx = m_level->tilePositionAt(i)[0] - cx;
+                    double dy = m_level->tilePositionAt(i)[1] - cy;
                     double d = dx * dx + dy * dy;
                     if (bestD < 0.0 || d < bestD) { bestD = d; cur = i; }
                 }
@@ -368,7 +368,7 @@ void GameWindow::handleInput() {
         static double arrowHoldStart = 0;
         bool al=(glfwGetKey(m_window,GLFW_KEY_LEFT)==GLFW_PRESS);
         bool ar=(glfwGetKey(m_window,GLFW_KEY_RIGHT)==GLFW_PRESS);
-        int tn=(int)m_level->tiles.size()-1;
+        int tn=(int)m_level->tileCount()-1;
         if (al || ar) {
             double now = glfwGetTime();
             bool firstPress = (arrowHoldStart == 0);
@@ -412,8 +412,8 @@ void GameWindow::update(float) {
     // Camera follow during playback
     if (m_playback->isPlaying()) {
         int tileIdx = m_playback->currentTileIndex();
-        if (tileIdx >= 0 && tileIdx < (int)m_level->tiles.size()) {
-            auto& p = m_level->tiles[tileIdx].position;
+        if (tileIdx >= 0 && tileIdx < (int)m_level->tileCount()) {
+            const auto& p = m_level->tilePositionAt(tileIdx);
             m_camCtrl.snapTo(p[0], p[1]);
         }
     }
@@ -538,8 +538,8 @@ void GameWindow::captureAndExit() {
     m_scene->applyFrame(m_playback->frame(), *m_timeline);
 
     int tileIdx = m_playback->currentTileIndex();
-    if (tileIdx >= 0 && tileIdx < (int)m_level->tiles.size())
-        m_camCtrl.snapTo(m_level->tiles[tileIdx].position[0], m_level->tiles[tileIdx].position[1]);
+    if (tileIdx >= 0 && tileIdx < (int)m_level->tileCount())
+        m_camCtrl.snapTo(m_level->tilePositionAt(tileIdx)[0], m_level->tilePositionAt(tileIdx)[1]);
     m_camera.setZoom(m_cfg->captureZoom);
 
     int fbW = 0, fbH = 0;

@@ -11,8 +11,8 @@
 namespace adofai {
 
 void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& redOut, glm::dvec2& blueOut) {
-    const auto& tiles = timeline.level()->tiles;
-    const int64_t nFull = (int64_t)tiles.size();   // #0：int64 算，收窄前显式判
+    const LevelData& L = *timeline.level();   // ③ 切片 4：走访问器，不直接碰 tiles[]
+    const int64_t nFull = L.tileCount();   // #0：int64 算，收窄前显式判
     if (!fitsInt32(nFull)) {
         LOG_E("PositionSolver 需要 64 位索引（#0 阶段 3）：%lld 层超出 int32", (long long)nFull);
         return;
@@ -23,7 +23,7 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
 
     // Before first tile: orbit backward at constant BPM
     if (t < timeline.startTimeAt(0)) {
-        const auto& p0 = tiles[0].position;
+        const auto& p0 = L.tilePositionAt(0);
         double bpm = timeline.tileBPMs()[0];
         bool cw = timeline.tileIsCW()[0];
         double startAngle = (timeline.level()->settings.rotation + 180.0) * 3.14159265358979 / 180.0;
@@ -40,10 +40,10 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
 
     if (tileIdx >= n - 1) {
         int lastIdx = n - 1;
-        const auto& pivotPos = tiles[lastIdx].position;
+        const auto& pivotPos = L.tilePositionAt(lastIdx);
         double startAngle = 0.0;
         if (lastIdx > 0) {
-            const auto& prevPos = tiles[lastIdx - 1].position;
+            const auto& prevPos = L.tilePositionAt(lastIdx - 1);
             startAngle = std::atan2(prevPos[1]-pivotPos[1], prevPos[0]-pivotPos[0]);
         }
         double extraTime = t - timeline.startTimeAt(lastIdx);
@@ -56,7 +56,7 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
     }
 
     bool isRed = (tileIdx%2==0);
-    const auto& pivotPos = tiles[tileIdx].position;
+    const auto& pivotPos = L.tilePositionAt(tileIdx);
     double startTime = timeline.startTimeAt(tileIdx);
     double duration = timeline.durationAt(tileIdx);
     double progress = (duration>0.0001)?(t-startTime)/duration:1.0;
@@ -70,8 +70,8 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
 }
 
 void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tileIdx, glm::dvec2& redOut, glm::dvec2& blueOut) {
-    const auto& tiles = timeline.level()->tiles;
-    const int64_t nFull = (int64_t)tiles.size();   // #0：int64 算，收窄前显式判
+    const LevelData& L = *timeline.level();   // ③ 切片 4：走访问器，不直接碰 tiles[]
+    const int64_t nFull = L.tileCount();   // #0：int64 算，收窄前显式判
     if (!fitsInt32(nFull)) {
         LOG_E("PositionSolver 需要 64 位索引（#0 阶段 3）：%lld 层超出 int32", (long long)nFull);
         return;
@@ -79,7 +79,7 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
     const int n = (int)nFull;
     if (n < 2) return;
     if (t < timeline.startTimeAt(0)) {
-        const auto& p0 = tiles[0].position;
+        const auto& p0 = L.tilePositionAt(0);
         double bpm = timeline.tileBPMs()[0]; bool cw = timeline.tileIsCW()[0];
         double startAngle = (timeline.level()->settings.rotation + 180.0) * 3.14159265358979 / 180.0;
         double dts = timeline.startTimeAt(0) - t;
@@ -93,10 +93,10 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
     }
     if (tileIdx >= n - 1) {
         int lastIdx = n - 1;
-        const auto& pivotPos = tiles[lastIdx].position;
+        const auto& pivotPos = L.tilePositionAt(lastIdx);
         double startAngle = 0.0;
         if (lastIdx > 0) {
-            const auto& prevPos = tiles[lastIdx - 1].position;
+            const auto& prevPos = L.tilePositionAt(lastIdx - 1);
             startAngle = std::atan2(prevPos[1]-pivotPos[1], prevPos[0]-pivotPos[0]);
         }
         double extraTime = t - timeline.startTimeAt(lastIdx);
@@ -108,7 +108,7 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
         return;
     }
     bool isRed = (tileIdx%2==0);
-    const auto& pivotPos = tiles[tileIdx].position;
+    const auto& pivotPos = L.tilePositionAt(tileIdx);
     double startTime = timeline.startTimeAt(tileIdx);
     double duration = timeline.durationAt(tileIdx);
     double progress = (duration>0.0001)?(t-startTime)/duration:1.0;

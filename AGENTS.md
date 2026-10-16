@@ -174,6 +174,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     ③ 并行剔除段**必须主线程先 pin 窗口**（worker 碰共享窗口缓存会撕数据），命中块数超过槽位数
     或剔除块粒度 > 4096 时退回串行。验收：`ADOCAO_MESH_DUMP=1` 的整段派生 FNV 与"数组时代"
     记录值四个全等 + 像素门槛 51/51 + 常驻 footprint 388.2 → **311.3 MB**（live 199.8 → 114.0）。
+  * **⑦ 容量边界第一道闸（2026-10-16）**：极端视距"整张一帧"会卡死（实测一帧 **36.2 s** → macOS 沙滩球）。
+    `TileMesh` 现在有 `kMaxCullCandidates = 524,288`（超了就**降级为离相机最近的块**，
+    `CullIndex::collectHitBlocksNearest()`，确定性）与 `kMaxInstances = 262,144`（确定性截断）。
+    **不能"超预算就不画"** —— 那会整帧黑屏（只剩行星/拖尾），用户一眼就看出来 ✗；
+    两个常量还必须**高于门槛里任何合法状态**（压到 1<<16 → 门槛 50/51 ✗）。效果：最坏帧 → **85.7 ms**。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`

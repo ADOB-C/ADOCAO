@@ -383,6 +383,16 @@ const TileMesh::DerivedRange* TileMesh::windowFor(size_t tile) const {
     return &m_windows[slot];
 }
 
+// ⑦ 限频告警（每秒最多一条，避免极端视距下刷屏）
+void TileMesh::limitWarn(const char* what, size_t n) const {
+    const double now = (double)std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (now - m_limitWarnAt < 1.0) return;
+    m_limitWarnAt = now;
+    LOG_W("cull-limit: %s = %zu 超过预算（候选 %zu / 实例 %zu）→ 降级为最近块 / 截断实例（⑦ 容量边界）",
+          what, n, kMaxCullCandidates, kMaxInstances);
+}
+
 void TileMesh::cullRange(size_t begin, size_t end, double vl, double vr, double vb, double vt,
                          double camX, double camY, std::vector<uint32_t>& outTiles,
                          std::vector<float>& outAttr) const {
@@ -476,6 +486,19 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
                 ranges.emplace_back((size_t)f, (size_t)f + (size_t)c);
                 candidates += c;
             });
+            // ⑦ 闸①：候选太多**降级**为"只画离相机最近的块"（累计候选 ≤ 预算）。
+            // 不能直接不画 —— 那会整帧黑屏（只剩行星/拖尾），实测被用户一眼看出来 ✗。
+            if (candidates > kMaxCullCandidates) {
+                limitWarn("cull-candidates", candidates);
+                const size_t before = candidates;
+                ranges.clear();
+                m_cullIndex.collectHitBlocksNearest(vl, vr, vb, vt, camX, camY,
+                                                    kMaxCullCandidates, ranges);
+                candidates = 0;
+                for (const auto& r : ranges) candidates += r.second - r.first;
+                LOG_W("cull-limit: 降级为最近块 —— 候选 %zu → %zu（%zu 块）", before, candidates, ranges.size());
+            }
+
             // 把命中块按"约 CHUNK 块砖"切成并行任务（保持块序）
             std::vector<std::pair<size_t, size_t>> jobs;     // ranges 的下标区间
             for (size_t i = 0; i < ranges.size();) {
@@ -566,6 +589,12 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
             }
         }
         m_vl = viewL; m_vr = viewR; m_vb = viewB; m_vt = viewT;
+        // ⑦ 闸②：可见实例封顶（确定性截断，按砖号取前 N）—— 宁可少画，不能卡死
+        if (m_listTiles.size() > kMaxInstances) {
+            limitWarn("visible-instances", m_listTiles.size());
+            m_listTiles.resize(kMaxInstances);
+            m_listAttr.resize(kMaxInstances * 5);
+        }
         m_listValid = true;
         m_listUploaded = false;
     } else {

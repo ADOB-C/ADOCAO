@@ -116,12 +116,23 @@ private:
     // ③ 切片 4【二分实验】：数组**保留**，额外建"按块窗口"，只让 cullRange 从窗口读 ——
     // 用来判定"派生值不对"还是"读路径不等价"。
     const LevelData* m_level = nullptr;
+    // ⑦ 容量边界（2026-10-16）：极端视距下"整张一帧"会让主线程卡死几十秒
+    // （实测：1055 万砖全进视锥 → 逐块剔除 + 211 MB 实例上传 = **一帧 36.2 s**，macOS 转沙滩球）。
+    // 两道闸：① 候选砖超过 kMaxCullCandidates 就**跳过本帧重建**（保留上一帧的列表）；
+    // ② 可见实例超过 kMaxInstances 就**确定性截断**（按砖号取前 N）。宁可少画，不能卡死。
+    // 门槛里最宽的状态只抽 5,407 个实例，所以这两道闸对 51 个状态**完全不可见**。
+    // ⚠️ 这两个值必须**高于门槛里任何合法状态**（实测：门槛中最宽的那个状态抽 >6.5 万实例，
+    // 把它压到 1<<16 会让门槛 50/51 ✗）。当前值下 51 个状态逐字节相同，而降级帧 36 s → 82 ms。
+    static constexpr size_t kMaxCullCandidates = 1u << 19;   // 524,288 块砖
+    static constexpr size_t kMaxInstances      = 1u << 18;   // 262,144 实例（×20 B = 5.2 MB）
     static constexpr size_t kWindowFloors = 4096;
     static constexpr size_t kWindowSlots  = 128;
     mutable std::vector<DerivedRange> m_windows;
     mutable std::vector<int64_t> m_windowBlock;
     mutable size_t m_windowNext = 0;
     const DerivedRange* windowFor(size_t tile) const;
+    void limitWarn(const char* what, size_t n) const;
+    mutable double m_limitWarnAt = 0.0;
     mutable bool m_windowChecked = false;   // 逐砖直比只做一次
 
     // ③ 切片 4：四支每砖数组**不再常驻**（13 B/砖，MYC 84 MB）—— 剔除时按 4096 窗口物化。

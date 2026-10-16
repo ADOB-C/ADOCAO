@@ -585,19 +585,24 @@ void GameWindow::captureAndExit() {
               m_cfg->capturePath.c_str(), fbW, fbH, targetTime, m_cfg->captureZoom, tileIdx,
               m_cfg->captureTile, renderMs, firstMs, frames, dragged);
         if (profile::enabled()) {
-            // 逐帧快照：`首帧`含一次性 GL 开销（着色器编译/纹理上传），`稳态`才是帧预算要看的那条
-            auto dump = [](const char* tag, const profile::Frame& f) {
-                if (!f.valid) return;
+            // 两条口径：首帧=一次性 GL 开销的单次快照；稳态=第 2..N 帧的 min/中位/max（抗单样本噪声）
+            if (frames == 1) {
+                const auto& f = profile::firstFrame();
                 const double sum = profile::sumMs(f);
-                LOG_I("profile(%s): %s ｜段和 %.3f / 帧 %.3f（%.0f%%）", tag,
-                      profile::report(f).c_str(), sum, f.ms,
-                      f.ms > 0 ? 100.0 * sum / f.ms : 0.0);
+                LOG_I("profile(单帧): %s ｜段和 %.3f / 帧 %.3f（%.0f%%）", profile::reportFirst().c_str(),
+                      sum, f.ms, f.ms > 0 ? 100.0 * sum / f.ms : 0.0);
                 if (sum > f.ms * 1.05 + 0.5)
-                    LOG_W("profile(%s): 段和 %.3f ms > 该帧自量 %.3f ms —— 口径有问题（别信这张表）",
-                          tag, sum, f.ms);
-            };
-            if (frames > 1) dump("首帧", profile::firstFrame());
-            dump(frames > 1 ? "稳态" : "单帧", profile::lastFrame());
+                    LOG_W("profile(单帧): 段和 %.3f ms > 该帧自量 %.3f ms —— 口径有问题（别信这张表）",
+                          sum, f.ms);
+            } else {
+                LOG_I("profile(首帧): %s", profile::reportFirst().c_str());
+                LOG_I("profile(稳态): %s", profile::reportSteady().c_str());
+                const double secSum = profile::steadySectionSumMed();
+                const double fmed = profile::steadyFrameMed();
+                if (secSum > fmed * 1.05 + 0.5)
+                    LOG_W("profile(稳态): 段中位和 %.3f ms > 帧中位 %.3f ms —— 口径有问题（别信这张表）",
+                          secSum, fmed);
+            }
         }
     else
         // 前缀**不能**是 `capture:`：`capture-gate.sh` 用"日志里最后一条 capture: 行"核对

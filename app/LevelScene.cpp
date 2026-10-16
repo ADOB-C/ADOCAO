@@ -254,26 +254,35 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
 
 void LevelScene::updateTileVisibility(const Timeline& timeline, double t, bool playing) {
     if (!m_tileVisEnabled) return;
-    const auto& dt = timeline.tileDisappearTimes();
-    const auto& at = timeline.tileAppearTimes();
-    int n = (int)dt.size();
+    if (!timeline.hasTrackVisTimes()) return;      // 这张谱不需要 TrackVis
+    const int64_t n = timeline.tileCount();
     if (n > 0 && playing) {
-        // Find approximate range: last tile with finite disappearTime <= t
-        int lo = 0, hi = n - 1, rangeEnd = -1;
+        // "最后一个 disappearTime <= t 的层"：**先在粗索引上二分**（每 kAnchorStride 层一份，
+        // 26 KB）→ 再物化那一块做块内细搜。等价性前提：粗索引单调（`trackVisCoarseMonotone()`，
+        // 不单调时 Timeline 不窗口化、这里读到的仍是密集数组的同一批值）。
+        const auto& cda = timeline.coarseDisappearTimes();
+        const int64_t stride = Timeline::kAnchorStride;
+        int64_t lo = 0, hi = (int64_t)cda.size() - 1, aEnd = -1;
         while (lo <= hi) {
-            int m = (lo + hi) / 2;
-            if (dt[m] <= t) { rangeEnd = m; lo = m + 1; }
-            else hi = m - 1;
+            const int64_t m = (lo + hi) / 2;
+            if (cda[(size_t)m] <= t) { aEnd = m; lo = m + 1; } else hi = m - 1;
+        }
+        int64_t rangeEnd = -1;
+        if (aEnd >= 0) {
+            const int64_t from = aEnd * stride;
+            const int64_t to = std::min(from + stride, n);
+            for (int64_t i = from; i < to; ++i)
+                if (timeline.disappearTimeAt(i) <= t) rangeEnd = i;   // 取块内最后一个满足的
         }
         if (rangeEnd != m_lastHiddenEnd) {
-            int start = std::min(m_lastHiddenEnd, rangeEnd) + 1;
-            int end   = std::max(m_lastHiddenEnd, rangeEnd);
-            for (int i = start; i <= end; i++) {
-                bool hide = (dt[i] <= t) || (at[i] > t);
-                m_tileMesh->updateVisibleRange(i, i, !hide);
+            const int64_t start = std::min<int64_t>(m_lastHiddenEnd, rangeEnd) + 1;
+            const int64_t end   = std::max<int64_t>(m_lastHiddenEnd, rangeEnd);
+            for (int64_t i = start; i <= end; i++) {
+                const bool hide = (timeline.disappearTimeAt(i) <= t) || (timeline.appearTimeAt(i) > t);
+                m_tileMesh->updateVisibleRange((int)i, (int)i, !hide);
             }
-            m_tileMesh->setVisibleThreshold(rangeEnd);
-            m_lastHiddenEnd = rangeEnd;
+            m_tileMesh->setVisibleThreshold((int)rangeEnd);
+            m_lastHiddenEnd = (int)rangeEnd;
         }
         if (rangeEnd >= 0) m_sgVisibleLatch = true;
     }

@@ -155,6 +155,41 @@ void testBlocks(const char* path) {
     }
 }
 
+// ③ 切片 3：丢掉密集两支之后，**窗口化访问器**必须逐层给出同一批值
+void testWindowedAccess(const char* path) {
+    LevelData lv;
+    if (!lv.loadFromFile(path)) { std::printf("FAIL 载入失败：%s\n", path); ++g_fail; return; }
+    Timeline tl;
+    tl.build(lv, /*exportOnly=*/false);
+    if (!tl.hasTrackVisTimes()) {
+        std::printf("     %-46s 无 TrackVis（不需要丢）\n", path);
+        return;
+    }
+    // 先留一份密集数组的副本当基准
+    const std::vector<double> wantDA = tl.tileDisappearTimes();
+    const std::vector<double> wantAA = tl.tileAppearTimes();
+    if (!tl.dropTrackVisArrays()) {
+        std::printf("     %-46s 保留密集数组（%s；单调=%d）\n", path, tl.blocksRecomputableWhy(),
+                    (int)tl.trackVisCoarseMonotone());
+        return;
+    }
+    check(tl.tileDisappearTimes().empty() && tl.tileAppearTimes().empty(),
+          "丢了之后密集数组应为空");
+    size_t bad = 0, firstBad = (size_t)-1;
+    for (size_t i = 0; i < wantDA.size(); ++i) {
+        // 逐位（==，不用容差）；inf/-inf 也走同一条比较
+        if (!(tl.disappearTimeAt((int64_t)i) == wantDA[i]) ||
+            !(tl.appearTimeAt((int64_t)i) == wantAA[i])) {
+            if (bad == 0) firstBad = i;
+            ++bad;
+        }
+    }
+    if (bad) std::printf("     首个不一致在第 %zu 层\n", firstBad);
+    check(bad == 0, std::string(path) + "：窗口化访问器与密集数组不一致");
+    std::printf("     %-46s 窗口化后逐层对拍：%zu 层 0 不一致？%s（粗索引单调=%d）\n", path,
+                wantDA.size(), bad == 0 ? "是" : "否", (int)tl.trackVisCoarseMonotone());
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -163,6 +198,8 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) testChart(argv[i]);
     std::printf("=== ③ 切片 2：按块重算逐层对拍 ===\n");
     for (int i = 1; i < argc; ++i) testBlocks(argv[i]);
+    std::printf("=== ③ 切片 3：丢掉密集数组后的窗口化访问 ===\n");
+    for (int i = 1; i < argc; ++i) testWindowedAccess(argv[i]);
     if (g_fail == 0) std::printf("全部通过\n");
     else std::printf("%d 项不通过\n", g_fail);
     return g_fail == 0 ? 0 : 1;

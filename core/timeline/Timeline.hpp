@@ -73,6 +73,21 @@ public:
     bool blocksRecomputable() const { return m_blocksRecomputable; }
     const char* blocksRecomputableWhy() const { return m_blocksWhy; }
     bool recomputeBlock(int64_t i0, int64_t i1, BlockResult& out) const;
+    // ③ 切片 3：TrackVis 两支的**窗口化访问**。粗索引（每 kAnchorStride 层一份，26 KB）
+    // 供消费方的二分查找用；逐层值由"物化所在块"给出（单块缓存）。
+    bool  hasTrackVisTimes() const { return m_needsTrackVis; }
+    bool  trackVisWindowed() const { return m_visWindowed; }   // 密集两支已丢
+    // 粗索引是否单调（消费方的二分沿用原实现的前提；不单调就不敢窗口化）
+    bool  trackVisCoarseMonotone() const { return m_visCoarseMonotone; }
+    int64_t tileCount() const { return (int64_t)m_tileBPM.size(); }
+    const std::vector<double>& coarseDisappearTimes() const { return m_coarseDA; }
+    const std::vector<double>& coarseAppearTimes() const { return m_coarseAA; }
+    // 逐层 TrackVis 时间（未窗口化时直接读密集数组；窗口化时物化所在块）
+    const BlockResult* windowFor(int64_t i) const;   // 单块缓存（物化 i 所在的块）
+    double disappearTimeAt(int64_t i) const;
+    double appearTimeAt(int64_t i) const;
+    // 丢掉两支密集 double（只有 blocksRecomputable() 时才允许；丢之前先建粗索引）
+    bool dropTrackVisArrays();
     // **仅测试用**：改某一层的时长（给"按块重算"做反面对照 —— 1 ULP 也必须被抓到）
     void setDurationForTest(int64_t i, float v) {
         if (i >= 0 && (size_t)i < m_durations.size()) m_durations[(size_t)i] = v;
@@ -133,6 +148,12 @@ private:
     float  m_visBB = 0.0f, m_visBA = 0.0f;
     float  m_visNum5 = 0.0f;         // = bpm[0]（i==0 时的 num5/num6 初值）
     bool   m_needsTrackVis = false;
+    // 切片 3
+    bool   m_visWindowed = false;
+    bool   m_visCoarseMonotone = false;
+    std::vector<double> m_coarseDA, m_coarseAA;   // 每锚点一份
+    mutable int64_t m_winBlock = -1;              // 单块缓存（物化过的块号）
+    mutable BlockResult m_winCache;
     size_t m_distCount = 0;          // 有效层数（= n）；配合下面两个标量实现 tileStartDist/tileEndDist
     float  m_lastStartDist = 1.0f;   // 只有最后一层用得上（其余恒 1.0f）
     float  m_lastEndDist   = 1.0f;

@@ -124,5 +124,14 @@ void runLevelLoading(const LauncherConfig& cfg, LoadingProgress& progress, LoadR
     // Release data no longer needed (angleData, actions, position offsets)
     result.level->releaseMemory();
 
+    // ③ 切片 3：丢掉 Timeline 的两支 TrackVis 密集 double（MYC 原版 103 MB）——
+    // 只有"可重算（无 AT 事件）+ 粗索引单调"时才丢（`dropTrackVisArrays()` 自己判定），
+    // 否则保留密集数组、行为与以前**完全一样**。
+    if (result.timeline) {
+        const bool dropped = result.timeline->dropTrackVisArrays();
+        LOG_I("timeline: TrackVis 密集数组 %s（%s）", dropped ? "已窗口化" : "保留",
+              dropped ? result.timeline->blocksRecomputableWhy() : "不可重算/粗索引不单调");
+    }
+
     report(progress, 1.0f, "Ready!");
 }

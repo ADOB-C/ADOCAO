@@ -391,6 +391,7 @@ void Timeline::precalculateTiming() {
         // ③ 切片 2：记下恒定态（无 AnimateTrack 事件时整段不变），供按块重算
         m_visDA = curDA; m_visAA = curAA; m_visBB = curBB; m_visBA = curBA;
         m_visNum5 = (n > 0) ? m_tileBPM[0] : 0.0f;
+
     }
     m_needsTrackVis = needsTrackVis;
     // 可重算判据：不需要 TrackVis 时只看时长；需要 TrackVis 时还要求块内没有 AT 事件
@@ -418,6 +419,27 @@ void Timeline::precalculateTiming() {
             m_anchors.push_back(a);
         }
         LOG_D("Timeline: %zu 个锚点（每 %lld 层）", m_anchors.size(), (long long)kAnchorStride);
+
+        // ③ 切片 3：粗索引（每锚点一份 TrackVis 时间，26 KB 换掉 103 MB）+ 单调性判据。
+        // **必须在锚点记完之后建**（它在 Phase 5 之后，早建会遍历空数组）。
+        m_coarseDA.clear(); m_coarseAA.clear();
+        m_visCoarseMonotone = false;
+        if (m_needsTrackVis) {
+            m_coarseDA.reserve(m_anchors.size()); m_coarseAA.reserve(m_anchors.size());
+            for (const Anchor& a : m_anchors) {
+                const size_t k = (size_t)a.floor;
+                m_coarseDA.push_back(k < m_tileDisappearTimes.size() ? m_tileDisappearTimes[k] : 0.0);
+                m_coarseAA.push_back(k < m_tileAppearTimes.size() ? m_tileAppearTimes[k] : 0.0);
+            }
+            // 消费方的二分（原实现）就假设单调；只有粗索引也单调才敢窗口化
+            m_visCoarseMonotone = true;
+            for (size_t k = 1; k < m_coarseDA.size(); k++) {
+                if (!(m_coarseDA[k] >= m_coarseDA[k - 1]) || !(m_coarseAA[k] >= m_coarseAA[k - 1])) {
+                    m_visCoarseMonotone = false;
+                    break;
+                }
+            }
+        }
     }
 
     auto [minBPM, maxBPM] = std::minmax_element(m_tileBPM.begin(), m_tileBPM.end());
@@ -462,6 +484,54 @@ bool Timeline::recomputeBlock(int64_t i0, int64_t i1, BlockResult& out) const {
         if (writeDA) out.disappearTimes[(size_t)(i - i0)] = st1 + (double)(m_visBB * 60.0f / refBPM);
         if (writeAA) out.appearTimes[(size_t)(i - i0)]    = st  - (double)(m_visBA * 60.0f / refBPM);
     }
+    return true;
+}
+
+// ③ 切片 3：物化 i 所在的块（单块缓存）。返回该块，出错则 nullptr
+const Timeline::BlockResult* Timeline::windowFor(int64_t i) const {
+    if (i < 0 || i >= tileCount()) return nullptr;
+    const int64_t b = i / kAnchorStride;
+    if (m_winBlock == b && !m_winCache.startTimes.empty()) return &m_winCache;
+    const int64_t i0 = b * kAnchorStride;
+    const int64_t i1 = std::min(i0 + kAnchorStride, tileCount());
+    BlockResult r;
+    if (!recomputeBlock(i0, i1, r)) return nullptr;
+    m_winCache = std::move(r);
+    m_winBlock = b;
+    return &m_winCache;
+}
+
+double Timeline::disappearTimeAt(int64_t i) const {
+    if (!m_visWindowed) {
+        return (i >= 0 && (size_t)i < m_tileDisappearTimes.size()) ? m_tileDisappearTimes[(size_t)i]
+                                                                   : std::numeric_limits<double>::infinity();
+    }
+    const BlockResult* w = windowFor(i);
+    if (!w) return std::numeric_limits<double>::infinity();
+    const size_t k = (size_t)(i - (i / kAnchorStride) * kAnchorStride);
+    return k < w->disappearTimes.size() ? w->disappearTimes[k] : std::numeric_limits<double>::infinity();
+}
+
+double Timeline::appearTimeAt(int64_t i) const {
+    if (!m_visWindowed) {
+        return (i >= 0 && (size_t)i < m_tileAppearTimes.size()) ? m_tileAppearTimes[(size_t)i]
+                                                                : -std::numeric_limits<double>::infinity();
+    }
+    const BlockResult* w = windowFor(i);
+    if (!w) return -std::numeric_limits<double>::infinity();
+    const size_t k = (size_t)(i - (i / kAnchorStride) * kAnchorStride);
+    return k < w->appearTimes.size() ? w->appearTimes[k] : -std::numeric_limits<double>::infinity();
+}
+
+bool Timeline::dropTrackVisArrays() {
+    if (!m_needsTrackVis) return true;                 // 本来就没有
+    if (!m_blocksRecomputable) return false;           // 有 AT：留着密集数组（行为不变）
+    if (m_coarseDA.empty()) return false;              // 防御：粗索引必须已经建好
+    if (!m_visCoarseMonotone) return false;            // 粗索引不单调 → 二分的等价性没保证
+    std::vector<double>().swap(m_tileDisappearTimes);
+    std::vector<double>().swap(m_tileAppearTimes);
+    m_visWindowed = true;
+    m_winBlock = -1;
     return true;
 }
 

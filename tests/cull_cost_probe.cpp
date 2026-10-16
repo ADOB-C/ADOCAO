@@ -6,6 +6,8 @@
 //   C  4096 层块 AABB 查询           —— 提案：每块一个 AABB，先筛块、再在块内逐砖判
 //   D  均匀网格（哈希）+ 查完排序     —— 我最初在 ③ 报告里提的那条：格子 → 下标流，
 //                                       查完把候选按"绘制序下标"排序以恢复绘制顺序
+//   D2 均匀网格 + 多路归并            —— D 的免排序版：每格的下标流**预先按绘制序排好**，
+//                                       查询按栅格序取格，做 #cells 路归并（O(k log #cells)）
 //
 // 口径（写清楚，免得数字被读过头）：
 //   * 用**砖中心 ± 0.5 砖**当 AABB，三种策略用同一个判定 → 相互可比；
@@ -204,6 +206,51 @@ Result runBlocks(const LevelData& lv, const std::vector<Block>& bl, const Roi& q
 
 // D：均匀网格查询 + 排序（恢复绘制序）。排序键用**砖号**代替绘制序下标 —— 真实渲染里
 // `m_drawOrder` 是砖号的排列，换成那个键**成本一样**（k log k），只是键不同。
+// D2：格子按下标**预排序** + 查询时多路归并（免掉全局 sort）
+Result runGridMerge(const LevelData& lv, const HashGrid& g, const Roi& q, int repeat) {
+    Result r;
+    const double ql = q.l - kHalfTile, qr = q.r + kHalfTile;
+    const double qb = q.b - kHalfTile, qt = q.t + kHalfTile;
+    const int64_t minCx = (int64_t)std::floor(ql / g.cell), maxCx = (int64_t)std::floor(qr / g.cell);
+    const int64_t minCy = (int64_t)std::floor(qb / g.cell), maxCy = (int64_t)std::floor(qt / g.cell);
+    // 取格（栅格序）——每格的流天然已按砖号排序（构建时就按 i 递增 push）
+    std::vector<const std::vector<uint32_t>*> lists;
+    for (int64_t cx = minCx; cx <= maxCx; ++cx)
+        for (int64_t cy = minCy; cy <= maxCy; ++cy) {
+            auto it = g.map.find(cellKey(cx, cy));
+            if (it != g.map.end()) lists.push_back(&it->second);
+        }
+    std::vector<size_t> pos(lists.size(), 0);
+    for (const auto* l : lists) r.candidates += l->size();
+    double best = 1e18, bestMerge = 1e18;
+    for (int rep = 0; rep < repeat; ++rep) {
+        size_t found = 0;
+        std::fill(pos.begin(), pos.end(), 0);
+        const double t0 = msNow();
+        for (;;) {                                   // 多路归并：每次挑最小的头（这里用简单扫描，
+            size_t pick = (size_t)-1;                // 真实实现用 #cells 路小顶堆；#cells 很小）
+            for (size_t s = 0; s < lists.size(); ++s) {
+                if (pos[s] >= lists[s]->size()) continue;
+                if (pick == (size_t)-1 || (*lists[s])[pos[s]] < (*lists[pick])[pos[pick]]) pick = s;
+            }
+            if (pick == (size_t)-1) break;
+            const uint32_t i = (*lists[pick])[pos[pick]++];
+            const double x = lv.tiles[i].position[0], y = lv.tiles[i].position[1];
+            if (x - kHalfTile > q.r || x + kHalfTile < q.l) continue;
+            if (y - kHalfTile > q.t || y + kHalfTile < q.b) continue;
+            ++found;
+        }
+        const double t1 = msNow();
+        best = std::min(best, t1 - t0);
+        bestMerge = std::min(bestMerge, t1 - t0);
+        r.found = found;
+        g_sink += found;
+    }
+    r.ms = best;
+    r.sortMs = bestMerge;   // 这里语义是"归并"的耗时（同一列输出）
+    return r;
+}
+
 Result runGrid(const LevelData& lv, const HashGrid& g, const Roi& q, int repeat) {
     Result r;
     // ⚠️ 格子范围要按**砖半径**外扩：判定用的是"AABB 与矩形相交"，中心的 x 可以落在
@@ -338,9 +385,12 @@ int main(int argc, char** argv) {
                         z, cur, a.visible, a.ms, b.ms, b.missed, c.ms, c.missed);
             for (const GridInfo& gi : grids) {
                 Result d = runGrid(lv, gi.g, q, repeat);
-                std::printf(" │ D(cell=%.0f) %6.3f ms（其中排序 %5.3f）候选 %-6zu 漏 %-4zu",
+                Result d2 = runGridMerge(lv, gi.g, q, repeat);
+                std::printf(" │ D(cell=%.0f) %6.3f ms（排序 %5.3f）候选 %-6zu 漏 %-4zu"
+                            " │ D2归并 %6.3f ms 漏 %-4zu",
                             gi.cell, d.ms, d.sortMs, d.candidates,
-                            a.visible > d.found ? a.visible - d.found : 0);
+                            a.visible > d.found ? a.visible - d.found : 0,
+                            d2.ms, a.visible > d2.found ? a.visible - d2.found : 0);
             }
             std::printf("\n");
         }

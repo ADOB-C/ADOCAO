@@ -158,7 +158,6 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     for (auto& kv : shapeGroups) {
         const GeoKey& key = kv.first;
         std::vector<int>& tileIndices = kv.second;
-        std::sort(tileIndices.begin(), tileIndices.end(), std::greater<int>());
         const uint32_t shapeIdx = (uint32_t)m_shapes.size();
         m_shapes.push_back(TileShape::buildShape(key.sa / 100.0f, key.ea / 100.0f, key.mid));
         for (int i : tileIndices) {
@@ -166,9 +165,14 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
             const size_t ti = (size_t)i, c = ti >> kPosChunkShift;
             m_posX[ti] = (float)(tiles[ti].position[0] - m_chunkX[c]);
             m_posY[ti] = (float)(tiles[ti].position[1] - m_chunkY[c]);
-            m_drawOrder.push_back((uint32_t)i);
         }
     }
+    // 【实验，2026-10-15】绘制顺序改成**按层号升序**（原来 = 按形状分组 + 组内降序）。
+    // 分组那个顺序是"实例化之前，同形状一起画省状态切换"的遗留；现在一次 draw，
+    // 它唯一还可能起作用的地方是**同深度并列时谁盖谁**（AGENTS 记过"遮挡胜负由
+    // unordered_map 迭代序决定"）。改成升序 = 低层号先提交，顺序从此**确定**。
+    // 验收方式：像素门槛 51 状态逐字节（集合不变、只动提交顺序）。
+    for (size_t i = 0; i < n; ++i) m_drawOrder.push_back((uint32_t)i);
 
     // 图标位：与改造前 `buildIcons` 的判据逐字相同（Twirl / SetSpeed 的 1.05、0.95 阈值）
     for (int i = 0; i < n; i++) {

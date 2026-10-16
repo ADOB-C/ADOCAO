@@ -18,9 +18,16 @@
 //   * 砖位置直接用 `LevelData::tiles[i].position`（double，渲染侧是块相对 f32 + 块基点，
 //     两者差在 ulp 级，不影响候选计数）。
 //
+// 另外有一个**块大小扫描**模式（找 C 的最优块粒度）：
+//   adocao_cull_cost_probe <谱> --blocks 256,512,1024,2048,4096,8192,16384,32768
+//                             [--tiles ...] [--zooms 25,1] [--repeat N]
+// 对每个块大小：建块表（f64 AABB，40 B/块）→ 查询 = **线性扫一遍块表**（O(#blocks)）+
+// 命中块内逐砖判 AABB。把这两段分开计时，因为它们的走向相反：
+//   块越小 → AABB 越紧、块内候选越少，但块表越大（内存 B/层 ↑）且过滤扫描 O(#blocks) ↑。
+//
 // 用法：
 //   adocao_cull_cost_probe <谱> [--tiles k1,k2,...] [--zooms 25,100] [--repeat N]
-//                             [--cells 5,16,64]
+//                             [--cells 5,16,64] [--blocks 256,512,...]
 
 #include "archive/Install.hpp"
 #include "core/level/LevelData.hpp"
@@ -151,14 +158,14 @@ Result runWindow(const LevelData& lv, const Roi& q, size_t cur, int repeat) {
     return r;
 }
 
-// C：4096 层块 AABB 查询
-std::vector<Block> buildBlocks(const LevelData& lv) {
+// C：块 AABB 查询（块大小可调）
+std::vector<Block> buildBlocksN(const LevelData& lv, size_t floors) {
     const size_t n = lv.angleData.size();
-    const size_t nb = (n + kBlockFloors - 1) / kBlockFloors;
+    const size_t nb = (n + floors - 1) / floors;
     std::vector<Block> bl(nb);
     for (size_t b = 0; b < nb; ++b) {
-        const size_t lo = b * kBlockFloors;
-        const size_t hi = std::min(lo + (size_t)kBlockFloors, n);
+        const size_t lo = b * floors;
+        const size_t hi = std::min(lo + floors, n);
         Block& blk = bl[b];
         blk.first = (uint32_t)lo;
         blk.count = (uint32_t)(hi - lo);
@@ -171,6 +178,49 @@ std::vector<Block> buildBlocks(const LevelData& lv) {
         blk.minX = mnx; blk.maxX = mxx; blk.minY = mny; blk.maxY = mxy;
     }
     return bl;
+}
+
+std::vector<Block> buildBlocks(const LevelData& lv) { return buildBlocksN(lv, kBlockFloors); }
+
+// 块表查询：**线性扫块表**（这是 O(#blocks) 那一段，块越小越贵）+ 命中块内逐砖判。
+// filterMs / inBlockMs 分开返回，好看出最优块粒度在哪。
+struct BlockQuery { size_t candidates, found, missed, hitBlocks; double filterMs, inBlockMs; };
+BlockQuery queryBlocksN(const LevelData& lv, const std::vector<Block>& bl, const Roi& q, int repeat) {
+    BlockQuery r{0, 0, 0, 0, 0, 0};
+    std::vector<uint32_t> hits;
+    double bestF = 1e18, bestI = 1e18;
+    for (int rep = 0; rep < repeat; ++rep) {
+        hits.clear();
+        r.candidates = 0;
+        r.hitBlocks = 0;
+        const double t0 = msNow();
+        for (size_t b = 0; b < bl.size(); ++b) {
+            const Block& k = bl[b];
+            if (k.maxX < q.l || k.minX > q.r || k.maxY < q.b || k.minY > q.t) continue;
+            hits.push_back((uint32_t)b);
+            r.candidates += k.count;
+        }
+        const double t1 = msNow();
+        size_t found = 0;
+        for (uint32_t b : hits) {
+            const Block& k = bl[b];
+            for (size_t i = k.first; i < k.first + k.count; ++i) {
+                const double x = lv.tiles[i].position[0], y = lv.tiles[i].position[1];
+                if (x - kHalfTile > q.r || x + kHalfTile < q.l) continue;
+                if (y - kHalfTile > q.t || y + kHalfTile < q.b) continue;
+                ++found;
+            }
+        }
+        const double t2 = msNow();
+        bestF = std::min(bestF, t1 - t0);
+        bestI = std::min(bestI, t2 - t1);
+        r.found = found;
+        r.hitBlocks = hits.size();
+        g_sink += found;
+    }
+    r.filterMs = bestF;
+    r.inBlockMs = bestI;
+    return r;
 }
 
 Result runBlocks(const LevelData& lv, const std::vector<Block>& bl, const Roi& q, int repeat) {
@@ -304,6 +354,7 @@ int main(int argc, char** argv) {
     std::vector<int> zooms{25, 100};
     std::vector<size_t> tilesArg;
     std::vector<double> cells{5.0, 16.0, 64.0};
+    std::vector<size_t> blocksArg;
     int repeat = 5;
     for (int i = 2; i < argc; ++i) {
         auto nums = [&](const char* s, std::vector<long>& out) {
@@ -330,6 +381,9 @@ int main(int argc, char** argv) {
             nums(argv[++i], cv);
             cells.clear();
             for (long x : cv) cells.push_back((double)x);
+        } else if (std::strcmp(argv[i], "--blocks") == 0 && i + 1 < argc) {
+            nums(argv[++i], v);
+            for (long x : v) blocksArg.push_back((size_t)x);
         } else if (std::strcmp(argv[i], "--repeat") == 0 && i + 1 < argc) {
             repeat = std::atoi(argv[++i]);
             if (repeat < 1) repeat = 1;
@@ -340,6 +394,44 @@ int main(int argc, char** argv) {
     if (!lv.loadFromFile(argv[1])) { std::fprintf(stderr, "加载失败: %s\n", argv[1]); return 1; }
     const size_t n = lv.angleData.size();
     if (n == 0) { std::fprintf(stderr, "空谱\n"); return 1; }
+
+    // ---- 块大小扫描模式 ----
+    if (!blocksArg.empty()) {
+        if (tilesArg.empty()) tilesArg = {0, n / 4, n / 2, n * 3 / 4};
+        std::printf("谱 %s：%zu 层｜块大小扫描（线性扫块表 + 块内逐砖判）\n", argv[1], n);
+        for (size_t bs : blocksArg) {
+            const double tb = msNow();
+            const std::vector<Block> bl = buildBlocksN(lv, bs);
+            const double buildMs = msNow() - tb;
+            const double bytesPerFloor = (double)(bl.size() * sizeof(Block)) / (double)n;
+            std::printf("  块 %-6zu：%zu 块｜%zu B（%.4f B/层）｜2³¹ 外推 %.1f MB｜建表 %.1f ms\n",
+                        bs, bl.size(), bl.size() * sizeof(Block), bytesPerFloor,
+                        bytesPerFloor * 2147483647.0 / 1048576.0, buildMs);
+            for (int z : zooms) {
+                const double halfH = 6.0 / ((double)z / 100.0);
+                const double halfW = halfH * 16.0 / 9.0;
+                double worstFilter = 0, worstIn = 0, worstTotal = 1e18;
+                size_t worstCand = 0, worstHits = 0;
+                for (size_t cur : tilesArg) {
+                    if (cur >= n) continue;
+                    const double cx = lv.tiles[cur].position[0], cy = lv.tiles[cur].position[1];
+                    Roi q{cx - halfW - kMargin, cx + halfW + kMargin,
+                          cy - halfH - kMargin, cy + halfH + kMargin};
+                    BlockQuery r = queryBlocksN(lv, bl, q, repeat);
+                    worstFilter = std::max(worstFilter, r.filterMs);
+                    worstIn = std::max(worstIn, r.inBlockMs);
+                    worstTotal = std::min(worstTotal, r.filterMs + r.inBlockMs);
+                    worstCand = std::max(worstCand, r.candidates);
+                    worstHits = std::max(worstHits, r.hitBlocks);
+                }
+                std::printf("      zoom %-7g 最坏：扫块表 %7.4f ms + 块内 %7.4f ms = %7.4f ms"
+                            "｜命中块 %-6zu 候选 %-8zu\n",
+                            (double)z, worstFilter, worstIn, worstFilter + worstIn,
+                            worstHits, worstCand);
+            }
+        }
+        return 0;
+    }
 
     // 索引构建成本（一次性）
     const double t0 = msNow();

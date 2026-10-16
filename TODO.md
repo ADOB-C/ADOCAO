@@ -218,11 +218,14 @@
 
 ### 性能
 - [x] Visibility cache fix
-- [ ] **Frame profiler（按段计时）** —— ⚠️ 2026-10-15 核对：这一条以前被勾成 `[x]`，但**全仓找不到
-      任何 per-section 计时代码**（可能是 P1–P5 重构时丢的）。现在只有**整帧**数（`--capture` 的
-      `render_ms`/`first_ms`，`ADOCAO_CAPTURE_FRAMES=N` 取稳态中位数）与实时循环的 `workMs`。
-      要做的是 `ADOCAO_PROFILE=1` 时把 `scene.update / cull / attr / upload / draw / glFinish` 分段计时，
-      并自洽校验"各段和 ≤ render_ms"；系统侧另有 `sample` / `vmmap` / `xctrace`（见待补的 `docs/profiling.md`）
+- [x] **Frame profiler（按段计时）** —— 2026-10-15 补上（`core/util/Profile.hpp`，`ADOCAO_PROFILE=1`）：
+      段 = `vis / cull / upload / draw / trails / planets` + `other`（帧自量 − 段和），
+      `ADOCAO_CAPTURE_FRAMES=N` 时**首帧/稳态**两条口径，自带自洽校验（段和 > 帧×1.05+0.5 ms 就 `LOG_W`）。
+      实测 MYC 首帧 37.2 / 稳态 **0.34** ms、Singularity 41.0 / 0.69、primer 41.6 / 0.64；
+      首帧那 16~26 ms 的 `draw` 是**一次性** GL 初始化（别当帧预算）。用法/边界/系统侧配方见 `docs/profiling.md`
+  - [ ] **平移抓帧模式**：`--capture` 现在重复**同一视锥** → 稳态里 `cull=0`（列表缓存命中），
+        所以"**每帧**剔除成本"读不到。要的是：让相机按固定步长走 N 帧、每帧重建列表，量连续 pan
+        下的 cull/total（这是 D3 帧预算真正要看的口径）
 - [x] High-FPS build option (1000fps)
 - [x] Sleep-based frame pacing (CPU-efficient)
 - [x] processActions() O(n+m) optimization (removed O(n*m) per-event fills)

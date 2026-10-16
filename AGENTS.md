@@ -204,6 +204,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |---|---|
 | `docs/level-loading.md` | 动解析 / 流式窗口 / 快路径回退 / `Timeline::build` / 加载时间与内存 |
 | `docs/rendering.md` | 动渲染、几何、实例流、剔除、图标、坐标约定、**像素门槛怎么用** |
+| `docs/profiling.md` | **要量什么、用什么量**：分段计时（`ADOCAO_PROFILE=1`）、整帧/常驻口径、`sample`/`vmmap`/`xctrace` 配方、已知盲区 |
 | `docs/audio.md` | 动音频、hitsound 混音、导出 WAV、audio-as-chart |
 | `docs/image-export.md` | 动 `adocao image`（真无头出图）、瓦片与拼接 |
 | `docs/cli.md` | 加/改命令行开关、拖尾采样参数 |

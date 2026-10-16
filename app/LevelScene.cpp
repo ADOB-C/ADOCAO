@@ -15,6 +15,7 @@
 #include "core/timeline/PlaybackClock.hpp"
 #include "core/timeline/PositionSolver.hpp"
 #include "core/util/Logger.hpp"
+#include "core/util/Profile.hpp"
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -288,7 +289,7 @@ void LevelScene::updateTileVisibility(const Timeline& timeline, double t, bool p
 void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
                         double timeInLevel, int highlightTile) {
     // Track appear/disappear animation
-    updateTileVisibility(timeline, timeInLevel, playing);
+    { profile::Scoped _s("vis"); updateTileVisibility(timeline, timeInLevel, playing); }
 
     double vl, vr, vb, vt;      // 世界坐标 → double（见 docs/rendering.md 坐标约定）
     camera.frustumBounds(vl, vr, vb, vt);
@@ -299,18 +300,24 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     m_tileShader->setVec3("uFillColor", m_fillRGB[0], m_fillRGB[1], m_fillRGB[2]);
     m_tileShader->setVec3("uStrokeColor", m_strokeRGB[0], m_strokeRGB[1], m_strokeRGB[2]);
     m_tileShader->setFloat("uOpacity", 1.0f);
-    m_tileMesh->draw(vl, vr, vb, vt, camera.targetX(), camera.targetY());   // 砖 + 图标一次画完
+    m_tileMesh->draw(vl, vr, vb, vt, camera.targetX(), camera.targetY());   // 砖 + 图标一次画完（内部 cull/upload/draw 自带段）
 
-    // Trails
-    if (m_showTrail && playing && m_redPlanet && m_redPlanet->trail) {
-        m_redPlanet->trail->draw(*m_trailShader, camera, camera.targetX(), camera.targetY());
-        m_bluePlanet->trail->draw(*m_trailShader, camera, camera.targetX(), camera.targetY());
+    // Trails（RAII 段：别显式调析构，那会跟作用域结束时的析构重复累加）
+    {
+        profile::Scoped _s("trails");
+        if (m_showTrail && playing && m_redPlanet && m_redPlanet->trail) {
+            m_redPlanet->trail->draw(*m_trailShader, camera, camera.targetX(), camera.targetY());
+            m_bluePlanet->trail->draw(*m_trailShader, camera, camera.targetX(), camera.targetY());
+        }
     }
 
     // Planets
-    if (playing && m_redPlanet && m_redPlanet->gpuBuilt()) {
-        m_redPlanet->draw(*m_planetShader, camera, camera.targetX(), camera.targetY());
-        m_bluePlanet->draw(*m_planetShader, camera, camera.targetX(), camera.targetY());
+    {
+        profile::Scoped _s("planets");
+        if (playing && m_redPlanet && m_redPlanet->gpuBuilt()) {
+            m_redPlanet->draw(*m_planetShader, camera, camera.targetX(), camera.targetY());
+            m_bluePlanet->draw(*m_planetShader, camera, camera.targetX(), camera.targetY());
+        }
     }
 
     // Highlight

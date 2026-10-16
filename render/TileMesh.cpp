@@ -2,6 +2,7 @@
 #include "glad/gl_core.hpp"
 #include "render/CullSIMD.hpp"
 #include "core/util/Logger.hpp"
+#include "core/util/Profile.hpp"
 #include "core/util/ThreadPool.hpp"
 #include <algorithm>
 #include <chrono>
@@ -502,11 +503,12 @@ void TileMesh::draw(double viewL, double viewR, double viewB, double viewT,
                     double camX, double camY) const {
     m_lastDrawn = 0;
     if (empty() || !m_vao) return;
-    ensureDrawList(viewL, viewR, viewB, viewT, camX, camY);
+    { profile::Scoped _s("cull"); ensureDrawList(viewL, viewR, viewB, viewT, camX, camY); }
     const size_t count = m_listTiles.size();
     m_lastDrawn = (int)count;
     if (count == 0) return;
-    uploadIfNeeded();
+    { profile::Scoped _s("upload"); uploadIfNeeded(); }
+    profile::Scoped _s("draw");
     glBindVertexArray(m_vao);
     // 形状表绑到纹理单元 0；`uShapeTex` 的默认值就是 0，所以不用设 uniform
     glActiveTexture(GL_TEXTURE0);

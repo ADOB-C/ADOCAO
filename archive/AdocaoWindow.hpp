@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "archive/AdocaoCheckpoints.hpp"
+#include "core/level/FloorWindow.hpp"    // ③ 共享层：FloorCheckpoint / FloorWindow(Input)
 #include "archive/AdocaoBlocked.hpp"    // ColumnView（分块列容器）
 #include "archive/AdocaoReader.hpp"     // SectionView（按段取载荷）
 #include "core/level/LevelData.hpp"
@@ -30,33 +31,11 @@
 namespace adofai {
 namespace adocao {
 
-struct FloorWindowInput {
-    FloorCheckpoint checkpoint;                      // i0 = checkpoint.floor（必须按 stride 对齐）
-    const std::vector<double>* angles = nullptr;      // [i0, i0+count) 的**原始**角度（999 保留）
-    const std::vector<LevelData::FastAction>* events = nullptr;  // floor ∈ [i0, i0+count) 的事件
-    // 事件里的字符串（hitsound 名、动画名）走驻留表；`atStates` 要用它。可为空（那就拿不到名字）。
-    const std::vector<std::string>* strings = nullptr;
-};
+using adofai::FloorCheckpoint;
+using adofai::FloorWindow;
+using adofai::FloorWindowInput;
 
-struct FloorWindow {
-    uint64_t first = 0;                          // i0
-    std::vector<LevelData::Tile> tiles;          // position / direction（逐位对齐 calculateTilePositions）
-    std::vector<float> tileBPMs;                 // 逐位对齐 Timeline::tileBPMs()
-    std::vector<double> tileStartTimes;          // 逐位对齐 Timeline::tileStartTimes()
-    // —— 逐层的"事件派生表"里**只与 floor 有关**的那几样（对齐 LevelData::processActions）——
-    std::vector<bool>  tileHasTwirl;             // 对齐 LevelData::tileHasTwirl 的窗口切片
-    std::vector<bool>  tileHasSetSpeed;          // 同上
-    std::map<int, LevelData::ATState> atStates;  // 键 = **相对窗口起点**的层号
-    bool hasAtStates = false;
-    // ⚠️ **故意不做**（各有原因，见 docs/adocao-format.md §8.13）：
-    //   * `tileHitsounds` / `tileHitsoundVolumes` —— 它们是**跨层前缀**（"当前 hitsound"由
-    //     `floor <= i` 的最后一个 SetHitsound 决定），要窗口化就得再往 checkpoint 里加两个字段；
-    //     而且它们的消费方是音频（`docs/2e9.md` 把音频列为独立的另一道墙），不是窗口化渲染。
-    //   * `bookmarkFloors` —— 它有**全局**语义（无条件补上第 0 层与最后一层做跳转目标），
-    //     不是一个"窗口内的表"。
-};
-
-// 失败时 err 是原因（checkpoint 缺分量 / i0 与快照不符 / 缺输入）。
+// 按块重算（实现留在 archive；由 archive::install() 注册给 core）
 bool computeFloorWindow(const LevelData::Settings& settings, const FloorWindowInput& in,
                         FloorWindow& out, std::string& err);
 

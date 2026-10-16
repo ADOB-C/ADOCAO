@@ -1,5 +1,6 @@
 add_library(adocao_core STATIC
     level/LevelData.cpp
+    level/FloorWindow.cpp
     level/ByteSource.cpp
     level/LevelPath.cpp
     level/JsonCleaner.cpp

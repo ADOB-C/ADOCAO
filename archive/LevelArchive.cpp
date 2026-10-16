@@ -1,4 +1,5 @@
 #include "LevelArchive.hpp"
+#include "archive/AdocaoWindow.hpp"   // computeFloorWindow（③ 重算，注册给 core）
 #include "LzmaMtCompat.hpp"
 
 #include <lzma.h>
@@ -365,7 +366,11 @@ ArchiveBackend backend() {
     return b;
 }
 
-void install() { setArchiveBackend(backend()); }
+void install() {
+    setArchiveBackend(backend());
+    // ③ 切片 4：把"按块重算每砖数据"注册给 core（明文路径也要用；core 不依赖 archive）
+    installFloorRecompute(&adocao::computeFloorWindow);
+}
 
 }  // namespace archive
 

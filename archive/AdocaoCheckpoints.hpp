@@ -22,58 +22,19 @@
 #include <string>
 #include <vector>
 
+#include "core/level/FloorWindow.hpp"   // ③ 共享层：FloorCheckpoint / 常量 / 位标志 / computeCheckpoints
+
 namespace adofai {
 
 struct LevelData;
 
 namespace adocao {
 
-inline constexpr uint32_t kCheckpointStride = 4096;   // **与分块边界同一个数**（§8.8：三者同界）
-inline constexpr size_t   kCheckpointBytes = 96;      // 定长记录（§8.8 估的 ~88 B + 中旋游程）
-
-// `flags` 的位：哪些分量真的算过（稀疏）。读取方必须按位判，别把 0 当成真值。
-enum : uint32_t {
-    kCkBase       = 1u << 0,   // baseX/baseY（angleData 前缀和）
-    kCkCum        = 1u << 1,   // cumX/cumY（PositionTrack 继承偏移）
-    kCkLastAngle  = 1u << 2,   // lastAngleDeg
-    kCkLastSentinel = 1u << 3, // i0-1 层是哨兵 999（midspin 续算要用）
-    kCkTime       = 1u << 4,   // timeSec（Timeline 前缀和）—— 需要 Timeline 的续算实现
-    kCkBpm        = 1u << 5,   // bpm（SetSpeed 继承）——      同上
-    kCkRadius     = 1u << 6,   // radiusScale（ScaleRadius 继承）—— 本仓库还没实现该事件
-    kCkCw         = 1u << 7,   // cw（Timeline Phase 1 的 tileIsCW 初值）
-    kCkAngleDir   = 1u << 8,   // angleDirDeg（进这一层的"角度方向"，ADOFAI-JS 语义）
-    kCkSentinelRun = 1u << 9,  // sentinelRun（紧跟 i0 之前的连续 999 个数）
-};
-
-struct FloorCheckpoint {
-    uint64_t floor = 0;         // 快照对应的层号 i0（4096 的倍数）
-    double baseX = 0.0, baseY = 0.0;   // angleData 前缀和（第 i0 层的位置，**不含** offsets）
-    double cumX = 0.0, cumY = 0.0;     // PositionTrack 继承偏移
-    double timeSec = 0.0;              // tileStartTimes[i0]
-    double bpm = 0.0;                  // 第 i0 层的 BPM（SetSpeed 之后）
-    double radiusScale = 1.0;          // ScaleRadius 继承（预留；未实现该事件时 = 1.0）
-    double lastAngleDeg = 0.0;         // 最后一个**真** angleData 原值（0..360）
-    // 进第 i0 层的"角度方向"（0..360，**归一化过所以有界** —— §8.8 担心的"累积方向会无界增长"
-    // 指的是未归一化的累加量，这里不是那个东西）。Timeline 续算要用它算第 i0 层的 relAngle。
-    double angleDirDeg = 180.0;
-    uint32_t flags = 0;                // 上面那些位
-    // 紧跟 i0 之前**连续**的 999 个数。要它是因为 `calculateTilePositions` 的
-    // `floats[i] = floats[i-1] + 180`（999 时的规则）是**沿用上一个"有效"方向**，
-    // 而有效方向在 999 连跑时要靠这个游程长度才能从 lastAngleDeg 推回来：
-    //   floats[i0-1] = lastAngleDeg + 180 × sentinelRun
-    // （存 `floats[i0-1]` 本身也行，但那正是 §8.8 提醒的"会无界增长"的那个量，所以存游程。）
-    uint32_t sentinelRun = 0;
-    uint8_t  cw = 1;                   // 进第 i0 层时的 tileIsCW 初值（是否顺时针）
-    uint8_t  pad[7] = {0, 0, 0, 0, 0, 0, 0};
-};
-static_assert(sizeof(FloorCheckpoint) == kCheckpointBytes,
-              "FloorCheckpoint 必须与落盘的定长记录逐字节一致（不要往里塞指针/vtable）");
-
-// 从**已加载**的 LevelData 算 checkpoint（写入方用）。用与 `calculateTilePositions` /
-// `applyPositionTrackOffsets` **同一套算式**，所以"从快照重算"能逐位对上（§8.10⑥）。
-// stride 必须是 4096 的语义等价值（默认 kCheckpointStride）。
-bool computeCheckpoints(const LevelData& level, uint32_t stride,
-                        std::vector<FloorCheckpoint>& out, std::string& err);
+// 这些搬去了 core（明文路径也要用）：这里保留名字，archive 内部代码不用改。
+using adofai::FloorCheckpoint;
+using adofai::kCheckpointBytes;
+using adofai::kCheckpointStride;
+using adofai::computeCheckpoints;
 
 // `Derived` 段载荷：u32 stride | u32 flags | u64 count | count × 80 B 记录
 bool encodeCheckpoints(const std::vector<FloorCheckpoint>& ck, uint32_t stride,

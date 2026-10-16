@@ -627,5 +627,18 @@ off 那两个采样值相等=被钳住，on 是正常插值，差值正好是**�
 `findTileIndex` 的窗口实现与密集二分逐值对拍（含"起点恰好等于某砖 startTime"、以及
 `startTime` 落在**相等时间串**里的情形）。
 
-处置：数值验收 + 访问器层 + 上述三个修复留在主干，provider 仍挂 env 开关（默认关，门槛 51/51）；
-把最后这一处对拍干净后默认打开并重量常驻。
+**2026-10-15 收尾：provider 已默认打开**（`ADOCAO_FLOOR_WINDOW=0` 可关，A/B 用）。
+最后那处差异的根因不是 provider，而是**先在 bug**：`GameWindow::releaseMeshTemporaries()` 在**同步**
+构建路径（`GameWindow.cpp:228`）也会跑，而无条件 `std::vector<double>().swap(m_level->angleData)`；
+`Timeline::totalAngleAt()`/`angleDirBefore()` **每一帧**要读 `angleData` 算行星/拖尾的转动 ⇒ 空数组下
+`rawAngleData` 全变 180°，行星沿**错误的弧**转（像素门槛只差 21 个像素，所以一直没被发现）。
+修法：不再释放 `angleData`（+8 B/层 = MYC 54 MB，换来正确转动；容器路径将来会把它也窗口化）。
+**基线已重存**（有意行为修正；重存前的差异统计：非行星/拖尾状态 **0 像素**，
+`icon_ssup_under_trail` 1.26%、`icon_ssup_under_planet` 0.65% —— 全部落在行星/拖尾）。
+修完后 provider 关/开两种模式**都 51/51 逐字节**。
+
+常驻（MYC 原版 6,770,912 层，`--no-hitsound`）：③ 开工前 **675.5 MB / 528 MB live** →
+切片 3a 后 **493.6 / 324.2** → 切片 4（默认开）**430.2 / 276.3**。
+
+**剩下的（切片 4 的另一半）**：`TileMesh` 自己的 13 B/层（MYC 84 MB）与 `angleData`（54 MB）也窗口化
+（容器路径的 blocked 列 + `Derived` checkpoint 已具备条件）。

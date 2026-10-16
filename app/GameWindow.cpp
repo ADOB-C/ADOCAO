@@ -480,12 +480,14 @@ void GameWindow::toggleFullscreen() {
 void GameWindow::releaseMeshTemporaries() {
     // ③ 切片 4：窗口化时 **不能**释放 `angleData` —— provider 物化块要用它当角度来源
     // （非窗口化路径照旧释放，保持异步构建那条路的内存特性）
-    // ⚠️ 窗口化时这两样都**不能**释放：`angleData` 是块内角度来源，`tileBPMs` 是 provider
-    // 合成 SetSpeed 事件的来源（漏了它会"构建期正常、播放期崩"—— 真踩过）
-    if (!m_level->tilesWindowed()) {
-        std::vector<double>().swap(m_level->angleData);
-        m_level->tileBPMs.clear(); m_level->tileBPMs.shrink_to_fit();
-    }
+    // ⚠️ **`angleData` 不能再释放了**（2026-10-15 修的先在 bug）：`Timeline::totalAngleAt()` 与
+    // `angleDirBefore()` **每一帧**都要读 `m_level->angleData` 来算行星/拖尾的转动 —— 之前这里
+    // 无条件 swap 掉它，于是运行时读到的是空数组（`rawAngleData` 全变 180°），行星沿错误的弧转
+    // （像素门槛只差 21 个像素，所以一直没被发现；是 ③ 窗口化"顺便"照出来的）。
+    // 代价 +8 B/层（MYC 54 MB），换来正确的行星转动。
+    // `tileBPMs` 也**不能**释放：provider 合成 SetSpeed 事件要用它（非窗口化时它同样没人再读，
+    // 但保持一致更简单，且它是 4 B/层）。
+    (void)m_level;
     m_level->tileHasTwirl.clear(); m_level->tileHasTwirl.shrink_to_fit();
     m_level->tileHasSetSpeed.clear(); m_level->tileHasSetSpeed.shrink_to_fit();
 }

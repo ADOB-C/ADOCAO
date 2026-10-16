@@ -186,6 +186,9 @@ cmake --build build --parallel 8
   （改输出前先比这一行，能立刻把差异关进/关出网格）。
 * `ADOCAO_TRAIL_DUMP=1`：拖尾采样处打 `startTime/rate/t/点数/红蓝点哈希`（并前 6 个蓝点全精度）——
   用于"差异只在拖尾"时的定位（实测就是这样把 21 像素差异定到"蓝行星开窗起点 2 个采样"）。
+* `ADOCAO_TRAIL_INPUTS=1`：`sampleTrailRange` 前 3 个采样打**全部输入**（tileIdx / tt / startTimeAt /
+  pivot 位置 / startAngle / totalAngle / 上一层 direction），把差异从"23 个量里哪一个"直接缩到一格。
+  实测它一眼指出 `totalAngleAt` 不同 ⇒ `angleData` 被 `releaseMeshTemporaries()` 释放过（先在 bug）。
 两者默认关、零开销；开关本身不改行为。
 
 ## 5. 专用探针（回答"策略该选哪个"，不是"现在多快"）

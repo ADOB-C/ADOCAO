@@ -1,4 +1,5 @@
 #include "core/timeline/PositionSolver.hpp"
+#include <cstdlib>   // getenv（诊断）
 #include "core/timeline/Timeline.hpp"
 
 #include <algorithm>
@@ -213,6 +214,14 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
         if (tt > t) break;
         while (tileIdx + 1 < tsz && tt >= timeline.startTimeAt(tileIdx + 1))
             tileIdx++;
+        if (i < 3 && std::getenv("ADOCAO_TRAIL_INPUTS")) {
+            const LevelData& L = *timeline.level();
+            const auto p = L.tilePositionAt(tileIdx);
+            LOG_I("trail-in[%d] idx=%d tt=%.17g st=%.17g pos=%.17g,%.17g sa=%.17g ta=%.17g dir=%.17g",
+                  i, tileIdx, tt, timeline.startTimeAt(tileIdx), p[0], p[1],
+                  (double)timeline.startAngleAt(tileIdx), (double)timeline.totalAngleAt(tileIdx),
+                  (double)L.tileDirectionAt((int64_t)tileIdx - 1));
+        }
         glm::dvec2 r(0), b(0);
         positionAtTile(timeline, tt, tileIdx, r, b);
         redXY[samples*2]=r.x; redXY[samples*2+1]=r.y;

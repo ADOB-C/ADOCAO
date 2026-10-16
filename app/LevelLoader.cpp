@@ -127,14 +127,16 @@ void runLevelLoading(const LauncherConfig& cfg, LoadingProgress& progress, LoadR
     // 必须在 `releaseMemory()` **之前**（它按 `tilesWindowed()` 决定是否保留稀疏的
     // `tilePositionOffsets` —— provider 物化块要用它合成 PositionTrack），
     // 也必须在 Timeline 丢掉起始时间数组之前（checkpoint 要用它）。
-    // ⚠️ **默认关**：③ 切片 4 的 provider 在**值级**已逐位验收（`floor_window_cache` 测试：
-    // MYC 6,770,913 层 / 1654 块 0 不一致），但**像素门槛在窗口化路径下会变**（51 个状态里 50 个
-    // 不一致，差异图显示"内圈整条弧消失 + 外圈 1~2 px 镶边"）→ 说明问题在网格装配/可见性那一层，
-    // 不在数值上。查清之前不开默认路径，用 `ADOCAO_FLOOR_WINDOW=1` 打开做 A/B。
+    // ③ 切片 4：`tiles` 按块物化 **默认开**（2026-10-15 起）。
+    // 关掉做 A/B：`ADOCAO_FLOOR_WINDOW=0`。
+    // 历史上这里曾"默认关"过一次，原因有三处真 bug（`TileShape::keyForTile` 直接读
+    // `lv.tiles[i].direction` 越界崩、`tileCount()` 丢完归零、`releaseMeshTemporaries` 清
+    // `tileBPMs`）+ 一处**先在 bug**（它无条件释放 `angleData`，而 `totalAngleAt()` 每帧要读它
+    // → 行星沿错误的弧转）。四处都修好后，provider 开/关两种模式的像素门槛都 51/51 逐字节。
     const char* fw = std::getenv("ADOCAO_FLOOR_WINDOW");
-    const bool windowTiles = fw && fw[0] == '1';
+    const bool windowTiles = !fw || fw[0] != '0';
     if (!windowTiles) {
-        LOG_I("floor-window: 关闭（默认；值级已逐位验收但出图有差异，待查 —— 见 AGENTS/TODO）");
+        LOG_I("floor-window: 关闭（ADOCAO_FLOOR_WINDOW=0，A/B 用）→ 保留密集 tiles");
     } else if (result.level && result.timeline) {
         std::string werr;
         if (result.level->buildFloorWindowCache(result.timeline->tileStartTimes(),

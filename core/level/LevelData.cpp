@@ -1682,6 +1682,21 @@ void LevelData::applyPositionTrackOffsets() {
 
 LevelData::~LevelData() { delete m_winCache; m_winCache = nullptr; }
 
+bool LevelData::releaseAngleData(std::string* err) {
+    const size_t rawBytes = angleData.size() * sizeof(double);
+    std::string e;
+    if (!m_angleStore.build(angleData, e)) { if (err) *err = e; return false; }
+    // 护栏：小谱 / 取值集很大时，**字典本体**可能比原数组还大（实测 diag_glide：1024 取值
+    // → 10 bit/层 + 8 KB 字典 = 9.25 B/层 > 8 B/层）。不划算就原样保留。
+    if (m_angleStore.bytes() >= rawBytes) {
+        m_angleStore = AngleStore{};
+        if (err) *err = "紧凑存储不比原数组小（字典占主导）";
+        return false;
+    }
+    std::vector<double>().swap(angleData);     // 字典 + 位打包已经能逐位还原
+    return true;
+}
+
 void LevelData::releaseMemory() {
     // Free arrays no longer needed after loading completes
     actions.clear(); actions.shrink_to_fit();

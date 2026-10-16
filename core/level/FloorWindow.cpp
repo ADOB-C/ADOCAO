@@ -25,7 +25,7 @@ bool computeCheckpoints(const LevelData& level, uint32_t stride,
     err.clear();
     if (stride == 0) { err = "checkpoint stride 不能为 0"; return false; }
 
-    const size_t nData = level.angleData.size();     // 真层数；tiles 还会多一块 extra 砖
+    const size_t nData = (size_t)level.angleCount();  // 真层数；tiles 还会多一块 extra 砖
     if ((size_t)level.tileCount() < nData) {
         err = "LevelData 还没有算位置（tiles < angleData）——checkpoint 必须在 finishLoad 之后算";
         return false;
@@ -214,7 +214,7 @@ bool FloorWindowCache::init(LevelData& level, const std::vector<double>& startTi
     m_block = -1;
     m_blocks = 0;
 
-    const size_t nData = level.angleData.size();
+    const size_t nData = (size_t)level.angleCount();
     m_tileCount = level.tileCount();          // 丢数组之前的权威砖数（含末尾合成砖）
     if (nData == 0 || m_tileCount < (int64_t)(nData + 1)) {
         m_why = "tiles 还没算好（需要在 finishLoad 之后调用）";
@@ -248,7 +248,7 @@ bool FloorWindowCache::materialize(int64_t block) const {
     if (!m_ready || !m_level) return false;
     FloorRecomputeFn fn = floorRecompute();
     if (!fn) return false;                        // 忘记 archive::install()
-    const int64_t nData = (int64_t)m_level->angleData.size();
+    const int64_t nData = m_level->angleCount();
     const int64_t i0 = block * kCheckpointStride;
     const int64_t i1 = std::min(i0 + (int64_t)kCheckpointStride, nData);
     if (i0 < 0 || i1 <= i0) return false;
@@ -257,8 +257,8 @@ bool FloorWindowCache::materialize(int64_t block) const {
 
     // 角度窗口：`computeFloorWindow` 以 `angles->size()` 作为窗口长度，所以这里切一块出来
     // （4096 × 8 B = 32 KB，只在物化那一刻存在）
-    const std::vector<double> angles(m_level->angleData.begin() + (size_t)i0,
-                                     m_level->angleData.begin() + (size_t)i1);
+    std::vector<double> angles((size_t)(i1 - i0));
+    for (int64_t i = i0; i < i1; ++i) angles[(size_t)(i - i0)] = m_level->angleAt(i);
 
     FloorWindowInput in;
     in.checkpoint = m_ck[bidx];
@@ -311,7 +311,7 @@ bool FloorWindowCache::materialize(int64_t block) const {
 
 const LevelData::Tile* FloorWindowCache::tileAt(int64_t i) const {
     if (!m_windowed) return nullptr;
-    const int64_t nData = (int64_t)m_level->angleData.size();
+    const int64_t nData = m_level->angleCount();
     if (i == nData) return m_hasExtra ? &m_extra : nullptr;
     if (i < 0 || i >= nData) return nullptr;
     const int64_t block = i / kCheckpointStride;

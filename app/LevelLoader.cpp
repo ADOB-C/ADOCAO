@@ -151,6 +151,22 @@ void runLevelLoading(const LauncherConfig& cfg, LoadingProgress& progress, LoadR
     }
 
     // Release data no longer needed (angleData, actions, position offsets)
+    // ③ 切片 4：`angleData` → 位精确紧凑存储（运行期 `angleAt()` 读它）。
+    // 必须在这之前完成：`computeCheckpoints`（上面建缓存时）与 `Timeline::build`（更早）都读原数组。
+    // `TileMesh::build` 之后不需要原数组了（它走 `tileDirectionAt` 与 `keyForTile`，后者已改走 angleAt）。
+    if (result.level) {
+        std::string aerr;
+        if (result.level->releaseAngleData(&aerr)) {
+            LOG_I("angle-store: %lld 个取值 → %.2f B/层（%.1f MB → %.1f MB）",
+                  (long long)result.level->angleStoreUnique(),
+                  (double)result.level->angleStoreBytes() / (double)std::max<int64_t>(1, result.level->angleCount()),
+                  (double)result.level->angleCount() * 8.0 / 1048576.0,
+                  (double)result.level->angleStoreBytes() / 1048576.0);
+        } else {
+            LOG_I("angle-store: 未启用（%s）→ 保留 angleData", aerr.c_str());
+        }
+    }
+
     result.level->releaseMemory();
 
     // ③ 切片 3：丢掉 Timeline 的两支 TrackVis 密集 double（MYC 原版 103 MB）——

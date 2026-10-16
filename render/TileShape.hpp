@@ -118,7 +118,7 @@ inline void keyForTile(const LevelData& lv, int i, float& sa, float& ea, bool& m
     // 崩溃地址 0x4 就是 `direction` 在 `Tile` 里的偏移，正好对上空指针越界读）。
     sa = (i == 0) ? -180.0f : lv.tileDirectionAt((int64_t)(i - 1)) - 180.0f;
     ea = lv.tileDirectionAt((int64_t)i);
-    mid = (i < (int)lv.angleData.size() && lv.angleData[(size_t)i] == 999.0);
+    mid = (i < (int)lv.angleCount() && lv.angleAt((int64_t)i) == 999.0);
 }
 
 struct Shape {

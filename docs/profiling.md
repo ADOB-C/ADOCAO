@@ -191,6 +191,13 @@ cmake --build build --parallel 8
   实测它一眼指出 `totalAngleAt` 不同 ⇒ `angleData` 被 `releaseMeshTemporaries()` 释放过（先在 bug）。
 两者默认关、零开销；开关本身不改行为。
 
+## 4.9 `angleData` 紧凑存储的账（③ 切片 4）
+
+`releaseAngleData()` 会把 `angleData` 编成"取值字典 + 位打包下标"（`core/level/AngleStore.hpp`），
+日志一行给出账：`angle-store: 52 个取值 → 0.75 B/层（51.7 MB → 4.8 MB）`。
+判定"要不要换"看 **B/层 vs 8**：真实谱面 0.75 B/层（MYC 52 个取值、The Moon 49 个），
+但**小谱/取值集大的谱**会被字典本体拖累（`diag_glide` 1024 个取值 → 9.25 B/层 > 8）→ 护栏直接不换。
+
 ## 5. 专用探针（回答"策略该选哪个"，不是"现在多快"）
 
 | 探针 | 回答 |

@@ -640,5 +640,22 @@ off 那两个采样值相等=被钳住，on 是正常插值，差值正好是**�
 常驻（MYC 原版 6,770,912 层，`--no-hitsound`）：③ 开工前 **675.5 MB / 528 MB live** →
 切片 3a 后 **493.6 / 324.2** → 切片 4（默认开）**430.2 / 276.3**。
 
-**剩下的（切片 4 的另一半）**：`TileMesh` 自己的 13 B/层（MYC 84 MB）与 `angleData`（54 MB）也窗口化
-（容器路径的 blocked 列 + `Derived` checkpoint 已具备条件）。
+**2026-10-15 再进一步：`angleData` 也换掉了**（③ 切片 4 的另一半之一）。运行期读者一律走
+`LevelData::angleAt()`，加载收尾把 `angleData`（8 B/层）编成**位精确紧凑存储**
+（`core/level/AngleStore.hpp`：取值字典 + 位打包下标）：
+* 实测真实谱面角度取值集极小 —— MYC **52** 个取值 → 6 bit/层 = **0.75 B/层（51.7 → 4.8 MB）**、
+  The Moon 49 个取值（4.6 → 0.4 MB）、angles360 1167 个取值（3.05 B/层）；
+* **护栏**：紧凑存储不比原数组小就不换（实测 `diag_glide` 1024 个取值 → 10 bit/层 + 字典 = 9.25 B/层，
+  比 8 B/层还大 → 跳过、保留原数组）；
+* 逐位验收 `ctest angle_store`：释放前后 `angleAt` / `Timeline::totalAngleAt` /
+  `TileShape::keyForTile` **全层 0 不一致** + 反面对照（`setAngleForTest`；这次它抓到了我
+  `putBits` **只置位不清位**的 bug —— 生产路径在全零缓冲上写所以没事，`setForTest` 会留残留位）。
+* 注意这是**明文路径的过渡手段**：位打包仍是 O(n)（2³¹ 层 = 1.6 GB），最终要交给容器路径的
+  blocked 角度列（按块取、与 checkpoint 同粒度）。
+
+常驻（MYC 原版，`--no-hitsound`）：675.5/528（③ 开工前）→ 493.6/324.2（3a）→
+430.2/276.3（provider）→ **404.0/206.3**（+ angle store）。
+
+**剩下的**：`TileMesh` 自己的 13 B/层（MYC 84 MB：位置 8 + 形状号 4 + 图标位 1）——要按可见块
+流式上传（④ 的块索引已经给出可见块），是渲染侧的真改造；另外容器路径应把 `tiles`/`actions`/
+`angleData` 都换成 blocked 列 + 预取。

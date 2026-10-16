@@ -10,6 +10,8 @@
 #include <functional>
 #include <rapidjson/document.h>
 
+#include "core/level/AngleStore.hpp"   // ③ 切片 4：angleData 的紧凑存储
+
 // Parsed .adofai level file
 // 驻留实现：互斥量与 thread-local 缓存都在 .cpp 文件作用域，按驻留表地址做缓存键；
 // LevelData 里因此没有 mutex / thread_local 数据成员（保持可拷贝，MSVC 也接受）。
@@ -89,6 +91,24 @@ struct LevelData {
     int64_t tileCount() const;
     std::array<double, 2> tilePositionAt(int64_t i) const;
     float tileDirectionAt(int64_t i) const;
+    // ③ 切片 4：运行期读角度一律走 `angleAt()` —— 加载收尾会把 `angleData` 换成**位精确紧凑存储**
+    // （字典 + 位打包下标；MYC 实测 45 个取值 → 0.75 B/层，54 MB → 4.8 MB）。
+    // 加载期（解析 / Timeline::build / computeCheckpoints / TileMesh::build）仍读原数组。
+    double angleAt(int64_t i) const {
+        if (m_angleStore.valid()) return m_angleStore.at(i);
+        return (i >= 0 && (size_t)i < angleData.size()) ? angleData[(size_t)i] : 180.0;
+    }
+    int64_t angleCount() const {
+        return m_angleStore.valid() ? m_angleStore.size() : (int64_t)angleData.size();
+    }
+    // 把 `angleData` 换紧凑存储（取值集过大则失败、原数组保留）
+    bool releaseAngleData(std::string* err = nullptr);
+    bool anglesCompacted() const { return m_angleStore.valid(); }
+    size_t angleStoreBytes() const { return m_angleStore.bytes(); }
+    int64_t angleStoreUnique() const { return m_angleStore.uniqueCount(); }
+    int angleStoreBitsPerIndex() const { return m_angleStore.bitsPerIndex(); }
+    void setAngleForTest(int64_t i, double v) { m_angleStore.setForTest(i, v); }
+
     // 建"按块物化"缓存（加载收尾调用；失败就保持密集数组）
     bool buildFloorWindowCache(const std::vector<double>& startTimes,
                                const std::vector<float>& bpms,
@@ -140,6 +160,7 @@ struct LevelData {
     // "cannot delete an incomplete type"），而 `LevelData.hpp` 不能包含 `FloorWindow.hpp`
     // （后者要 LevelData 的嵌套类型）。析构在 `LevelData.cpp`，那里类型完整。
     FloorWindowCache* m_winCache = nullptr;
+    AngleStore m_angleStore;   // ③ 切片 4：`angleData` 的紧凑存储（releaseAngleData 之后生效）
 
     using ProgressCb = std::function<void(float pct, const char* stage)>;
 

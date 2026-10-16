@@ -67,6 +67,13 @@ add_executable(adocao_diagnostics_test adocao_diagnostics_test.cpp)
 target_link_libraries(adocao_diagnostics_test PRIVATE adocao_archive)
 add_test(NAME adocao_diagnostics COMMAND adocao_diagnostics_test)
 
+# ③ 切片 4 另一半：angleData 的紧凑存储（释放前后逐位对拍 + 反面对照）
+add_executable(adocao_angle_store_test angle_store_test.cpp)
+target_link_libraries(adocao_angle_store_test PRIVATE adocao_core adocao_archive)
+add_test(NAME angle_store
+         COMMAND adocao_angle_store_test ${CMAKE_SOURCE_DIR}/tests/charts/angles360.adofai
+                 "${CMAKE_SOURCE_DIR}/tests/charts/diag_glide.adofai")
+
 # ③ 切片 4：按块物化的每砖 provider（丢掉密集 tiles 后逐层对拍 + 反面对照）
 add_executable(adocao_floor_window_cache_test floor_window_cache_test.cpp)
 target_link_libraries(adocao_floor_window_cache_test PRIVATE adocao_core adocao_archive)

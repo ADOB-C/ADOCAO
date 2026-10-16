@@ -168,15 +168,16 @@ void Timeline::recomputeForTest(std::vector<float>& outStartAngles,
 }
 
 float Timeline::angleDirBefore(int64_t i) const {
-    const auto& ad = m_level->angleData;
+    // ③ 切片 4：走 `angleAt()`（`angleData` 可能已被换成紧凑存储）
     if (i <= 0) return 180.0f;
     const int64_t k = i - 1;
-    const double rawAngleData = (k < (int64_t)ad.size()) ? ad[(size_t)k] : 180.0;
+    const int64_t nAd = m_level->angleCount();
+    const double rawAngleData = (k < nAd) ? m_level->angleAt(k) : 180.0;
     float angleDir;
     if (rawAngleData == 999.0) {
         int minus = 1;
-        while (k - minus >= 0 && ad[(size_t)(k - minus)] == 999.0) minus++;
-        const double realAngle = (k - minus >= 0) ? ad[(size_t)(k - minus)] : 0.0;
+        while (k - minus >= 0 && m_level->angleAt(k - minus) == 999.0) minus++;
+        const double realAngle = (k - minus >= 0) ? m_level->angleAt(k - minus) : 0.0;
         angleDir = (float)std::fmod(realAngle + (minus - 1) * 180.0, 360.0);
     } else {
         angleDir = (float)std::fmod(rawAngleData + 180.0, 360.0);
@@ -200,9 +201,8 @@ float Timeline::totalAngleAt(int64_t i) const {
     if (m_level->tileCount() == 0) return 0.0f;
     const int64_t nAll = (int64_t)m_tileBPM.size();
     if (i >= nAll - 1) return m_lastTotalAngle;
-    const auto& ad = m_level->angleData;
     const bool isCW = m_tileIsCW[(size_t)i];
-    const double rawAngleData = (i < (int64_t)ad.size()) ? ad[(size_t)i] : 180.0;
+    const double rawAngleData = (i < m_level->angleCount()) ? m_level->angleAt(i) : 180.0;
     double relAngle;
     if (rawAngleData == 999.0) {
         relAngle = 0.0;

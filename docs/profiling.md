@@ -79,6 +79,37 @@ MYC 677 万层（tile 3385456，`ADOCAO_CAPTURE_FRAMES=10`）：
 2. **`cull` 那一格才是剔除的账**：块索引之后首帧 **MYC 0.011 / Singularity 0.390 / primer 0.032 ms**；
    同为首帧口径，**全扫时代**约为 **2~3 / 0.45 / 113 ms**（`ADOCAO_CULL=scan` 可复现）。
 
+## 1.5 整程浸泡（"100% 从头到尾"）
+
+`--capture` 只能看单帧；"从头到尾跑完整首"要看**整程**统计。开 `ADOCAO_PROFILE=1` 后在**真实播放环路**
+里每 10 s 打一行、结束时再打一行总结（关掉时零开销）：
+
+```
+soak(结束): 帧 65027｜work p50=0.19 p95=0.48 p99=0.71 max=30.54 ms｜
+            frame p50=3.12 p95=6.15 max=35.35｜>16.7ms 2 帧(0.00%)｜drawn 中位 629 峰值 99018｜常驻 743 MB
+soak(结束-分段): cull=0.008[0.000..0.883] upload=0.001 draw=0.009 trails=0.003[0..8.321] planets=0.002[0..6.326]
+                other~=0.165 frame=0.192[0.015..30.535] n=65026
+```
+
+口径：`work` = `update+render`（不含 swap/pacing），`frame` = 整圈**含** `glfwSwapBuffers` 与帧控等待
+（本 app 的目标是 320 fps，所以 `frame` p50≈3.12 ms 是**故意的节流**，不是性能上限）；
+`>16.7ms` 那一列才是"掉不掉帧"。`drawn` 是每次 draw 的实例数。
+
+**实测（2026-10-15，Apple M5，1280×720）**：`Won't You Make a Song with Me (no three planets)`
+（6,377,689 层、205.49 s；`--auto-play --trail-sample-rate 4000 --force-hitsound Kick`；
+视距由用户滚轮设定，未固定）：
+
+* **65,027 帧跑完整首，`work` p50=0.19 / p99=0.71 ms，`>16.7 ms` 只有 2 帧（0.003%）**；
+  全程 `cull` 中位 **0.008 ms**（④ 的块索引在连续平移下也是这个量级），`upload=0.001`、`draw=0.009`。
+* `drawn` 中位 **629**、峰值 **99,018** —— 峰值那次仍然没掉帧（`>16.7ms` 的 2 帧与它不同时）。
+* 常驻 **732 → 743 MB**（跑整首只涨 11 MB；对比：加载峰值 ~1.4 GB、建 mesh 前 1091 → 后 1151 MB，
+  说明加载期临时量在播放开始前就还掉了）。
+* 音频（`--force-hitsound Kick`）：`Synthesized 6377687 hits from 1 groups into 215.4s buffer`
+  —— 6.38M 次打拍音一次合成 ≈76 MB PCM（44.1k 立体声 float）。**这就是"音频墙"那笔常驻 PCM。**
+
+**注意**：这张谱的 `settings.hitsound` 是 `"None"`（谱师防普通播放器炸）—— 要听/要测打拍音必须
+`--force-hitsound Kick`。另外这类谱的打拍音**本身就是曲子**，别再加 `--music`（会叠一层）。
+
 ## 2. 整帧口径（`--capture`）
 
 `--capture` 打一行：`render_ms=… first_ms=… frames=… drawn=…`。

@@ -4,6 +4,7 @@
 #include "LevelLoader.hpp"
 #include "LevelScene.hpp"
 #include "core/util/Profile.hpp"
+#include "ProcMem.hpp"   // 常驻口径（浸泡统计用）
 #include "glad/gl_core.hpp"
 #include "core/level/LevelData.hpp"
 #include "core/timeline/Timeline.hpp"
@@ -638,6 +639,32 @@ void GameWindow::captureAndExit() {
     }
 }
 
+namespace {
+// 浸泡统计（"100% 从头到尾"那类整程跑）用的分位数：样本量到 10 万级也只是一次 sort
+double pctOf(std::vector<double> v, double p) {
+    if (v.empty()) return 0.0;
+    std::sort(v.begin(), v.end());
+    const size_t i = (size_t)(p * (double)(v.size() - 1) + 0.5);
+    return v[i < v.size() ? i : v.size() - 1];
+}
+void soakLine(const char* tag, const std::vector<double>& work, const std::vector<double>& frame,
+              const std::vector<int>& drawn, double overBudgetMs) {
+    if (work.empty()) return;
+    size_t over = 0;
+    for (double w : work) if (w > overBudgetMs) ++over;
+    std::vector<int> d = drawn;
+    std::sort(d.begin(), d.end());
+    const int dMed = d.empty() ? 0 : d[d.size() / 2];
+    const int dMax = d.empty() ? 0 : d.back();
+    LOG_I("soak(%s): 帧 %zu｜work p50=%.2f p95=%.2f p99=%.2f max=%.2f ms｜frame p50=%.2f p95=%.2f max=%.2f｜"
+          ">%.1fms %zu 帧(%.2f%%)｜drawn 中位 %d 峰值 %d｜常驻 %.0f MB",
+          tag, work.size(), pctOf(work, 0.50), pctOf(work, 0.95), pctOf(work, 0.99),
+          pctOf(work, 1.0), pctOf(frame, 0.50), pctOf(frame, 0.95), pctOf(frame, 1.0),
+          overBudgetMs, over, 100.0 * (double)over / (double)work.size(), dMed, dMax,
+          (double)appmem::currentResidentBytes() / 1048576.0);
+}
+}  // namespace
+
 void GameWindow::run() {
     // 开发：确定性抓帧优先于主循环（--capture）
     if (!m_cfg->capturePath.empty()) {
@@ -650,7 +677,12 @@ void GameWindow::run() {
 
     double targetFrameTime = 1.0 / 320.0;
 
+    std::vector<double> soakWork, soakFrame;
+    std::vector<int> soakDrawn;
+    double soakLastLog = 0.0;
+
     while (!glfwWindowShouldClose(m_window)) {
+        const double loopT0 = glfwGetTime();
         glfwPollEvents();
         handleInput();
 
@@ -682,12 +714,25 @@ void GameWindow::run() {
         if (m_scene->meshReady()) {
             // Time the real work (update+render, excluding the vsync wait) so
             // the scene can auto-tune the trail sample rate.
+            profile::frameBegin();
             double t0 = glfwGetTime();
             update(deltaMs);
             render();
             double workMs = (glfwGetTime() - t0) * 1000.0;
+            profile::frameEnd();
             m_scene->setMeasuredFrameMs(workMs);
             glfwSwapBuffers(m_window);
+            if (profile::enabled()) {
+                // 浸泡统计：`work` = update+render，`frame` = 算上 swap/pacing 的整圈
+                soakWork.push_back(workMs);
+                soakFrame.push_back((glfwGetTime() - loopT0) * 1000.0);
+                soakDrawn.push_back(m_scene->drawnInstances());
+                const double nowS = glfwGetTime();
+                if (nowS - soakLastLog >= 10.0) {
+                    soakLastLog = nowS;
+                    soakLine("10s", soakWork, soakFrame, soakDrawn, 1000.0 / 60.0);
+                }
+            }
         } else {
             // Still building async: show background color, keep responsive
             int fbW, fbH;
@@ -697,6 +742,10 @@ void GameWindow::run() {
             glClear(GL_COLOR_BUFFER_BIT);
             glfwSwapBuffers(m_window);
         }
+    }
+    if (profile::enabled()) {
+        soakLine("结束", soakWork, soakFrame, soakDrawn, 1000.0 / 60.0);
+        LOG_I("soak(结束-分段): %s", profile::reportSteady().c_str());
     }
 
     m_audioEngine->shutdown();

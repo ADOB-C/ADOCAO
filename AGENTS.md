@@ -186,7 +186,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `std::async` / 裸 `std::thread`），互相不知情 → **过订阅**、共享窗口缓存只能"主线程 pin"（`sample` 量到
   单帧 36% 的 `materialize` 就这么被串行化掉 ✗）。模型 = **一个调度器**（`clamp(hw-1,1,8)` worker + 调用
   线程参与；`Frame`/`Background` 两条车道；嵌套并行就地串行；`ADOCAO_JOBS=1` 全局串行钩子）+ **四条不变式**
-  （并行区内不写共享缓存 / 输出按 index 写 / GL 归上下文所有者 / 确定性优先）。**例外**：`adocao_audio`
+  （并行区内不写共享缓存 / 输出按 index 写 / GL 归上下文所有者 / 确定性优先）—— 这四条是**承重墙**；
+车道/worker 数/任务种类/暂存/平台策略都是**预留的缝**（见文档 §3.4 的扩展点表：加东西而不是改结构），
+但**明确不建** fiber/工作窃取/全局 DAG/自研无锁队列。**例外**：`adocao_audio`
   保持自己的线程（模块规则：单独编 `HitsoundManager.cpp` 的 harness 不能缺源码 ✗），别顺手"统一"。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在

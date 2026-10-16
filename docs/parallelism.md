@@ -51,10 +51,14 @@ public:
 }  // namespace adofai
 ```
 
-* **worker 数**：`clamp(hardware_concurrency() - 1, 1, 8)`（沿用 `LevelData` 里"超过 8 边际收益很小"的实测口径），
-  **调用线程永远参与**（和现在 `parallelFor` 一样），所以 8 核 = 1 调用 + 7 worker。
-* **车道**：worker 先抽 `Frame` 再抽 `Background`（严格优先，后台可被饿着 —— 它本来就是"空闲时做"）。
-  当前帧的剔除/物化走 `Frame`；解析、出图、预载、`.adocao` pack 走 `Background`。
+* **worker 数**走**策略**而不是硬编码：`Scheduler::Config { unsigned workers; bool mainParticipates; }`，
+  默认 `clamp(hardware_concurrency() - 1, 1, 8)`（沿用 `LevelData` 里"超过 8 边际收益很小"的实测口径，
+  但**上限是配置项**：将来按核数放开 / 让用户选 / 按电池状态降档都只是改 Config），
+  **调用线程永远参与**（和现在 `parallelFor` 一样），所以 8 核默认 = 1 调用 + 7 worker。
+* **车道用"优先级 + 名字"表达，不用二元开关**：`Lane` 是一个小枚举 + 每车道一个优先级整数
+  （`Frame` 最高，`Background` 最低）。worker 按优先级取任务；低优先可被饿着（后台本来就是"空闲时做"），
+  但**每车道要写明"会不会饿死"**。当前帧的剔除/物化走 `Frame`；解析、出图、预载、`.adocao` pack 走
+  `Background`。加车道 = 加一个常量 + 定优先级 + 写饿死政策（见 §3.4）。
 * **嵌套护栏**：线程本地 `inParallel` 标志 → 并行区内再调 `parallelFor` **就地串行执行**（防过订阅，且确定）。
 * **取消**：`Handle::cancel()` + `CancelToken`（`bool cancelled()`）；加载类任务在块边界检查。
 * **模板 `parallelFor`**：不再用 `std::function`（去类型擦除、支持 move-only 捕获）。
@@ -81,6 +85,25 @@ public:
 `adocao_audio` **不依赖** `Scheduler`（模块规则：单独编译 `HitsoundManager.cpp` 的 harness 不能缺源码 ✗）。
 它继续用自己的 `std::thread` 块调度，但：(a) 线程数收进一个参数（已有 `ADOCAO_MIX_THREADS` 钩子 ✓），
 (b) 由 app 侧把"可用核数"传进去，避免与调度器过订阅。
+
+### 3.4 可扩展性（哪些是缝、哪些是承重墙）
+
+**承重墙（不许动）**：§3.2 的四条不变式 —— 它们保证"并行不改出图"，任何扩展都必须在它们之内。
+**缝（预留，改起来是加东西而不是改结构）**：
+
+| 扩展点 | 现在长什么样 | 将来怎么加 | 别破坏什么 |
+|---|---|---|---|
+| **worker 数 / 是否参与** | `Scheduler::Config` 默认 `clamp(hw−1,1,8)` | 按核数放开、CLI/wizard 选项、省电档 | 调用线程必须仍能参与（否则主线程空等） |
+| **车道** | 枚举 + 优先级整数（`Frame`/`Background`） | 加 `Stream`（容器预取）/`Gpu`（上传）/`Audio` 等：加常量 + 优先级 + 饿死政策 | 低优先车道不许无限饿死**帧关键**的依赖（例如上传必须让帧车道先跑） |
+| **任务种类** | `parallelFor`（定长分片）/ `submit`（一次性） | `parallelReduce`（有序合并）、`parallelForEach`、DAG（`after(handle)` 依赖）—— **现在不建**，但 `Handle` 已经是引用计数的，加 `after` 不动调用方 | 归约必须**有序**（否则不确定 ✗） |
+| **取消** | `CancelToken::cancelled()`，块边界检查 | 超时、父任务级联取消、取消传播到 IO | 被取消的任务不许留下"半写"的输出（要么全写要么不写） |
+| **暂存 / 分配** | 热点内复用 per-worker 缓冲（§5 第 6 步） | per-worker arena、`ThreadLocalBuffer<T>`、分配器按车道切 | 暂存不许跨任务泄漏状态（否则不确定 ✗） |
+| **观测** | `ADOCAO_JOBS=1` 串行钩子；沿用 `ADOCAO_PROFILE=1` | 每车道/每任务的耗时直方图、队列深度、核占用（`docs/profiling.md` 的口径） | 埋点不许进抓帧路径的确定性输出（老规矩 ✗） |
+| **平台策略** | core 只认 `std::thread`（core-purity 铁律） | app 侧注册回调：macOS QoS、Windows 线程优先级、CPU 亲和 | 平台头/API **不许进 core**（`scripts/check-core-purity.sh` 会红） |
+| **音频** | 明文例外（自造线程） | 给 `HitsoundManager` 一个"可用核数"入口（已有 `ADOCAO_MIX_THREADS` 钩子的方向），由 app 把调度器的预算传进去 | 不许让 `adocao_audio` 依赖 `Scheduler`（单独编 harness 会缺源码 ✗） |
+
+**明确不建**（避免过度设计，但留了上面的缝）：fiber/协程、工作窃取、全局 DAG 调度器、自研无锁队列。
+真需要时的入口：`Handle` 的依赖链接（DAG）、车道优先级（窃取）、`Config`（线程数策略）。
 
 ## 4. 逐站点归类（改造后的样子）
 

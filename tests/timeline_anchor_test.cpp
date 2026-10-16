@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -97,12 +98,71 @@ void testChart(const char* path) {
     }
 }
 
+// ③ 切片 2：**按块重算**逐层对拍（每 4096 层一块，块内每一层都比）
+void testBlocks(const char* path) {
+    LevelData lv;
+    if (!lv.loadFromFile(path)) { std::printf("FAIL 载入失败：%s\n", path); ++g_fail; return; }
+    Timeline tl;
+    tl.build(lv, /*exportOnly=*/false);
+    if (!tl.blocksRecomputable()) {
+        std::printf("     %-46s 跳过按块重算（%s）\n", path, tl.blocksRecomputableWhy());
+        return;
+    }
+    const auto& st = tl.tileStartTimes();
+    const auto& dt = tl.tileDisappearTimes();
+    const auto& at = tl.tileAppearTimes();
+    const int64_t n = (int64_t)st.size(), stride = Timeline::kAnchorStride;
+
+    size_t blocks = 0, floors = 0, bad = 0, firstBadFloor = (size_t)-1;
+    for (int64_t i0 = 0; i0 < n; i0 += stride) {
+        const int64_t i1 = (i0 + stride < n) ? (i0 + stride) : n;
+        Timeline::BlockResult r;
+        if (!tl.recomputeBlock(i0, i1, r)) { ++bad; break; }
+        ++blocks;
+        for (int64_t i = i0; i < i1; ++i) {
+            ++floors;
+            const size_t k = (size_t)(i - i0);
+            bool ok = (r.startTimes[k] == st[(size_t)i]);
+            if (ok && !dt.empty())
+                ok = (r.disappearTimes[k] == dt[(size_t)i]) && (r.appearTimes[k] == at[(size_t)i]);
+            if (!ok) { if (bad == 0) firstBadFloor = (size_t)i; ++bad; }
+        }
+    }
+    if (bad && firstBadFloor != (size_t)-1)
+        std::printf("     首个不一致在第 %zu 层\n", firstBadFloor);
+    check(bad == 0, std::string(path) + "：按块重算与全量数组不一致");
+    std::printf("     %-46s 按块重算：%zu 块 / %zu 层逐位不一致 %zu%s\n", path, blocks, floors, bad,
+                dt.empty() ? "（无 TrackVis）" : "（含 disappear/appear）");
+
+    // 反面对照：把某层时长动 1 ULP → 该块（及其后同块）必须重现出不一致
+    if (n > 2) {
+        const int64_t mid = (n / stride / 2) * stride + 7;   // 中间某块里的第 7 层
+        if (mid < n - 1) {
+            Timeline copy;                        // 重新建一份，避免污染上面的对拍
+            copy.build(lv, false);
+            const float orig = copy.durations()[(size_t)mid];
+            copy.setDurationForTest(mid, std::nextafterf(orig, orig + 1e30f));
+            Timeline::BlockResult r2;
+            const int64_t i0 = (mid / stride) * stride;
+            const int64_t i1 = std::min(i0 + stride, n);
+            bool caught = false;
+            if (copy.recomputeBlock(i0, i1, r2)) {
+                for (int64_t i = i0; i < i1; ++i)
+                    if (r2.startTimes[(size_t)(i - i0)] != st[(size_t)i]) { caught = true; break; }
+            }
+            check(caught, "反面对照失败：时长动 1 ULP 后重算竟然还一致");
+        }
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     if (argc < 2) { std::printf("用法: %s <谱>…\n", argv[0]); return 2; }
     std::printf("=== ③ 切片 1：Timeline 锚点逐位对拍 ===\n");
     for (int i = 1; i < argc; ++i) testChart(argv[i]);
+    std::printf("=== ③ 切片 2：按块重算逐层对拍 ===\n");
+    for (int i = 1; i < argc; ++i) testBlocks(argv[i]);
     if (g_fail == 0) std::printf("全部通过\n");
     else std::printf("%d 项不通过\n", g_fail);
     return g_fail == 0 ? 0 : 1;

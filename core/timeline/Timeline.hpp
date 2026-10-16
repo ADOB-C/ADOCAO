@@ -60,6 +60,25 @@ public:
     };
     static constexpr int64_t kAnchorStride = 4096;   // 与 ② 分块 / ④ 块索引同粒度
     const std::vector<Anchor>& anchors() const { return m_anchors; }
+    // ③ 切片 2：**按块重算**。给块号与块内 [i0,i1)，用"锚点 + 每层时长（float）+ 每层 BPM +
+    // TrackVis 恒定态"重算出该块的三支 double（若 needsTrackVis 则含 disappear/appear）。
+    // 逐位口径与 precalculateTiming 相同：duration 转 double 后按层序累加（同一顺序、同一操作）。
+    struct BlockResult {
+        std::vector<double> startTimes;     // [i0, i1)
+        std::vector<double> disappearTimes; // 空 = 这张谱不需要 TrackVis
+        std::vector<double> appearTimes;
+    };
+    // 能否按块重算：需要 TrackVis 时，只有**块内没有 AnimateTrack 事件**才严格等价
+    // （FastAction 没留 trackAnimation 的值，见 LevelData.cpp 的 AnimateTrack 组装）。
+    bool blocksRecomputable() const { return m_blocksRecomputable; }
+    const char* blocksRecomputableWhy() const { return m_blocksWhy; }
+    bool recomputeBlock(int64_t i0, int64_t i1, BlockResult& out) const;
+    // **仅测试用**：改某一层的时长（给"按块重算"做反面对照 —— 1 ULP 也必须被抓到）
+    void setDurationForTest(int64_t i, float v) {
+        if (i >= 0 && (size_t)i < m_durations.size()) m_durations[(size_t)i] = v;
+    }
+    // 每层时长（float；= precalculateTiming 里累加进 startTimes 的那个值）
+    const std::vector<float>& durations() const { return m_durations; }
     const std::vector<double>& tileDisappearTimes() const { return m_tileDisappearTimes; }
     const std::vector<double>& tileAppearTimes() const { return m_tileAppearTimes; }
     const std::vector<float>& tileBPMs() const { return m_tileBPM; }
@@ -106,6 +125,14 @@ private:
     std::vector<float> m_tileBPM;
     std::vector<bool>  m_tileIsCW;
     std::vector<Anchor> m_anchors;   // ③ 切片 1：见 anchors()
+    std::vector<float>  m_durations; // ③ 切片 2：每层时长（替代 3 支 double 的前缀来源）
+    bool   m_blocksRecomputable = false;
+    const char* m_blocksWhy = "尚未记录";
+    // TrackVis 恒定态（无 AnimateTrack 事件时全程不变）
+    std::string m_visDA, m_visAA;
+    float  m_visBB = 0.0f, m_visBA = 0.0f;
+    float  m_visNum5 = 0.0f;         // = bpm[0]（i==0 时的 num5/num6 初值）
+    bool   m_needsTrackVis = false;
     size_t m_distCount = 0;          // 有效层数（= n）；配合下面两个标量实现 tileStartDist/tileEndDist
     float  m_lastStartDist = 1.0f;   // 只有最后一层用得上（其余恒 1.0f）
     float  m_lastEndDist   = 1.0f;

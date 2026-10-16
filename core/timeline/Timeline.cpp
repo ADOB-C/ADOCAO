@@ -303,9 +303,11 @@ void Timeline::precalculateTiming() {
 
     // Phase 3: Prefix sum
     double totalTime = 0.0;
+    m_durations.assign((size_t)n, 0.0f);          // ③ 切片 2：每层时长（同一批值，供按块重算）
     for (int i = 0; i < n - 1; i++) {
         m_tileStartTimes[i] = totalTime;
-        totalTime += durationAt(i);
+        m_durations[(size_t)i] = durationAt(i);
+        totalTime += (double)m_durations[(size_t)i];   // 与原来 `totalTime += durationAt(i)` 逐位同值
     }
     if (n > 0) m_tileStartTimes[n - 1] = totalTime;
 
@@ -386,7 +388,16 @@ void Timeline::precalculateTiming() {
         int dc = 0; for (int i = 0; i < n; i++) if (m_tileDisappearTimes[i] < 1e100) dc++;
         LOG_D("TrackVis Phase5: %d/%d tiles have disappearTime, curDA=%s curBB=%.1f curBA=%.1f refBPM=%.1f",
               dc, n, curDA.c_str(), curBB, curBA, flag2 ? num6 : num5);
+        // ③ 切片 2：记下恒定态（无 AnimateTrack 事件时整段不变），供按块重算
+        m_visDA = curDA; m_visAA = curAA; m_visBB = curBB; m_visBA = curBA;
+        m_visNum5 = (n > 0) ? m_tileBPM[0] : 0.0f;
     }
+    m_needsTrackVis = needsTrackVis;
+    // 可重算判据：不需要 TrackVis 时只看时长；需要 TrackVis 时还要求块内没有 AT 事件
+    // （FastAction 只留了 hasTrackAnimation 的 bool，没留 trackAnimation 的值 → 有 AT 就不严格）。
+    if (!needsTrackVis) { m_blocksRecomputable = true; m_blocksWhy = "不需要 TrackVis，只需时长前缀"; }
+    else if (!m_level->hasAtStates) { m_blocksRecomputable = true; m_blocksWhy = "TrackVis 状态恒定（无 AnimateTrack）"; }
+    else { m_blocksRecomputable = false; m_blocksWhy = "有 AnimateTrack：FastAction 没留 trackAnimation 值"; }
 
     // ③ 切片 1：记录锚点（每 kAnchorStride 层一个）。**只记录，不改消费方** ——
     // 本切片的验收是"锚点值 == 全量数组在该层逐位相同"（tests/timeline_anchor_test.cpp）。
@@ -412,6 +423,46 @@ void Timeline::precalculateTiming() {
     auto [minBPM, maxBPM] = std::minmax_element(m_tileBPM.begin(), m_tileBPM.end());
     LOG_D("Timeline: %d tiles, total duration %.2fs, bpm range %.0f-%.0f",
           n - 1, preShiftTotal, *minBPM, *maxBPM);
+}
+
+bool Timeline::recomputeBlock(int64_t i0, int64_t i1, BlockResult& out) const {
+    const int64_t n = (int64_t)m_tileStartTimes.size();
+    if (i0 < 0 || i1 > n || i0 >= i1) return false;
+    const int64_t stride = kAnchorStride;
+    const int64_t b = i0 / stride;
+    if (b >= (int64_t)m_anchors.size() || m_anchors[(size_t)b].floor != i0) return false;
+    if ((int64_t)m_durations.size() != n) return false;
+    if (m_needsTrackVis && !m_blocksRecomputable) return false;
+
+    // 1) 起始时间：从锚点的**已存值**起步，按层序把时长（转 double）累加 —— 与原前缀同一顺序、
+    //    同一操作，所以逐位相同。为 TrackVis 那一遍多算一层（disappear[i] 要用 start[i+1]）。
+    const int64_t last = std::min(i1 + 1, n);
+    out.startTimes.assign((size_t)(last - i0), 0.0);
+    double t = m_anchors[(size_t)b].startTime;
+    for (int64_t i = i0; i < last; i++) {
+        out.startTimes[(size_t)(i - i0)] = t;
+        if (i < n - 1) t += (double)m_durations[(size_t)i];
+    }
+    if (!m_needsTrackVis) { out.disappearTimes.clear(); out.appearTimes.clear(); return true; }
+
+    // 2) TrackVis 两支：复刻 Phase 5 的循环（i ∈ [0, n-1) 才写；refBPM 在无 AT 时取 num5）
+    out.disappearTimes.assign((size_t)(i1 - i0), std::numeric_limits<double>::infinity());
+    out.appearTimes.assign((size_t)(i1 - i0), -std::numeric_limits<double>::infinity());
+    const bool writeDA = (m_visDA != "None");
+    const bool writeAA = (m_visAA != "None");
+    const float bpm0 = (n > 0) ? m_tileBPM[0] : 0.0f;
+    for (int64_t i = i0; i < i1 && i < n - 1; i++) {
+        // num5/num6 的推进规则与 Phase 5 逐字相同：i>0 时 num5=num6、num6=bpm[i]；i==0 用初值
+        float num5, num6;
+        if (i == 0) { num5 = m_visNum5; num6 = m_visNum5; }
+        else { num5 = (i - 1 == 0) ? bpm0 : m_tileBPM[(size_t)(i - 1)]; num6 = m_tileBPM[(size_t)i]; }
+        const float refBPM = num5;   // flag2 == false（无 AT）
+        const double st  = out.startTimes[(size_t)(i - i0)];
+        const double st1 = out.startTimes[(size_t)(i - i0 + 1)];
+        if (writeDA) out.disappearTimes[(size_t)(i - i0)] = st1 + (double)(m_visBB * 60.0f / refBPM);
+        if (writeAA) out.appearTimes[(size_t)(i - i0)]    = st  - (double)(m_visBA * 60.0f / refBPM);
+    }
+    return true;
 }
 
 double Timeline::totalDuration() const {

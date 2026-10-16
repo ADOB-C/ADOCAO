@@ -218,7 +218,11 @@
 
 ### 性能
 - [x] Visibility cache fix
-- [x] Frame profiler (per-section timing)
+- [ ] **Frame profiler（按段计时）** —— ⚠️ 2026-10-15 核对：这一条以前被勾成 `[x]`，但**全仓找不到
+      任何 per-section 计时代码**（可能是 P1–P5 重构时丢的）。现在只有**整帧**数（`--capture` 的
+      `render_ms`/`first_ms`，`ADOCAO_CAPTURE_FRAMES=N` 取稳态中位数）与实时循环的 `workMs`。
+      要做的是 `ADOCAO_PROFILE=1` 时把 `scene.update / cull / attr / upload / draw / glFinish` 分段计时，
+      并自洽校验"各段和 ≤ render_ms"；系统侧另有 `sample` / `vmmap` / `xctrace`（见待补的 `docs/profiling.md`）
 - [x] High-FPS build option (1000fps)
 - [x] Sleep-based frame pacing (CPU-efficient)
 - [x] processActions() O(n+m) optimization (removed O(n*m) per-event fills)

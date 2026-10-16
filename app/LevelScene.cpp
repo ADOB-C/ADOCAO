@@ -3,6 +3,7 @@
 #include "core/util/AssetPaths.hpp"
 
 #include "LauncherWindow.hpp"
+#include "ProcMem.hpp"
 #include "glad/gl_core.hpp"
 #include "render/Camera.hpp"
 #include "render/Shader.hpp"
@@ -120,8 +121,22 @@ bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level) {
 
 int LevelScene::drawnInstances() const { return m_tileMesh ? m_tileMesh->lastDrawnInstances() : 0; }
 
+// D1 的仪表盘：**常驻**口径（不是 peak RSS —— 大谱的峰值在加载期，见 ProcMem.hpp）
+static void logResidentDelta(const char* what, size_t before) {
+    const size_t after = appmem::currentResidentBytes();
+    if (before == 0 || after == 0) {
+        LOG_I("RSS: 建 %s 后 %.1f MB（本平台量不到前后差）", what, (double)after / 1048576.0);
+        return;
+    }
+    LOG_I("RSS: 建 %s 前 %.1f MB → 后 %.1f MB（+%.1f MB，常驻口径）", what,
+          (double)before / 1048576.0, (double)after / 1048576.0,
+          (double)(after - before) / 1048576.0);
+}
+
 void LevelScene::buildSync(const LevelData& level) {
+    const size_t rss0 = appmem::currentResidentBytes();
     m_tileMesh->build(level, m_fillColor, m_strokeColor);
+    logResidentDelta("TileMesh", rss0);
     if (m_redPlanet) {
         m_redPlanet->buildGPU();
         m_bluePlanet->buildGPU();
@@ -133,7 +148,9 @@ bool LevelScene::beginAsyncBuild(const LevelData& level, GLFWwindow* sharedWindo
     if (!sharedWindow) return false;
     m_buildFuture = std::async(std::launch::async, [this, &level, sharedWindow]() {
         glfwMakeContextCurrent(sharedWindow);
+        const size_t rss0 = appmem::currentResidentBytes();
         m_tileMesh->build(level, m_fillColor, m_strokeColor);
+        logResidentDelta("TileMesh(async)", rss0);
         if (m_redPlanet) {
             m_redPlanet->buildGPU();
             m_bluePlanet->buildGPU();

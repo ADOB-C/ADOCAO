@@ -110,7 +110,6 @@ private:
     int m_cullFloors = (int)CullIndex::kBlockFloors;   // 见 setCullBlockFloors                  // 建表用的保守半边长（= 所有形状 localBBox 的最大外扩）
     std::vector<uint8_t> m_iconBits;          // bit0 twirl / bit1 ssUp / bit2 ssDown
     std::vector<uint8_t> m_visible;           // lazy：只有 TrackVis 需要
-    std::vector<uint32_t> m_drawOrder;        // 改造前的绘制顺序（见类注释）
     int m_nTiles = 0;
 
     // ---- 每帧可见实例（compaction 结果；draw 时上传）----

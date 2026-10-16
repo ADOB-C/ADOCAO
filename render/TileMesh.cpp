@@ -59,8 +59,7 @@ TileMesh::TileMesh(TileMesh&& o) noexcept
       m_posX(std::move(o.m_posX)), m_posY(std::move(o.m_posY)),
       m_chunkX(std::move(o.m_chunkX)), m_chunkY(std::move(o.m_chunkY)),
       m_iconBits(std::move(o.m_iconBits)), m_visible(std::move(o.m_visible)),
-      m_cullIndex(std::move(o.m_cullIndex)), m_cullHalf(o.m_cullHalf),
-      m_drawOrder(std::move(o.m_drawOrder)), m_nTiles(o.m_nTiles) {
+      m_cullIndex(std::move(o.m_cullIndex)), m_cullHalf(o.m_cullHalf), m_nTiles(o.m_nTiles) {
     std::memcpy(m_fill, o.m_fill, sizeof m_fill);
     std::memcpy(m_stroke, o.m_stroke, sizeof m_stroke);
     o.m_vao = o.m_recipeVbo = o.m_ebo = o.m_instVbo = o.m_shapeTex = 0;
@@ -77,8 +76,7 @@ TileMesh& TileMesh::operator=(TileMesh&& o) noexcept {
         m_posX = std::move(o.m_posX); m_posY = std::move(o.m_posY);
         m_chunkX = std::move(o.m_chunkX); m_chunkY = std::move(o.m_chunkY);
         m_iconBits = std::move(o.m_iconBits); m_visible = std::move(o.m_visible);
-        m_cullIndex = std::move(o.m_cullIndex); m_cullHalf = o.m_cullHalf;
-        m_drawOrder = std::move(o.m_drawOrder); m_nTiles = o.m_nTiles;
+        m_cullIndex = std::move(o.m_cullIndex); m_cullHalf = o.m_cullHalf; m_nTiles = o.m_nTiles;
         std::memcpy(m_fill, o.m_fill, sizeof m_fill);
         std::memcpy(m_stroke, o.m_stroke, sizeof m_stroke);
         o.m_vao = o.m_recipeVbo = o.m_ebo = o.m_instVbo = o.m_shapeTex = 0;
@@ -101,7 +99,7 @@ void TileMesh::destroy() {
     destroyStaticGL();
     m_shapes.clear(); m_tileShape.clear(); m_posX.clear(); m_posY.clear();
     m_chunkX.clear(); m_chunkY.clear();
-    m_iconBits.clear(); m_visible.clear(); m_cullIndex.clear(); m_drawOrder.clear();
+    m_iconBits.clear(); m_visible.clear(); m_cullIndex.clear(); m_nTiles = 0;
     m_listTiles.clear(); m_listAttr.clear();
     m_listValid = false;
     m_listUploaded = false;
@@ -170,7 +168,7 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
         m_chunkY[c] = tiles[i0].position[1];
     }
     m_iconBits.assign((size_t)n, 0);
-    m_drawOrder.clear(); m_drawOrder.reserve((size_t)n);
+    // 剔除/上传都直接按下标取砖，所以这里没有任何"逐砖排列"数组了（见下面绘制顺序的说明）
 
     for (auto& kv : shapeGroups) {
         const GeoKey& key = kv.first;
@@ -184,21 +182,14 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
             m_posY[ti] = (float)(tiles[ti].position[1] - m_chunkY[c]);
         }
     }
-    // 【实验，2026-10-15】绘制顺序改成**按层号升序**（原来 = 按形状分组 + 组内降序）。
-    // 分组那个顺序是"实例化之前，同形状一起画省状态切换"的遗留；现在一次 draw，
-    // 它唯一还可能起作用的地方是**同深度并列时谁盖谁**（AGENTS 记过"遮挡胜负由
-    // unordered_map 迭代序决定"）。改成升序 = 低层号先提交，顺序从此**确定**。
-    // 验收方式：像素门槛 51 状态逐字节（集合不变、只动提交顺序）。
-    // `ADOCAO_DRAW_ORDER=grouped` 是 **A/B 钩子**：恢复旧顺序，好在同一份二进制上做对比抓帧。
-    const char* orderEnv = std::getenv("ADOCAO_DRAW_ORDER");
-    if (orderEnv && std::strcmp(orderEnv, "grouped") == 0) {
-        for (auto& kv : shapeGroups) {
-            std::vector<int>& v = kv.second;
-            std::sort(v.begin(), v.end(), std::greater<int>());
-            for (int i : v) m_drawOrder.push_back((uint32_t)i);
-        }
-    } else {
-        for (size_t i = 0; i < n; ++i) m_drawOrder.push_back((uint32_t)i);
+    // 绘制顺序 = **按砖号（= 层号）升序**（2026-10-15 起）：所以不再需要 `m_drawOrder` 那支
+    // 4 B/砖 的排列数组（MYC 27 MB、2³¹−1 外推 **8.6 GB**）——剔除与上传**直接用下标**（下标即
+    // 砖号）。依据（顺序对出图不可观测）：像素门槛 51/51 + 巨谱 16 帧 A/B（三种 Won't You、
+    // TNR、primer-final 含"整张一帧"6,841 万块）**逐字节相同**，见 `docs/rendering.md`。
+    // 旧的 A/B 钩子 `ADOCAO_DRAW_ORDER=grouped` 随数组一并删除（要重做就临时改提交顺序）。
+    LOG_I("TileMesh: 每砖常驻 %zu B（位置 8 + 形状号 4 + 图标位 1）= %.1f MB；"
+          "另按需 1 B/砖（TrackVis 可见位）",
+          (size_t)13, 13.0 * (double)n / 1048576.0);
 
     // ---- ④ 粗块 AABB 索引 ----
     // 保守半边长 = 所有形状 localBBox 的最大外扩（块 AABB 必须**包住**块内任何一块砖的
@@ -240,7 +231,6 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     } else {
         m_cullIndex.clear();
         LOG_I("cull-index: 关闭（砖 %d < %d 或粒度为 0）→ 剔除走全扫", n, kCullIndexMinTiles);
-    }
     }
 
     // 图标位：与改造前 `buildIcons` 的判据逐字相同（Twirl / SetSpeed 的 1.05、0.95 阈值）
@@ -321,7 +311,7 @@ void TileMesh::buildStaticGL() {
 void TileMesh::cullRange(size_t begin, size_t end, double vl, double vr, double vb, double vt,
                          double camX, double camY, std::vector<uint32_t>& outTiles,
                          std::vector<float>& outAttr) const {
-    const size_t n = m_drawOrder.size();
+    const size_t n = (size_t)m_nTiles;
     if (end > n) end = n;
     if (begin >= end) return;
     outTiles.reserve(outTiles.size() + (end - begin));
@@ -333,7 +323,7 @@ void TileMesh::cullRange(size_t begin, size_t end, double vl, double vr, double 
     size_t i = begin;
     for (; i + (W - 1) < end; i += W) {
         for (size_t b = 0; b < W; b++) {
-            uint32_t t = m_drawOrder[i + b];
+            const uint32_t t = (uint32_t)(i + b);   // 下标即砖号
             const Shape& sh = m_shapes[m_tileShape[t]];
             sMinX[b] = sh.localMinX + tileX(t);
             sMaxX[b] = sh.localMaxX + tileX(t);
@@ -343,7 +333,7 @@ void TileMesh::cullRange(size_t begin, size_t end, double vl, double vr, double 
         int mask = CullSIMD::test4(sMinX, sMaxX, sMinY, sMaxY, vl, vr, vb, vt);
         for (size_t b = 0; b < W; b++) {
             if (!(mask & (1 << (int)b))) continue;
-            uint32_t t = m_drawOrder[i + b];
+            const uint32_t t = (uint32_t)(i + b);
             if (haveVis && !m_visible[t]) continue;
             outTiles.push_back(t);
             // 相机相对偏移在 **double** 里算完再窄化一次：分开窄化（pos 与 cam 各自 cast）会
@@ -353,7 +343,7 @@ void TileMesh::cullRange(size_t begin, size_t end, double vl, double vr, double 
         }
     }
     for (; i < end; i++) {
-        uint32_t t = m_drawOrder[i];
+        const uint32_t t = (uint32_t)i;
         const Shape& sh = m_shapes[m_tileShape[t]];
         double mnX = sh.localMinX + tileX(t), mxX = sh.localMaxX + tileX(t);
         double mnY = sh.localMinY + tileY(t), mxY = sh.localMaxY + tileY(t);
@@ -378,7 +368,7 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
     if (frustumChanged) {
         m_listTiles.clear();
         m_listAttr.clear();
-        const size_t n = m_drawOrder.size();
+        const size_t n = (size_t)m_nTiles;
         constexpr size_t CHUNK = 32768;
         // A/B 钩子：ADOCAO_CULL=scan 强制走原来的全扫（同一份二进制上对比真实渲染耗时）
         static const bool forceScan = [] {

@@ -147,7 +147,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   * `m_drawOrder` = **按层号升序**（原来是"按形状分组 + 组内降序"）。像素门槛 51/51 + 巨谱 A/B
     16 帧（三种 Won't You、TNR、primer-final，含整张一帧 6,841 万块）**逐字节相同** →
     顺序对出图不可观测（旧的"反转顺序差 102 像素"是**旧全局 Z** 时代的现象，窗口归一化 Z 之后
-    并列基本消失）。钩子 `ADOCAO_DRAW_ORDER=grouped`，整套 `scripts/order-ab.sh`。
+    并列基本消失）。**该顺序下那支 4 B/砖 的 `m_drawOrder` 是纯冗余，已删除**（2026-10-15）：
+    MYC 常驻实测 **−26.3 MB**（`app/ProcMem.hpp` 的常驻口径 945.8→919.5 MB）、2³¹−1 外推 **8.6 GB**，
+    出图逐字节相同。A/B 钩子 `ADOCAO_DRAW_ORDER=grouped` 与 `scripts/order-ab.sh` **一并移除**
+    （留着会变成永远绿的假对照）；要重做就临时改 `TileMesh` 的提交顺序。
+  * **内存量具**（D1 用）：峰值 RSS 看**加载期**（`/usr/bin/time -l`，门槛在用）；
+    "建完之后跑起来常驻多少"看 `app/ProcMem.hpp::currentResidentBytes()`（`LevelScene` 在建
+    `TileMesh` 前后各打一行）—— 渲染侧的改动只有这个口径量得出来。
   * 剔除改成**粗块 AABB 索引**（`render/CullIndex.hpp`，每 4096 层一块、0.0098 B/砖、
     2³¹ 外推 21 MB）：先筛块再在块内调用**原来那个** `cullRange` → 输出与全扫**逐元素相同**
     （ctest `cull_index` 对拍 + 像素门槛 51/51）。端到端 `--capture` 帧时 MYC z25 38.2→36.1 ms、

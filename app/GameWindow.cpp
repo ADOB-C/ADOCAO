@@ -428,17 +428,20 @@ void GameWindow::render() {
     glfwGetFramebufferSize(m_window, &fbW, &fbH);
     LetterboxedViewport vp = computeLetterbox(fbW, fbH, m_targetAspect);
 
-    glViewport(0, 0, fbW, fbH);
-    glClearColor(0, 0, 0, 1); glClear(GL_COLOR_BUFFER_BIT);
+    {
+        adofai::profile::Scoped _s("setup");   // 帧头：letterbox + 两次 clear + setAspect
+        glViewport(0, 0, fbW, fbH);
+        glClearColor(0, 0, 0, 1); glClear(GL_COLOR_BUFFER_BIT);
 
-    glViewport(vp.x, vp.y, vp.w, vp.h);
-    glScissor(vp.x, vp.y, vp.w, vp.h);
-    glEnable(GL_SCISSOR_TEST);
-    glClearColor(m_bgR, m_bgG, m_bgB, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glDisable(GL_SCISSOR_TEST);
+        glViewport(vp.x, vp.y, vp.w, vp.h);
+        glScissor(vp.x, vp.y, vp.w, vp.h);
+        glEnable(GL_SCISSOR_TEST);
+        glClearColor(m_bgR, m_bgG, m_bgB, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glDisable(GL_SCISSOR_TEST);
 
-    m_camera.setAspect((float)vp.w, (float)vp.h);
+        m_camera.setAspect((float)vp.w, (float)vp.h);
+    }
 
     bool playing = m_playback->isPlaying();
     m_scene->render(m_camera, *m_timeline, playing, m_playback->timeInLevel(),
@@ -551,7 +554,7 @@ void GameWindow::captureAndExit() {
     const auto tRender0 = std::chrono::steady_clock::now();
     profile::frameBegin();
     render();
-    glFinish();
+    { adofai::profile::Scoped _s("glfinish"); glFinish(); }   // = 这一帧的 GPU 等完（CPU 提交之外的部分）
     profile::frameEnd();
     const auto tRender1 = std::chrono::steady_clock::now();
     const double firstMs = std::chrono::duration<double, std::milli>(tRender1 - tRender0).count();
@@ -560,7 +563,7 @@ void GameWindow::captureAndExit() {
         const auto a = std::chrono::steady_clock::now();
         profile::frameBegin();
         render();
-        glFinish();
+        { adofai::profile::Scoped _s("glfinish"); glFinish(); }
         profile::frameEnd();
         const auto b = std::chrono::steady_clock::now();
         reps.push_back(std::chrono::duration<double, std::milli>(b - a).count());

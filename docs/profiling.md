@@ -18,14 +18,20 @@
 
 段名与放置：
 
-| 段 | 位置 |
-|---|---|
-| `vis` | `LevelScene::render` 开头 `updateTileVisibility`（TrackVis 起隐/显）|
-| `cull` | `TileMesh::draw` 内的 `ensureDrawList`（④ 的筛块 + 块内判 + 拼表）|
-| `upload` | `uploadIfNeeded`（实例缓冲上传）|
-| `draw` | `glBindVertexArray` + `glDrawElementsInstanced`（GL 提交；不 glFinish）|
-| `trails` / `planets` | `LevelScene::render` 的拖尾 / 行星 |
-| `other` | **不是段**：`帧自量 − 段和`（ImGui、swap、present、驱动侧等待等）|
+| 段 | 位置 | 量的是 |
+|---|---|---|
+| `setup` | `GameWindow::render` 帧头（letterbox + 两次 `glClear` + `setAspect`）| CPU 提交 |
+| `vis` | `LevelScene::render` 开头 `updateTileVisibility`（TrackVis 起隐/显）| CPU |
+| `cull` | `TileMesh::draw` 内的 `ensureDrawList`（④ 的筛块 + 块内判 + 拼表）| CPU |
+| `upload` | `uploadIfNeeded`（实例缓冲上传）| CPU 提交 |
+| `draw` | `glBindVertexArray` + `glDrawElementsInstanced` | **CPU 提交**（异步，不是 GPU 时间）|
+| `trails` / `planets` | `LevelScene::render` 的拖尾 / 行星 | CPU 提交 |
+| `glfinish` | 帧末 `glFinish()` | **这一帧的 GPU 等完**（提交之外的全部）|
+| `other` | **不是段**：`帧自量 − 段和` | 剩余（应≈0；不≈0 就说明有东西没立段）|
+
+**`other` 曾经长到 97%，那是我的错**（2026-10-15 当天被指出）：当时没给帧末的 `glFinish` 立段，
+于是"等 GPU 做完这一帧"整块掉进了桶里 —— 而那恰恰是稳态帧的全部。立段之后 `other ≈ 0`，
+真账变成"**GPU 96% vs CPU 提交 4%**"（见下表）。**规则：`other` 只要不接近 0，就是漏立了段，先补段。**
 
 两条口径：
 * `N=1` → `profile(单帧)`：该帧单次快照（**首帧**，含一次性 GL 开销）。
@@ -43,11 +49,17 @@
 
 **实测（2026-10-15，Apple M5，1280×720，zoom 25，`ADOCAO_CAPTURE_FRAMES=6/4/3`）**：
 
-| 谱（tile）| drawn | 首帧总 | vis | **cull** | draw | trails | planets | other | **稳态帧（中位）** |
-|---|---|---|---|---|---|---|---|---|---|
-| MYC 677 万（3385456）| 178 | 41.87 | 7.55 | **0.008** | 16.35 | 7.07 | 6.10 | 4.76 | **0.679 [0.31..0.78] n=9** |
-| Singularity 100 万（249416）| 3765 | 41.03 | 0.48 | **0.390** | 21.30 | 7.27 | 5.60 | 5.98 | **0.692**（单样本） |
-| primer 6841 万（34205538）| 127 | 41.64 | 0.00 | **0.032** | 26.01 | 7.33 | 5.32 | 2.94 | **0.636**（单样本） |
+MYC 677 万层（tile 3385456，`ADOCAO_CAPTURE_FRAMES=10`）：
+
+| 口径 | setup | vis | cull | upload | draw | trails | planets | **glfinish** | other | 帧 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 首帧 | 0.023 | 6.563 | 0.009 | 0.019 | 16.119 | 7.041 | 6.510 | 1.078 | 0.013 | 37.376 |
+| **稳态（中位 n=9）** | 0.003 | 0.000 | 0.000 | 0.008 | 0.013 | 0.004 | 0.003 | **0.650 [0.259..3.421]** | −0.004 | 0.677 [0.281..3.472] |
+
+读法：稳态帧 **≈96% 是 `glfinish`（GPU 等完）**，CPU 提交（setup+vis+cull+upload+draw+trails+planets）
+合计只有 **0.027 ms**。首帧那 16.1/7.0/6.5 ms 的 `draw`/`trails`/`planets` 是**一次性 GL 建立**
+（着色器编译、纹理/缓冲首次上传），别当帧预算；`cull=0.009`（首帧）才是剔除的账。
+`glfinish` 的**区间很宽**（0.259~3.421）—— GPU 侧噪声比 CPU 侧大得多，所以更要看中位数而不是单采样。
 
 （后两张是单帧口径，只作对照；要下结论请按上面的多帧方式重跑。）
 
@@ -117,6 +129,8 @@ xcrun xctrace record --template 'Time Profiler' --attach <pid> --time-limit 20s 
    （在 `--capture` 里让相机按固定步长走 N 帧、每帧都重建列表）。
 2. `profile` **只覆盖渲染线程**：异步建 mesh / 加载期在别的线程（用 §3 的口径）。
 3. `other` 是个**混合桶**（ImGui + swap + present + 驱动等待），要拆它得上 `sample`/`xctrace`。
-4. **`draw` 段量的是 CPU 提交时间，不是 GPU 时间**（`glDrawElementsInstanced` 是异步的，帧末的
-   `glFinish` 被算进 `other`）。要看 GPU 真耗时得上 **`GL_TIMER_QUERY`**（`glBeginQuery(GL_TIME_ELAPSED)`；
+4. **`draw`/`trails`/`planets` 量的是 CPU 提交时间**（异步），GPU 侧现在只有帧末 `glfinish` 一个
+   **总数**。要**按 pass** 拆 GPU 耗时得上 **`GL_TIMER_QUERY`**（`glBeginQuery(GL_TIME_ELAPSED)`；
    GL 3.3+，本机 4.3 ✓），代价是查询结果要**延后一帧**回读（双缓冲查询），且查询本身有开销。**未做。**
+5. `run()` 的真实播放环路里还有 `glfwSwapBuffers`（vsync/pacing 等待）——它**不在** `--capture` 的口径里
+   （抓帧不 swap），所以 `--capture` 的帧时**不含** vsync 等待。

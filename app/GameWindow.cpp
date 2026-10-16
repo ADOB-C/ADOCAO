@@ -3,6 +3,7 @@
 #include "LauncherWindow.hpp"
 #include "LevelLoader.hpp"
 #include "LevelScene.hpp"
+#include "core/util/Profile.hpp"
 #include "glad/gl_core.hpp"
 #include "core/level/LevelData.hpp"
 #include "core/timeline/Timeline.hpp"
@@ -548,15 +549,19 @@ void GameWindow::captureAndExit() {
     if (frames < 1) frames = 1;
     if (frames > 200) frames = 200;
     const auto tRender0 = std::chrono::steady_clock::now();
+    profile::frameBegin();
     render();
     glFinish();
+    profile::frameEnd();
     const auto tRender1 = std::chrono::steady_clock::now();
     const double firstMs = std::chrono::duration<double, std::milli>(tRender1 - tRender0).count();
     std::vector<double> reps;
     for (int f = 1; f < frames; f++) {
         const auto a = std::chrono::steady_clock::now();
+        profile::frameBegin();
         render();
         glFinish();
+        profile::frameEnd();
         const auto b = std::chrono::steady_clock::now();
         reps.push_back(std::chrono::duration<double, std::milli>(b - a).count());
     }
@@ -579,8 +584,26 @@ void GameWindow::captureAndExit() {
         LOG_I("capture: %s %dx%d t=%.4fs zoom=%.1f tile=%d req=%d render_ms=%.3f first_ms=%.2f frames=%d drawn=%d",
               m_cfg->capturePath.c_str(), fbW, fbH, targetTime, m_cfg->captureZoom, tileIdx,
               m_cfg->captureTile, renderMs, firstMs, frames, dragged);
+        if (profile::enabled()) {
+            // 逐帧快照：`首帧`含一次性 GL 开销（着色器编译/纹理上传），`稳态`才是帧预算要看的那条
+            auto dump = [](const char* tag, const profile::Frame& f) {
+                if (!f.valid) return;
+                const double sum = profile::sumMs(f);
+                LOG_I("profile(%s): %s ｜段和 %.3f / 帧 %.3f（%.0f%%）", tag,
+                      profile::report(f).c_str(), sum, f.ms,
+                      f.ms > 0 ? 100.0 * sum / f.ms : 0.0);
+                if (sum > f.ms * 1.05 + 0.5)
+                    LOG_W("profile(%s): 段和 %.3f ms > 该帧自量 %.3f ms —— 口径有问题（别信这张表）",
+                          tag, sum, f.ms);
+            };
+            if (frames > 1) dump("首帧", profile::firstFrame());
+            dump(frames > 1 ? "稳态" : "单帧", profile::lastFrame());
+        }
     else
-        LOG_W("capture: 写 PNG 失败 %s", m_cfg->capturePath.c_str());
+        // 前缀**不能**是 `capture:`：`capture-gate.sh` 用"日志里最后一条 capture: 行"核对
+        // tile/req，一条不是抓帧结果的 capture: 行会把解析带偏（真踩过：写 PNG 失败那次
+        // 让 48 个状态报"抓错砖"）。抓帧块里的辅助日志统一用 capture-selfcheck:/capture-write:。
+        LOG_E("capture-write: 写 PNG 失败 %s", m_cfg->capturePath.c_str());
 
     // 4) **自检：同一帧再渲染一次，逐字节比** —— 这是"抓帧必须确定性"的机械保证。
     // 为什么这么做：与其去追"哪些量是反馈驱动的"（追不完 —— 帧时间、墙上时钟、音频位置、

@@ -128,7 +128,9 @@ run_capture() {   # name chart mode value zoom WxH → 写 $CAPDIR/$name.png；�
         rss=$(grep -oE "Maximum resident set size \(kbytes\): [0-9]+" "$CAPDIR/$name.time" | grep -oE "[0-9]+$" | head -1)
         [ -n "${rss:-}" ] && rss=$(awk -v r="$rss" 'BEGIN{printf "%.1f", r/1024}')   # Linux：KiB
     fi
-    tline=$(grep "capture:" "$LOG" | tail -1)
+    # 只认"真正带 tile=N req=M 的抓帧行"：任何别的 `capture:` 前缀行（自检/写失败/将来新增）
+    # 都可能排在后面，`tail -1` 会抓错（真踩过：写 PNG 失败那条让 48 个状态报"抓错砖"）。
+    tline=$(grep -E "capture: .*tile=[-0-9]+ req=[-0-9]+" "$LOG" | tail -1)
     tile=$(echo "$tline" | grep -oE "tile=[-0-9]+" | cut -d= -f2)
     req=$(echo "$tline" | grep -oE "req=[-0-9]+" | cut -d= -f2)
     shapes=$(grep -oE "[0-9]+ unique shapes" "$LOG" | tail -1 | grep -oE "^[0-9]+")
@@ -149,6 +151,8 @@ run_capture() {   # name chart mode value zoom WxH → 写 $CAPDIR/$name.png；�
     if [ "$mode" = "tile" ] && [ "$tile" != "$value" ]; then
         echo "FAIL|$name|抓错砖：tile=$tile 期望 ${value}（--capture-tile 定点失效）"; return 1
     fi
+    # 注意：scratch 里的同名 PNG 可能是**上一次 run 留下的** —— 所以"文件存在"不是可靠信号，
+    # 真正可靠的是上面那条"只认带 tile=N req=M 的抓帧行"。
     printf 'OK|%s|tile=%s req=%s|zoom=%s|shapes=%s|groups=%s|rss_mb=%s|sec=%s\n' \
         "$name" "${tile:-?}" "${req:-?}" "$zoom" "${shapes:-?}" "${groups:-?}" "${rss:-?}" "$((t1 - t0))"
 }

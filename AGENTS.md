@@ -187,6 +187,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   单帧 36% 的 `materialize` 就这么被串行化掉 ✗）。模型 = **一个调度器**（`clamp(hw-1,1,8)` worker + 调用
   线程参与；`Frame`/`Background` 两条车道；嵌套并行就地串行；`ADOCAO_JOBS=1` 全局串行钩子）+ **四条不变式**
   （并行区内不写共享缓存 / 输出按 index 写 / GL 归上下文所有者 / 确定性优先）—— 这四条是**承重墙**；
+  第一条的活标本：`render/TileShape.hpp::keyForTile()` 曾直接调 `lv.tileDirectionAt(i)` 不带 worker 缓存
+  → 多线程一起动**共享** `FloorWindowCache` 的单块 scratch → 并行剔除比串行**少 16~21 块砖**（且只少不多）。
+  **"看起来只读"的 provider 访问器可能内部在物化** —— 并行前必须逐个揪出这种隐式可变 ✗；
 车道/worker 数/任务种类/暂存/平台策略都是**预留的缝**（见文档 §3.4 的扩展点表：加东西而不是改结构），
 但**明确不建** fiber/工作窃取/全局 DAG/自研无锁队列。**例外**：`adocao_audio`
   保持自己的线程（模块规则：单独编 `HitsoundManager.cpp` 的 harness 不能缺源码 ✗），别顺手"统一"。

@@ -124,6 +124,24 @@ public:
 | 音频解码 + hitsound 混音 | 音频自有 | 块 | 例外（§3.3） |
 | 加载窗/向导预载 | Background | — | 收编裸线程；支持取消（换谱时掐掉旧的） |
 
+### 4.5 第一步落地（2026-10-16）与**踩到的真 bug**
+
+已落地：`core/util/Scheduler`（模板 `parallelFor` + `Frame`/`Background` 车道 + 嵌套就地串行 +
+`ADOCAO_JOBS=1` 全局串行钩子 + `ADOCAO_SCHED_WORKERS=N` 诊断钩子）；`TileMesh` 的剔除迁到它；
+**窗口改成"线程私有 provider 克隆"**（`FloorWindowCache::clone()` + `LevelData::threadWindowCache()`），
+主线程 pin 与共享窗口 LRU 一并删除。
+
+**并行一开就发现真 bug（不变式 1 的活标本）**：并行剔除比串行**少 16~21 块砖**，而且并行结果是串行的
+**真子集**（只会少、不会多）→ 每个 job 各少几块。根因：`render/TileShape.hpp` 的 `keyForTile()` 直接调
+`lv.tileDirectionAt(i)` **不带 worker 缓存** → 多线程一起去动**共享** `FloorWindowCache` 的单块
+`m_scratch` → 互相覆盖 → 随机丢砖。修法：把 worker 缓存一路传进 `keyForTile` ✓。
+**教训**：不变式 1 不只是"别写共享容器"，**任何"看起来只读"的 provider 访问器都可能在内部物化**
+（1 块窗口的 scratch ✗）—— 并行前必须把这种"隐式可变"逐个揪出来。
+
+实测（10.5M 层螺旋谱）：冷单帧 **95.2 → 45.0 ms**；实时浸泡 work **p95 167 → 48 ms**、**max 241 → 152 ms**
+（p50 从 0.17 → 19~31 ms：以前是"偶尔 167 ms、多数帧复用列表"，现在每帧都在做被预算限制的活 ✗ 待优化）；
+`ADOCAO_JOBS=1` 与多 worker **PNG 逐字节相同** ✓、门槛 51/51 ✓、ctest 24/24 ✓。
+
 ## 5. 迁移顺序（每步都可独立验收，门槛 51/51 + 位对拍）
 
 1. **调度器骨架 + 窗口物化并行**（最大一刀）。`Scheduler::parallelFor`（模板、车道、嵌套护栏、

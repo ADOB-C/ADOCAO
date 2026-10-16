@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 // ③「每砖结构窗口化」的**共享层**：checkpoint 状态、窗口输入/输出类型、以及"按块重算"的钩子。
 //
 // 为什么放在 core：`LevelData` 要**存** checkpoint、要**缓存**一个窗口，所以这些**类型**必须在
@@ -118,6 +120,11 @@ public:
     const LevelData::Tile* tileAt(int64_t i) const;
     // 丢掉密集 `tiles` 数组（失败则原样不动）
     bool dropTiles(LevelData& level);
+    // 给并行剔除用：**克隆一份只读状态 + 全新可变窗口**（每线程一份 → 不写共享缓存、无竞争；
+    // 纯函数派生 → 结果与共享缓存逐位相同）。只读部分（checkpoints / isCW / 砖数）共享同一批值，
+    // 所以克隆很便宜（一次，随线程存活）。
+    std::unique_ptr<FloorWindowCache> clone() const;
+
     // **仅测试用**：让单块缓存失效（反面对照要"改了输入 → 必须重算"，
     // 而"读另一块挤掉缓存"在目标层恰好就在块 0 时不成立）
     void invalidateWindowForTest() const { m_block = -1; }

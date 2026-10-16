@@ -89,8 +89,12 @@ struct LevelData {
     // ⚠️ **不能**只写 `tiles.size()`：丢过密集数组之后它是 0，而全运行期（mesh 装配、capture、
     // jump、最近砖搜索）都拿它当"谱面砖数"。窗口化时由 provider 记着那个数。
     int64_t tileCount() const;
-    std::array<double, 2> tilePositionAt(int64_t i) const;
-    float tileDirectionAt(int64_t i) const;
+    // 可选 `wc`：并行剔除时传**本线程自己的克隆**（见 `FloorWindowCache::clone()`）；
+    // 不传 = 用共享缓存（单线程路径，语义与以前逐位相同）。
+    std::array<double, 2> tilePositionAt(int64_t i, FloorWindowCache* wc = nullptr) const;
+    float tileDirectionAt(int64_t i, FloorWindowCache* wc = nullptr) const;
+    // 本线程的私有窗口克隆（首次调用克隆一次，随线程存活；level 换了会自动重建）
+    FloorWindowCache* threadWindowCache() const;
     // ③ 切片 4：运行期读角度一律走 `angleAt()` —— 加载收尾会把 `angleData` 换成**位精确紧凑存储**
     // （字典 + 位打包下标；MYC 实测 45 个取值 → 0.75 B/层，54 MB → 4.8 MB）。
     // 加载期（解析 / Timeline::build / computeCheckpoints / TileMesh::build）仍读原数组。

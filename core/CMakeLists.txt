@@ -8,6 +8,7 @@ add_library(adocao_core STATIC
     util/Logger.cpp
     util/Progress.cpp
     util/ThreadPool.cpp
+    util/Scheduler.cpp
     util/DataFile.cpp
     timeline/Timeline.cpp
     timeline/PositionSolver.cpp

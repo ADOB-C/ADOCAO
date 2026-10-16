@@ -153,26 +153,58 @@ FloorRecomputeFn g_floorRecompute = nullptr;
 
 // ---------------- ③ 切片 4：LevelData 侧的访问器与缓存管理 ----------------
 
+std::unique_ptr<FloorWindowCache> FloorWindowCache::clone() const {
+    auto c = std::make_unique<FloorWindowCache>();
+    c->m_level = m_level;            // 只读：指向同一份 LevelData
+    c->m_ck = m_ck;                  // 只读：checkpoint 数组（96 B/4096 层）
+    c->m_isCW = m_isCW;              // 只读：cw 位
+    c->m_extra = m_extra;            // 只读：末尾合成砖
+    c->m_hasExtra = m_hasExtra;
+    c->m_tileCount = m_tileCount;
+    c->m_ready = m_ready;
+    c->m_windowed = m_windowed;
+    c->m_why = m_why;
+    c->m_block = -1;                 // 可变：全新窗口
+    c->m_blocks = 0;
+    return c;
+}
+
 int64_t LevelData::tileCount() const {
     if (m_winCache && m_winCache->windowed()) return m_winCache->tileCount();
     return (int64_t)tiles.size();
 }
 
-std::array<double, 2> LevelData::tilePositionAt(int64_t i) const {
-    if (m_winCache && m_winCache->windowed()) {
-        const Tile* t = m_winCache->tileAt(i);
+std::array<double, 2> LevelData::tilePositionAt(int64_t i, FloorWindowCache* wc) const {
+    FloorWindowCache* c = wc ? wc : m_winCache;
+    if (c && c->windowed()) {
+        const Tile* t = c->tileAt(i);
         if (t) return t->position;
     }
     return (i >= 0 && (size_t)i < tiles.size()) ? tiles[(size_t)i].position
                                                 : std::array<double, 2>{0.0, 0.0};
 }
 
-float LevelData::tileDirectionAt(int64_t i) const {
-    if (m_winCache && m_winCache->windowed()) {
-        const Tile* t = m_winCache->tileAt(i);
+float LevelData::tileDirectionAt(int64_t i, FloorWindowCache* wc) const {
+    FloorWindowCache* c = wc ? wc : m_winCache;
+    if (c && c->windowed()) {
+        const Tile* t = c->tileAt(i);
         if (t) return t->direction;
     }
     return (i >= 0 && (size_t)i < tiles.size()) ? tiles[(size_t)i].direction : 0.0f;
+}
+
+FloorWindowCache* LevelData::threadWindowCache() const {
+    if (!m_winCache || !m_winCache->windowed()) return nullptr;
+    struct TL {
+        const LevelData* owner = nullptr;
+        std::unique_ptr<FloorWindowCache> cache;
+    };
+    static thread_local TL tl;                 // 每线程一份（1 个窗口 = 65 KB）
+    if (tl.owner != this || !tl.cache) {       // 换谱/首次 → 克隆一份只读状态
+        tl.owner = this;
+        tl.cache = m_winCache->clone();
+    }
+    return tl.cache.get();
 }
 
 bool LevelData::buildFloorWindowCache(const std::vector<double>& startTimes,

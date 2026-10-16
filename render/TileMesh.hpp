@@ -38,6 +38,8 @@
 
 namespace adofai {
 
+class FloorWindowCache;
+
 class TileMesh {
 public:
     TileMesh() = default;
@@ -80,7 +82,9 @@ public:
         const uint32_t qe = (uint32_t)(int32_t)std::lround(ea * 100.0f) & 0xFFFFFu;
         return (uint64_t)qa | ((uint64_t)qe << 20) | (mid ? (1ull << 40) : 0ull);
     }
-    void deriveRange(const LevelData& level, int64_t i0, int64_t i1, DerivedRange& out) const;
+    // `wc`（可选）= 调用线程自己的 provider 窗口克隆（并行剔除用；nullptr = 共享缓存）
+    void deriveRange(const LevelData& level, int64_t i0, int64_t i1, DerivedRange& out,
+                     FloorWindowCache* wc = nullptr) const;
     const std::unordered_map<uint64_t, uint32_t>& shapeIndex() const { return m_shapeIndex; }
     int  cullBlockFloors() const { return m_cullFloors; }
     void updateVisibleRange(int startTile, int endTile, bool visible);
@@ -125,23 +129,11 @@ private:
     // 把它压到 1<<16 会让门槛 50/51 ✗）。当前值下 51 个状态逐字节相同，而降级帧 36 s → 82 ms。
     static constexpr size_t kMaxCullCandidates = 1u << 19;   // 524,288 块砖
     static constexpr size_t kMaxInstances      = 1u << 18;   // 262,144 实例（×20 B = 5.2 MB）
-    static constexpr size_t kWindowFloors = 4096;
-    // 窗口缓存槽数**按命中块数自适应**（2026-10-16，sample 证明这是最大头）：
-    // 固定 128 槽时，一张每帧命中 ~478 个粗块的谱会**每帧颠簸重算** ~478 个 4096 层窗口
-    // （`sample`：`FloorWindowCache::materialize` 占主线程 36%，其中大头是逐砖 `__sincos_stret`）
-    // → 单帧 130 ms。按工作集定容后，稳态只剩 1~2 次物化。普通谱（MYC 等）命中块少 → 仍是 128 槽，
-    // 不增加常驻。上限 512 槽（≈33 MB）防止病态谱把内存吃穿。
-    static constexpr size_t kWindowSlotsMin = 128;
-    static constexpr size_t kWindowSlotsMax = 512;
-    static constexpr size_t kWindowSlots    = kWindowSlotsMin;   // 兼容旧引用（初始/下限）
-    void ensureWindowSlots(size_t hitBlocks) const;
-    mutable size_t m_windowSlotCount = kWindowSlotsMin;
-    mutable std::vector<DerivedRange> m_windows;
-    mutable std::vector<int64_t> m_windowBlock;
-    // 块号 → 槽位。原来是**线性扫** m_windowBlock（槽数越多越慢：512 槽 × 26 万次查询/帧
+    // 剔除用的派生窗口粒度**与剔除索引的细块对齐**（512 层）：以前是 4096（= 粗块），
+    // 于是每个 512 层的细块命中都要白推 4096 层（实测一帧 321 次推导 × ~164 µs ≈ 53 ms ✗）。
+    // provider 侧的窗口仍是 4096（checkpoint 粒度），但它的 1 块缓存会命中，摊薄到 1/8。
+    static constexpr size_t kWindowFloors = 512;
     // = 上亿次比较），改成哈希后 O(1)。
-    mutable std::unordered_map<int64_t, size_t> m_windowSlot;
-    mutable size_t m_windowNext = 0;
     const DerivedRange* windowFor(size_t tile) const;
     void limitWarn(const char* what, size_t n) const;
     static bool limitOffCache();

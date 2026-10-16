@@ -3,7 +3,7 @@
 #include "render/CullSIMD.hpp"
 #include "core/util/Logger.hpp"
 #include "core/util/Profile.hpp"
-#include "core/util/ThreadPool.hpp"
+#include "core/util/Scheduler.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -42,8 +42,6 @@ bool operator==(const GeoKey& a, const GeoKey& b) {
     return a.sa == b.sa && a.ea == b.ea && a.mid == b.mid;
 }
 
-ThreadPool& getPool() { static ThreadPool pool; return pool; }
-
 inline void pushAttr(std::vector<float>& v, float ox, float oy, float oz, uint32_t shape, uint8_t bits) {
     v.push_back(ox); v.push_back(oy); v.push_back(oz);
     v.push_back((float)shape); v.push_back((float)bits);
@@ -57,7 +55,6 @@ TileMesh::TileMesh(TileMesh&& o) noexcept
     : m_vao(o.m_vao), m_recipeVbo(o.m_recipeVbo), m_ebo(o.m_ebo), m_instVbo(o.m_instVbo),
       m_shapeTex(o.m_shapeTex), m_instCapacity(o.m_instCapacity), m_shapeRows(o.m_shapeRows),
       m_shapes(std::move(o.m_shapes)), m_level(o.m_level),
-      m_windows(std::move(o.m_windows)), m_windowBlock(std::move(o.m_windowBlock)),
       m_chunkX(std::move(o.m_chunkX)), m_chunkY(std::move(o.m_chunkY)),
       m_visible(std::move(o.m_visible)),
       m_cullIndex(std::move(o.m_cullIndex)), m_cullHalf(o.m_cullHalf), m_nTiles(o.m_nTiles) {
@@ -74,7 +71,7 @@ TileMesh& TileMesh::operator=(TileMesh&& o) noexcept {
         m_instVbo = o.m_instVbo; m_shapeTex = o.m_shapeTex;
         m_instCapacity = o.m_instCapacity; m_shapeRows = o.m_shapeRows;
         m_shapes = std::move(o.m_shapes);
-        m_level = o.m_level; m_windows = std::move(o.m_windows); m_windowBlock = std::move(o.m_windowBlock);
+        m_level = o.m_level;
         m_chunkX = std::move(o.m_chunkX); m_chunkY = std::move(o.m_chunkY);
         m_visible = std::move(o.m_visible);
         m_cullIndex = std::move(o.m_cullIndex); m_cullHalf = o.m_cullHalf; m_nTiles = o.m_nTiles;
@@ -108,7 +105,7 @@ void TileMesh::visSetRange(size_t a, size_t b, bool v) {
 void TileMesh::destroy() {
     destroyStaticGL();
     m_shapes.clear(); m_shapeIndex.clear();
-    m_windows.clear(); m_windowBlock.clear(); m_windowNext = 0; m_level = nullptr;
+    m_level = nullptr;
     m_chunkX.clear(); m_chunkY.clear();
     m_visible.clear(); m_cullIndex.clear(); m_nTiles = 0;
     m_listTiles.clear(); m_listAttr.clear();
@@ -143,7 +140,8 @@ void TileMesh::hexToColor3(const std::string& hex, float out[3]) {
 
 
 // ③ 切片 4：某层区间的每砖派生数据（口径与原来 build() 里的循环逐字一致）
-void TileMesh::deriveRange(const LevelData& level, int64_t i0, int64_t i1, DerivedRange& out) const {
+void TileMesh::deriveRange(const LevelData& level, int64_t i0, int64_t i1, DerivedRange& out,
+                          FloorWindowCache* wc) const {
     const int64_t n = (int64_t)m_nTiles;
     if (i0 < 0) i0 = 0;
     if (i1 > n) i1 = n;
@@ -154,11 +152,11 @@ void TileMesh::deriveRange(const LevelData& level, int64_t i0, int64_t i1, Deriv
     for (int64_t i = i0; i < i1; ++i) {
         const size_t k = (size_t)(i - i0);
         const size_t ti = (size_t)i, c = ti >> kPosChunkShift;
-        const auto p = level.tilePositionAt(i);
+        const auto p = level.tilePositionAt(i, wc);
         out.posX[k] = (float)(p[0] - m_chunkX[c]);
         out.posY[k] = (float)(p[1] - m_chunkY[c]);
         float sa, ea; bool mid;
-        TileShape::keyForTile(level, (int)i, sa, ea, mid);
+        TileShape::keyForTile(level, (int)i, sa, ea, mid, wc);
         const auto it = m_shapeIndex.find(packShapeKey(sa, ea, mid));
         out.shape[k] = (it != m_shapeIndex.end()) ? it->second : 0u;
         // 图标位：与 buildIcons 的判据逐字相同（Twirl / SetSpeed 的 1.05、0.95 阈值）
@@ -200,10 +198,7 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
 
     m_shapes.reserve(shapeGroups.size());
     m_level = &level;
-    m_windows.assign(kWindowSlots, DerivedRange{});
-    m_windowBlock.assign(kWindowSlots, -1);
-    m_windowSlot.clear();
-    m_windowNext = 0; m_windowChecked = false;
+    m_windowChecked = false;
 
     // 每块一个 double 原点（取块内第一块砖的位置）—— 块内偏移用 float 才不丢精度（见 .hpp）
     const size_t chunkSize = (size_t)1 << kPosChunkShift;
@@ -371,34 +366,26 @@ void TileMesh::buildStaticGL() {
 // ---- 剔除 + 压实 ------------------------------------------------------
 
 // ③ 切片 4【二分实验】取/物化窗口；`ADOCAO_WINDOW_CHECK=1` 时与常驻数组**逐砖直比**
-void TileMesh::ensureWindowSlots(size_t hitBlocks) const {
-    // **只增不减**（槽数变化 = 清空缓存 = 丢掉所有已物化的窗口）。原来按 hitBlocks 每帧重算，
-    // 命中块数在 2 的幂边界附近抖动时就会**反复清缓存** → 帧时间 p95 反而从 136 ms 涨到 161 ms ✗。
-    // 现在只朝"够用"的方向长，长到上限为止（每次运行最多几次，之后稳态不再动）。
-    if (m_windows.size() == m_windowSlotCount * kWindowFloors && m_windowSlotCount > kWindowSlotsMin) return;
-    size_t want = m_windowSlotCount;
-    while (want < hitBlocks * 2 && want < kWindowSlotsMax) want *= 2;
-    if (want == m_windowSlotCount && !m_windows.empty()) return;
-    m_windowSlotCount = want;
-    m_windows.assign(want * kWindowFloors, DerivedRange{});
-    m_windowBlock.assign(want, (int64_t)-1);
-    m_windowSlot.clear();
-    m_windowNext = 0;
-}
-
+// ③ 切片 4 / 并行模型：剔除用的窗口改成**线程私有**（每线程一个 4096 层窗口，65 KB）。
+// 以前是"共享 LRU + 主线程 pin"：并行段不能碰共享缓存（会被撕），于是每帧最多 36% 的时间
+// （`sample`：materialize 824/2284）被串行化在主线程上。现在每个线程用自己的窗口 ——
+// 派生是**纯函数**（同一批输入 → 逐位相同），所以既没有竞争、结果也没变。
 const TileMesh::DerivedRange* TileMesh::windowFor(size_t tile) const {
-    if (!m_level || m_windows.empty()) return nullptr;
+    struct TL {
+        DerivedRange buf;
+        int64_t blk = -1;
+    };
+    static thread_local TL tl;          // 每线程一份（1 个窗口即可：剔除按砖号升序走）
+    if (!m_level) return nullptr;
     const int64_t b = (int64_t)(tile / kWindowFloors);
-    const auto it = m_windowSlot.find(b);
-    if (it != m_windowSlot.end()) return &m_windows[it->second];
-    const size_t slot = m_windowNext++ % m_windowBlock.size();
-    if (m_windowBlock[slot] >= 0) m_windowSlot.erase(m_windowBlock[slot]);   // 淘汰旧块
-    const int64_t i0 = b * (int64_t)kWindowFloors;
-    const int64_t i1 = std::min<int64_t>(i0 + (int64_t)kWindowFloors, (int64_t)m_nTiles);
-    m_windowBlock[slot] = b;
-    m_windowSlot[b] = slot;
-    deriveRange(*m_level, i0, i1, m_windows[slot]);
-    return &m_windows[slot];
+    if (tl.blk != b) {
+        const int64_t i0 = b * (int64_t)kWindowFloors;
+        const int64_t i1 = std::min<int64_t>(i0 + (int64_t)kWindowFloors, (int64_t)m_nTiles);
+        // 线程私有窗口用**本线程的 provider 克隆**（否则 deriveRange 里的 provider 缓存仍是共享的）
+        deriveRange(*m_level, i0, i1, tl.buf, m_level->threadWindowCache());
+        tl.blk = b;
+    }
+    return &tl.buf;
 }
 
 // ⑦ 诊断用：`ADOCAO_CULL_LIMIT=0` 关掉两道预算（会退回"整张一帧"的卡死风险，仅用于对比排查）
@@ -519,7 +506,6 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
                 const int64_t blk = (int64_t)((size_t)f / m_cullIndex.floorsPerBlock());
                 if (blk != lastBlk) { lastBlk = blk; ++hitBlocks; }
             });
-            ensureWindowSlots(hitBlocks);   // ⑦ 按工作集定容（否则每帧颠簸重算窗口）
             // ⑦ 闸①：候选太多**降级**为"只画离相机最近的块"（累计候选 ≤ 预算）。
             // 不能直接不画 —— 那会整帧黑屏（只剩行星/拖尾），实测被用户一眼看出来 ✗。
             const bool limitOff = std::getenv("ADOCAO_CULL_LIMIT") &&
@@ -535,6 +521,9 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
                 // 相机在几百万层处 → 屏幕空白，用户实测截图就是那样 ✗）。
                 ranges.clear();
                 m_cullIndex.collectHitSubNearest(vl, vr, vb, vt, camX, camY, kMaxCullCandidates, ranges);
+                // 选出来的集合不变，只把**处理顺序**改成砖号升序：窗口是 1 槽线程私有缓存，
+                // 按距离的顺序会在块之间跳 → 每跳一次重推一个窗口（局部性差）
+                std::sort(ranges.begin(), ranges.end());
                 for (const auto& r : ranges) {
                     if (m_listTiles.size() >= kMaxInstances) break;
                     cullRange(r.first, r.second, vl, vr, vb, vt, camX, camY, m_listTiles, m_listAttr);
@@ -561,27 +550,22 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
                 jobs.emplace_back(i, j);
                 i = j;
             }
-            // ③ 切片 4：**主线程先把命中块的窗口物化好**（并行段只读、不产生写 —— 否则共享窗口
-            // 缓存被多线程写/淘汰，派生数据会被撕）。命中块数超过槽位数就不 pin → 退回串行。
-            const bool pinnable = ranges.size() <= kWindowSlots &&
-                                  (size_t)m_cullIndex.floorsPerBlock() <= kWindowFloors;
-            if (pinnable) {
-                for (size_t r = 0; r < ranges.size(); ++r) (void)windowFor(ranges[r].first);
-            }
-
-            // 候选少就别开线程：唤醒 + 每任务两个 vector 的分配比串行做还贵
-            // （实测 Singularity zoom 25：25 万候选，并行比串行慢 ~1 ms）
-            constexpr size_t kCullSerialMax = 1u << 18;   // 262,144 块砖
-            if (pinnable && jobs.size() > 1 && candidates > kCullSerialMax) {
+            // 候选少就别开线程（唤醒 + 每任务两个 vector 的分配比串行做还贵）。
+            // 以前这个阈值被迫定得很高（26.2 万）：并行段不能碰共享窗口缓存，只能主线程先 pin，
+            // 候选一多 pin 本身就要 100 ms+ ✗。现在窗口是**线程私有**（纯函数派生）→ 阈值可以放开，
+            // 让"候选多"的帧真正吃到多核。
+            constexpr size_t kCullSerialMax = 1u << 14;   // 16,384 块砖
+            if (jobs.size() > 1 && candidates > kCullSerialMax) {
                 std::vector<std::vector<uint32_t>> tiles(jobs.size());
                 std::vector<std::vector<float>> attr(jobs.size());
-                auto& pool = getPool();
-                pool.parallelFor(0, jobs.size(), [&](size_t a, size_t b) {
-                    for (size_t k = a; k < b; ++k)
+                auto jobBody = [&](size_t a, size_t b) {
+                    for (size_t k = a; k < b; ++k) {
                         for (size_t r = jobs[k].first; r < jobs[k].second; ++r)
                             cullRange(ranges[r].first, ranges[r].second, vl, vr, vb, vt, camX, camY,
                                       tiles[k], attr[k]);
-                }, 1);
+                    }
+                };
+                Scheduler::instance().parallelFor(jobs.size(), 1, Lane::Frame, jobBody);
                 size_t totalT = 0, totalA = 0;
                 for (size_t k = 0; k < jobs.size(); k++) { totalT += tiles[k].size(); totalA += attr[k].size(); }
                 m_listTiles.reserve(totalT);
@@ -598,13 +582,12 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
             const size_t chunks = (n + CHUNK - 1) / CHUNK;
             std::vector<std::vector<uint32_t>> tiles(chunks);
             std::vector<std::vector<float>> attr(chunks);
-            auto& pool = getPool();
-            pool.parallelFor(0, chunks, [&](size_t a, size_t b) {
+            Scheduler::instance().parallelFor(chunks, 1, Lane::Frame, [&](size_t a, size_t b) {
                 for (size_t c = a; c < b; c++) {
                     size_t lo = c * CHUNK, hi = std::min(lo + CHUNK, n);
                     cullRange(lo, hi, vl, vr, vb, vt, camX, camY, tiles[c], attr[c]);
                 }
-            }, 1);
+            });
             size_t totalT = 0, totalA = 0;
             for (size_t c = 0; c < chunks; c++) { totalT += tiles[c].size(); totalA += attr[c].size(); }
             m_listTiles.reserve(totalT);
@@ -639,6 +622,14 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
             }
         }
         m_vl = viewL; m_vr = viewR; m_vb = viewB; m_vt = viewT;
+        if (const char* dp = std::getenv("ADOCAO_CULL_DUMP")) {   // 诊断：把剔除列表 dump 出来对差集
+            FILE* f = std::fopen(dp, "w");
+            if (f) {
+                for (uint32_t t : m_listTiles) std::fprintf(f, "%u\n", t);
+                std::fclose(f);
+                LOG_I("cull-dump: %zu 块 → %s", m_listTiles.size(), dp);
+            }
+        }
         // ⑦ 闸②：可见实例封顶（确定性截断，按砖号取前 N）—— 宁可少画，不能卡死
         if (m_listTiles.size() > kMaxInstances && !limitOffCache()) {
             limitWarn("visible-instances", m_listTiles.size());

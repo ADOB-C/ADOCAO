@@ -31,6 +31,8 @@
 
 namespace adofai {
 
+class FloorWindowCache;
+
 namespace TileShape {
 
 // ---- 布局常量 --------------------------------------------------------
@@ -113,11 +115,15 @@ inline int partBase(int layer, int part) {
 inline int iconBase(int part) { return kTileSlots + (part - P_ICON_TWIRL) * kIconSlots; }
 
 // 砖 i 的形状键（与 `TileMesh.cpp` 里那段逐字相同；放在这里让渲染与测试共用一份公式）。
-inline void keyForTile(const LevelData& lv, int i, float& sa, float& ea, bool& mid) {
+// `wc`（可选）= 调用线程自己的 provider 窗口克隆。**并行调用必须传**：不传就会去动共享缓存
+// （`FloorWindowCache` 只有一块窗口的 `m_scratch`），多线程下互相覆盖 → 每块随机丢几块砖
+// （实测并行剔除比串行少 16~21 块，且并行结果是串行的真子集）。
+inline void keyForTile(const LevelData& lv, int i, float& sa, float& ea, bool& mid,
+                       FloorWindowCache* wc = nullptr) {
     // ③ 切片 4：走访问器 —— `lv.tiles` 在"按块物化"之后是空的（这里原来直接 `t[i].direction`，
     // 崩溃地址 0x4 就是 `direction` 在 `Tile` 里的偏移，正好对上空指针越界读）。
-    sa = (i == 0) ? -180.0f : lv.tileDirectionAt((int64_t)(i - 1)) - 180.0f;
-    ea = lv.tileDirectionAt((int64_t)i);
+    sa = (i == 0) ? -180.0f : lv.tileDirectionAt((int64_t)(i - 1), wc) - 180.0f;
+    ea = lv.tileDirectionAt((int64_t)i, wc);
     mid = (i < (int)lv.angleCount() && lv.angleAt((int64_t)i) == 999.0);
 }
 

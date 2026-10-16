@@ -96,6 +96,15 @@ void TileMesh::destroyStaticGL() {
     m_instCapacity = 0;
 }
 
+// 位图区间置值（闭区间）：字节内用掩码，整字节用 memset —— TrackVis 每帧只动一小段
+void TileMesh::visSetRange(size_t a, size_t b, bool v) {
+    if (a > b || m_visible.empty()) return;
+    const size_t lastBit = (size_t)m_nTiles ? (size_t)m_nTiles - 1 : 0;
+    if (b > lastBit) b = lastBit;
+    if (a > b) return;
+    bitRangeSet(m_visible.data(), a, b, v);   // 纯逻辑在 render/BitSpan.hpp（有独立单测）
+}
+
 void TileMesh::destroy() {
     destroyStaticGL();
     m_shapes.clear(); m_tileShape.clear(); m_posX.clear(); m_posY.clear();
@@ -338,7 +347,7 @@ void TileMesh::cullRange(size_t begin, size_t end, double vl, double vr, double 
     outAttr.reserve(outAttr.size() + (end - begin) * 5);
     alignas(32) double sMinX[CullSIMD::WIDTH], sMaxX[CullSIMD::WIDTH];
     alignas(32) double sMinY[CullSIMD::WIDTH], sMaxY[CullSIMD::WIDTH];
-    const bool haveVis = m_visible.size() == (size_t)m_nTiles;
+    const bool haveVis = visAllocated();
     constexpr size_t W = CullSIMD::WIDTH;
     size_t i = begin;
     for (; i + (W - 1) < end; i += W) {
@@ -354,7 +363,7 @@ void TileMesh::cullRange(size_t begin, size_t end, double vl, double vr, double 
         for (size_t b = 0; b < W; b++) {
             if (!(mask & (1 << (int)b))) continue;
             const uint32_t t = (uint32_t)(i + b);
-            if (haveVis && !m_visible[t]) continue;
+            if (haveVis && !visAt((size_t)t)) continue;
             outTiles.push_back(t);
             // 相机相对偏移在 **double** 里算完再窄化一次：分开窄化（pos 与 cam 各自 cast）会
             // 在超大坐标上把两者的舍入误差叠加成半个格子（primer 上就是好几块砖）
@@ -368,7 +377,7 @@ void TileMesh::cullRange(size_t begin, size_t end, double vl, double vr, double 
         double mnX = sh.localMinX + tileX(t), mxX = sh.localMaxX + tileX(t);
         double mnY = sh.localMinY + tileY(t), mxY = sh.localMaxY + tileY(t);
         if (mxX < vl || mnX > vr || mxY < vb || mnY > vt) continue;
-        if (haveVis && !m_visible[t]) continue;
+        if (haveVis && !visAt((size_t)t)) continue;
         outTiles.push_back(t);
         pushAttr(outAttr, (float)(tileX(t) - camX), (float)(tileY(t) - camY),
                  tileZForIndex((int)t, m_nTiles), m_tileShape[t], m_iconBits[t]);
@@ -571,11 +580,11 @@ void TileMesh::setVisibleThreshold(int lastVisible) {
 
 void TileMesh::updateVisibleRange(int startTile, int endTile, bool visible) {
     if (m_nTiles <= 0) return;
-    if (m_visible.size() != (size_t)m_nTiles) m_visible.assign((size_t)m_nTiles, 1);
+    if (!visAllocated()) m_visible.assign((size_t)(((size_t)m_nTiles + 7) / 8), 0xFF);
     if (startTile < 0) startTile = 0;
     if (endTile >= m_nTiles) endTile = m_nTiles - 1;
     if (endTile < startTile) return;
-    std::memset(m_visible.data() + startTile, visible ? 1 : 0, (size_t)(endTile - startTile + 1));
+    visSetRange((size_t)startTile, (size_t)endTile, visible);
 }
 
 }  // namespace adofai

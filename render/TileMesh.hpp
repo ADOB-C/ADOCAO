@@ -1,5 +1,7 @@
 #pragma once
 
+#include "BitSpan.hpp"
+
 #include "glad/gl_core.hpp"
 #include "core/level/LevelData.hpp"
 #include "render/CullIndex.hpp"
@@ -109,7 +111,11 @@ private:
     double m_cullHalf = 0.0;
     int m_cullFloors = (int)CullIndex::kBlockFloors;   // 见 setCullBlockFloors                  // 建表用的保守半边长（= 所有形状 localBBox 的最大外扩）
     std::vector<uint8_t> m_iconBits;          // bit0 twirl / bit1 ssUp / bit2 ssDown
-    std::vector<uint8_t> m_visible;           // lazy：只有 TrackVis 需要
+    // TrackVis 的逐砖可见位：**位图**（原 1 B/砖 = MYC 6.8 MB → 0.85 MB）。lazy：只有 TrackVis 需要。
+    std::vector<uint8_t> m_visible;
+    bool visAt(size_t t) const { return bitAt(m_visible.data(), t); }
+    void visSetRange(size_t a, size_t b, bool v);          // 闭区间 [a, b]
+    bool visAllocated() const { return m_visible.size() == (size_t)(((size_t)m_nTiles + 7) / 8); }
     int m_nTiles = 0;
 
     // ---- 每帧可见实例（compaction 结果；draw 时上传）----

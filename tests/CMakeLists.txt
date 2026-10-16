@@ -67,6 +67,11 @@ add_executable(adocao_diagnostics_test adocao_diagnostics_test.cpp)
 target_link_libraries(adocao_diagnostics_test PRIVATE adocao_archive)
 add_test(NAME adocao_diagnostics COMMAND adocao_diagnostics_test)
 
+# ③ 切片 4：位图区间置值（朴素逐位实现当参照）
+add_executable(adocao_bit_span_test bit_span_test.cpp)
+target_link_libraries(adocao_bit_span_test PRIVATE adocao_core)
+add_test(NAME bit_span COMMAND adocao_bit_span_test)
+
 # ③ 切片 4 另一半：angleData 的紧凑存储（释放前后逐位对拍 + 反面对照）
 add_executable(adocao_angle_store_test angle_store_test.cpp)
 target_link_libraries(adocao_angle_store_test PRIVATE adocao_core adocao_archive)

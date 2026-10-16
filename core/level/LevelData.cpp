@@ -1551,11 +1551,17 @@ void LevelData::processActions() {
     tileHasSetSpeed.assign(n, false);
     bookmarkFloors.clear();
 
-    struct SS { float multiplier = 0.0f; float bpm = 0.0f; bool isMultiplier = false; };
+    // ③ 2026-10-16：SetSpeed 改成**事件表**（旧的是"每层一个槽"的 12 B/层稠密数组）：
+    //   ① 同层可以有**多条** SetSpeed（先绝对 `Bpm` 再 `Multiplier` 是常见写法），旧结构里
+    //      第二条会把第一条的字段覆盖掉 → 绝对值丢失。MYC 第 27473 层正是（Bpm 8000 + ×2）：
+    //      旧代码得 72000、正确是 16000（`Timeline` 逐条按文件序应用，一直是对的）。
+    //   ② 那张稠密数组只要谱里有一条 SetSpeed 就 `resize(n)`（MYC 315 条事件白占 81 MB）。
+    struct SSEv { int floor = 0; float val = 0.0f; bool isMultiplier = false; };
+    std::vector<SSEv> ssEvents;
     // 按需分配：没有任何 SetSpeed 事件时这 n x 12 B 是白占的（实测 25 万层的无害谱上，
     // 峰值快照里就有一块 250001 x 12 = 3,000,012 B 的分配）。1e8 层就是 1.2 GB。
     // 空 vector 与原来逐位等价：默认构造的 SS 全 false/0，下面那个逐层循环体什么都不做。
-    std::vector<SS> setSpeedByFloor;
+
 
     // 每个 SetHitsound 事件一条。原来存 std::string（40 B/条），改成存驻留 id：12 B/条，
     // 而 2^31 层 × 0.9 事件/层时这是 72 GB → 18 GB 的差别（见 docs/scale-1e8-to-2e9.md §13）。
@@ -1576,9 +1582,7 @@ void LevelData::processActions() {
             tileHasTwirl[floor] = true; break;
         case FastAction::SetSpeed:
             tileHasSetSpeed[floor] = true;
-            if (setSpeedByFloor.empty()) setSpeedByFloor.resize((size_t)n);   // 第一次遇到才分配
-            { SS& ev = setSpeedByFloor[floor]; ev.isMultiplier = a.flag;
-              if (a.flag) ev.multiplier = a.val1; else ev.bpm = a.val1; }
+            if (floor >= 0 && floor < n) ssEvents.push_back({floor, a.val1, a.flag});
             break;
         case FastAction::PositionTrack:
             tilePositionOffsets[floor] = {a.val1, a.val2, a.flag}; break;
@@ -1603,10 +1607,17 @@ void LevelData::processActions() {
     float runningBPM = settings.bpm;
     // 空 = 本谱一条 SetSpeed 都没有：tileBPMs 上面已经 assign 成全 settings.bpm，
     // 而原循环在这种情况下本来就只写回 settings.bpm —— 所以整段跳过是逐位等价的。
-    if (!setSpeedByFloor.empty()) {
+    if (!ssEvents.empty()) {
+        // 同层多条必须按**文件序**应用（与 `Timeline::precalculateTiming` 的 flatActions 一致）：
+        // 稳定排序只按 floor，同层保持原顺序。
+        std::stable_sort(ssEvents.begin(), ssEvents.end(),
+                         [](const SSEv& a, const SSEv& b) { return a.floor < b.floor; });
+        size_t si = 0;
         for (int i = 0; i < n; i++) {
-            if (setSpeedByFloor[i].isMultiplier) runningBPM *= setSpeedByFloor[i].multiplier;
-            else if (setSpeedByFloor[i].bpm > 0.0f) runningBPM = setSpeedByFloor[i].bpm;
+            while (si < ssEvents.size() && ssEvents[si].floor <= i) {
+                const SSEv& e = ssEvents[si++];
+                if (e.isMultiplier) runningBPM *= e.val; else runningBPM = e.val;
+            }
             tileBPMs[i] = runningBPM;
         }
     }

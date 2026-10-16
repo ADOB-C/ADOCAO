@@ -76,6 +76,22 @@ void testChart(const char* path) {
     const size_t bad = compareAnchors(tl, anchors);
     check(bad == 0, "锚点与全量数组不一致");
 
+    // 不变式：Timeline 的 BPM 与 LevelData 的 tileBPMs 是否逐位相同（若同，前者可不再常驻）
+    if (!lv.tileBPMs.empty() && lv.tileBPMs.size() == tl.tileBPMs().size()) {
+        size_t bad = 0;
+        for (size_t i = 0; i < lv.tileBPMs.size(); ++i) if (!(lv.tileBPMs[i] == tl.tileBPMs()[i])) ++bad;
+        std::printf("     BPM 交叉：LevelData.tileBPMs vs Timeline.tileBPMs → %zu 处不一致（%zu 层）\n",
+                    bad, lv.tileBPMs.size());
+        int shown = 0;
+        for (size_t i = 0; i < lv.tileBPMs.size() && shown < 5; ++i) {
+            if (!(lv.tileBPMs[i] == tl.tileBPMs()[i])) {
+                std::printf("        @%zu LevelData=%.9g Timeline=%.9g（比值 %.6f）\n", i,
+                            (double)lv.tileBPMs[i], (double)tl.tileBPMs()[i],
+                            (double)lv.tileBPMs[i] / (double)tl.tileBPMs()[i]);
+                ++shown;
+            }
+        }
+    }
     const bool hasTV = !tl.tileDisappearTimes().empty();
     std::printf("     %-46s n=%-9zu 锚点 %-6zu（每 %lld 层）逐位不一致 %zu ｜TrackVis %s\n",
                 path, n, anchors.size(), (long long)stride, bad, hasTV ? "有（两支 double 也对拍）" : "无");

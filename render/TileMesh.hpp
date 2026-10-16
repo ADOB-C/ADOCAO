@@ -132,6 +132,7 @@ private:
     mutable size_t m_windowNext = 0;
     const DerivedRange* windowFor(size_t tile) const;
     void limitWarn(const char* what, size_t n) const;
+    static bool limitOffCache();
     mutable double m_limitWarnAt = 0.0;
     mutable bool m_windowChecked = false;   // 逐砖直比只做一次
 

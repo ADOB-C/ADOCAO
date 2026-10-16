@@ -175,8 +175,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     或剔除块粒度 > 4096 时退回串行。验收：`ADOCAO_MESH_DUMP=1` 的整段派生 FNV 与"数组时代"
     记录值四个全等 + 像素门槛 51/51 + 常驻 footprint 388.2 → **311.3 MB**（live 199.8 → 114.0）。
   * **⑦ 容量边界第一道闸（2026-10-16）**：极端视距"整张一帧"会卡死（实测一帧 **36.2 s** → macOS 沙滩球）。
-    `TileMesh` 现在有 `kMaxCullCandidates = 524,288`（超了就**降级为离相机最近的块**，
-    `CullIndex::collectHitBlocksNearest()`，确定性）与 `kMaxInstances = 262,144`（确定性截断）。
+    `TileMesh` 现在有 `kMaxCullCandidates = 524,288`（超了就**按层号顺序边剔边收、收够就停**）
+    与 `kMaxInstances = 262,144`（确定性截断）。**别用"按块 AABB 距离挑最近块"**：块 AABB 是一整圈
+    的包围盒（~1300 单位），小视锥会被几百个块"包住"（距离全 0）→ 挑出来的块可能一块砖都不在视锥内
+    （实测 `drawn=0`、轨道整个消失，用户一眼看出来 ✗）。诊断钩子 `ADOCAO_CULL_LIMIT=0` 可关掉两道闸。
     **不能"超预算就不画"** —— 那会整帧黑屏（只剩行星/拖尾），用户一眼就看出来 ✗；
     两个常量还必须**高于门槛里任何合法状态**（压到 1<<16 → 门槛 50/51 ✗）。效果：最坏帧 → **85.7 ms**。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）

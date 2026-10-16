@@ -383,6 +383,17 @@ const TileMesh::DerivedRange* TileMesh::windowFor(size_t tile) const {
     return &m_windows[slot];
 }
 
+// ⑦ 诊断用：`ADOCAO_CULL_LIMIT=0` 关掉两道预算（会退回"整张一帧"的卡死风险，仅用于对比排查）
+bool TileMesh::limitOffCache() {
+    static const bool off = [] {
+        const char* e = std::getenv("ADOCAO_CULL_LIMIT");
+        const bool o = e && std::atoi(e) == 0;
+        if (o) LOG_W("cull-limit: ADOCAO_CULL_LIMIT=0 → 预算关闭（整张一帧可能卡死，仅诊断用）");
+        return o;
+    }();
+    return off;
+}
+
 // ⑦ 限频告警（每秒最多一条，避免极端视距下刷屏）
 void TileMesh::limitWarn(const char* what, size_t n) const {
     const double now = (double)std::chrono::duration<double>(
@@ -488,15 +499,27 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
             });
             // ⑦ 闸①：候选太多**降级**为"只画离相机最近的块"（累计候选 ≤ 预算）。
             // 不能直接不画 —— 那会整帧黑屏（只剩行星/拖尾），实测被用户一眼看出来 ✗。
-            if (candidates > kMaxCullCandidates) {
+            const bool limitOff = std::getenv("ADOCAO_CULL_LIMIT") &&
+                                  std::atoi(std::getenv("ADOCAO_CULL_LIMIT")) == 0;
+            if (!limitOff && candidates > kMaxCullCandidates) {
                 limitWarn("cull-candidates", candidates);
                 const size_t before = candidates;
-                ranges.clear();
-                m_cullIndex.collectHitBlocksNearest(vl, vr, vb, vt, camX, camY,
-                                                    kMaxCullCandidates, ranges);
+                // 按层号顺序边剔边收，**可见数够 kMaxInstances 就停** —— 工作量由输出封顶。
+                // （不能用"按块 AABB 距离挑最近块"：块 AABB 是一整圈的包围盒（~1300 单位），
+                //   小视锥会被几百个块"包住"（距离全为 0），挑出来的块里可能一块砖都不在视锥内
+                //   → 实测 drawn=0、轨道整个消失 ✗。）
+                for (const auto& r : ranges) {
+                    if (m_listTiles.size() >= kMaxInstances) break;
+                    cullRange(r.first, r.second, vl, vr, vb, vt, camX, camY, m_listTiles, m_listAttr);
+                }
+                if (m_listTiles.size() > kMaxInstances) {
+                    m_listTiles.resize(kMaxInstances);
+                    m_listAttr.resize(kMaxInstances * 5);
+                }
+                LOG_W("cull-limit: 降级为按序收集 —— 候选 %zu → 可见 %zu（预算 %zu）",
+                      before, m_listTiles.size(), kMaxInstances);
+                ranges.clear();          // 让下面的并行段变成空操作（列表已经填好了）
                 candidates = 0;
-                for (const auto& r : ranges) candidates += r.second - r.first;
-                LOG_W("cull-limit: 降级为最近块 —— 候选 %zu → %zu（%zu 块）", before, candidates, ranges.size());
             }
 
             // 把命中块按"约 CHUNK 块砖"切成并行任务（保持块序）
@@ -590,7 +613,7 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
         }
         m_vl = viewL; m_vr = viewR; m_vb = viewB; m_vt = viewT;
         // ⑦ 闸②：可见实例封顶（确定性截断，按砖号取前 N）—— 宁可少画，不能卡死
-        if (m_listTiles.size() > kMaxInstances) {
+        if (m_listTiles.size() > kMaxInstances && !limitOffCache()) {
             limitWarn("visible-instances", m_listTiles.size());
             m_listTiles.resize(kMaxInstances);
             m_listAttr.resize(kMaxInstances * 5);

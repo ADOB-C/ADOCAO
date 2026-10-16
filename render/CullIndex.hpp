@@ -93,43 +93,6 @@ public:
         }
     }
 
-    // ⑦ 容量边界：命中块**按到相机的距离**排序后取前若干个（累计砖数 ≤ budget），
-    // 用于"整张一帧"时降级成"只画离相机最近的块"（而不是干脆不画 → 黑屏）。
-    // 命中块数 ≤ kSortMax 时精确排序（等距按块号，确定性）；超过则按块号等距抽样后排序
-    // （仍确定性，且成本有界）。
-    void collectHitBlocksNearest(double vl, double vr, double vb, double vt,
-                                 double camX, double camY, size_t budget,
-                                 std::vector<std::pair<size_t, size_t>>& out) const {
-        out.clear();
-        struct Hit { double d2; size_t first; size_t count; };
-        std::vector<Hit> hits;
-        forEachHitBlock(vl, vr, vb, vt, [&](uint32_t f, uint32_t c) {
-            const Block& b = m_blocks[f / (uint32_t)(m_floors ? m_floors : 1)];
-            const double cx = std::min(std::max(camX, b.minX), b.maxX);
-            const double cy = std::min(std::max(camY, b.minY), b.maxY);
-            const double dx = camX - cx, dy = camY - cy;
-            hits.push_back({dx * dx + dy * dy, (size_t)f, (size_t)c});
-        });
-        constexpr size_t kSortMax = 200000;
-        if (hits.size() > kSortMax) {                      // 抽样：只保留 1/stride，保证有界
-            const size_t stride = (hits.size() + kSortMax - 1) / kSortMax;
-            std::vector<Hit> keep;
-            keep.reserve(hits.size() / stride + 1);
-            for (size_t i = 0; i < hits.size(); i += stride) keep.push_back(hits[i]);
-            hits.swap(keep);
-        }
-        std::sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) {
-            if (a.d2 != b.d2) return a.d2 < b.d2;
-            return a.first < b.first;                      // 等距按块号 → 确定性
-        });
-        size_t acc = 0;
-        for (const Hit& h : hits) {
-            if (acc >= budget) break;
-            out.emplace_back(h.first, h.first + h.count);   // 与 forEachHitBlock 路径同一约定：(begin, end)
-            acc += h.count;
-        }
-    }
-
     // 诊断：命中块数 / 候选砖数（用于核对"候选 ≈ 可见"的冗余度）
     void countCandidates(double vl, double vr, double vb, double vt,
                          size_t& hitBlocks, size_t& candidates) const {

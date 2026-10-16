@@ -519,6 +519,10 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
     } else if (pxPerUnit < 1.0) {
         lodStride = (size_t)std::ceil(1.0 / pxPerUnit);    // 每 ~1 px 抽一块
     }
+    // live 下再叠加"上一帧收敛出的步长"：饱和视距每帧要扫 ~百万候选，第一遍太贵（p50 12~21 ms ✗）。
+    // 反馈式种子让第一遍直接按收敛步长走 → 不再需要第二遍。**抓帧不看种子**（`m_detCull`）= 出图
+    // 与历史无关 ✅（门槛/对拍都跑抓帧路径）。
+    if (!m_detCull && m_lodSeed > lodStride) lodStride = m_lodSeed;
     if (lodStride != m_lodStride) {
         LOG_I("lod: 每单位 %.3f px → 抽稀步长 %zu（此前 %zu）", pxPerUnit, lodStride, m_lodStride);
         m_listValid = false;                               // 步长一变，列表作废
@@ -700,6 +704,8 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
                 }
             }
         }
+        // 记录收敛步长：这一帧"要不要抽"就是下一帧的种子（收紧视距时自动回落到 1 ✓）
+        if (!m_detCull) m_lodSeed = (m_listTiles.size() > kMaxInstances) ? m_lodStride : 1;
         if (m_listTiles.size() > kMaxInstances && !limitOffCache()) {
             limitWarn("visible-instances", m_listTiles.size());
             m_listTiles.resize(kMaxInstances);

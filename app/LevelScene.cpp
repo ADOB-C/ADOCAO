@@ -112,6 +112,8 @@ bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level) {
 
     // Track
     m_tileMesh = new TileMesh();
+    // 抓帧 = 确定性剔除（LOD 步长只由视口 + 两段式决定，不用上一帧的反馈种子）
+    m_tileMesh->setDeterministicCull(!cfg.capturePath.empty());
     m_tileMesh->setCullBlockFloors(cfg.cullBlockFloors);   // ④ 剔除粗块粒度（0 = 全扫）
 
     // Render-layer planets. The core timeline/clock only produce pure frame

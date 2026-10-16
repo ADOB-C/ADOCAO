@@ -63,6 +63,9 @@ public:
     void draw(double viewL, double viewR, double viewB, double viewT, double camX, double camY) const;
     // 视口像素高度（每帧由 app 侧设入；LOD 用它算"每世界单位多少像素"）
     void setViewportHeightPx(int h) const { m_viewportH = h; }
+    // 抓帧（确定性）模式：LOD 步长只能由"当前视口 + 两段式"决定，**不许用上一帧的反馈种子**
+    // （否则同一帧在不同运行/不同历史下步长可能不同 → 出图不再逐字节可复现 ✗）。
+    void setDeterministicCull(bool b) const { m_detCull = b; }
     void drawHighlightedTile(int tileIdx, double camX, double camY) const;
     void setVisibleThreshold(int lastVisible);
     // ④ 剔除粗块粒度（层/块；0 = 关闭索引走全扫）。必须在 build() 之前设。
@@ -171,6 +174,8 @@ private:
     mutable bool m_listValid = false;
     mutable int m_viewportH = 720;
     mutable size_t m_lodStride = 1;      // 当前帧的抽稀步长（1 = 不抽）
+    mutable size_t m_lodSeed = 1;        // 上一帧收敛出的步长（live 反馈用；抓帧不看它）
+    mutable bool m_detCull = false;
     mutable bool m_listUploaded = false;   // 实例缓冲里是不是这一帧的列表
     mutable double m_vl = 0, m_vr = 0, m_vb = 0, m_vt = 0;
     mutable int m_visibleThreshold = 0x7fffffff;

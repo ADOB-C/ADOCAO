@@ -303,11 +303,10 @@ void Timeline::precalculateTiming() {
 
     // Phase 3: Prefix sum
     double totalTime = 0.0;
-    m_durations.assign((size_t)n, 0.0f);          // ③ 切片 2：每层时长（同一批值，供按块重算）
+
     for (int i = 0; i < n - 1; i++) {
         m_tileStartTimes[i] = totalTime;
-        m_durations[(size_t)i] = durationAt(i);
-        totalTime += (double)m_durations[(size_t)i];   // 与原来 `totalTime += durationAt(i)` 逐位同值
+        totalTime += (double)durationAt(i);   // 时长不存了：后面按块重算用同一个 durationAt() 现算
     }
     if (n > 0) m_tileStartTimes[n - 1] = totalTime;
 
@@ -453,7 +452,7 @@ bool Timeline::recomputeBlock(int64_t i0, int64_t i1, BlockResult& out) const {
     const int64_t stride = kAnchorStride;
     const int64_t b = i0 / stride;
     if (b >= (int64_t)m_anchors.size() || m_anchors[(size_t)b].floor != i0) return false;
-    if ((int64_t)m_durations.size() != n) return false;
+    if ((int64_t)m_tileBPM.size() != n) return false;   // 前置：BPM/角度/cw 都在（时长现算）
     // 起始时间只依赖"时长 + 锚点"，任何谱都可算；TrackVis 两支才需要额外条件（见下）
 
     // 1) 起始时间：从锚点的**已存值**起步，按层序把时长（转 double）累加 —— 与原前缀同一顺序、
@@ -463,7 +462,7 @@ bool Timeline::recomputeBlock(int64_t i0, int64_t i1, BlockResult& out) const {
     double t = m_anchors[(size_t)b].startTime;
     for (int64_t i = i0; i < last; i++) {
         out.startTimes[(size_t)(i - i0)] = t;
-        if (i < n - 1) t += (double)m_durations[(size_t)i];
+        if (i < n - 1) t += (double)durationAt(i);   // 现算：与 precalculateTiming 同一函数、同一顺序
     }
     // TrackVis 两支：只有"需要 + 可重算"时才给；否则留空（消费方走 trackVisWindowed() 判定）
     if (!m_needsTrackVis || !m_blocksRecomputable) {
@@ -517,7 +516,7 @@ double Timeline::startTimeAt(int64_t i) const {
 bool Timeline::dropStartTimesArray() {
     const size_t n = m_tileBPM.size();
     if (n == 0) return false;
-    if (m_anchors.empty() || m_durations.size() != n) return false;   // 前置：锚点 + 时长齐备
+    if (m_anchors.empty() || m_tileBPM.size() != n) return false;     // 前置：锚点 + BPM 齐备
     std::vector<double>().swap(m_tileStartTimes);
     m_startWindowed = true;
     m_winBlock = -1;         // 缓存里的 startTimes 仍有效，但保持一致语义

@@ -93,12 +93,12 @@ public:
     double appearTimeAt(int64_t i) const;
     // 丢掉两支密集 double（只有 blocksRecomputable() 时才允许；丢之前先建粗索引）
     bool dropTrackVisArrays();
-    // **仅测试用**：改某一层的时长（给"按块重算"做反面对照 —— 1 ULP 也必须被抓到）
-    void setDurationForTest(int64_t i, float v) {
-        if (i >= 0 && (size_t)i < m_durations.size()) m_durations[(size_t)i] = v;
+    // **仅测试用**：给"按块重算"做反面对照 —— 直接把某一层的 BPM 改掉（时长随之变，
+    // 1 ULP 也必须被抓到）。以前这里改的是 `m_durations`，那个数组 2026-10-16 已删除
+    // （时长由 `durationAt(i)` 现算，见下）。
+    void setBpmForTest(int64_t i, float v) {
+        if (i >= 0 && (size_t)i < m_tileBPM.size()) m_tileBPM[(size_t)i] = v;
     }
-    // 每层时长（float；= precalculateTiming 里累加进 startTimes 的那个值）
-    const std::vector<float>& durations() const { return m_durations; }
     const std::vector<double>& tileDisappearTimes() const { return m_tileDisappearTimes; }
     const std::vector<double>& tileAppearTimes() const { return m_tileAppearTimes; }
     const std::vector<float>& tileBPMs() const { return m_tileBPM; }
@@ -145,7 +145,8 @@ private:
     std::vector<float> m_tileBPM;
     std::vector<bool>  m_tileIsCW;
     std::vector<Anchor> m_anchors;   // ③ 切片 1：见 anchors()
-    std::vector<float>  m_durations; // ③ 切片 2：每层时长（替代 3 支 double 的前缀来源）
+    // ③ 切片 2 起时长是"按块重算"的前缀来源；2026-10-16 起**不再存**（27 MB）：`durationAt(i)`
+    // 由 `angleAt(i)` + `m_tileBPM[i]` + `m_tileIsCW[i]` 现算，口径与 `precalculateTiming` 逐字相同。
     bool   m_blocksRecomputable = false;
     const char* m_blocksWhy = "尚未记录";
     // TrackVis 恒定态（无 AnimateTrack 事件时全程不变）

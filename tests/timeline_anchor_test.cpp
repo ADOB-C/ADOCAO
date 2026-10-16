@@ -140,8 +140,11 @@ void testBlocks(const char* path) {
         if (mid < n - 1) {
             Timeline copy;                        // 重新建一份，避免污染上面的对拍
             copy.build(lv, false);
-            const float orig = copy.durations()[(size_t)mid];
-            copy.setDurationForTest(mid, std::nextafterf(orig, orig + 1e30f));
+            // 时长已不存（现算）→ 改 BPM。注意**不能用 1 ULP**：`durationAt` 走 `60/bpm`，
+            // 而 MYC 那层的 BPM 高达 3.2768e7，倒数把 1 ULP 的 BPM 变化直接吸收掉（实测过）。
+            // 控制要"可见扰动"才有意义（意图是"改了输入 → 重算必须变"）。
+            const float orig = copy.tileBPMs()[(size_t)mid];
+            copy.setBpmForTest(mid, orig * 1.05f);
             Timeline::BlockResult r2;
             const int64_t i0 = (mid / stride) * stride;
             const int64_t i1 = std::min(i0 + stride, n);
@@ -246,10 +249,17 @@ void testStartWindowed(const char* path) {
         copy.build(lv, false);
         copy.dropStartTimesArray();
         const int64_t mid = (int64_t)(n / 2);
-        const float orig = copy.durations()[(size_t)mid];
-        copy.setDurationForTest(mid, std::nextafterf(orig, orig + 1e30f));
-        check(!(copy.startTimeAt(mid + 1) == want[(size_t)(mid + 1)]),
-              "反面对照失败：时长动 1 ULP 后窗口化 startTimeAt 竟然没变");
+        // 同 testBlocks：不能用 1 ULP（`60/bpm` 会把巨大 BPM 的 1 ULP 吸收掉）→ 可见扰动
+        const float orig = copy.tileBPMs()[(size_t)mid];
+        const float d0 = copy.durationAt(mid);
+        copy.setBpmForTest(mid, orig * 1.05f);
+        const float d1 = copy.durationAt(mid);
+        char buf[320];
+        std::snprintf(buf, sizeof buf,
+                      "反面对照失败：bpm %g→%g、durationAt(%lld) %g→%g，窗口化 startTimeAt 却没变",
+                      (double)orig, (double)copy.tileBPMs()[(size_t)mid], (long long)mid,
+                      (double)d0, (double)d1);
+        check(!(copy.startTimeAt(mid + 1) == want[(size_t)(mid + 1)]), buf);
     }
 }
 

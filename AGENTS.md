@@ -143,11 +143,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   * **日志前缀**：抓帧块里新增的日志**不许**以 `capture:` 开头 ✗（`capture-gate.sh` 用"日志里最后一条
     `capture:` 行"核对本次的 `tile=`/`req=`；自检日志一开始也叫 `capture:` → 51 个状态全判 FAIL，
     门槛**自己**抓住了这个疏忽 ✓）。自检统一用 `capture-selfcheck:` 前缀。
-- **绘制顺序**：`m_drawOrder` 现在是**按层号升序**（2026-10-15 改；原来是"按形状分组 +
-  组内降序"，那个顺序是实例化的遗留）。像素门槛 51/51 + 巨谱 A/B 16 帧（三种 Won't You、TNR、
-  primer-final，含整张一帧 6,841 万块）**逐字节相同** → 顺序对出图不可观测，所以 ④ 不必为
-  "恢复绘制序"付排序代价，⑤ 的哈希序根因也一并消掉。A/B 钩子：`ADOCAO_DRAW_ORDER=grouped`
-  （`scripts/order-ab.sh` 跑整套）。见 `docs/scale-1e8-to-2e9.md` §8 第 3 条。
+- **剔除（④）与绘制顺序（2026-10-15）**：
+  * `m_drawOrder` = **按层号升序**（原来是"按形状分组 + 组内降序"）。像素门槛 51/51 + 巨谱 A/B
+    16 帧（三种 Won't You、TNR、primer-final，含整张一帧 6,841 万块）**逐字节相同** →
+    顺序对出图不可观测（旧的"反转顺序差 102 像素"是**旧全局 Z** 时代的现象，窗口归一化 Z 之后
+    并列基本消失）。钩子 `ADOCAO_DRAW_ORDER=grouped`，整套 `scripts/order-ab.sh`。
+  * 剔除改成**粗块 AABB 索引**（`render/CullIndex.hpp`，每 4096 层一块、0.0098 B/砖、
+    2³¹ 外推 21 MB）：先筛块再在块内调用**原来那个** `cullRange` → 输出与全扫**逐元素相同**
+    （ctest `cull_index` 对拍 + 像素门槛 51/51）。端到端 `--capture` 帧时 MYC z25 38.2→36.1 ms、
+    **primer z25 156.6→43.0 ms**。钩子 `ADOCAO_CULL=scan` 回全扫（A/B 用）。
+    候选 ≤262,144 不开线程；`n < 4096` 不建索引。未做：块表进容器、折叠谱两级细表、
+    编辑/预览的空间索引。粒度依据见 `tests/cull_cost_probe.cpp --blocks`。
+  详见 `docs/rendering.md`「可见性/剔除缓存」与 `docs/scale-1e8-to-2e9.md` §8 第 3 条。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`

@@ -67,6 +67,13 @@ add_executable(adocao_diagnostics_test adocao_diagnostics_test.cpp)
 target_link_libraries(adocao_diagnostics_test PRIVATE adocao_archive)
 add_test(NAME adocao_diagnostics COMMAND adocao_diagnostics_test)
 
+# ④ 粗块 AABB 索引：与全扫逐元素对拍（含反面对照）
+add_executable(adocao_cull_index_test cull_index_test.cpp)
+target_include_directories(adocao_cull_index_test PRIVATE ${CMAKE_SOURCE_DIR}/render)
+target_link_libraries(adocao_cull_index_test PRIVATE adocao_core adocao_archive)
+add_test(NAME cull_index
+         COMMAND adocao_cull_index_test ${CMAKE_SOURCE_DIR}/tests/charts/angles360.adofai)
+
 # 剔除策略对比探针（④）：同一份真实数据、同一套 AABB 判定下比三种候选集策略
 # （全扫 O(n) / 层号±4096 窗口 / 4096 层块 AABB 查询）的候选数、漏砖数、耗时、索引体积。
 add_executable(adocao_cull_cost_probe cull_cost_probe.cpp)

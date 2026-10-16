@@ -4,12 +4,24 @@
 #include "core/util/Logger.hpp"
 #include "core/util/ThreadPool.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <functional>
 
 
 namespace adofai {
+
+namespace {
+// 建表耗时（一次性）用；只在这里用，别扩散
+double msSince() {
+    using clk = std::chrono::steady_clock;
+    static const clk::time_point t0 = clk::now();
+    return std::chrono::duration<double, std::milli>(clk::now() - t0).count();
+}
+// 小于这个砖数就不建索引：全扫本来就便宜，而且省下小谱的内存与建表时间
+constexpr int kCullIndexMinTiles = 4096;
+}  // namespace
 
 using TileShape::Shape;
 
@@ -44,6 +56,7 @@ TileMesh::TileMesh(TileMesh&& o) noexcept
       m_posX(std::move(o.m_posX)), m_posY(std::move(o.m_posY)),
       m_chunkX(std::move(o.m_chunkX)), m_chunkY(std::move(o.m_chunkY)),
       m_iconBits(std::move(o.m_iconBits)), m_visible(std::move(o.m_visible)),
+      m_cullIndex(std::move(o.m_cullIndex)), m_cullHalf(o.m_cullHalf),
       m_drawOrder(std::move(o.m_drawOrder)), m_nTiles(o.m_nTiles) {
     std::memcpy(m_fill, o.m_fill, sizeof m_fill);
     std::memcpy(m_stroke, o.m_stroke, sizeof m_stroke);
@@ -61,6 +74,7 @@ TileMesh& TileMesh::operator=(TileMesh&& o) noexcept {
         m_posX = std::move(o.m_posX); m_posY = std::move(o.m_posY);
         m_chunkX = std::move(o.m_chunkX); m_chunkY = std::move(o.m_chunkY);
         m_iconBits = std::move(o.m_iconBits); m_visible = std::move(o.m_visible);
+        m_cullIndex = std::move(o.m_cullIndex); m_cullHalf = o.m_cullHalf;
         m_drawOrder = std::move(o.m_drawOrder); m_nTiles = o.m_nTiles;
         std::memcpy(m_fill, o.m_fill, sizeof m_fill);
         std::memcpy(m_stroke, o.m_stroke, sizeof m_stroke);
@@ -84,7 +98,7 @@ void TileMesh::destroy() {
     destroyStaticGL();
     m_shapes.clear(); m_tileShape.clear(); m_posX.clear(); m_posY.clear();
     m_chunkX.clear(); m_chunkY.clear();
-    m_iconBits.clear(); m_visible.clear(); m_drawOrder.clear();
+    m_iconBits.clear(); m_visible.clear(); m_cullIndex.clear(); m_drawOrder.clear();
     m_listTiles.clear(); m_listAttr.clear();
     m_listValid = false;
     m_listUploaded = false;
@@ -182,6 +196,29 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
         }
     } else {
         for (size_t i = 0; i < n; ++i) m_drawOrder.push_back((uint32_t)i);
+
+    // ---- ④ 粗块 AABB 索引 ----
+    // 保守半边长 = 所有形状 localBBox 的最大外扩（块 AABB 必须**包住**块内任何一块砖的
+    // 真实 AABB，否则会漏砖）。n < kCullIndexMinTiles 时不建（省内存、且小谱全扫本来就便宜）。
+    double half = 0.0;
+    for (const TileShape::Shape& sh : m_shapes) {
+        half = std::max(half, std::abs(sh.localMinX));
+        half = std::max(half, std::abs(sh.localMaxX));
+        half = std::max(half, std::abs(sh.localMinY));
+        half = std::max(half, std::abs(sh.localMaxY));
+    }
+    m_cullHalf = half;
+    if ((size_t)n >= kCullIndexMinTiles) {
+        const double t0 = msSince();
+        m_cullIndex.build((size_t)n, [&](size_t i, double& x, double& y) {
+            x = tileX(i); y = tileY(i);
+        }, half);
+        LOG_I("cull-index: %d 砖 → %zu 块（每 %zu 层），%zu B（%.4f B/砖），半边长 %.3f，建表 %.1f ms",
+              n, m_cullIndex.blockCount(), m_cullIndex.floorsPerBlock(), m_cullIndex.bytes(),
+              (double)m_cullIndex.bytes() / (double)n, half, msSince() - t0);
+    } else {
+        m_cullIndex.clear();
+    }
     }
 
     // 图标位：与改造前 `buildIcons` 的判据逐字相同（Twirl / SetSpeed 的 1.05、0.95 阈值）
@@ -321,8 +358,61 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
         m_listAttr.clear();
         const size_t n = m_drawOrder.size();
         constexpr size_t CHUNK = 32768;
-        const size_t chunks = (n + CHUNK - 1) / CHUNK;
-        if (chunks > 1) {
+        // A/B 钩子：ADOCAO_CULL=scan 强制走原来的全扫（同一份二进制上对比真实渲染耗时）
+        static const bool forceScan = [] {
+            const char* v = std::getenv("ADOCAO_CULL");
+            return v && std::strcmp(v, "scan") == 0;
+        }();
+        if (m_cullIndex.valid() && !forceScan) {
+            // ④：**先按块筛**（块 AABB 是块内砖的保守包围盒），再在命中块内做与全扫**同一个**
+            // `cullRange` 判定 —— 所以输出与全扫**逐元素相同**（`tests/cull_index_test.cpp` 对拍）。
+            // 块按层号升序、块内按砖号升序 ⇒ 逐块拼接天然升序，不需要排序（顺序对出图不可观测，
+            // 见类注释；像素门槛 51/51 + 巨谱 16 帧 A/B 已验证）。
+            std::vector<std::pair<size_t, size_t>> ranges;   // [begin, end)
+            size_t candidates = 0;
+            m_cullIndex.forEachHitBlock(vl, vr, vb, vt, [&](uint32_t f, uint32_t c) {
+                ranges.emplace_back((size_t)f, (size_t)f + (size_t)c);
+                candidates += c;
+            });
+            // 把命中块按"约 CHUNK 块砖"切成并行任务（保持块序）
+            std::vector<std::pair<size_t, size_t>> jobs;     // ranges 的下标区间
+            for (size_t i = 0; i < ranges.size();) {
+                size_t j = i, acc = 0;
+                while (j < ranges.size() &&
+                       (j == i || acc + (ranges[j].second - ranges[j].first) <= CHUNK)) {
+                    acc += ranges[j].second - ranges[j].first;
+                    ++j;
+                }
+                jobs.emplace_back(i, j);
+                i = j;
+            }
+            // 候选少就别开线程：唤醒 + 每任务两个 vector 的分配比串行做还贵
+            // （实测 Singularity zoom 25：25 万候选，并行比串行慢 ~1 ms）
+            constexpr size_t kCullSerialMax = 1u << 18;   // 262,144 块砖
+            if (jobs.size() > 1 && candidates > kCullSerialMax) {
+                std::vector<std::vector<uint32_t>> tiles(jobs.size());
+                std::vector<std::vector<float>> attr(jobs.size());
+                auto& pool = getPool();
+                pool.parallelFor(0, jobs.size(), [&](size_t a, size_t b) {
+                    for (size_t k = a; k < b; ++k)
+                        for (size_t r = jobs[k].first; r < jobs[k].second; ++r)
+                            cullRange(ranges[r].first, ranges[r].second, vl, vr, vb, vt, camX, camY,
+                                      tiles[k], attr[k]);
+                }, 1);
+                size_t totalT = 0, totalA = 0;
+                for (size_t k = 0; k < jobs.size(); k++) { totalT += tiles[k].size(); totalA += attr[k].size(); }
+                m_listTiles.reserve(totalT);
+                m_listAttr.reserve(totalA);
+                for (size_t k = 0; k < jobs.size(); k++) {   // 按块序拼接 = 升序
+                    m_listTiles.insert(m_listTiles.end(), tiles[k].begin(), tiles[k].end());
+                    m_listAttr.insert(m_listAttr.end(), attr[k].begin(), attr[k].end());
+                }
+            } else {
+                for (const auto& r : ranges)
+                    cullRange(r.first, r.second, vl, vr, vb, vt, camX, camY, m_listTiles, m_listAttr);
+            }
+        } else if ((n + CHUNK - 1) / CHUNK > 1) {
+            const size_t chunks = (n + CHUNK - 1) / CHUNK;
             std::vector<std::vector<uint32_t>> tiles(chunks);
             std::vector<std::vector<float>> attr(chunks);
             auto& pool = getPool();
@@ -347,9 +437,10 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
         // 窗口相对 Z（2026-10，用户指出）：全局归一化 `kMaxTileZ*(1-i/(n-1))` 的每层间距是
         // 9/(n-1) —— MYC 677 万层只有 **1.33e-6**，而 24 bit 深度在正交 0.1→200 上的分辨率是
         // **1.19e-5**：间距只有分辨率的 1/9，于是"相邻砖在深度上等于同一个值"，谁盖谁由
-        // m_drawOrder（unordered_map 迭代序 + 组内降序）决定，**而不是层号** —— 屏幕只画 3 块砖
-        // 也一样（Z 只看全局层号与总层数）。现在改成按**本次可见窗口** [i0,i1] 归一化：可见几百砖
-        // 时每层间距 0.01~0.05（分辨率的 1000 倍），深度测试真正生效、前后由层号决定。
+        // 提交顺序决定，**而不是层号** —— 屏幕只画 3 块砖也一样（Z 只看全局层号与总层数）。
+        // 现在改成按**本次可见窗口** [i0,i1] 归一化：可见几百砖时每层间距 0.01~0.05
+        // （分辨率的 1000 倍），深度测试真正生效、前后由层号决定；并列基本消失（要跨度 >75 万层
+        // 才重新出现，那时胜负也是确定的：提交序已改为按层号升序）。
         // 只在重建列表时算（平移分支不碰 Z），且不增加任何上传 —— offZ 本来就每帧上传。
         if (!m_listTiles.empty()) {
             int i0 = (int)m_listTiles[0], i1 = i0;

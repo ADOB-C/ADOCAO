@@ -2,6 +2,7 @@
 
 #include "glad/gl_core.hpp"
 #include "core/level/LevelData.hpp"
+#include "render/CullIndex.hpp"
 #include "render/TileShape.hpp"
 #include <glm/glm.hpp>
 #include <cstdint>
@@ -20,9 +21,18 @@
 // 之前是"砖 24 B + 每实例 pos/color/tileIdx/可见 ≈ 57 B（含图标实例 616 万）"。
 // 每帧只上传**可见**实例（20 B/实例：相机相对偏移 3 + 形状号 1 + 图标位 1）。
 //
-// 绘制顺序：与改造前**逐字相同**（`unordered_map<GeoKey>` 的迭代序 + 组内下标降序）。
-// 这条不是洁癖：深度 24 bit 下相邻砖的深度会量化到同一个值，重叠处谁赢由先后决定 ——
-// 实测把组内顺序反过来，MYC t=30s 那一帧会有 102 个像素不同（maxdelta 111）。
+// 绘制顺序：**按层号升序**（2026-10-15 改；原来是"按形状分组 + 组内降序"，那是实例化之前
+// "同形状一起画省状态切换"的遗留）。旧注释记过"把组内顺序反过来，MYC t=30s 那帧有 102 个
+// 像素不同" —— 那发生在**旧的全局 Z 归一化**下：相邻砖的深度被量化到同一个值，重叠处谁赢
+// 由先后决定。改成**按可见窗口归一化 Z** 之后（见 `tileZForIndex` 的说明）窗口内步长
+// ≈0.018 ≫ 深度分辨率 1.19e-5，并列基本消失。实测：像素门槛 51/51 逐字节不变，另在
+// 三种 Won't You + TNR + primer-final 上做了 16 帧 A/B（含"整张一帧"6,841 万块）
+// **全部逐字节相同**（`scripts/order-ab.sh`，钩子 `ADOCAO_DRAW_ORDER=grouped` 可回旧序）。
+// 残留的理论情形：极端广角 + 屏幕上真的重合但颜色/图标不同的砖（那 16 帧没造出来）；
+// 但那时胜负也已是**确定**的（低层号在上），不再是 `unordered_map` 的迭代序。
+//
+// ⇒ 推论（④ 的设计前提）：**绘制顺序可以随便排**，所以剔除改成"先按块筛"之后，
+// 块按层号升序、块内按砖号升序输出即可，不需要为"恢复旧绘制序"付排序代价。
 
 namespace adofai {
 
@@ -89,6 +99,10 @@ private:
     std::vector<double> m_chunkX, m_chunkY;        // 每块的 double 原点（世界坐标）
     double tileX(size_t t) const { return m_chunkX[t >> kPosChunkShift] + (double)m_posX[t]; }
     double tileY(size_t t) const { return m_chunkY[t >> kPosChunkShift] + (double)m_posY[t]; }
+    // ④ 粗块 AABB 索引（每 4096 层一块，0.0098 B/砖）。n 小于阈值时留空 → 走原来的全扫，
+    // 小谱行为与改造前**逐字相同**。查询按块升序 → 输出与全扫逐元素相同（`cull_index` 用例）。
+    CullIndex m_cullIndex;
+    double m_cullHalf = 0.0;                  // 建表用的保守半边长（= 所有形状 localBBox 的最大外扩）
     std::vector<uint8_t> m_iconBits;          // bit0 twirl / bit1 ssUp / bit2 ssDown
     std::vector<uint8_t> m_visible;           // lazy：只有 TrackVis 需要
     std::vector<uint32_t> m_drawOrder;        // 改造前的绘制顺序（见类注释）

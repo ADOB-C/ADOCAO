@@ -155,8 +155,7 @@ int exportLevelMapNativeAll(const std::string& levelPath, const std::string& out
     Timeline tl;
     tl.build(level, /*exportOnly=*/true);
     const int n = (int)level.tiles.size();
-    const auto& times = tl.tileStartTimes();
-    if (n < 2 || times.size() < (size_t)n) { std::fprintf(stderr, "bad level\n"); return 1; }
+        if (n < 2 || tl.tileCount() < (int64_t)n) { std::fprintf(stderr, "bad level\n"); return 1; }
 
     long long a = 0, b = n - 1;
     if (!tilesStr.empty()) std::sscanf(tilesStr.c_str(), "%lld-%lld", &a, &b);
@@ -166,7 +165,7 @@ int exportLevelMapNativeAll(const std::string& levelPath, const std::string& out
     double mnx = 1e300, mny = 1e300, mxx = -1e300, mxy = -1e300;
     glm::dvec2 red, blue;
     for (long long i = a; i <= b; ++i) {
-        PositionSolver::positionAtTile(tl, times[(size_t)i], (int)i, red, blue);
+        PositionSolver::positionAtTile(tl, tl.startTimeAt(i), (int)i, red, blue);
         mnx = std::min(mnx, std::min(red.x, blue.x)); mxx = std::max(mxx, std::max(red.x, blue.x));
         mny = std::min(mny, std::min(red.y, blue.y)); mxy = std::max(mxy, std::max(red.y, blue.y));
     }
@@ -194,9 +193,9 @@ int exportLevelMapNativeAll(const std::string& levelPath, const std::string& out
             const long long sy1 = std::min<long long>(H - 1, sy0 + block - 1);
             segs.clear();
             glm::dvec2 pr, pb, cr, cb;
-            PositionSolver::positionAtTile(tl, times[(size_t)a], (int)a, pr, pb);
+            PositionSolver::positionAtTile(tl, tl.startTimeAt(a), (int)a, pr, pb);
             for (long long i = a + 1; i <= b; ++i) {
-                PositionSolver::positionAtTile(tl, times[(size_t)i], (int)i, cr, cb);
+                PositionSolver::positionAtTile(tl, tl.startTimeAt(i), (int)i, cr, cb);
                 const glm::dvec2 pairs[2][2] = { {pr, cr}, {pb, cb} };
                 for (auto& q : pairs) {
                     const double x0 = q[0].x + offX, x1 = q[1].x + offX;
@@ -269,7 +268,7 @@ int exportLevelMapNativeAll(const std::string& levelPath, const std::string& out
                             // TODO(timeColor)：这里的样本只带 (y,x)，取不到所属 tile 的时间 →
                             // 需要给 Sample 加一个 tile 序号/时间字段（3 处小改）再接 timeColorAt()。
                             const uint32_t tc = timeColor
-                                ? timeColorAt(times[(size_t)samples[si].ti] / std::max(1e-9, tl.totalDuration()))
+                                ? timeColorAt(tl.startTimeAt(samples[si].ti) / std::max(1e-9, tl.totalDuration()))
                                 : 0xDEBB7BFFu;
                             const uint8_t tcR = (uint8_t)(tc >> 24), tcG = (uint8_t)(tc >> 16), tcB = (uint8_t)(tc >> 8);
                             row[off] = tcR; row[off + 1] = tcG; row[off + 2] = tcB;

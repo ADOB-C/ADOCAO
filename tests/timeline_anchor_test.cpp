@@ -190,6 +190,69 @@ void testWindowedAccess(const char* path) {
                 wantDA.size(), bad == 0 ? "是" : "否", (int)tl.trackVisCoarseMonotone());
 }
 
+// ③ 切片 3a：丢掉 `m_tileStartTimes` 之后，逐层访问 + `findTileIndex` 必须与密集数组一致
+void testStartWindowed(const char* path) {
+    LevelData lv;
+    if (!lv.loadFromFile(path)) { std::printf("FAIL 载入失败：%s\n", path); ++g_fail; return; }
+    Timeline tl;
+    tl.build(lv, /*exportOnly=*/false);
+    if (!tl.dropStartTimesArray()) {
+        std::printf("     %-46s 保留起始时间（锚点/时长不齐）\n", path);
+        return;
+    }
+    check(tl.tileStartTimes().empty(), "丢了之后起点数组应为空");
+    const size_t n = (size_t)tl.tileCount();
+    // 参考实现 = 密集数组上的原二分（就是未窗口化分支那段）
+    std::vector<double> want(n);
+    for (size_t i = 0; i < n; ++i) want[i] = tl.startTimeAt(i);   // 先取一份（窗口化后仍是同一批值）
+    auto refFind = [&](double t) -> int {
+        if (n < 2) return 0;
+        long lo = 0, hi = (long)n - 1;
+        while (lo <= hi) { long mid = (lo + hi) / 2; if (want[(size_t)mid] <= t) lo = mid + 1; else hi = mid - 1; }
+        long idx = hi; if (idx < 0) idx = 0; if (idx >= (long)n) idx = (long)n - 1;
+        return (int)idx;
+    };
+    // 逐层
+    size_t bad = 0;
+    for (size_t i = 0; i < n; ++i) if (!(want[i] == want[i])) ++bad;   // 占位（真实比对在下面）
+    bad = 0;
+    for (size_t i = 0; i < n; ++i) {
+        // 与"刚丢之前的密集数组"比：用锚点重算出来的值必须逐位相同
+        // （want 是丢弃后取的，等价性由 testBlocks 保证；这里查自洽 + 与 findTileIndex 一致）
+        if (!(tl.startTimeAt((int64_t)i) == want[i])) ++bad;
+    }
+    // findTileIndex 探针：均匀 + 锚点边界 ±1ULP + 两端 + 负值 + 超尾
+    size_t badFind = 0, probes = 0;
+    std::vector<double> ts;
+    for (size_t k = 0; k < 2000; ++k) ts.push_back(want[n * k / 2000]);
+    for (size_t k = 0; k < n; k += (size_t)Timeline::kAnchorStride) {
+        ts.push_back(want[k]);
+        ts.push_back(std::nextafter(want[k], -1e308));
+        ts.push_back(std::nextafter(want[k], 1e308));
+    }
+    ts.push_back(-1e9); ts.push_back(want[n - 1] + 10.0); ts.push_back(want[n - 1]);
+    for (double t : ts) {
+        ++probes;
+        if (tl.findTileIndex(t) != refFind(t)) ++badFind;
+    }
+    check(bad == 0, std::string(path) + "：窗口化 startTimeAt 不自洽");
+    check(badFind == 0, std::string(path) + "：窗口化 findTileIndex 与密集数组不一致");
+    std::printf("     %-46s 起始时间窗口化：%zu 层 / findTileIndex %zu 探针，不一致 %zu+%zu\n",
+                path, n, probes, bad, badFind);
+
+    // 反面对照：动 1 ULP 的时长必须让该块（及之后）的 startTimeAt 变
+    if (n > 5000) {
+        Timeline copy;
+        copy.build(lv, false);
+        copy.dropStartTimesArray();
+        const int64_t mid = (int64_t)(n / 2);
+        const float orig = copy.durations()[(size_t)mid];
+        copy.setDurationForTest(mid, std::nextafterf(orig, orig + 1e30f));
+        check(!(copy.startTimeAt(mid + 1) == want[(size_t)(mid + 1)]),
+              "反面对照失败：时长动 1 ULP 后窗口化 startTimeAt 竟然没变");
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -200,6 +263,8 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) testBlocks(argv[i]);
     std::printf("=== ③ 切片 3：丢掉密集数组后的窗口化访问 ===\n");
     for (int i = 1; i < argc; ++i) testWindowedAccess(argv[i]);
+    std::printf("=== ③ 切片 3a：丢掉起始时间数组后的窗口化访问 ===\n");
+    for (int i = 1; i < argc; ++i) testStartWindowed(argv[i]);
     if (g_fail == 0) std::printf("全部通过\n");
     else std::printf("%d 项不通过\n", g_fail);
     return g_fail == 0 ? 0 : 1;

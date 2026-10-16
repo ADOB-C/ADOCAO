@@ -110,9 +110,8 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
         return false;
     }
     const int n = (int)nFull;
-    const auto& times = tl.tileStartTimes();
-    if (n < 2 || times.size() < (size_t)n) {
-        LOG_E("Map: 层数不足（n=%d, times=%zu）", n, times.size());
+    if (n < 2 || tl.tileCount() < (int64_t)n) {
+        LOG_E("Map: 层数不足（n=%d, times=%lld）", n, (long long)tl.tileCount());
         return false;
     }
 
@@ -124,7 +123,7 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
     double minX = 1e300, minY = 1e300, maxX = -1e300, maxY = -1e300;
     glm::dvec2 red, blue;
     for (int i = i0; i <= i1; ++i) {
-        PositionSolver::positionAtTile(tl, times[i], i, red, blue);
+        PositionSolver::positionAtTile(tl, tl.startTimeAt(i), i, red, blue);
         const double xs[2] = { red.x, blue.x }, ys[2] = { red.y, blue.y };
         const int cnt = opts.drawBlue ? 2 : 1;
         for (int k = 0; k < cnt; ++k) {
@@ -179,12 +178,12 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
     glm::dvec2 prevRed, prevBlue, cur;
     bool havePrev = false;
     for (int i = i0; i <= i1; ++i) {
-        PositionSolver::positionAtTile(tl, times[i], i, red, blue);
+        PositionSolver::positionAtTile(tl, tl.startTimeAt(i), i, red, blue);
         if (havePrev) {
             Rgba c = fill;
             if (opts.timeColor) {
                 const double tot = std::max(1e-9, tl.totalDuration());
-                c = unpack(timeColorAt(times[(size_t)i] / tot));   // 六档彩虹，按真实谱面时间
+                c = unpack(timeColorAt(tl.startTimeAt(i) / tot));   // 六档彩虹，按真实谱面时间
             }
             const glm::dvec2 a = toPx(prevRed), b = toPx(red);
             if (opts.hardLine) drawSegmentHard(out, (int)W, (int)H, a.x, a.y, b.x, b.y, c);
@@ -200,8 +199,8 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
 
     if (opts.markers && !opts.timeColor) {   // 彩虹已用颜色表达时间 → 起止点多余
         glm::dvec2 r0, b0, r1, b1;
-        PositionSolver::positionAtTile(tl, times[(size_t)i0], i0, r0, b0);
-        PositionSolver::positionAtTile(tl, times[(size_t)i1], i1, r1, b1);
+        PositionSolver::positionAtTile(tl, tl.startTimeAt(i0), i0, r0, b0);
+        PositionSolver::positionAtTile(tl, tl.startTimeAt(i1), i1, r1, b1);
         const double rad = std::max(3.0, std::min(14.0, scale * 1.5));
         const glm::dvec2 s0 = toPx(r0), s1 = toPx(r1);
         drawDisc(out, (int)W, (int)H, s0.x, s0.y, rad, Rgba{0.30f, 0.85f, 0.40f, 1.0f});  // 绿 = 起点

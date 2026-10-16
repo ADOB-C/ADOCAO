@@ -128,6 +128,8 @@ void runLevelLoading(const LauncherConfig& cfg, LoadingProgress& progress, LoadR
     // 只有"可重算（无 AT 事件）+ 粗索引单调"时才丢（`dropTrackVisArrays()` 自己判定），
     // 否则保留密集数组、行为与以前**完全一样**。
     if (result.timeline) {
+        const bool dropStart = result.timeline->dropStartTimesArray();
+        LOG_I("timeline: 起始时间密集数组 %s（省 8 B/层）", dropStart ? "已窗口化" : "保留");
         const bool dropped = result.timeline->dropTrackVisArrays();
         LOG_I("timeline: TrackVis 密集数组 %s（%s）", dropped ? "已窗口化" : "保留",
               dropped ? result.timeline->blocksRecomputableWhy() : "不可重算/粗索引不单调");

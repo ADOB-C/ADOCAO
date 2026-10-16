@@ -64,8 +64,8 @@ public:
     // TrackVis 恒定态"重算出该块的三支 double（若 needsTrackVis 则含 disappear/appear）。
     // 逐位口径与 precalculateTiming 相同：duration 转 double 后按层序累加（同一顺序、同一操作）。
     struct BlockResult {
-        std::vector<double> startTimes;     // [i0, i1)
-        std::vector<double> disappearTimes; // 空 = 这张谱不需要 TrackVis
+        std::vector<double> startTimes;     // [i0, i1]（多一层：TrackVis 要用 start[i+1]）
+        std::vector<double> disappearTimes; // 空 = 这张谱不需要 / 不可重算 TrackVis
         std::vector<double> appearTimes;
     };
     // 能否按块重算：需要 TrackVis 时，只有**块内没有 AnimateTrack 事件**才严格等价
@@ -84,6 +84,11 @@ public:
     const std::vector<double>& coarseAppearTimes() const { return m_coarseAA; }
     // 逐层 TrackVis 时间（未窗口化时直接读密集数组；窗口化时物化所在块）
     const BlockResult* windowFor(int64_t i) const;   // 单块缓存（物化 i 所在的块）
+    // 起始时间：未窗口化时直读密集数组，窗口化时物化所在块（单块缓存）
+    double startTimeAt(int64_t i) const;
+    // 丢掉 `m_tileStartTimes`（只依赖"锚点 + 每层时长"，**与 TrackVis 能否重算无关**，
+    // 所以有 AnimateTrack 的谱也能省这 54 MB）。导出路径也走 startTimeAt()。
+    bool dropStartTimesArray();
     double disappearTimeAt(int64_t i) const;
     double appearTimeAt(int64_t i) const;
     // 丢掉两支密集 double（只有 blocksRecomputable() 时才允许；丢之前先建粗索引）
@@ -149,6 +154,7 @@ private:
     float  m_visNum5 = 0.0f;         // = bpm[0]（i==0 时的 num5/num6 初值）
     bool   m_needsTrackVis = false;
     // 切片 3
+    bool   m_startWindowed = false;
     bool   m_visWindowed = false;
     bool   m_visCoarseMonotone = false;
     std::vector<double> m_coarseDA, m_coarseAA;   // 每锚点一份

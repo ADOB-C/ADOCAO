@@ -83,7 +83,7 @@ void PlaybackClock::updateFrame() {
 
     const double t = timeInLevel();
     // #0：int64 算，收窄前显式判
-    const int64_t nFull = (int64_t)m_timeline->tileStartTimes().size();
+    const int64_t nFull = m_timeline->tileCount();
     if (!fitsInt32(nFull)) {
         LOG_E("PlaybackClock 需要 64 位索引（#0 阶段 3）：%lld 层超出 int32", (long long)nFull);
         return;

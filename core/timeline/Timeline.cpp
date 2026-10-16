@@ -448,13 +448,13 @@ void Timeline::precalculateTiming() {
 }
 
 bool Timeline::recomputeBlock(int64_t i0, int64_t i1, BlockResult& out) const {
-    const int64_t n = (int64_t)m_tileStartTimes.size();
+    const int64_t n = tileCount();   // 丢过密集数组也要成立（这正是窗口化的用途）
     if (i0 < 0 || i1 > n || i0 >= i1) return false;
     const int64_t stride = kAnchorStride;
     const int64_t b = i0 / stride;
     if (b >= (int64_t)m_anchors.size() || m_anchors[(size_t)b].floor != i0) return false;
     if ((int64_t)m_durations.size() != n) return false;
-    if (m_needsTrackVis && !m_blocksRecomputable) return false;
+    // 起始时间只依赖"时长 + 锚点"，任何谱都可算；TrackVis 两支才需要额外条件（见下）
 
     // 1) 起始时间：从锚点的**已存值**起步，按层序把时长（转 double）累加 —— 与原前缀同一顺序、
     //    同一操作，所以逐位相同。为 TrackVis 那一遍多算一层（disappear[i] 要用 start[i+1]）。
@@ -465,7 +465,10 @@ bool Timeline::recomputeBlock(int64_t i0, int64_t i1, BlockResult& out) const {
         out.startTimes[(size_t)(i - i0)] = t;
         if (i < n - 1) t += (double)m_durations[(size_t)i];
     }
-    if (!m_needsTrackVis) { out.disappearTimes.clear(); out.appearTimes.clear(); return true; }
+    // TrackVis 两支：只有"需要 + 可重算"时才给；否则留空（消费方走 trackVisWindowed() 判定）
+    if (!m_needsTrackVis || !m_blocksRecomputable) {
+        out.disappearTimes.clear(); out.appearTimes.clear(); return true;
+    }
 
     // 2) TrackVis 两支：复刻 Phase 5 的循环（i ∈ [0, n-1) 才写；refBPM 在无 AT 时取 num5）
     out.disappearTimes.assign((size_t)(i1 - i0), std::numeric_limits<double>::infinity());
@@ -499,6 +502,26 @@ const Timeline::BlockResult* Timeline::windowFor(int64_t i) const {
     m_winCache = std::move(r);
     m_winBlock = b;
     return &m_winCache;
+}
+
+double Timeline::startTimeAt(int64_t i) const {
+    if (!m_startWindowed) {
+        return (i >= 0 && (size_t)i < m_tileStartTimes.size()) ? m_tileStartTimes[(size_t)i] : 0.0;
+    }
+    const BlockResult* w = windowFor(i);
+    if (!w) return 0.0;
+    const size_t k = (size_t)(i - (i / kAnchorStride) * kAnchorStride);
+    return k < w->startTimes.size() ? w->startTimes[k] : 0.0;
+}
+
+bool Timeline::dropStartTimesArray() {
+    const size_t n = m_tileBPM.size();
+    if (n == 0) return false;
+    if (m_anchors.empty() || m_durations.size() != n) return false;   // 前置：锚点 + 时长齐备
+    std::vector<double>().swap(m_tileStartTimes);
+    m_startWindowed = true;
+    m_winBlock = -1;         // 缓存里的 startTimes 仍有效，但保持一致语义
+    return true;
 }
 
 double Timeline::disappearTimeAt(int64_t i) const {
@@ -536,9 +559,9 @@ bool Timeline::dropTrackVisArrays() {
 }
 
 double Timeline::totalDuration() const {
-    int n = (int)m_tileStartTimes.size();
+    const int64_t n = tileCount();
     if (n < 2) return 0.0f;
-    return m_tileStartTimes[n - 1] + 10.0;
+    return startTimeAt(n - 1) + 10.0;
 }
 
 bool Timeline::buildRawPcm(std::vector<float>& out, double& sampleRateOut) const {
@@ -578,7 +601,7 @@ bool Timeline::buildRawPcm(std::vector<float>& out, double& sampleRateOut) const
 // 它不是谱面里的砖 —— 打拍音不能给它排一击（曾经末尾会多响一下，Kick 和弦那种
 // "一击不多一击不少"的谱上直接量得出来）。
 int Timeline::realTileCount() const {
-    int n = (int)m_tileStartTimes.size();
+    int n = (int)tileCount();
     if (m_level && !m_level->angleData.empty() && (int)m_level->angleData.size() < n)
         n = (int)m_level->angleData.size();
     return n;
@@ -590,7 +613,7 @@ std::vector<double> Timeline::getHitsoundTimestamps() const {
     if (n < 2) return timestamps;
     float offsetSec = m_level->settings.offset / 1000.0f;
     for (int i = 1; i < n; i++)
-        timestamps.push_back(m_tileStartTimes[i] + offsetSec);
+        timestamps.push_back(startTimeAt(i) + offsetSec);
     return timestamps;
 }
 
@@ -618,24 +641,42 @@ std::vector<HitsoundTimestampGroup> Timeline::getHitsoundTimestampGroups() const
             groupMap[key] = groups.size();
             groups.push_back({type, vol, {}});
         }
-        groups[groupMap[key]].timestamps.push_back(m_tileStartTimes[i] + offsetSec);
+        groups[groupMap[key]].timestamps.push_back(startTimeAt(i) + offsetSec);
     }
     return groups;
 }
 
 int Timeline::findTileIndex(double t) const {
-    int n = (int)m_tileStartTimes.size();
+    const int64_t n = tileCount();
     if (n < 2) return 0;
-    int lo = 0, hi = n - 1;
-    while (lo <= hi) {
-        int mid = (lo + hi) / 2;
-        if (m_tileStartTimes[mid] <= t) lo = mid + 1;
-        else hi = mid - 1;
+    if (!m_startWindowed) {
+        // 未窗口化：保持原实现（逐位同结果）
+        int lo = 0, hi = (int)n - 1;
+        while (lo <= hi) {
+            int mid = (lo + hi) / 2;
+            if (m_tileStartTimes[(size_t)mid] <= t) lo = mid + 1;
+            else hi = mid - 1;
+        }
+        int idx = hi;
+        if (idx < 0) idx = 0;
+        if (idx >= (int)n) idx = (int)n - 1;
+        return idx;
     }
-    int idx = hi;
+    // 窗口化：先在锚点上二分（startTime 单调不减：duration 恒 ≥ 0），再在那一块内取
+    // "最后一个 startTime <= t"的层（与原实现的结果相同；块内扫描对非单调也更稳）。
+    int64_t lo = 0, hi = (int64_t)m_anchors.size() - 1, aEnd = -1;
+    while (lo <= hi) {
+        const int64_t m = (lo + hi) / 2;
+        if (m_anchors[(size_t)m].startTime <= t) { aEnd = m; lo = m + 1; } else hi = m - 1;
+    }
+    if (aEnd < 0) return 0;
+    const int64_t from = aEnd * kAnchorStride;
+    const int64_t to = std::min(from + kAnchorStride, n);
+    int64_t idx = -1;
+    for (int64_t i = from; i < to; ++i)
+        if (startTimeAt(i) <= t) idx = i;
     if (idx < 0) idx = 0;
-    if (idx >= n) idx = n - 1;
-    return idx;
+    return (int)idx;
 }
 
 }  // namespace adofai

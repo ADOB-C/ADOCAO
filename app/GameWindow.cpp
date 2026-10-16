@@ -35,7 +35,7 @@ namespace {
 static void jumpToTile(Timeline& timeline, PlaybackClock& clock, AudioEngine& audio, HitsoundManager& hs,
                         const LevelData& level, int floor) {
     if (floor < 0 || floor >= (int)level.tiles.size()) return;
-    double targetTime = timeline.tileStartTimes()[floor];
+    double targetTime = timeline.startTimeAt(floor);
     float offsetSec = level.settings.offset / 1000.0f;
     float audioPos = (float)(targetTime + offsetSec);
     if (audioPos < 0) audioPos = 0;
@@ -520,16 +520,17 @@ void GameWindow::captureAndExit() {
     }
     float targetTime = m_cfg->captureTime;
     if (m_cfg->captureTile >= 0) {
-        const auto& st = m_timeline->tileStartTimes();
         size_t N = (size_t)m_cfg->captureTile;
-        if (N < st.size()) {
+        const size_t nTiles = (size_t)m_timeline->tileCount();
+        if (N < nTiles) {
             // 取这一砖区间的**中点**（用 st[N+1]-st[N]，不要用 tileDurations —— 中旋砖的
             // 时长与实际区间不是一回事，会落到隔壁砖）。audioPos 是 float（千秒量级只有
             // ~1e-4 s 分辨率），落在区间起点上会被舍到上一砖，currentTileIndex() 就变成 N-1。
-            double span = (N + 1 < st.size()) ? (st[N + 1] - st[N]) : 0.0;
-            targetTime = (float)(st[N] + 0.5 * span);
+            double span = (N + 1 < nTiles) ? (m_timeline->startTimeAt((int64_t)N + 1) -
+                                               m_timeline->startTimeAt((int64_t)N)) : 0.0;
+            targetTime = (float)(m_timeline->startTimeAt((int64_t)N) + 0.5 * span);
         } else {
-            LOG_W("capture: --capture-tile %d 超出 %zu 砖，退回 --capture-time", m_cfg->captureTile, st.size());
+            LOG_W("capture: --capture-tile %d 超出 %zu 砖，退回 --capture-time", m_cfg->captureTile, nTiles);
         }
     }
     const float audioPos = targetTime + m_playback->preRoll() - m_playback->audioStartOffset();

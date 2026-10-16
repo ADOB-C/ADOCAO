@@ -206,6 +206,21 @@ static void earlyLog(const char* msg) {
 #endif
 }
 
+// macOS/GLFW：GLFW 的 Cocoa init **默认会 `chdir` 到 bundle 的 `Contents/Resources`**
+// （`GLFW_COCOA_CHDIR_RESOURCES`，默认开；见 glfw 的 `src/cocoa_init.m`：main bundle 存在
+// 且其 resources 目录末级正好叫 "Resources" 时直接 `chdir(resourcesPath)`）。
+// 后果：从 `.app` 的 `Contents/MacOS/ADOCAO` 启动时，**命令行给的相对路径全部按 Resources 解析**
+// ——相对谱面路径报 "Failed to load level"，相对输出路径的 PNG 悄悄落到 `Contents/Resources/` 里
+// （2026-10-15 实测：`--capture relprobe.png` 落在 `ADOCAO.app/Contents/Resources/relprobe.png`）。
+// 我们并不需要那次 chdir 来定位资产：`app/AssetSetup.cpp` 已经把 `exe 目录/../Resources`
+// 显式加进 `assetOptions().roots`。所以在 `glfwInit()` 之前关掉它，让 .app 路的相对路径
+// 与直跑 `build/ADOCAO` 行为一致。
+static void initGlfwHints() {
+#if defined(__APPLE__) && defined(GLFW_COCOA_CHDIR_RESOURCES)   // GLFW 3.3+
+    glfwInitHint(GLFW_COCOA_CHDIR_RESOURCES, GLFW_FALSE);
+#endif
+}
+
 int runApplication(bool debugConsole) {
     earlyLog("[ADOCAO] main() entered");
 
@@ -221,6 +236,7 @@ int runApplication(bool debugConsole) {
 #endif
 
     earlyLog("[ADOCAO] GLFW init...");
+    initGlfwHints();
     if (!glfwInit()) {
         LOG_E("Failed to initialize GLFW");
 #ifdef _WIN32
@@ -320,6 +336,7 @@ int runApplicationFromCLI(const LauncherConfig& cfg, bool debugConsole) {
     pinToBigCore();
 #endif
 
+    initGlfwHints();
     if (!glfwInit()) {
         LOG_E("Failed to initialize GLFW");
 #ifdef _WIN32

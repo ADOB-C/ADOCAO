@@ -60,6 +60,19 @@ env `ADOCAO_CULL_BLOCK` 可覆盖）。默认 **4096**（0.0098 B/砖，2³¹−
 候选变多。**它不改画面**：`--cull-block 0/256/…/65536` 在同一帧上出图逐字节相同，
 `drawn` 也相同。合法范围 64…1048576，超范围会钳制并在日志里 `LOG_W`。
 
+### 路径语义 / 从 `.app` 启动
+
+所有路径（`--level`、`--capture`/`--image` 的输出、`--export-dir`…）都按**进程当前目录**解析，
+**从 `build/ADOCAO.app/Contents/MacOS/ADOCAO` 启动也一样** —— 这条不是自动成立的：GLFW 的
+Cocoa init 默认会 `chdir` 到 bundle 的 `Contents/Resources`（`GLFW_COCOA_CHDIR_RESOURCES`，
+默认开；见 glfw `src/cocoa_init.m`：main bundle 存在且其 resources 目录末级正好叫 `Resources`
+时直接 `chdir`）。那会让 `.app` 路下"相对谱面路径"报 `Failed to load level`，而相对输出路径的
+PNG **悄悄落到 `Contents/Resources/` 里**（2026-10-15 实测）。
+我们在 `glfwInit()` 之前显式关掉它（`app/Application.cpp::initGlfwHints()`）—— 资产定位不依赖
+那次 chdir（`app/AssetSetup.cpp` 已把 `exe 目录/../Resources` 显式加进 `options().roots`），
+所以关掉之后，`.app` 路与直跑 `build/ADOCAO` 的相对路径行为**完全一致**
+（实测：相对谱面 + 相对输出、绝对路径、从没有 `assets/` 的 CWD 启动，三者出图逐字节相同）。
+
 **Length** — `--trail-duration SEC` (default) or `--trail-tiles N` (wizard
 "Length in tiles" + "Trail tiles"). A *time* window is unusable on charts whose BPM
 spans orders of magnitude: 0.4 s is ~6,800 tiles at BPM 1.5M, so the trail sweeps

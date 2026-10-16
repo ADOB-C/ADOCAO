@@ -173,9 +173,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 脚本：`scripts/push-ci.sh`（push → gh run watch；`--watch` 默认输出平台耗时/产物）
   `scripts/run.sh --debugger` | `scripts/release.sh`（支持 x.y.z-AlphaN/-BetaN/-RcN）
   `scripts/make-app.sh`（macOS：把 `build/adocao` + `assets/` 打成自包含的 `build/adocao.app`，含 ad-hoc 签名；CI 的 macOS job 也用同一个脚本）
-  **注意 `.app` 是快照**：`./build.sh` 之后它不会自动更新 —— 验收/试玩前要么直跑 `build/adocao`，
-  要么先跑一次 `make-app.sh`。判断"跑的是哪个"看日志路径：写进可执行文件旁边 = 直跑；
+  **注意 `.app` 默认是快照**：`./build.sh` 之后它不会自动更新 —— 验收/试玩前要么直跑 `build/adocao`，
+  要么先跑一次 `make-app.sh`；**开发期用 `scripts/make-app.sh --link`** 可把
+  `Contents/MacOS/ADOCAO` 做成指向 `build/adocao` 的符号链接（bundle 不签名，仅本机开发用，
+  链接目标随 `./build.sh` 即时生效）。判断"跑的是哪个"看日志路径：写进可执行文件旁边 = 直跑；
   写进 `~/Library/Logs/ADOCAO/` = 跑的是 `.app`（2026-10-11 用户对着 4 天前的旧包怀疑人生过一次）。
+  **`.app` 路的相对路径与直跑一致**（2026-10-15 修的）：GLFW 的 Cocoa init 默认 `chdir` 到
+  bundle 的 `Contents/Resources`（`GLFW_COCOA_CHDIR_RESOURCES`），会让相对谱面路径报
+  "Failed to load level"、相对输出 PNG 悄悄落到 Resources 里；现在 `glfwInit()` 前显式关掉它，
+  资产定位本来就靠 `AssetSetup` 显式加的 `../Resources` 根，不依赖那次 chdir。详见 `docs/cli.md`。
   `build.sh`（已有 build/ 缓存且不带参数 = 增量构建，不提问）
 - **联网只看局部，绝不整份拉进上下文（2026-10 真亏过 3 元）**：要参考实现/资料时，一律
   `curl -sS -o build/ref/xxx <raw-url>` 落到工作区，再用 `grep`/`sed` 看那几行；**不要** `web_fetch`

@@ -388,6 +388,27 @@ void Timeline::precalculateTiming() {
               dc, n, curDA.c_str(), curBB, curBA, flag2 ? num6 : num5);
     }
 
+    // ③ 切片 1：记录锚点（每 kAnchorStride 层一个）。**只记录，不改消费方** ——
+    // 本切片的验收是"锚点值 == 全量数组在该层逐位相同"（tests/timeline_anchor_test.cpp）。
+    m_anchors.clear();
+    if (n > 0) {
+        const bool hasTV = !m_tileDisappearTimes.empty();
+        for (int64_t i = 0; i < (int64_t)n; i += kAnchorStride) {
+            Anchor a;
+            a.floor = i;
+            a.startTime = m_tileStartTimes[(size_t)i];
+            a.bpm = m_tileBPM[(size_t)i];
+            a.cw = m_tileIsCW[(size_t)i];
+            if (hasTV) {
+                a.hasTrackVis = true;
+                a.disappearTime = m_tileDisappearTimes[(size_t)i];
+                a.appearTime = m_tileAppearTimes[(size_t)i];
+            }
+            m_anchors.push_back(a);
+        }
+        LOG_D("Timeline: %zu 个锚点（每 %lld 层）", m_anchors.size(), (long long)kAnchorStride);
+    }
+
     auto [minBPM, maxBPM] = std::minmax_element(m_tileBPM.begin(), m_tileBPM.end());
     LOG_D("Timeline: %d tiles, total duration %.2fs, bpm range %.0f-%.0f",
           n - 1, preShiftTotal, *minBPM, *maxBPM);

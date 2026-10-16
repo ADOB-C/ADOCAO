@@ -67,6 +67,13 @@ add_executable(adocao_diagnostics_test adocao_diagnostics_test.cpp)
 target_link_libraries(adocao_diagnostics_test PRIVATE adocao_archive)
 add_test(NAME adocao_diagnostics COMMAND adocao_diagnostics_test)
 
+# ③ 切片 1：Timeline 锚点（每 4096 层）与全量数组逐位对拍
+add_executable(adocao_timeline_anchor_test timeline_anchor_test.cpp)
+target_link_libraries(adocao_timeline_anchor_test PRIVATE adocao_core adocao_archive)
+add_test(NAME timeline_anchor
+         COMMAND adocao_timeline_anchor_test ${CMAKE_SOURCE_DIR}/tests/charts/angles360.adofai
+                 "${CMAKE_SOURCE_DIR}/tests/charts/diag_glide.adofai")
+
 # ④ 粗块 AABB 索引：与全扫逐元素对拍（含反面对照）
 add_executable(adocao_cull_index_test cull_index_test.cpp)
 target_include_directories(adocao_cull_index_test PRIVATE ${CMAKE_SOURCE_DIR}/render)

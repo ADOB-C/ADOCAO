@@ -45,6 +45,21 @@ public:
     void recomputeForTest(std::vector<float>& outStartAngles,
                           std::vector<float>& outTotalAngles,
                           std::vector<float>& outDurations) const;
+    // ③ 切片 1：**每 4096 层一个锚点**。目标是"按块重算"替代 3 支 double 常驻
+    // （MYC 原版实测：3×8 B/层 = 162 MB，占 live 530 MB 的 31%）。
+    // 本切片只**记录**锚点并做"锚点 == 全量数组在该层的值"的逐位对拍，
+    // 不改任何消费方（时钟/PositionSolver/TrackVis 仍读全量数组）。
+    struct Anchor {
+        int64_t floor = 0;
+        double startTime = 0.0;        // == m_tileStartTimes[floor]
+        float  bpm = 0.0f;             // == m_tileBPM[floor]
+        bool   cw = false;             // == m_tileIsCW[floor]
+        double disappearTime = 0.0;    // 仅 needsTrackVis 时有意义
+        double appearTime = 0.0;
+        bool   hasTrackVis = false;
+    };
+    static constexpr int64_t kAnchorStride = 4096;   // 与 ② 分块 / ④ 块索引同粒度
+    const std::vector<Anchor>& anchors() const { return m_anchors; }
     const std::vector<double>& tileDisappearTimes() const { return m_tileDisappearTimes; }
     const std::vector<double>& tileAppearTimes() const { return m_tileAppearTimes; }
     const std::vector<float>& tileBPMs() const { return m_tileBPM; }
@@ -90,6 +105,7 @@ private:
     float m_lastTotalAngle = 0.0f;
     std::vector<float> m_tileBPM;
     std::vector<bool>  m_tileIsCW;
+    std::vector<Anchor> m_anchors;   // ③ 切片 1：见 anchors()
     size_t m_distCount = 0;          // 有效层数（= n）；配合下面两个标量实现 tileStartDist/tileEndDist
     float  m_lastStartDist = 1.0f;   // 只有最后一层用得上（其余恒 1.0f）
     float  m_lastEndDist   = 1.0f;

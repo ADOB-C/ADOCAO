@@ -67,6 +67,12 @@ add_executable(adocao_diagnostics_test adocao_diagnostics_test.cpp)
 target_link_libraries(adocao_diagnostics_test PRIVATE adocao_archive)
 add_test(NAME adocao_diagnostics COMMAND adocao_diagnostics_test)
 
+# 剔除策略对比探针（④）：同一份真实数据、同一套 AABB 判定下比三种候选集策略
+# （全扫 O(n) / 层号±4096 窗口 / 4096 层块 AABB 查询）的候选数、漏砖数、耗时、索引体积。
+add_executable(adocao_cull_cost_probe cull_cost_probe.cpp)
+target_link_libraries(adocao_cull_cost_probe PRIVATE adocao_core)
+add_test(NAME cull_cost COMMAND adocao_cull_cost_probe ${CMAKE_SOURCE_DIR}/tests/charts/angles360.adofai --zooms 25,100 --repeat 3)
+
 # 砖块几何自测：中旋砖（angleData=999）必须是五边形（尖角朝来路、面积 3w²）；带负向对照。
 # TileGeometryReference.cpp（改造前的 CPU 几何，现在的 A/B 基准）只需要 <vector>/<cmath>，
 # 直接编进测试，不碰 GL。

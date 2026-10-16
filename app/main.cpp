@@ -130,6 +130,7 @@ void printHelp(Mode mode, bool all) {
         "  --fill <hex>  --stroke <hex>  --bg <hex>  --no-auto-stroke\n"
         "  --msaa N  --no-exclusive                 抗锯齿 / 无边框全屏（默认独占）\n"
         "  --no-hitsound  --force-hitsound [TYPE]  --auto-play  --no-trail  --export\n"
+        "  --cull-block N            剔除的粗块粒度（层/块，默认 4096；0 = 关闭索引走全扫）\n"
         "  --trail-duration SEC | --trail-tiles N   拖尾长度（二选一，默认关）\n"
         "  --trail-sample-rate N | --trail-target-fps N            固定 / 自适应采样率\n"
         "  --trail-samples-per-tile N  --trail-rate-min N  --trail-rate-max N\n"
@@ -264,6 +265,7 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--msaa") == 0 && i+1<argc)      cli.msaaSamples = atoi(argv[++i]);
             else if (std::strcmp(a, "--no-exclusive") == 0)          cli.exclusiveFullscreen = false;   // 默认独占全屏
             else if (std::strcmp(a, "--no-trail") == 0)              cli.showTrail = false;
+            else if (std::strcmp(a, "--cull-block") == 0 && i+1<argc) cli.cullBlockFloors = atoi(argv[++i]);
             else if (std::strcmp(a, "--capture") == 0 && i+1<argc)      cli.capturePath = argv[++i];
             else if (std::strcmp(a, "--capture-time") == 0 && i+1<argc) cli.captureTime = (float)atof(argv[++i]);
             else if (std::strcmp(a, "--capture-tile") == 0 && i+1<argc) {

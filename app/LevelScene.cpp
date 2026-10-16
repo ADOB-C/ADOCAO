@@ -109,6 +109,7 @@ bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level) {
 
     // Track
     m_tileMesh = new TileMesh();
+    m_tileMesh->setCullBlockFloors(cfg.cullBlockFloors);   // ④ 剔除粗块粒度（0 = 全扫）
 
     // Render-layer planets. The core timeline/clock only produce pure frame
     // data; the scene owns the actual GL drawable Planet objects.

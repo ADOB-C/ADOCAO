@@ -34,6 +34,11 @@ struct LauncherConfig {
     float trailSamplesPerTile = 4.0f; // per-tile mode: samples per tile (clamped to rateMin/Max)
     bool  trailLengthInTiles = false; // optional: trail length in tiles instead of seconds
     float trailTiles = 8.0f;       // trail length in tiles (when trailLengthInTiles)
+    // ④ 剔除用的粗块粒度（层/块；0 = 关闭索引、退回全扫）。
+    // 更小 → 折叠/绕圈谱的块 AABB 更紧、剔除更快，但索引内存按比例增大
+    // （实测 0.0098 B/砖 @4096；2³¹−1 外推 21 MB @4096 → 320 MB @256）。
+    // 依据见 docs/rendering.md「④ 剔除」与 tests/cull_cost_probe.cpp --blocks。
+    int cullBlockFloors = 4096;
     bool exportHitsounds = false;
     std::string exportDir;         // hitsound export directory (defaults to level dir)
     bool cancelled = false;

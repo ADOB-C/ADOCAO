@@ -21,6 +21,9 @@ double msSince() {
 }
 // 小于这个砖数就不建索引：全扫本来就便宜，而且省下小谱的内存与建表时间
 constexpr int kCullIndexMinTiles = 4096;
+// 用户可选粒度的合法范围（钳制而不是报错：这是个性能旋钮，不是正确性开关）
+constexpr int kCullMinBlockFloors = 64;
+constexpr int kCullMaxBlockFloors = 1 << 20;
 }  // namespace
 
 using TileShape::Shape;
@@ -208,16 +211,35 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
         half = std::max(half, std::abs(sh.localMaxY));
     }
     m_cullHalf = half;
-    if ((size_t)n >= kCullIndexMinTiles) {
+    // 粒度：设置值（`--cull-block` / wizard Graphics 页）→ env 钩子覆盖 → 合法范围钳制。
+    // 0 或负数 = 关闭索引（走全扫）。
+    int wantFloors = m_cullFloors;
+    if (const char* e = std::getenv("ADOCAO_CULL_BLOCK")) {
+        wantFloors = std::atoi(e);
+        LOG_I("cull-index: ADOCAO_CULL_BLOCK=%d 覆盖设置值 %d", wantFloors, m_cullFloors);
+    }
+    if (wantFloors != 0) {
+        const int clamped = wantFloors < kCullMinBlockFloors ? kCullMinBlockFloors
+                          : (wantFloors > kCullMaxBlockFloors ? kCullMaxBlockFloors : wantFloors);
+        if (clamped != wantFloors) {
+            LOG_W("cull-index: 块粒度 %d 层超出范围，钳到 %d", wantFloors, clamped);
+            wantFloors = clamped;
+        }
+    }
+    if (wantFloors != 0 && (size_t)n >= kCullIndexMinTiles) {
         const double t0 = msSince();
         m_cullIndex.build((size_t)n, [&](size_t i, double& x, double& y) {
             x = tileX(i); y = tileY(i);
-        }, half);
-        LOG_I("cull-index: %d 砖 → %zu 块（每 %zu 层），%zu B（%.4f B/砖），半边长 %.3f，建表 %.1f ms",
-              n, m_cullIndex.blockCount(), m_cullIndex.floorsPerBlock(), m_cullIndex.bytes(),
-              (double)m_cullIndex.bytes() / (double)n, half, msSince() - t0);
+        }, half, (size_t)wantFloors);
+        const size_t bytes = m_cullIndex.bytes();
+        LOG_I("cull-index: %d 砖 → %zu 块（每 %zu 层），%zu B（%.4f B/砖；2³¹−1 外推 %.1f MB），"
+              "半边长 %.3f，建表 %.1f ms",
+              n, m_cullIndex.blockCount(), m_cullIndex.floorsPerBlock(), bytes,
+              (double)bytes / (double)n, (double)bytes / (double)n * 2147483647.0 / 1048576.0,
+              half, msSince() - t0);
     } else {
         m_cullIndex.clear();
+        LOG_I("cull-index: 关闭（砖 %d < %d 或粒度为 0）→ 剔除走全扫", n, kCullIndexMinTiles);
     }
     }
 

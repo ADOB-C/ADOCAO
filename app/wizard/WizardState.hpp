@@ -51,6 +51,14 @@ inline std::array<float, 3> deriveStroke(const float fill[3]) {
     return { half(fill[0]), half(fill[1]), half(fill[2]) };
 }
 
+// 剔除粗块粒度（Graphics 页的选项）。0 = 关闭索引、退回全扫。
+// 值与名字放这里，好让 PageGraphics（画）与 PageMusic（提交进 cfg）共用一份。
+inline constexpr int kCullBlockValues[] = {0, 1024, 2048, 4096, 8192, 16384};
+inline constexpr const char* kCullBlockNames[] = {
+    "关闭（全扫）", "1024 层", "2048 层", "4096 层（默认）", "8192 层", "16384 层"
+};
+inline constexpr int kCullBlockDefaultIdx = 3;   // 4096
+
 // Wizard page ids, in display order.
 enum class Page : int { Welcome = 0, Preload, Hitsounds, Graphics, Visuals, Music };
 
@@ -88,6 +96,7 @@ struct State {
     bool fullscreen = false;
     int  msaaIdx = 0;                  // 0 = Off
     int  resoIdx = 2;                  // default: 1920x1080
+    int  cullBlockIdx = kCullBlockDefaultIdx;   // 剔除粗块粒度（Graphics 页）
 
     std::string lastError;
     bool musicAutoTried = false;

@@ -59,6 +59,10 @@ public:
     void draw(double viewL, double viewR, double viewB, double viewT, double camX, double camY) const;
     void drawHighlightedTile(int tileIdx, double camX, double camY) const;
     void setVisibleThreshold(int lastVisible);
+    // ④ 剔除粗块粒度（层/块；0 = 关闭索引走全扫）。必须在 build() 之前设。
+    // 默认 4096；`ADOCAO_CULL_BLOCK=<n>` 环境变量可覆盖（测试/A-B 钩子）。
+    void setCullBlockFloors(int floors) { m_cullFloors = floors; }
+    int  cullBlockFloors() const { return m_cullFloors; }
     void updateVisibleRange(int startTile, int endTile, bool visible);
     bool empty() const;
 
@@ -102,7 +106,8 @@ private:
     // ④ 粗块 AABB 索引（每 4096 层一块，0.0098 B/砖）。n 小于阈值时留空 → 走原来的全扫，
     // 小谱行为与改造前**逐字相同**。查询按块升序 → 输出与全扫逐元素相同（`cull_index` 用例）。
     CullIndex m_cullIndex;
-    double m_cullHalf = 0.0;                  // 建表用的保守半边长（= 所有形状 localBBox 的最大外扩）
+    double m_cullHalf = 0.0;
+    int m_cullFloors = (int)CullIndex::kBlockFloors;   // 见 setCullBlockFloors                  // 建表用的保守半边长（= 所有形状 localBBox 的最大外扩）
     std::vector<uint8_t> m_iconBits;          // bit0 twirl / bit1 ssUp / bit2 ssDown
     std::vector<uint8_t> m_visible;           // lazy：只有 TrackVis 需要
     std::vector<uint32_t> m_drawOrder;        // 改造前的绘制顺序（见类注释）

@@ -20,6 +20,8 @@ adocao stitch <dir> <out.png>           [--scale N] [--threads N]
   --level <file> --music <file> --width N --height N --fullscreen
   --fill HEX --stroke HEX --bg HEX --no-auto-stroke --no-hitsound --no-trail
   --force-hitsound [TYPE] --auto-play --msaa N --no-exclusive
+  --cull-block N    剔除粗块粒度（层/块，默认 4096；0 = 关闭索引走全扫）。只影响剔除成本与
+                    索引内存，**不改画面**（8 种粒度实测 PNG 逐字节相同）—— 见 docs/rendering.md
   --trail-duration SEC | --trail-tiles N
   --trail-sample-rate N | --trail-target-fps N
   --trail-rate-min N --trail-rate-max N --trail-samples-per-tile N
@@ -46,6 +48,17 @@ adocao stitch <dir> <out.png>           [--scale N] [--threads N]
 
 Trail sampling — two independent axes, both optional and **off by default** (wizard
 Visuals page / CLI):
+
+### 剔除块粒度（`--cull-block`）
+
+`--cull-block N` 选"每 N 层一个 AABB"的粗块索引粒度（wizard 的 Graphics 页同一个开关，
+env `ADOCAO_CULL_BLOCK` 可覆盖）。默认 **4096**（0.0098 B/砖，2³¹−1 外推 21 MB），这与
+`.adocao` 的分块粒度、以及 Re_ADOJAS 的可见窗口半径一致。
+
+取舍（全部实测，`docs/rendering.md`「④ 剔除」有表）：块越小 → 折返/绕圈谱的块 AABB 越紧、
+剔除越快，但索引内存按比例增大（256 层 = 320 MB 外推）；块越大 → 内存越小，但折叠谱上块内
+候选变多。**它不改画面**：`--cull-block 0/256/…/65536` 在同一帧上出图逐字节相同，
+`drawn` 也相同。合法范围 64…1048576，超范围会钳制并在日志里 `LOG_W`。
 
 **Length** — `--trail-duration SEC` (default) or `--trail-tiles N` (wizard
 "Length in tiles" + "Trail tiles"). A *time* window is unusable on charts whose BPM

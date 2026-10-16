@@ -152,7 +152,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     2³¹ 外推 21 MB）：先筛块再在块内调用**原来那个** `cullRange` → 输出与全扫**逐元素相同**
     （ctest `cull_index` 对拍 + 像素门槛 51/51）。端到端 `--capture` 帧时 MYC z25 38.2→36.1 ms、
     **primer z25 156.6→43.0 ms**。钩子 `ADOCAO_CULL=scan` 回全扫（A/B 用）。
-    候选 ≤262,144 不开线程；`n < 4096` 不建索引。未做：块表进容器、折叠谱两级细表、
+    候选 ≤262,144 不开线程；`n < 4096` 不建索引。**粒度用户可选**：CLI `--cull-block N`、
+    wizard Graphics 页的"剔除块粒度"下拉、env `ADOCAO_CULL_BLOCK`（测试用）；0 = 全扫，
+    超范围钳制 + `LOG_W`。**粒度不改出图**（8 种粒度实测 PNG 逐字节相同），只在成本/内存上取舍
+    （4096 → 0.0098 B/砖 = 2³¹ 的 21 MB；256 → 320 MB）。未做：块表进容器、折叠谱两级细表、
     编辑/预览的空间索引。粒度依据见 `tests/cull_cost_probe.cpp --blocks`。
   详见 `docs/rendering.md`「可见性/剔除缓存」与 `docs/scale-1e8-to-2e9.md` §8 第 3 条。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）

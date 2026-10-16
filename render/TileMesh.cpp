@@ -172,7 +172,17 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     // 它唯一还可能起作用的地方是**同深度并列时谁盖谁**（AGENTS 记过"遮挡胜负由
     // unordered_map 迭代序决定"）。改成升序 = 低层号先提交，顺序从此**确定**。
     // 验收方式：像素门槛 51 状态逐字节（集合不变、只动提交顺序）。
-    for (size_t i = 0; i < n; ++i) m_drawOrder.push_back((uint32_t)i);
+    // `ADOCAO_DRAW_ORDER=grouped` 是 **A/B 钩子**：恢复旧顺序，好在同一份二进制上做对比抓帧。
+    const char* orderEnv = std::getenv("ADOCAO_DRAW_ORDER");
+    if (orderEnv && std::strcmp(orderEnv, "grouped") == 0) {
+        for (auto& kv : shapeGroups) {
+            std::vector<int>& v = kv.second;
+            std::sort(v.begin(), v.end(), std::greater<int>());
+            for (int i : v) m_drawOrder.push_back((uint32_t)i);
+        }
+    } else {
+        for (size_t i = 0; i < n; ++i) m_drawOrder.push_back((uint32_t)i);
+    }
 
     // 图标位：与改造前 `buildIcons` 的判据逐字相同（Twirl / SetSpeed 的 1.05、0.95 阈值）
     for (int i = 0; i < n; i++) {

@@ -143,6 +143,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   * **日志前缀**：抓帧块里新增的日志**不许**以 `capture:` 开头 ✗（`capture-gate.sh` 用"日志里最后一条
     `capture:` 行"核对本次的 `tile=`/`req=`；自检日志一开始也叫 `capture:` → 51 个状态全判 FAIL，
     门槛**自己**抓住了这个疏忽 ✓）。自检统一用 `capture-selfcheck:` 前缀。
+- **绘制顺序**：`m_drawOrder` 现在是**按层号升序**（2026-10-15 改；原来是"按形状分组 +
+  组内降序"，那个顺序是实例化的遗留）。像素门槛 51/51 + 巨谱 A/B 16 帧（三种 Won't You、TNR、
+  primer-final，含整张一帧 6,841 万块）**逐字节相同** → 顺序对出图不可观测，所以 ④ 不必为
+  "恢复绘制序"付排序代价，⑤ 的哈希序根因也一并消掉。A/B 钩子：`ADOCAO_DRAW_ORDER=grouped`
+  （`scripts/order-ab.sh` 跑整套）。见 `docs/scale-1e8-to-2e9.md` §8 第 3 条。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`

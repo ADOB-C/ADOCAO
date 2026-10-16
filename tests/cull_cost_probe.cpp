@@ -22,6 +22,7 @@
 //   adocao_cull_cost_probe <谱> [--tiles k1,k2,...] [--zooms 25,100] [--repeat N]
 //                             [--cells 5,16,64]
 
+#include "archive/Install.hpp"
 #include "core/level/LevelData.hpp"
 
 #include <algorithm>
@@ -295,6 +296,7 @@ Result runGrid(const LevelData& lv, const HashGrid& g, const Roi& q, int repeat)
 }  // namespace
 
 int main(int argc, char** argv) {
+    adofai::archive::install();      // .xz/.zst/.adocao 的解码后端（core 只认接口）
     if (argc < 2) {
         std::fprintf(stderr, "用法: %s <谱> [--tiles k1,k2] [--zooms 25,100] [--repeat N]\n", argv[0]);
         return 2;

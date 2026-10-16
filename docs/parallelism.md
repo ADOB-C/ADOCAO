@@ -6,6 +6,17 @@
 
 ## 1. 现状盘点（改之前的事实）
 
+**2026-10-16 收编进度**（② 迁移）：`LevelData` 的"每次调用新建池" ✗ 与 `MapExport` 的自造线程 ✗
+已迁到 `Scheduler`（Background 车道），`core/util/ThreadPool.{hpp,cpp}` **已删除**（全库无人再用 ✓）。
+**保留的两个合法例外**：
+* `adocao_audio`（`HitsoundManager`）：模块规则 —— 单独编这个文件的 harness 不能缺源码 ✗；
+* `core/map/PngBand`：它是**生产者/消费者流水线**（worker 压缩、主线程边写边 drain，`maxPending` 是背压），
+  fork-join 的 `parallelFor` 表达不了它 ✗（硬换会死锁 ✗）→ 要统一得等"IO/Stream 车道 + `submit` 依赖链"
+  那条缝长出来（文档 §3.4）。
+其余（`std::async` 的音频解码/网格构建、裸 `std::thread` 的加载窗/向导预载）待做：它们都是
+**一次性后台任务** ✓ 对应 `Scheduler::submit(Background)`，但涉及 GUI 生命周期（加载窗）与共享 GL 上下文
+（网格构建），要单独一轮做 ✓。
+
 | # | 位置 | 机制 | 用途 | 问题 |
 |---|---|---|---|---|
 | 1 | `core/util/ThreadPool.{hpp,cpp}` | 真池 + `parallelFor` | 通用 | 用 `std::function`（类型擦除、要求可拷贝、每任务一次间接调用） |

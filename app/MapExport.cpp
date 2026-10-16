@@ -4,6 +4,7 @@
 #include "core/timeline/Timeline.hpp"
 #include "core/map/LevelMap.hpp"
 #include "core/util/Logger.hpp"
+#include "core/util/Scheduler.hpp"
 #include "core/util/Progress.hpp"
 
 #include "core/map/PngStream.hpp"
@@ -284,10 +285,13 @@ int exportLevelMapNativeAll(const std::string& levelPath, const std::string& out
         }
     };
 
-    const int T = std::max(1, threads > 0 ? threads : (int)std::thread::hardware_concurrency());
-    std::vector<std::thread> pool;
-    for (int t = 0; t < T; ++t) pool.emplace_back(worker);
-    for (auto& th : pool) th.join();
+    // ② 并行模型：不再自造线程池 ✗ —— 走 `Scheduler` 的 Background 车道。
+    // `worker` 本身是"从共享队列取 slab 直到取空"的循环，所以按**任务数**并发调用它即可
+    // （调用线程也会参与，比原来"主线程只 join"多一份算力 ✓）。
+    const size_t T = (size_t)std::max(1, threads > 0 ? threads : (int)Scheduler::instance().workers() + 1);
+    Scheduler::instance().parallelFor(T, 1, Lane::Background, [&](size_t a, size_t b) {
+        for (size_t t = a; t < b; ++t) worker();
+    });
 
     LevelMapOptions ov;
     ov.width = ov.height = 4096;

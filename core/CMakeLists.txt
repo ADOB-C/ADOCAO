@@ -7,7 +7,6 @@ add_library(adocao_core STATIC
     util/AssetPaths.cpp
     util/Logger.cpp
     util/Progress.cpp
-    util/ThreadPool.cpp
     util/Scheduler.cpp
     util/DataFile.cpp
     timeline/Timeline.cpp

@@ -3,7 +3,7 @@
 #include "JsonCleaner.hpp"
 #include "ByteSource.hpp"   // 容器识别 + 解压后端接口（实现见 archive/）
 #include "core/util/Logger.hpp"
-#include "core/util/ThreadPool.hpp"
+#include "core/util/Scheduler.hpp"
 #include <fstream>
 #include <sstream>
 #include <cstdio>
@@ -667,16 +667,17 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
     std::atomic<bool> failed{false};
     unsigned poolThreads = 0;
     {
-        ThreadPool pool((unsigned)n - 1);                // parallelFor 会让调用线程也干活
-        poolThreads = pool.threadCount() + 1;            // +1 = 调用线程也参与
-        pool.parallelFor(0, n, [&](size_t lo, size_t hi) {
+        // ② 并行模型：不再**每次调用新建线程池**（那是"五套机制"里最浪费的一套 ✗），
+        // 统一走 `Scheduler`（Background 车道：加载期本来就不与帧关键任务抢）。
+        poolThreads = Scheduler::instance().workers() + 1;   // +1 = 调用线程也参与
+        Scheduler::instance().parallelFor(n, 1, Lane::Background, [&](size_t lo, size_t hi) {
             for (size_t i = lo; i < hi && !failed.load(std::memory_order_relaxed); i++) {
                 size_t k = parseActionRangeInto(bounds[i], bounds[i + 1],
                                                 out.data() + base + slots[i], counts[i]);
                 if (k == kFail) failed.store(true, std::memory_order_relaxed);
                 else kept[i] = k;
             }
-        }, 1);
+        });
     }
     const double parseMs = msSince(tParse);
     if (dbg) std::fprintf(stderr, "[parse] 找切分点 %.1f ms  并行解析 %.1f ms  段数=%zu 线程=%u  failed=%d\n",

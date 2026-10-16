@@ -64,6 +64,24 @@ public:
     // ④ 剔除粗块粒度（层/块；0 = 关闭索引走全扫）。必须在 build() 之前设。
     // 默认 4096；`ADOCAO_CULL_BLOCK=<n>` 环境变量可覆盖（测试/A-B 钩子）。
     void setCullBlockFloors(int floors) { m_cullFloors = floors; }
+
+    // ③ 切片 4：**某层区间的每砖派生数据**（相对本块原点的位置、形状号、图标位）。
+    // 口径与 `build()` 里原来那几个循环**逐字一致**，`build()` 现在也调用它 —— 于是"按块派生"
+    // 与"整段派生"的一致性由构造保证。将来渲染侧按可见块物化时复用它（省 13 B/砖）。
+    struct DerivedRange {
+        int64_t first = 0;
+        std::vector<float> posX, posY;
+        std::vector<uint32_t> shape;
+        std::vector<uint8_t> icon;
+    };
+    // 形状键打包：sa/ea 各 20 位（角度 ×100，范围 ±18000），mid 1 位 —— 无冲突
+    static uint64_t packShapeKey(float sa, float ea, bool mid) {
+        const uint32_t qa = (uint32_t)(int32_t)std::lround(sa * 100.0f) & 0xFFFFFu;
+        const uint32_t qe = (uint32_t)(int32_t)std::lround(ea * 100.0f) & 0xFFFFFu;
+        return (uint64_t)qa | ((uint64_t)qe << 20) | (mid ? (1ull << 40) : 0ull);
+    }
+    void deriveRange(const LevelData& level, int64_t i0, int64_t i1, DerivedRange& out) const;
+    const std::unordered_map<uint64_t, uint32_t>& shapeIndex() const { return m_shapeIndex; }
     int  cullBlockFloors() const { return m_cullFloors; }
     void updateVisibleRange(int startTile, int endTile, bool visible);
     bool empty() const;
@@ -94,6 +112,7 @@ private:
 
     // ---- 每砖常驻 ----
     std::vector<TileShape::Shape> m_shapes;   // 形状（去重；含 localBBox）
+    std::unordered_map<uint64_t, uint32_t> m_shapeIndex;   // ③ 切片 4：形状键 → 形状号（派生用）
     std::vector<uint32_t> m_tileShape;        // 砖 → 形状号
     // 砖位置：**块相对 float**。绝对世界坐标是 double，直接窄化成 float 会在超大谱上塌掉 ——
     // primer-final（68,411,077 砖、直线轨道）的 x 到 6.84e7，float ulp 正好 **8 砖**，

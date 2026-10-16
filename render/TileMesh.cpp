@@ -140,6 +140,38 @@ void TileMesh::hexToColor3(const std::string& hex, float out[3]) {
 
 // ---- build -----------------------------------------------------------
 
+
+// ③ 切片 4：某层区间的每砖派生数据（口径与原来 build() 里的循环逐字一致）
+void TileMesh::deriveRange(const LevelData& level, int64_t i0, int64_t i1, DerivedRange& out) const {
+    const int64_t n = (int64_t)m_nTiles;
+    if (i0 < 0) i0 = 0;
+    if (i1 > n) i1 = n;
+    if (i1 <= i0) { out.first = i0; out.posX.clear(); out.posY.clear(); out.shape.clear(); out.icon.clear(); return; }
+    const size_t cnt = (size_t)(i1 - i0);
+    out.first = i0;
+    out.posX.resize(cnt); out.posY.resize(cnt); out.shape.resize(cnt); out.icon.resize(cnt);
+    for (int64_t i = i0; i < i1; ++i) {
+        const size_t k = (size_t)(i - i0);
+        const size_t ti = (size_t)i, c = ti >> kPosChunkShift;
+        const auto p = level.tilePositionAt(i);
+        out.posX[k] = (float)(p[0] - m_chunkX[c]);
+        out.posY[k] = (float)(p[1] - m_chunkY[c]);
+        float sa, ea; bool mid;
+        TileShape::keyForTile(level, (int)i, sa, ea, mid);
+        const auto it = m_shapeIndex.find(packShapeKey(sa, ea, mid));
+        out.shape[k] = (it != m_shapeIndex.end()) ? it->second : 0u;
+        // 图标位：与 buildIcons 的判据逐字相同（Twirl / SetSpeed 的 1.05、0.95 阈值）
+        const bool ht = i < (int64_t)level.tileHasTwirl.size() && level.tileHasTwirl[(size_t)i];
+        const bool hs = i < (int64_t)level.tileHasSetSpeed.size() && level.tileHasSetSpeed[(size_t)i];
+        uint8_t bits = ht ? 1 : 0;
+        if (hs && i > 0 && i < (int64_t)level.tileBPMs.size()) {
+            const float r = level.tileBPMs[(size_t)i] / level.tileBPMs[(size_t)(i - 1)];
+            if (r > 1.05f || r < 0.95f) bits |= (r > 1.05f) ? 2 : 4;
+        }
+        out.icon[k] = bits;
+    }
+}
+
 void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
                      const std::string& strokeColorHex) {
     destroy();
@@ -177,7 +209,7 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
         m_chunkX[c] = level.tilePositionAt(i0)[0];
         m_chunkY[c] = level.tilePositionAt(i0)[1];
     }
-    m_iconBits.assign((size_t)n, 0);
+    m_iconBits.clear();   // 由 deriveRange() 填
     // 剔除/上传都直接按下标取砖，所以这里没有任何"逐砖排列"数组了（见下面绘制顺序的说明）
 
     for (auto& kv : shapeGroups) {
@@ -185,12 +217,17 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
         std::vector<int>& tileIndices = kv.second;
         const uint32_t shapeIdx = (uint32_t)m_shapes.size();
         m_shapes.push_back(TileShape::buildShape(key.sa / 100.0f, key.ea / 100.0f, key.mid));
-        for (int i : tileIndices) {
-            m_tileShape[(size_t)i] = shapeIdx;
-            const size_t ti = (size_t)i, c = ti >> kPosChunkShift;
-            m_posX[ti] = (float)(level.tilePositionAt(ti)[0] - m_chunkX[c]);
-            m_posY[ti] = (float)(level.tilePositionAt(ti)[1] - m_chunkY[c]);
-        }
+        m_shapeIndex[packShapeKey(key.sa / 100.0f, key.ea / 100.0f, key.mid)] = shapeIdx;
+    }
+    // ③ 切片 4：位置/形状号/图标位**统一由 deriveRange() 填**（将来按可见块物化就用它），
+    // 于是"整段"与"按块"的一致性由构造保证。
+    {
+        DerivedRange all;
+        deriveRange(level, 0, n, all);
+        m_posX = std::move(all.posX);
+        m_posY = std::move(all.posY);
+        m_tileShape = std::move(all.shape);
+        m_iconBits = std::move(all.icon);
     }
     // 绘制顺序 = **按砖号（= 层号）升序**（2026-10-15 起）：所以不再需要 `m_drawOrder` 那支
     // 4 B/砖 的排列数组（MYC 27 MB、2³¹−1 外推 **8.6 GB**）——剔除与上传**直接用下标**（下标即
@@ -243,17 +280,6 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
         LOG_I("cull-index: 关闭（砖 %d < %d 或粒度为 0）→ 剔除走全扫", n, kCullIndexMinTiles);
     }
 
-    // 图标位：与改造前 `buildIcons` 的判据逐字相同（Twirl / SetSpeed 的 1.05、0.95 阈值）
-    for (int i = 0; i < n; i++) {
-        bool ht = i < (int)level.tileHasTwirl.size() && level.tileHasTwirl[(size_t)i];
-        bool hs = i < (int)level.tileHasSetSpeed.size() && level.tileHasSetSpeed[(size_t)i];
-        uint8_t bits = ht ? 1 : 0;
-        if (hs && i > 0 && i < (int)level.tileBPMs.size()) {
-            float r = level.tileBPMs[(size_t)i] / level.tileBPMs[(size_t)i - 1];
-            if (r > 1.05f || r < 0.95f) bits |= (r > 1.05f) ? 2 : 4;
-        }
-        m_iconBits[(size_t)i] = bits;
-    }
 
     buildStaticGL();
     m_listValid = false;

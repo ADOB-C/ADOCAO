@@ -477,10 +477,16 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
     const double vl = viewL - m, vr = viewR + m, vb = viewB - m, vt = viewT + m;
     // 一律 double 比：float 在 x≈6.8e7 上 ulp 就是 8，`> 0.5f` 会退化成"只要变了就重建"
     // （虽然结果碰巧对，但边界与被比较的量都该是 double —— 见 docs/rendering.md 坐标约定）
+    //
+    // 容差**按视野比例**给（≈1.25 px @1280 宽），不是固定的 0.5 世界单位：
+    // 实例属性是 chunk 相对的（与相机无关），所以复用旧列表只是"集合略旧 ≤1 px"（看不见）；
+    // 而固定的 0.5 世界单位在拉远时等于 0.01 px（每帧都重建 ✗）、在拉近时又过大 —— 实测
+    // 饱和视距下浸泡 p50 因此从 0.17 涨到 19~31 ms（每帧都在做被预算限制的活）。
+    const double tolX = (viewR - viewL) / 1024.0, tolY = (viewT - viewB) / 1024.0;
     const bool frustumChanged =
-        !m_listValid || std::abs(m_vl - viewL) > 0.5 ||
-        std::abs(m_vr - viewR) > 0.5 || std::abs(m_vb - viewB) > 0.5 ||
-        std::abs(m_vt - viewT) > 0.5;
+        !m_listValid || std::abs(m_vl - viewL) > tolX ||
+        std::abs(m_vr - viewR) > tolX || std::abs(m_vb - viewB) > tolY ||
+        std::abs(m_vt - viewT) > tolY;
     if (frustumChanged) {
         m_listTiles.clear();
         m_listAttr.clear();

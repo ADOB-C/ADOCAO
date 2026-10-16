@@ -144,6 +144,41 @@ xcrun xctrace record --template 'Time Profiler' --attach <pid> --time-limit 20s 
 `__workq_kernreturn`/`mach_msg2_trap` 这类 idle 栈（实测就是这样）——要采**加载**（`adocao image` 那条
 只加载不出图的路）或正在 pan 的帧；③ `xctrace` 在本机**未验证**（可能需要提权/开发者工具授权）。
 
+## 4.5 跨版本对照（"是不是退化了"该怎么量）
+
+老标签现在也能编出来量（2026-10-15 试通 v2.1.0）。步骤与**三个必须的修补**（都在一次性副本里做，
+不进仓库）：
+
+```bash
+mkdir -p build/wt-v2.1.0 && git archive v2.1.0 | tar -x -C build/wt-v2.1.0
+cd build/wt-v2.1.0
+# ① 当年的 glad 要系统的 GL/glcorearb.h（今天没有）→ 拉两个头到本地 include
+mkdir -p build/glinc/GL build/glinc/KHR
+curl -sS -o build/glinc/GL/glcorearb.h  https://raw.githubusercontent.com/KhronosGroup/OpenGL-Registry/main/api/GL/glcorearb.h
+curl -sS -o build/glinc/KHR/khrplatform.h https://raw.githubusercontent.com/KhronosGroup/EGL-Registry/main/api/KHR/khrplatform.h
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CXX_FLAGS="-I$PWD/build/glinc" -DCMAKE_C_FLAGS="-I$PWD/build/glinc"
+# ② 老 CMake 没链 macOS 的 OpenGL.framework → 补上
+cmake -S . -B build -DCMAKE_EXE_LINKER_FLAGS="-framework OpenGL"
+# ③ 当年窗口创建失败后会 glfwSetWindowPos(NULL,…) 崩掉；要量稳态就在
+#    `LevelLoader.cpp` 的 `releaseMemory()` 之后插一个 env 门控的驻留点（SCRATCH ONLY）
+cmake --build build --parallel 8
+```
+
+然后用**同一张谱、同一个 `--no-hitsound`、同一口径**（`vmmap -summary` 的 physical footprint +
+`heap` 的 live）各量一次。**实测（MYC 原版 6,770,912 层，Apple M5，加载后静置）**：
+
+| | v2.1.0 | v7.1.0（今） |
+|---|---|---|
+| 稳态 footprint | **1.4 GB** | **675 MB** |
+| 峰值 footprint | **4.9 GB**（`actions` 是 nlohmann DOM）| **1.2 GB** |
+| live 分配 | **928 MB** | **528 MB** |
+| 最大单块 | 413 MB（未定名）+ `tiles`(32 B/层) 207 MB | `tiles`(24 B/层) 155 MB + `FastAction` 94 MB |
+
+→ **"退化"不成立**：同口径下今版稳态/峰值都只有 v2.1.0 的一半左右。用户记的"Windows 300-400 MB"
+更可能是 ①Mem Reduct 挤过之后的**工作集**（≠ macOS `footprint`）、②Windows 的**私有工作集/提交大小**
+口径、或 ③另一张谱/另一个版本 —— 要坐实必须固定"版本 + 谱 + 口径"三件事再比。
+
 ## 5. 专用探针（回答"策略该选哪个"，不是"现在多快"）
 
 | 探针 | 回答 |

@@ -126,9 +126,21 @@ private:
     static constexpr size_t kMaxCullCandidates = 1u << 19;   // 524,288 块砖
     static constexpr size_t kMaxInstances      = 1u << 18;   // 262,144 实例（×20 B = 5.2 MB）
     static constexpr size_t kWindowFloors = 4096;
-    static constexpr size_t kWindowSlots  = 128;
+    // 窗口缓存槽数**按命中块数自适应**（2026-10-16，sample 证明这是最大头）：
+    // 固定 128 槽时，一张每帧命中 ~478 个粗块的谱会**每帧颠簸重算** ~478 个 4096 层窗口
+    // （`sample`：`FloorWindowCache::materialize` 占主线程 36%，其中大头是逐砖 `__sincos_stret`）
+    // → 单帧 130 ms。按工作集定容后，稳态只剩 1~2 次物化。普通谱（MYC 等）命中块少 → 仍是 128 槽，
+    // 不增加常驻。上限 512 槽（≈33 MB）防止病态谱把内存吃穿。
+    static constexpr size_t kWindowSlotsMin = 128;
+    static constexpr size_t kWindowSlotsMax = 512;
+    static constexpr size_t kWindowSlots    = kWindowSlotsMin;   // 兼容旧引用（初始/下限）
+    void ensureWindowSlots(size_t hitBlocks) const;
+    mutable size_t m_windowSlotCount = kWindowSlotsMin;
     mutable std::vector<DerivedRange> m_windows;
     mutable std::vector<int64_t> m_windowBlock;
+    // 块号 → 槽位。原来是**线性扫** m_windowBlock（槽数越多越慢：512 槽 × 26 万次查询/帧
+    // = 上亿次比较），改成哈希后 O(1)。
+    mutable std::unordered_map<int64_t, size_t> m_windowSlot;
     mutable size_t m_windowNext = 0;
     const DerivedRange* windowFor(size_t tile) const;
     void limitWarn(const char* what, size_t n) const;

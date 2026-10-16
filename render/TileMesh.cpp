@@ -202,6 +202,7 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     m_level = &level;
     m_windows.assign(kWindowSlots, DerivedRange{});
     m_windowBlock.assign(kWindowSlots, -1);
+    m_windowSlot.clear();
     m_windowNext = 0; m_windowChecked = false;
 
     // 每块一个 double 原点（取块内第一块砖的位置）—— 块内偏移用 float 才不丢精度（见 .hpp）
@@ -370,15 +371,32 @@ void TileMesh::buildStaticGL() {
 // ---- 剔除 + 压实 ------------------------------------------------------
 
 // ③ 切片 4【二分实验】取/物化窗口；`ADOCAO_WINDOW_CHECK=1` 时与常驻数组**逐砖直比**
+void TileMesh::ensureWindowSlots(size_t hitBlocks) const {
+    // **只增不减**（槽数变化 = 清空缓存 = 丢掉所有已物化的窗口）。原来按 hitBlocks 每帧重算，
+    // 命中块数在 2 的幂边界附近抖动时就会**反复清缓存** → 帧时间 p95 反而从 136 ms 涨到 161 ms ✗。
+    // 现在只朝"够用"的方向长，长到上限为止（每次运行最多几次，之后稳态不再动）。
+    if (m_windows.size() == m_windowSlotCount * kWindowFloors && m_windowSlotCount > kWindowSlotsMin) return;
+    size_t want = m_windowSlotCount;
+    while (want < hitBlocks * 2 && want < kWindowSlotsMax) want *= 2;
+    if (want == m_windowSlotCount && !m_windows.empty()) return;
+    m_windowSlotCount = want;
+    m_windows.assign(want * kWindowFloors, DerivedRange{});
+    m_windowBlock.assign(want, (int64_t)-1);
+    m_windowSlot.clear();
+    m_windowNext = 0;
+}
+
 const TileMesh::DerivedRange* TileMesh::windowFor(size_t tile) const {
     if (!m_level || m_windows.empty()) return nullptr;
     const int64_t b = (int64_t)(tile / kWindowFloors);
-    for (size_t s = 0; s < m_windowBlock.size(); ++s)
-        if (m_windowBlock[s] == b) return &m_windows[s];
+    const auto it = m_windowSlot.find(b);
+    if (it != m_windowSlot.end()) return &m_windows[it->second];
     const size_t slot = m_windowNext++ % m_windowBlock.size();
+    if (m_windowBlock[slot] >= 0) m_windowSlot.erase(m_windowBlock[slot]);   // 淘汰旧块
     const int64_t i0 = b * (int64_t)kWindowFloors;
     const int64_t i1 = std::min<int64_t>(i0 + (int64_t)kWindowFloors, (int64_t)m_nTiles);
     m_windowBlock[slot] = b;
+    m_windowSlot[b] = slot;
     deriveRange(*m_level, i0, i1, m_windows[slot]);
     return &m_windows[slot];
 }
@@ -493,10 +511,15 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
             // 见类注释；像素门槛 51/51 + 巨谱 16 帧 A/B 已验证）。
             std::vector<std::pair<size_t, size_t>> ranges;   // [begin, end)
             size_t candidates = 0;
+            size_t hitBlocks = 0;
+            int64_t lastBlk = -1;
             m_cullIndex.forEachHitBlock(vl, vr, vb, vt, [&](uint32_t f, uint32_t c) {
                 ranges.emplace_back((size_t)f, (size_t)f + (size_t)c);
                 candidates += c;
+                const int64_t blk = (int64_t)((size_t)f / m_cullIndex.floorsPerBlock());
+                if (blk != lastBlk) { lastBlk = blk; ++hitBlocks; }
             });
+            ensureWindowSlots(hitBlocks);   // ⑦ 按工作集定容（否则每帧颠簸重算窗口）
             // ⑦ 闸①：候选太多**降级**为"只画离相机最近的块"（累计候选 ≤ 预算）。
             // 不能直接不画 —— 那会整帧黑屏（只剩行星/拖尾），实测被用户一眼看出来 ✗。
             const bool limitOff = std::getenv("ADOCAO_CULL_LIMIT") &&
@@ -508,6 +531,10 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
                 // （不能用"按块 AABB 距离挑最近块"：块 AABB 是一整圈的包围盒（~1300 单位），
                 //   小视锥会被几百个块"包住"（距离全为 0），挑出来的块里可能一块砖都不在视锥内
                 //   → 实测 drawn=0、轨道整个消失 ✗。）
+                // **细块粒度**上按离相机的距离挑（不是按层号顺序！按顺序收满就永远画谱开头那一段，
+                // 相机在几百万层处 → 屏幕空白，用户实测截图就是那样 ✗）。
+                ranges.clear();
+                m_cullIndex.collectHitSubNearest(vl, vr, vb, vt, camX, camY, kMaxCullCandidates, ranges);
                 for (const auto& r : ranges) {
                     if (m_listTiles.size() >= kMaxInstances) break;
                     cullRange(r.first, r.second, vl, vr, vb, vt, camX, camY, m_listTiles, m_listAttr);
@@ -516,8 +543,8 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
                     m_listTiles.resize(kMaxInstances);
                     m_listAttr.resize(kMaxInstances * 5);
                 }
-                LOG_W("cull-limit: 降级为按序收集 —— 候选 %zu → 可见 %zu（预算 %zu）",
-                      before, m_listTiles.size(), kMaxInstances);
+                LOG_W("cull-limit: 降级为就近细块 —— 候选 %zu → %zu 块 / 可见 %zu（预算 %zu）",
+                      before, ranges.size(), m_listTiles.size(), kMaxInstances);
                 ranges.clear();          // 让下面的并行段变成空操作（列表已经填好了）
                 candidates = 0;
             }

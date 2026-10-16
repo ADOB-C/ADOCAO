@@ -56,10 +56,10 @@ TileMesh::~TileMesh() { destroy(); }
 TileMesh::TileMesh(TileMesh&& o) noexcept
     : m_vao(o.m_vao), m_recipeVbo(o.m_recipeVbo), m_ebo(o.m_ebo), m_instVbo(o.m_instVbo),
       m_shapeTex(o.m_shapeTex), m_instCapacity(o.m_instCapacity), m_shapeRows(o.m_shapeRows),
-      m_shapes(std::move(o.m_shapes)), m_tileShape(std::move(o.m_tileShape)),
-      m_posX(std::move(o.m_posX)), m_posY(std::move(o.m_posY)),
+      m_shapes(std::move(o.m_shapes)), m_level(o.m_level),
+      m_windows(std::move(o.m_windows)), m_windowBlock(std::move(o.m_windowBlock)),
       m_chunkX(std::move(o.m_chunkX)), m_chunkY(std::move(o.m_chunkY)),
-      m_iconBits(std::move(o.m_iconBits)), m_visible(std::move(o.m_visible)),
+      m_visible(std::move(o.m_visible)),
       m_cullIndex(std::move(o.m_cullIndex)), m_cullHalf(o.m_cullHalf), m_nTiles(o.m_nTiles) {
     std::memcpy(m_fill, o.m_fill, sizeof m_fill);
     std::memcpy(m_stroke, o.m_stroke, sizeof m_stroke);
@@ -73,10 +73,10 @@ TileMesh& TileMesh::operator=(TileMesh&& o) noexcept {
         m_vao = o.m_vao; m_recipeVbo = o.m_recipeVbo; m_ebo = o.m_ebo;
         m_instVbo = o.m_instVbo; m_shapeTex = o.m_shapeTex;
         m_instCapacity = o.m_instCapacity; m_shapeRows = o.m_shapeRows;
-        m_shapes = std::move(o.m_shapes); m_tileShape = std::move(o.m_tileShape);
-        m_posX = std::move(o.m_posX); m_posY = std::move(o.m_posY);
+        m_shapes = std::move(o.m_shapes);
+        m_level = o.m_level; m_windows = std::move(o.m_windows); m_windowBlock = std::move(o.m_windowBlock);
         m_chunkX = std::move(o.m_chunkX); m_chunkY = std::move(o.m_chunkY);
-        m_iconBits = std::move(o.m_iconBits); m_visible = std::move(o.m_visible);
+        m_visible = std::move(o.m_visible);
         m_cullIndex = std::move(o.m_cullIndex); m_cullHalf = o.m_cullHalf; m_nTiles = o.m_nTiles;
         std::memcpy(m_fill, o.m_fill, sizeof m_fill);
         std::memcpy(m_stroke, o.m_stroke, sizeof m_stroke);
@@ -107,9 +107,10 @@ void TileMesh::visSetRange(size_t a, size_t b, bool v) {
 
 void TileMesh::destroy() {
     destroyStaticGL();
-    m_shapes.clear(); m_tileShape.clear(); m_posX.clear(); m_posY.clear();
+    m_shapes.clear(); m_shapeIndex.clear();
+    m_windows.clear(); m_windowBlock.clear(); m_windowNext = 0; m_level = nullptr;
     m_chunkX.clear(); m_chunkY.clear();
-    m_iconBits.clear(); m_visible.clear(); m_cullIndex.clear(); m_nTiles = 0;
+    m_visible.clear(); m_cullIndex.clear(); m_nTiles = 0;
     m_listTiles.clear(); m_listAttr.clear();
     m_listValid = false;
     m_listUploaded = false;
@@ -198,8 +199,11 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     LOG_D("TileMesh::build: %zu unique shapes", shapeGroups.size());
 
     m_shapes.reserve(shapeGroups.size());
-    m_tileShape.assign((size_t)n, 0);
-    m_posX.assign((size_t)n, 0.0f); m_posY.assign((size_t)n, 0.0f);
+    m_level = &level;
+    m_windows.assign(kWindowSlots, DerivedRange{});
+    m_windowBlock.assign(kWindowSlots, -1);
+    m_windowNext = 0; m_windowChecked = false;
+
     // 每块一个 double 原点（取块内第一块砖的位置）—— 块内偏移用 float 才不丢精度（见 .hpp）
     const size_t chunkSize = (size_t)1 << kPosChunkShift;
     const size_t nChunks = ((size_t)n + chunkSize - 1) / chunkSize;
@@ -209,7 +213,7 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
         m_chunkX[c] = level.tilePositionAt(i0)[0];
         m_chunkY[c] = level.tilePositionAt(i0)[1];
     }
-    m_iconBits.clear();   // 由 deriveRange() 填
+
     // 剔除/上传都直接按下标取砖，所以这里没有任何"逐砖排列"数组了（见下面绘制顺序的说明）
 
     for (auto& kv : shapeGroups) {
@@ -219,24 +223,11 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
         m_shapes.push_back(TileShape::buildShape(key.sa / 100.0f, key.ea / 100.0f, key.mid));
         m_shapeIndex[packShapeKey(key.sa / 100.0f, key.ea / 100.0f, key.mid)] = shapeIdx;
     }
-    // ③ 切片 4：位置/形状号/图标位**统一由 deriveRange() 填**（将来按可见块物化就用它），
-    // 于是"整段"与"按块"的一致性由构造保证。
-    {
-        DerivedRange all;
-        deriveRange(level, 0, n, all);
-        m_posX = std::move(all.posX);
-        m_posY = std::move(all.posY);
-        m_tileShape = std::move(all.shape);
-        m_iconBits = std::move(all.icon);
-    }
     // 绘制顺序 = **按砖号（= 层号）升序**（2026-10-15 起）：所以不再需要 `m_drawOrder` 那支
     // 4 B/砖 的排列数组（MYC 27 MB、2³¹−1 外推 **8.6 GB**）——剔除与上传**直接用下标**（下标即
     // 砖号）。依据（顺序对出图不可观测）：像素门槛 51/51 + 巨谱 16 帧 A/B（三种 Won't You、
     // TNR、primer-final 含"整张一帧"6,841 万块）**逐字节相同**，见 `docs/rendering.md`。
     // 旧的 A/B 钩子 `ADOCAO_DRAW_ORDER=grouped` 随数组一并删除（要重做就临时改提交顺序）。
-    LOG_I("TileMesh: 每砖常驻 %zu B（位置 8 + 形状号 4 + 图标位 1）= %.1f MB；"
-          "另按需 1 B/砖（TrackVis 可见位）",
-          (size_t)13, 13.0 * (double)n / 1048576.0);
 
     // ---- ④ 粗块 AABB 索引 ----
     // 保守半边长 = 所有形状 localBBox 的最大外扩（块 AABB 必须**包住**块内任何一块砖的
@@ -266,8 +257,13 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     }
     if (wantFloors != 0 && (size_t)n >= kCullIndexMinTiles) {
         const double t0 = msSince();
+        // 与剔除判定用**同一批值**（chunk 基点 + float 舍入后的块内偏移），否则块 AABB 差一丝、
+        // 块选择就变、出图差几百个边缘像素（真踩过）。
         m_cullIndex.build((size_t)n, [&](size_t i, double& x, double& y) {
-            x = tileX(i); y = tileY(i);
+            const auto p = level.tilePositionAt((int64_t)i);
+            const size_t c = i >> kPosChunkShift;
+            x = m_chunkX[c] + (double)(float)(p[0] - m_chunkX[c]);
+            y = m_chunkY[c] + (double)(float)(p[1] - m_chunkY[c]);
         }, half, (size_t)wantFloors);
         const size_t bytes = m_cullIndex.bytes();
         LOG_I("cull-index: %d 砖 → %zu 块（每 %zu 层），%zu B（%.4f B/砖；2³¹−1 外推 %.1f MB），"
@@ -280,6 +276,14 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
         LOG_I("cull-index: 关闭（砖 %d < %d 或粒度为 0）→ 剔除走全扫", n, kCullIndexMinTiles);
     }
 
+    // ③ 切片 4：四支每砖数组（原 13 B/砖）**已不常驻** —— 剔除时按 4096 层窗口从 provider 派生
+    // （每窗 4096 × 13 B = 53 KB，128 槽环形 ≈ 6.8 MB 上限）。常驻的只剩形状表 + 形状索引 +
+    // 每块 double 原点 + 剔除索引 + 可见位。
+    LOG_I("TileMesh: 每砖**不常驻**（原 13 B/砖 = %.1f MB 已改为按窗口派生，每窗 53 KB）；"
+          "常驻 %zu 形状 + 剔除索引 %.4f B/砖 + 可见位 %s",
+          13.0 * (double)n / 1048576.0, m_shapes.size(),
+          (double)m_cullIndex.bytes() / (double)(n ? n : 1),
+          visAllocated() ? "1 bit/砖" : "未分配");
 
     buildStaticGL();
     m_listValid = false;
@@ -294,13 +298,15 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
             for (size_t i = 0; i < bytes; ++i) { h ^= q[i]; h *= 1099511628211ull; }
             return h;
         };
+        DerivedRange all;
+        deriveRange(level, 0, n, all);
         LOG_I("mesh-dump: n=%d shapes=%zu chunks=%zu tileShape=%016llx posX=%016llx posY=%016llx "
               "iconBits=%016llx chunkX=%016llx chunkY=%016llx",
               m_nTiles, m_shapes.size(), m_chunkX.size(),
-              (unsigned long long)fnv(m_tileShape.data(), m_tileShape.size() * sizeof(uint32_t)),
-              (unsigned long long)fnv(m_posX.data(), m_posX.size() * sizeof(float)),
-              (unsigned long long)fnv(m_posY.data(), m_posY.size() * sizeof(float)),
-              (unsigned long long)fnv(m_iconBits.data(), m_iconBits.size()),
+              (unsigned long long)fnv(all.shape.data(), all.shape.size() * sizeof(uint32_t)),
+              (unsigned long long)fnv(all.posX.data(), all.posX.size() * sizeof(float)),
+              (unsigned long long)fnv(all.posY.data(), all.posY.size() * sizeof(float)),
+              (unsigned long long)fnv(all.icon.data(), all.icon.size()),
               (unsigned long long)fnv(m_chunkX.data(), m_chunkX.size() * sizeof(double)),
               (unsigned long long)fnv(m_chunkY.data(), m_chunkY.size() * sizeof(double)));
     }
@@ -363,6 +369,20 @@ void TileMesh::buildStaticGL() {
 
 // ---- 剔除 + 压实 ------------------------------------------------------
 
+// ③ 切片 4【二分实验】取/物化窗口；`ADOCAO_WINDOW_CHECK=1` 时与常驻数组**逐砖直比**
+const TileMesh::DerivedRange* TileMesh::windowFor(size_t tile) const {
+    if (!m_level || m_windows.empty()) return nullptr;
+    const int64_t b = (int64_t)(tile / kWindowFloors);
+    for (size_t s = 0; s < m_windowBlock.size(); ++s)
+        if (m_windowBlock[s] == b) return &m_windows[s];
+    const size_t slot = m_windowNext++ % m_windowBlock.size();
+    const int64_t i0 = b * (int64_t)kWindowFloors;
+    const int64_t i1 = std::min<int64_t>(i0 + (int64_t)kWindowFloors, (int64_t)m_nTiles);
+    m_windowBlock[slot] = b;
+    deriveRange(*m_level, i0, i1, m_windows[slot]);
+    return &m_windows[slot];
+}
+
 void TileMesh::cullRange(size_t begin, size_t end, double vl, double vr, double vb, double vt,
                          double camX, double camY, std::vector<uint32_t>& outTiles,
                          std::vector<float>& outAttr) const {
@@ -375,15 +395,28 @@ void TileMesh::cullRange(size_t begin, size_t end, double vl, double vr, double 
     alignas(32) double sMinY[CullSIMD::WIDTH], sMaxY[CullSIMD::WIDTH];
     const bool haveVis = visAllocated();
     constexpr size_t W = CullSIMD::WIDTH;
-    size_t i = begin;
-    for (; i + (W - 1) < end; i += W) {
+    // 按**窗口块**分段：每段取一次窗口（4096 层），块内保持原来的两段循环结构。
+    // 调用方若已 pin（并行路径），首段可直接命中缓存、不产生写。
+    size_t w0 = begin;
+    while (w0 < end) {
+    const DerivedRange* d = windowFor(w0);
+    if (!d) return;
+    const size_t base = (size_t)d->first;
+    size_t w1 = std::min(w0 + kWindowFloors, end);
+    const size_t cover = base + d->posX.size();
+    if (w1 > cover) w1 = cover;
+    if (w1 <= w0) break;
+    auto worldX = [&](size_t t) { return m_chunkX[t >> kPosChunkShift] + (double)d->posX[t - base]; };
+    auto worldY = [&](size_t t) { return m_chunkY[t >> kPosChunkShift] + (double)d->posY[t - base]; };
+    size_t i = w0;
+    for (; i + (W - 1) < w1; i += W) {
         for (size_t b = 0; b < W; b++) {
             const uint32_t t = (uint32_t)(i + b);   // 下标即砖号
-            const Shape& sh = m_shapes[m_tileShape[t]];
-            sMinX[b] = sh.localMinX + tileX(t);
-            sMaxX[b] = sh.localMaxX + tileX(t);
-            sMinY[b] = sh.localMinY + tileY(t);
-            sMaxY[b] = sh.localMaxY + tileY(t);
+            const Shape& sh = m_shapes[d->shape[t - base]];
+            sMinX[b] = sh.localMinX + worldX(t);
+            sMaxX[b] = sh.localMaxX + worldX(t);
+            sMinY[b] = sh.localMinY + worldY(t);
+            sMaxY[b] = sh.localMaxY + worldY(t);
         }
         int mask = CullSIMD::test4(sMinX, sMaxX, sMinY, sMaxY, vl, vr, vb, vt);
         for (size_t b = 0; b < W; b++) {
@@ -393,20 +426,22 @@ void TileMesh::cullRange(size_t begin, size_t end, double vl, double vr, double 
             outTiles.push_back(t);
             // 相机相对偏移在 **double** 里算完再窄化一次：分开窄化（pos 与 cam 各自 cast）会
             // 在超大坐标上把两者的舍入误差叠加成半个格子（primer 上就是好几块砖）
-            pushAttr(outAttr, (float)(tileX(t) - camX), (float)(tileY(t) - camY),
-                     tileZForIndex((int)t, m_nTiles), m_tileShape[t], m_iconBits[t]);
+            pushAttr(outAttr, (float)(worldX(t) - camX), (float)(worldY(t) - camY),
+                     tileZForIndex((int)t, m_nTiles), d->shape[t - base], d->icon[t - base]);
         }
     }
-    for (; i < end; i++) {
+    for (; i < w1; i++) {
         const uint32_t t = (uint32_t)i;
-        const Shape& sh = m_shapes[m_tileShape[t]];
-        double mnX = sh.localMinX + tileX(t), mxX = sh.localMaxX + tileX(t);
-        double mnY = sh.localMinY + tileY(t), mxY = sh.localMaxY + tileY(t);
+        const Shape& sh = m_shapes[d->shape[t - base]];
+        double mnX = sh.localMinX + worldX(t), mxX = sh.localMaxX + worldX(t);
+        double mnY = sh.localMinY + worldY(t), mxY = sh.localMaxY + worldY(t);
         if (mxX < vl || mnX > vr || mxY < vb || mnY > vt) continue;
         if (haveVis && !visAt((size_t)t)) continue;
         outTiles.push_back(t);
-        pushAttr(outAttr, (float)(tileX(t) - camX), (float)(tileY(t) - camY),
-                 tileZForIndex((int)t, m_nTiles), m_tileShape[t], m_iconBits[t]);
+        pushAttr(outAttr, (float)(worldX(t) - camX), (float)(worldY(t) - camY),
+                 tileZForIndex((int)t, m_nTiles), d->shape[t - base], d->icon[t - base]);
+    }
+    w0 = w1;
     }
 }
 
@@ -453,10 +488,18 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
                 jobs.emplace_back(i, j);
                 i = j;
             }
+            // ③ 切片 4：**主线程先把命中块的窗口物化好**（并行段只读、不产生写 —— 否则共享窗口
+            // 缓存被多线程写/淘汰，派生数据会被撕）。命中块数超过槽位数就不 pin → 退回串行。
+            const bool pinnable = ranges.size() <= kWindowSlots &&
+                                  (size_t)m_cullIndex.floorsPerBlock() <= kWindowFloors;
+            if (pinnable) {
+                for (size_t r = 0; r < ranges.size(); ++r) (void)windowFor(ranges[r].first);
+            }
+
             // 候选少就别开线程：唤醒 + 每任务两个 vector 的分配比串行做还贵
             // （实测 Singularity zoom 25：25 万候选，并行比串行慢 ~1 ms）
             constexpr size_t kCullSerialMax = 1u << 18;   // 262,144 块砖
-            if (jobs.size() > 1 && candidates > kCullSerialMax) {
+            if (pinnable && jobs.size() > 1 && candidates > kCullSerialMax) {
                 std::vector<std::vector<uint32_t>> tiles(jobs.size());
                 std::vector<std::vector<float>> attr(jobs.size());
                 auto& pool = getPool();
@@ -575,12 +618,17 @@ void TileMesh::draw(double viewL, double viewR, double viewB, double viewT,
 
 void TileMesh::drawHighlightedTile(int ti, double cX, double cY) const {
     if (ti < 0 || ti >= m_nTiles || !m_vao) return;
+    const DerivedRange* d = windowFor((size_t)ti);
+    if (!d) return;
+    const size_t base = (size_t)d->first, k = (size_t)ti - base;
+    const double wx = m_chunkX[(size_t)ti >> kPosChunkShift] + (double)d->posX[k];
+    const double wy = m_chunkY[(size_t)ti >> kPosChunkShift] + (double)d->posY[k];
     float attr[5];
-    attr[0] = (float)(tileX((size_t)ti) - cX);
-    attr[1] = (float)(tileY((size_t)ti) - cY);
+    attr[0] = (float)(wx - cX);
+    attr[1] = (float)(wy - cY);
     attr[2] = tileZForIndex(ti, m_nTiles);
-    attr[3] = (float)m_tileShape[(size_t)ti];
-    attr[4] = (float)m_iconBits[(size_t)ti];
+    attr[3] = (float)d->shape[k];
+    attr[4] = (float)d->icon[k];
     glBindVertexArray(m_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_instVbo);
     if (m_instCapacity < 1) {

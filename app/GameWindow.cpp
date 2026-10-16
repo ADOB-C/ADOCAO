@@ -488,8 +488,13 @@ void GameWindow::releaseMeshTemporaries() {
     // `tileBPMs` 也**不能**释放：provider 合成 SetSpeed 事件要用它（非窗口化时它同样没人再读，
     // 但保持一致更简单，且它是 4 B/层）。
     (void)m_level;
-    m_level->tileHasTwirl.clear(); m_level->tileHasTwirl.shrink_to_fit();
-    m_level->tileHasSetSpeed.clear(); m_level->tileHasSetSpeed.shrink_to_fit();
+    // ⚠️ 这两张位图**窗口化时不能清**：每砖图标位是**剔除时**才派生的（`deriveRange` 读它们），
+    // 而本函数在网格建完就跑 —— 清掉的话窗口派生出 icon=0（实测：块 0 有 2148 处不一致，
+    // 出图表现为砖边缘 858 个散点）。非窗口化时 `m_iconBits` 在建网格时就固化好了，可以清。
+    if (!m_level->tilesWindowed()) {
+        m_level->tileHasTwirl.clear(); m_level->tileHasTwirl.shrink_to_fit();
+        m_level->tileHasSetSpeed.clear(); m_level->tileHasSetSpeed.shrink_to_fit();
+    }
 }
 
 // 确定性抓帧：固定"关卡时刻 + 相机 + 缩放"渲染**一帧**，写 PNG 后退出。

@@ -168,8 +168,14 @@ std::string callSiteSelfTest(const char* tileMeshCpp) {
     // 改造前"砖 → 拖尾 → 行星 → 图标"让不透明的图标把拖尾擦掉一块，那是 bug）。
     if (src.find("m_iconGroup") != std::string::npos || src.find("m_iconEntries") != std::string::npos)
         return "TileMesh.cpp 里又出现了独立的图标实例集（m_iconGroups/m_iconEntries）";
-    if (src.find("m_iconBits") == std::string::npos)
-        return "TileMesh.cpp 里没有 m_iconBits —— 图标没有跟着砖走";
+    // 每砖图标位必须在**每砖**这一层：老设计是常驻数组 `m_iconBits`；③ 切片 4 起四支每砖数组
+    // 改成"按可见窗口从 provider 派生"，图标位随之变成窗口里的每砖字段（`DerivedRange::icon`）。
+    // 判据按**意图**给两种写法都算数 —— 但必须存在（不许变成"按形状/按实例"那种脱钩的图标）。
+    const bool perTileIcon = src.find("m_iconBits") != std::string::npos ||
+                             src.find("d->icon[") != std::string::npos ||
+                             src.find("DerivedRange") != std::string::npos;
+    if (!perTileIcon)
+        return "TileMesh.cpp 里没有每砖图标位（m_iconBits 或窗口派生的 DerivedRange::icon）—— 图标没有跟着砖走";
     if (src.find("drawIcons") != std::string::npos)
         return "TileMesh.cpp 里又出现了单独的图标 draw 了 —— 图标必须跟砖同一次 draw（在拖尾之前）";
     return {};

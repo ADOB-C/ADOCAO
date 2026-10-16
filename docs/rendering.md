@@ -61,6 +61,22 @@ Tiles and icons use depth test ON with per-instance Z values encoding far-to-nea
 - `aType` 仍然在拼色：VS 里 `mix(uStroke, uFill, layer)`（图标 part 直接用各自的常量色）。
 
 ### 可见性 / 剔除缓存
+
+**每砖派生数据不再常驻**（2026-10-16，③ 切片 4 渲染侧）。原来 `TileMesh` 常驻四支每砖数组
+（`m_tileShape` 4 B + `m_posX`/`m_posY` 8 B + `m_iconBits` 1 B = **13 B/砖**，MYC 84 MB）；
+现在只保留**形状表 + 形状索引 + 每块 double 原点 + 剔除索引 + 可见位**，剔除时按 **4096 层窗口**
+用 `TileMesh::deriveRange()` 从 provider 现派生（每窗 4096 × 13 B = **53 KB**，128 槽环形 ≈ 6.8 MB 上限）。
+
+* 口径唯一：`deriveRange()` 同时被 `build()` 与剔除用，所以"整段"和"按块"一致**由构造保证**；
+  `ADOCAO_MESH_DUMP=1` 打整段派生的 FNV，可与"数组时代"的记录值直接对比（实测四个全等）。
+* 三条踩过的坑：① `TileShape::keyForTile` 原来直接读 `lv.tiles[i].direction`（丢数组后越界崩）；
+  ② 窗口化时**不能清 `tileHasTwirl/tileHasSetSpeed`**（图标位是剔除时才派生的，清了得到 icon=0）；
+  ③ 并行剔除段**必须主线程先 pin 窗口**（worker 碰共享缓存会撕数据），命中块数 > 槽位数或剔除块
+  粒度 > 4096 时退回串行。
+* 代价与验收：`--capture` 下 `cull` 段 0.009 → **0.059 ms**（MYC z25，整帧 36 ms 的 0.16%）；
+  像素门槛 51/51 逐字节；常驻 footprint 388.2 → **311.3 MB**、live 199.8 → **114.0 MB**。
+
+
 `draw()` 只为**可见**实例建一份压实列表（一个全局缓存，容差 0.5 与改造前同）：视锥变了才重新
 SIMD 剔除（按绘制序切块并行，`render/TileMesh.cpp` 的 `getPool()`，Meyers 静态、活到进程退出），
 否则只按 (dx,dy) 平移相机相对偏移。世界 AABB = 形状局部包围盒（`Shape::localMin/Max`，double）+

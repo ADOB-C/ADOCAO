@@ -113,23 +113,33 @@ private:
     // ---- 每砖常驻 ----
     std::vector<TileShape::Shape> m_shapes;   // 形状（去重；含 localBBox）
     std::unordered_map<uint64_t, uint32_t> m_shapeIndex;   // ③ 切片 4：形状键 → 形状号（派生用）
-    std::vector<uint32_t> m_tileShape;        // 砖 → 形状号
+    // ③ 切片 4【二分实验】：数组**保留**，额外建"按块窗口"，只让 cullRange 从窗口读 ——
+    // 用来判定"派生值不对"还是"读路径不等价"。
+    const LevelData* m_level = nullptr;
+    static constexpr size_t kWindowFloors = 4096;
+    static constexpr size_t kWindowSlots  = 128;
+    mutable std::vector<DerivedRange> m_windows;
+    mutable std::vector<int64_t> m_windowBlock;
+    mutable size_t m_windowNext = 0;
+    const DerivedRange* windowFor(size_t tile) const;
+    mutable bool m_windowChecked = false;   // 逐砖直比只做一次
+
+    // ③ 切片 4：四支每砖数组**不再常驻**（13 B/砖，MYC 84 MB）—— 剔除时按 4096 窗口物化。
     // 砖位置：**块相对 float**。绝对世界坐标是 double，直接窄化成 float 会在超大谱上塌掉 ——
     // primer-final（68,411,077 砖、直线轨道）的 x 到 6.84e7，float ulp 正好 **8 砖**，
     // 于是相邻 8 块砖被舍入到同一个坐标、屏幕上"轨道不渲染"（2026-10-08 用户实测）。
     // 现在每 kPosChunkShift 砖记一个 double 原点，块内偏移用 float：块内跨度 ≤65536 砖时
     // ulp ≤ 0.008 砖，内存代价是每块 16 B（65536 砖 → 0.00024 B/砖）。
     static constexpr size_t kPosChunkShift = 16;   // 65536 砖/块
-    std::vector<float> m_posX, m_posY;             // 相对本块原点的偏移
+
     std::vector<double> m_chunkX, m_chunkY;        // 每块的 double 原点（世界坐标）
-    double tileX(size_t t) const { return m_chunkX[t >> kPosChunkShift] + (double)m_posX[t]; }
-    double tileY(size_t t) const { return m_chunkY[t >> kPosChunkShift] + (double)m_posY[t]; }
+
     // ④ 粗块 AABB 索引（每 4096 层一块，0.0098 B/砖）。n 小于阈值时留空 → 走原来的全扫，
     // 小谱行为与改造前**逐字相同**。查询按块升序 → 输出与全扫逐元素相同（`cull_index` 用例）。
     CullIndex m_cullIndex;
     double m_cullHalf = 0.0;
     int m_cullFloors = (int)CullIndex::kBlockFloors;   // 见 setCullBlockFloors                  // 建表用的保守半边长（= 所有形状 localBBox 的最大外扩）
-    std::vector<uint8_t> m_iconBits;          // bit0 twirl / bit1 ssUp / bit2 ssDown
+    // （图标位随窗口派生：bit0 twirl / bit1 ssUp / bit2 ssDown）
     // TrackVis 的逐砖可见位：**位图**（原 1 B/砖 = MYC 6.8 MB → 0.85 MB）。lazy：只有 TrackVis 需要。
     std::vector<uint8_t> m_visible;
     bool visAt(size_t t) const { return bitAt(m_visible.data(), t); }

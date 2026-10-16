@@ -158,12 +158,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     2³¹ 外推 21 MB）：先筛块再在块内调用**原来那个** `cullRange` → 输出与全扫**逐元素相同**
     （ctest `cull_index` 对拍 + 像素门槛 51/51）。端到端 `--capture` 帧时 MYC z25 38.2→36.1 ms、
     **primer z25 156.6→43.0 ms**。钩子 `ADOCAO_CULL=scan` 回全扫（A/B 用）。
-    候选 ≤262,144 不开线程；`n < 4096` 不建索引。**粒度用户可选**：CLI `--cull-block N`、
+    候选 ≤262,144 不开线程；`n < 4096` 不建索引。
+**粒度用户可选**：CLI `--cull-block N`、
     wizard Graphics 页的"剔除块粒度"下拉、env `ADOCAO_CULL_BLOCK`（测试用）；0 = 全扫，
     超范围钳制 + `LOG_W`。**粒度不改出图**（8 种粒度实测 PNG 逐字节相同），只在成本/内存上取舍
     （4096 → 0.0098 B/砖 = 2³¹ 的 21 MB；256 → 320 MB）。未做：块表进容器、折叠谱两级细表、
     编辑/预览的空间索引。粒度依据见 `tests/cull_cost_probe.cpp --blocks`。
   详见 `docs/rendering.md`「可见性/剔除缓存」与 `docs/scale-1e8-to-2e9.md` §8 第 3 条。
+  * **每砖派生数据不再常驻**（2026-10-16，③ 切片 4 渲染侧）：原来 `m_tileShape`/`m_posX`/`m_posY`/
+    `m_iconBits` 共 **13 B/砖**（MYC 84 MB）→ 改成剔除时按 **4096 层窗口**从 provider 派生
+    （`TileMesh::deriveRange`，每窗 53 KB、128 槽环形 ≈ 6.8 MB 上限）。三条踩过的坑：
+    ① `TileShape::keyForTile` 原来直接读 `lv.tiles[i].direction`（丢数组后越界崩，崩溃地址 0x4
+    正是 `direction` 的偏移）；② **窗口化时不能清 `tileHasTwirl/tileHasSetSpeed`** —— 图标位是
+    剔除时才派生的（清了会得到 icon=0，实测块 0 有 2148 处不一致、出图差 858 个边缘散点）；
+    ③ 并行剔除段**必须主线程先 pin 窗口**（worker 碰共享窗口缓存会撕数据），命中块数超过槽位数
+    或剔除块粒度 > 4096 时退回串行。验收：`ADOCAO_MESH_DUMP=1` 的整段派生 FNV 与"数组时代"
+    记录值四个全等 + 像素门槛 51/51 + 常驻 footprint 388.2 → **311.3 MB**（live 199.8 → 114.0）。
 - 纯逻辑层护栏：`scripts/check-core-purity.sh`（core/ 禁 glad/GLFW/imgui/miniaudio/tinyfiledialogs/平台头，CI 已接入）
 - 解析对拍测试：`tests/level_parse_test.cpp`（快路径 vs cleanJson+DOM 逐位比对，用例在
   `tests/level_fixtures/`，生成脚本 `tests/gen_level_fixtures.py`）；`ctest --test-dir build`

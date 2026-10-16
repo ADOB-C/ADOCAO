@@ -608,5 +608,24 @@ settings 定长记录 → angleData 列 → actions 六列 → pathData；未知
    （窗口 98 KB + 角度 32 KB + 事件）。方向：单块缓存 → **±1 预取窗**，并让 `TileMesh::build`
    与 `CullIndex::build` **顺序物化**（它们本来就是顺序的）。
 
-处置：先把数值验收与访问器层合入主干（**本文件这节**），provider 挂在 env 开关后面继续修；
-修好两关再默认打开并重新量常驻。
+**2026-10-15 进展（三个真 bug 已修，门槛 1/51 → 21/51）**：
+1. `TileShape::keyForTile()` 直接读 `lv.tiles[i].direction` —— 丢数组后是**空数组越界**，
+   崩溃地址 `0x4` 正好是 `direction` 在 `Tile` 里的偏移（改成走 `tileDirectionAt()`）；
+2. `LevelData::tileCount()` 原来就是 `tiles.size()` —— 丢完数组变 0，而 mesh/capture/jump 都拿它当
+   砖数（改成窗口化时由 provider 记着的权威值）；
+3. `GameWindow::releaseMeshTemporaries()` 会清 `tileBPMs` —— provider 合成 SetSpeed 要用它
+   （现象是"构建期正常、播放期崩"；窗口化时不清）。
+修完后：网格数据**逐位相同**（`ADOCAO_MESH_DUMP=1` 转储 `tileShape/posX/posY/iconBits/chunkX/Y`
+的 FNV，on/off 全等），`angles360` 整帧 **PNG 逐字节相同**；footprint 也回到 **404.6 MB**
+（off 493.6 / live 268.2 vs 324.2）—— churn 由"重算输出复用缓冲"解决
+（`computeFloorWindow` 不再 `out = FloorWindow{}`，容量保留；cache 持有 scratch）。
+
+**仅剩 1 处**：MYC t=30s z25 差 **21 个像素**，落在**蓝行星拖尾开窗起点的 2 个采样**上
+（`ADOCAO_TRAIL_DUMP=1`：红点哈希 on/off 相同；蓝点 `[0]/[1]` 不同、`[2]` 起完全一致；
+off 那两个采样值相等=被钳住，on 是正常插值，差值正好是**一块砖的长度** ⇒ 窗口起点
+`findTileIndex(startTime)` 的 tileIdx 差 1）。下一步：在 `sampleTrailRange` 起点处把
+`findTileIndex` 的窗口实现与密集二分逐值对拍（含"起点恰好等于某砖 startTime"、以及
+`startTime` 落在**相等时间串**里的情形）。
+
+处置：数值验收 + 访问器层 + 上述三个修复留在主干，provider 仍挂 env 开关（默认关，门槛 51/51）；
+把最后这一处对拍干净后默认打开并重量常驻。

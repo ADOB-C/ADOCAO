@@ -373,7 +373,12 @@ float checkpointPrevDirection(const FloorCheckpoint& ck) {
 
 bool computeFloorWindow(const LevelData::Settings& settings, const FloorWindowInput& in,
                         FloorWindow& out, std::string& err) {
-    out = FloorWindow{};
+    // ③ 切片 4：**不要** `out = FloorWindow{}` —— 那会把 vector 的容量扔掉，而"按块物化"
+    // 会反复调用本函数（MYC 1654 块 + 运行期），每次重新分配就是纯粹的 churn（实测 footprint
+    // 反涨到 1.1 GB 而 live 只有 150 MB）。改成显式复位 + `assign`（容量保留）。
+    out.first = 0;
+    out.hasAtStates = false;
+    out.atStates.clear();
     err.clear();
     if (!in.angles || !in.events) { err = "computeFloorWindow 缺输入（angles/events）"; return false; }
     const FloorCheckpoint& ck = in.checkpoint;

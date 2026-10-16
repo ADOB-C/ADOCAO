@@ -179,6 +179,15 @@ cmake --build build --parallel 8
 更可能是 ①Mem Reduct 挤过之后的**工作集**（≠ macOS `footprint`）、②Windows 的**私有工作集/提交大小**
 口径、或 ③另一张谱/另一个版本 —— 要坐实必须固定"版本 + 谱 + 口径"三件事再比。
 
+## 4.8 两个 env 门控的**数据转储**（③ 窗口化排查用）
+
+* `ADOCAO_MESH_DUMP=1`：`TileMesh::build` 末尾把 `n / shapes / chunks / tileShape / posX / posY /
+  iconBits / chunkX / chunkY` 的 FNV-1a 打一行 —— 用于"按块物化 provider 是否改变了网格装配"的 A/B
+  （改输出前先比这一行，能立刻把差异关进/关出网格）。
+* `ADOCAO_TRAIL_DUMP=1`：拖尾采样处打 `startTime/rate/t/点数/红蓝点哈希`（并前 6 个蓝点全精度）——
+  用于"差异只在拖尾"时的定位（实测就是这样把 21 像素差异定到"蓝行星开窗起点 2 个采样"）。
+两者默认关、零开销；开关本身不改行为。
+
 ## 5. 专用探针（回答"策略该选哪个"，不是"现在多快"）
 
 | 探针 | 回答 |

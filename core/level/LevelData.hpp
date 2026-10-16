@@ -84,7 +84,9 @@ struct LevelData {
     //
     // ⚠️ **按值**返回（不是引用）：物化下一块会替换窗口缓存，引用会失效；按值返回也顺带
     // 让"同时持有两块里的位置"（`PositionSolver` 就同时读 tileIdx 与第 0 层）天然安全。
-    int64_t tileCount() const { return (int64_t)tiles.size(); }
+    // ⚠️ **不能**只写 `tiles.size()`：丢过密集数组之后它是 0，而全运行期（mesh 装配、capture、
+    // jump、最近砖搜索）都拿它当"谱面砖数"。窗口化时由 provider 记着那个数。
+    int64_t tileCount() const;
     std::array<double, 2> tilePositionAt(int64_t i) const;
     float tileDirectionAt(int64_t i) const;
     // 建"按块物化"缓存（加载收尾调用；失败就保持密集数组）

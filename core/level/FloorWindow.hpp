@@ -110,6 +110,7 @@ public:
     bool init(LevelData& level, const std::vector<double>& startTimes,
               const std::vector<float>& bpms, const std::vector<bool>& isCW, std::string& err);
     bool ready() const { return m_ready; }
+    int64_t tileCount() const { return m_tileCount; }   // 丢数组之后仍然权威（= 当初的 tiles.size()）
     bool windowed() const { return m_windowed; }
     const char* why() const { return m_why; }
     size_t blocksMaterialized() const { return m_blocks; }
@@ -119,7 +120,7 @@ public:
     bool dropTiles(LevelData& level);
     // **仅测试用**：让单块缓存失效（反面对照要"改了输入 → 必须重算"，
     // 而"读另一块挤掉缓存"在目标层恰好就在块 0 时不成立）
-    void invalidateWindowForTest() const { m_block = -1; m_win.clear(); }
+    void invalidateWindowForTest() const { m_block = -1; }
 
 private:
     bool materialize(int64_t block) const;
@@ -129,11 +130,13 @@ private:
     std::vector<bool> m_isCW;
     LevelData::Tile m_extra{};
     bool m_hasExtra = false;
+    int64_t m_tileCount = 0;
     bool m_ready = false;
     bool m_windowed = false;
     const char* m_why = "未初始化";
     mutable int64_t m_block = -1;
-    mutable std::vector<LevelData::Tile> m_win;
+    // 复用的重算输出（**不每次重建**：容量保留 → 没有 churn；`tileAt` 直接指进这里）
+    mutable FloorWindow m_scratch;
     mutable size_t m_blocks = 0;
 };
 

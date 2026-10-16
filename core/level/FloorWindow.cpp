@@ -153,6 +153,11 @@ FloorRecomputeFn g_floorRecompute = nullptr;
 
 // ---------------- ③ 切片 4：LevelData 侧的访问器与缓存管理 ----------------
 
+int64_t LevelData::tileCount() const {
+    if (m_winCache && m_winCache->windowed()) return m_winCache->tileCount();
+    return (int64_t)tiles.size();
+}
+
 std::array<double, 2> LevelData::tilePositionAt(int64_t i) const {
     if (m_winCache && m_winCache->windowed()) {
         const Tile* t = m_winCache->tileAt(i);
@@ -207,11 +212,11 @@ bool FloorWindowCache::init(LevelData& level, const std::vector<double>& startTi
     m_ready = false;
     m_windowed = false;
     m_block = -1;
-    m_win.clear();
     m_blocks = 0;
 
     const size_t nData = level.angleData.size();
-    if (nData == 0 || level.tileCount() < (int64_t)(nData + 1)) {
+    m_tileCount = level.tileCount();          // 丢数组之前的权威砖数（含末尾合成砖）
+    if (nData == 0 || m_tileCount < (int64_t)(nData + 1)) {
         m_why = "tiles 还没算好（需要在 finishLoad 之后调用）";
         err = m_why;
         return false;
@@ -295,11 +300,10 @@ bool FloorWindowCache::materialize(int64_t block) const {
     }
     in.events = &ev;
 
-    FloorWindow w;
+    FloorWindow& w = m_scratch;          // 复用缓冲（容量保留）
     std::string err;
     if (!fn(m_level->settings, in, w, err)) return false;
     if ((int64_t)w.tiles.size() != (i1 - i0)) return false;
-    m_win = std::move(w.tiles);
     m_block = block;
     ++m_blocks;
     return true;
@@ -313,7 +317,7 @@ const LevelData::Tile* FloorWindowCache::tileAt(int64_t i) const {
     const int64_t block = i / kCheckpointStride;
     if (m_block != block && !materialize(block)) return nullptr;
     const size_t k = (size_t)(i - block * kCheckpointStride);
-    return k < m_win.size() ? &m_win[k] : nullptr;
+    return k < m_scratch.tiles.size() ? &m_scratch.tiles[k] : nullptr;
 }
 
 bool FloorWindowCache::dropTiles(LevelData& level) {

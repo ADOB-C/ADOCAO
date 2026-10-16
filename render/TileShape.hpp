@@ -114,9 +114,10 @@ inline int iconBase(int part) { return kTileSlots + (part - P_ICON_TWIRL) * kIco
 
 // 砖 i 的形状键（与 `TileMesh.cpp` 里那段逐字相同；放在这里让渲染与测试共用一份公式）。
 inline void keyForTile(const LevelData& lv, int i, float& sa, float& ea, bool& mid) {
-    const auto& t = lv.tiles;
-    sa = (i == 0) ? -180.0f : t[(size_t)(i - 1)].direction - 180.0f;
-    ea = t[(size_t)i].direction;
+    // ③ 切片 4：走访问器 —— `lv.tiles` 在"按块物化"之后是空的（这里原来直接 `t[i].direction`，
+    // 崩溃地址 0x4 就是 `direction` 在 `Tile` 里的偏移，正好对上空指针越界读）。
+    sa = (i == 0) ? -180.0f : lv.tileDirectionAt((int64_t)(i - 1)) - 180.0f;
+    ea = lv.tileDirectionAt((int64_t)i);
     mid = (i < (int)lv.angleData.size() && lv.angleData[(size_t)i] == 999.0);
 }
 

@@ -1,4 +1,5 @@
 #include "LevelScene.hpp"
+#include <cstdlib>   // getenv（诊断转储）
 
 #include "core/util/AssetPaths.hpp"
 
@@ -237,6 +238,27 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
     PositionSolver::sampleTrailRange(timeline, win.startTime, frame.timeInLevel, win.sampleRate,
                                      frame.redPosition, frame.bluePosition,
                                      redPts, bluePts);
+
+    // 【诊断，env 门控】拖尾点哈希：A/B "按块物化 provider" 是否改变了拖尾
+    if (std::getenv("ADOCAO_TRAIL_DUMP")) {
+        auto fnv = [](const void* p, size_t bytes) {
+            const uint8_t* q = (const uint8_t*)p;
+            uint64_t h = 1469598103934665603ull;
+            for (size_t k = 0; k < bytes; ++k) { h ^= q[k]; h *= 1099511628211ull; }
+            return h;
+        };
+        LOG_I("trail-dump: startTime=%.17g rate=%.17g t=%.17g n=%zu/%zu red=%016llx blue=%016llx",
+              win.startTime, win.sampleRate, frame.timeInLevel, redPts.size(), bluePts.size(),
+              (unsigned long long)fnv(redPts.data(), redPts.size() * sizeof(glm::dvec2)),
+              (unsigned long long)fnv(bluePts.data(), bluePts.size() * sizeof(glm::dvec2)));
+        for (size_t k = 0; k < bluePts.size() && k < 6; ++k)
+            LOG_I("trail-blue[%zu]=%.17g,%.17g", k, bluePts[k].x, bluePts[k].y);
+        if (!bluePts.empty()) {
+            const size_t L = bluePts.size() - 1;
+            LOG_I("trail-blue[last]=%.17g,%.17g", bluePts[L].x, bluePts[L].y);
+        }
+    }
+
     if (redPts.empty() || bluePts.empty()) return;
 
     const int maxPoints =

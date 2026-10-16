@@ -250,6 +250,25 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     m_listValid = false;
     m_listUploaded = false;
     LOG_D("TileMesh::build: draws=1 (tiles+icons 同一次), shapes=%zu, tiles=%d", m_shapes.size(), n);
+
+    // 【诊断，env 门控】网格数据哈希：用来 A/B "按块物化 provider" 是否改变了装配结果
+    if (std::getenv("ADOCAO_MESH_DUMP")) {
+        auto fnv = [](const void* p, size_t bytes) {
+            const uint8_t* q = (const uint8_t*)p;
+            uint64_t h = 1469598103934665603ull;
+            for (size_t i = 0; i < bytes; ++i) { h ^= q[i]; h *= 1099511628211ull; }
+            return h;
+        };
+        LOG_I("mesh-dump: n=%d shapes=%zu chunks=%zu tileShape=%016llx posX=%016llx posY=%016llx "
+              "iconBits=%016llx chunkX=%016llx chunkY=%016llx",
+              m_nTiles, m_shapes.size(), m_chunkX.size(),
+              (unsigned long long)fnv(m_tileShape.data(), m_tileShape.size() * sizeof(uint32_t)),
+              (unsigned long long)fnv(m_posX.data(), m_posX.size() * sizeof(float)),
+              (unsigned long long)fnv(m_posY.data(), m_posY.size() * sizeof(float)),
+              (unsigned long long)fnv(m_iconBits.data(), m_iconBits.size()),
+              (unsigned long long)fnv(m_chunkX.data(), m_chunkX.size() * sizeof(double)),
+              (unsigned long long)fnv(m_chunkY.data(), m_chunkY.size() * sizeof(double)));
+    }
 }
 
 void TileMesh::buildStaticGL() {

@@ -146,22 +146,23 @@ bool drawNavButton(const Chrome& chrome, bool isStart, bool canContinue,
     const float btnH = 30.0f * S;
 
     if (backPressed) *backPressed = false;
+    // 两个按钮时按**一对居中**摆（与 Welcome 页 `Next`+`Export` 同一约定 ✓），
+    // 单个时维持原来的"居中" ✓。间距 12px 用 `SameLine`（与 Welcome 页一致 ✓）。
     ImGui::SetCursorPosY((float)chrome.winH - 56.0f * S);
-    // Back 在 Next 左侧 12px；窗口比两个按钮宽得多，不会挤到标题栏
-    if (showBack) {
-        const float xb = ((float)chrome.winW - btnW) / 2.0f - btnW - 12.0f * S;
-        ImGui::SetCursorPosX(xb);
-        if (ImGui::Button("Back", ImVec2(btnW, btnH)) && backPressed) *backPressed = true;
-    }
-    // ⚠️ 必须**同时**重设 Y：画完 Back 后光标已经往下走了一个按钮高，
-    // 只重设 X 会让 Next 掉到 Back 下面（实测截图：Next 被切在窗口底边外 ✗）。
-    ImGui::SetCursorPosY((float)chrome.winH - 56.0f * S);
-    float xb = ((float)chrome.winW - btnW) / 2.0f;
+    const float pairW = btnW * 2.0f + 12.0f * S;
+    float xb = showBack ? ((float)chrome.winW - pairW) / 2.0f
+                        : ((float)chrome.winW - btnW) / 2.0f;
     ImGui::SetCursorPosX(xb);
+    bool backClicked = false;
+    if (showBack) {
+        backClicked = ImGui::Button("Back", ImVec2(btnW, btnH));
+        ImGui::SameLine(0.0f, 12.0f * S);
+    }
     if (!canContinue) ImGui::BeginDisabled();
     const char* label = isStart ? "Start" : "Next";
     bool pressed = ImGui::Button(label, ImVec2(btnW, btnH));
     if (!canContinue) ImGui::EndDisabled();
+    if (backClicked && backPressed) *backPressed = true;
     return pressed;
 }
 

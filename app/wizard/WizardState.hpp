@@ -128,7 +128,6 @@ inline constexpr std::array<int, 5>         kResoH       = {540, 720, 1080, 1440
 
 // ---- Page entry points (implemented in app/wizard/Page*.cpp) ----
 void drawWelcomePage(State& st, const Chrome& ch);
-void drawPreloadPage(State& st, const Chrome& ch);
 void drawHitsoundsPage(State& st, const Chrome& ch);
 void drawGraphicsPage(State& st, const Chrome& ch);
 void drawVisualsPage(State& st, const Chrome& ch);

@@ -127,7 +127,10 @@ void drawConfigHeader(const Chrome& chrome, const char* title, float progressPct
 
     ImGui::SetCursorPosY(18.0f * S);
     ImGui::SetCursorPosX(padX);
-    ImGui::ProgressBar(progressPct / 100.0f, ImVec2(contentW, 10.0f * S));
+    // 高度用 ImGui 的标准框高（字号 + 上下 FramePadding），**别自己压到 10px** ✗：
+    // ImGui 的百分比文字是**裁剪到进度条矩形**里的（imgui_widgets.cpp 的 RenderTextClipped
+    // 以 bb 为 clip_rect），条比字体矮就只画出中间一条，文字被压扁（用户实测截图）。
+    ImGui::ProgressBar(progressPct / 100.0f, ImVec2(contentW, ImGui::GetFrameHeight()));
     ImGui::Spacing();
     ImGui::Spacing();
     ImGui::SetCursorPosX(padX);

@@ -154,7 +154,6 @@ ADOCAO/
 │       ├── WizardChrome.hpp/.cpp      # 向导窗口/ImGui 引导 + 配置页公共 chrome（进度条/Next/Start）
 │       ├── FileDialogs.hpp/.cpp       # 文件/文件夹对话框（Win32 COM / tinyfd）+ 音乐自动检测
 │       ├── PageWelcome.cpp            # Welcome 页 + 预加载线程启动 + Export
-│       ├── PagePreload.cpp            # Preload 过渡页（后台 parse+timeline 进度）
 │       ├── PageHitsounds.cpp / PageGraphics.cpp / PageVisuals.cpp
 │       └── PageMusic.cpp              # Music 页 + Start（提交全部配置）
 │
@@ -269,18 +268,18 @@ GameWindow 内剩下的成员职责：LevelScene（GL 对象，异步 build 轮�
 
 ```
 app/wizard/
-├── WizardState.hpp          # 页面枚举（Welcome/Preload/Hitsounds/Graphics/Visuals/Music）+ State + 选项表
+├── WizardState.hpp          # 页面枚举（Welcome/Hitsounds/Graphics/Visuals/Music）+ State + 选项表
 ├── WizardChrome.hpp/.cpp    # 窗口/GL/ImGui 引导（原 LauncherWindow init）+ 配置页公共 chrome
 ├── FileDialogs.hpp/.cpp     # openFileDialog/selectFolderDialog（Win32 COM/tinyfd）+ detectMusicFile
 ├── PageWelcome.cpp          # Welcome → (Preload 后台线程) → Hitsounds；Export 出口
-├── PagePreload.cpp          # Preload 过渡页（进度条，线程完成后由调度循环推进）
 ├── PageHitsounds.cpp / PageGraphics.cpp / PageVisuals.cpp
 └── PageMusic.cpp            # Music 页 + Start 按钮（提交全部配置 → done）
 ```
 
-（LauncherWindow.cpp 保留窗口生命周期与分页调度，~95 行。与蓝图差异：真实向导没有独立
-「Start 页」——Start 是 Music 页底部的提交按钮；「Preload」是 Welcome 与 Hitsounds 之间
-的过渡页，单独成文件。原 §1.2-4 的大文件混杂问题已消除。）
+（LauncherWindow.cpp 保留窗口生命周期与分页调度，~100 行。与蓝图差异：真实向导没有独立
+「Start 页」——Start 是 Music 页底部的提交按钮；预载**没有独立页**（`PagePreload.cpp` 已删）：
+`Preload` 是 Welcome/Hitsounds 两页上的同一个复选框，勾上就在后台跑，进度不显示。
+原 §1.2-4 的大文件混杂问题已消除。）
 
 ### 4.4 其余大文件（可选 / 后续）
 

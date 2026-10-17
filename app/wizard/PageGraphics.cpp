@@ -38,10 +38,9 @@ void drawGraphicsPage(State& st, const Chrome& ch) {
     ImGui::SetNextItemWidth(contentW - (ctrlX - padX) - 24.0f * S);
     ImGui::Combo("##cullblock", &st.cullBlockIdx, kCullBlockNames.data(),
                  (int)kCullBlockNames.size());
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Floors per block of the coarse culling index. Smaller is faster on\n"
-                          "looping/folded charts but uses more memory (4k ~= 21 MB at 2^31-1\n"
-                          "floors, 256 ~= 320 MB). Never changes what is drawn.");
+    // 这里原来挂过一个悬停说明（"每块多少层 / 4k≈21MB / 256≈320MB / 不改变出图"）——
+    // 用户指出"其他地方都没有"，向导里只有这一个控件有 tooltip，很突兀 → 去掉 ✗。
+    // 这份权衡有正式去处：`docs/rendering.md`「可见性/剔除缓存」+ `tests/cull_cost_probe.cpp`。
     ImGui::Spacing();
 
     bool back = false;

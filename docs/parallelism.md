@@ -21,8 +21,14 @@
   **析构时 `cancel()` + `wait()`** —— 等价于原来 `future` 析构的 join 语义 ✓，但任务能在**块边界提前退出**
   （`TileMesh::build(..., const std::function<bool()>* shouldCancel)`，每 64K 砖查一次 ✓）。
   注意它默认走同步路径（`Async build: OFF (sync)`），异步路径是开关打开时才走的 ✓。
-**仍未迁**：裸 `std::thread` 的**加载窗**（×2，GUI 生命周期 ✗）与**向导预载** —— 要单独一轮，
-且每一步都要能回退（它们跟窗口销毁/切谱绑在一起）。
+**加载窗与向导预载也已迁（2026-10-16 同轮）**：`LoadingWindow` 的两处 loader 线程与
+`wizard/PageWelcome` 的预载线程 → `submit(Lane::Background)`，`joinable()/join()` →
+`valid()/wait()/clear()`（**语义等价** ✓）。两处刻意**不取消**：loader/preload 的结果一定会被用，
+取消只会留下半成品状态 ✗。`LauncherWindow` 的两处 join 同步改掉。
+**验收靠门槛**：51 个抓帧状态**每个都要经过加载窗的 CLI 分支** ✓ → 门槛 51/51 就是这次迁移的验收 ✓。
+向导/launcher 的 GUI 路径仍是交互式的（需要手动冒烟一次 ✓）。
+
+至此"五套机制"只剩文档里那**两个合法例外**（`adocao_audio` 模块规则、`PngBand` 生产者/消费者流水线）。
 
 | # | 位置 | 机制 | 用途 | 问题 |
 |---|---|---|---|---|

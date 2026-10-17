@@ -35,7 +35,10 @@ LauncherConfig showLauncher() {
 
         // Preload finished → advance to the Hitsounds page
         if (st.preloadRunning && st.preloadFinished.load()) {
-            if (st.preloadThread.joinable()) st.preloadThread.join();
+            if (st.preloadThread.valid()) {        // ①/④：等价于原 join
+                st.preloadThread.wait();
+                st.preloadThread.clear();
+            }
             st.preloadRunning = false;
             if (st.cfg.preloadedLevel && st.cfg.preloadedTimeline) {
                 st.page = wizard::Page::Hitsounds;
@@ -86,8 +89,9 @@ LauncherConfig showLauncher() {
     }
 
     // Ensure preload thread is joined before tearing down
-    if (st.preloadRunning && st.preloadThread.joinable()) {
-        st.preloadThread.join();
+    if (st.preloadRunning && st.preloadThread.valid()) {
+        st.preloadThread.wait();
+        st.preloadThread.clear();
         st.preloadRunning = false;
     }
 

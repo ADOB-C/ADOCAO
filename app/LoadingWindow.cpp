@@ -2,6 +2,7 @@
 #include "core/util/Progress.hpp"
 #include "app/FontSetup.hpp"
 #include "core/util/Logger.hpp"
+#include "core/util/Scheduler.hpp"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
@@ -24,10 +25,12 @@ void showLoadingWindow(std::function<void(LoadingProgress&)> loader, bool cliOnl
         // （stderr、\r 原地刷新、速率+ETA，见 core/util/Progress.hpp）。加载照样在后台线程里跑，
         // 进度结构与 GUI 那条路完全一样，所以下面的行为不受影响。
         LoadingProgress progress;
-        std::thread loaderThread([&]() {
-            loader(progress);
-            progress.percent.store(100.0f);
-        });
+        // ①/④：后台加载走 `Scheduler`（Background），不再自起裸线程 ✗；join → wait（语义相同 ✓）
+        Scheduler::Handle loaderJob = Scheduler::instance().submit(
+            Lane::Background, [&](Scheduler::CancelToken) {
+                loader(progress);
+                progress.percent.store(100.0f);
+            });
         progress::reset();
         while (progress.percent.load() < 100.0f) {
             {   // stageText 由 loader 线程写，读的时候持锁（update 只是拷贝字符串，可以放在锁内）
@@ -38,7 +41,8 @@ void showLoadingWindow(std::function<void(LoadingProgress&)> loader, bool cliOnl
         }
         progress::update(100, 100, "%", "done");
         progress::finish();
-        if (loaderThread.joinable()) loaderThread.join();
+        loaderJob.wait();
+        loaderJob.clear();
         return;
     }
 
@@ -114,10 +118,13 @@ void showLoadingWindow(std::function<void(LoadingProgress&)> loader, bool cliOnl
 
     // ---- Start loader thread ----
     LoadingProgress progress;
-    std::thread loaderThread([&]() {
-        loader(progress);
-        progress.percent.store(100.0f);
-    });
+    // ①/④：同上（GUI 分支）。注意**不取消** —— loader 的结果一定会被用 ✓，
+    // 取消只会把状态搞成半成品 ✗；这里是"等它做完"（与原 join 等价 ✓）。
+    Scheduler::Handle loaderJob = Scheduler::instance().submit(
+        Lane::Background, [&](Scheduler::CancelToken) {
+            loader(progress);
+            progress.percent.store(100.0f);
+        });
 
     // ---- Render loop ----
     while (!glfwWindowShouldClose(window)) {
@@ -165,18 +172,23 @@ void showLoadingWindow(std::function<void(LoadingProgress&)> loader, bool cliOnl
         glfwSwapBuffers(window);
 
         // Close when loader finishes
-        if (pct >= 100.0f && !loaderThread.joinable()) {
+        if (pct >= 100.0f && !loaderJob.ready()) {
+            // 进度到 100 但任务还没返回（最后几步）：等一下再退，别丢状态
+            loaderJob.wait();
+            loaderJob.clear();
             break;
         }
-        if (pct >= 100.0f && loaderThread.joinable()) {
-            loaderThread.join();
+        if (pct >= 100.0f) {
+            loaderJob.wait();
+            loaderJob.clear();
             break;
         }
     }
 
-    // Ensure thread is joined
-    if (loaderThread.joinable()) {
-        loaderThread.join();
+    // 确保任务已汇合（与原 join 等价）
+    if (loaderJob.valid()) {
+        loaderJob.wait();
+        loaderJob.clear();
     }
 
     // ---- Cleanup ----

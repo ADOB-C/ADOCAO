@@ -1,4 +1,5 @@
 #pragma once
+#include "core/util/Scheduler.hpp"
 
 // Wizard UI state shared across the per-page files in app/wizard/. One .cpp
 // per page: each exports a self-contained drawXxxPage(State&, const Chrome&)
@@ -112,7 +113,7 @@ struct State {
     LoadingProgress preloadProgress;
     bool preloadRunning = false;
     std::atomic<bool> preloadFinished{false};
-    std::thread preloadThread;
+    adofai::Scheduler::Handle preloadThread;   // ①/④：向导预载的句柄（原来裸线程 ✗）
 };
 
 // Shared option tables (used by page drawing and by the Start commit).

@@ -106,11 +106,12 @@ void drawWelcomePage(State& st, const Chrome& ch) {
                 st.preloadRunning = true;
                 st.cfg.preloadedLevel.reset();
                 st.cfg.preloadedTimeline.reset();
-                st.preloadThread = std::thread([&st]() {
-                    runLevelPreload(st.cfg, st.preloadProgress,
-                                    st.cfg.preloadedLevel, st.cfg.preloadedTimeline);
-                    st.preloadFinished.store(true);
-                });
+                st.preloadThread = Scheduler::instance().submit(
+                    Lane::Background, [&st](Scheduler::CancelToken) {
+                        runLevelPreload(st.cfg, st.preloadProgress,
+                                        st.cfg.preloadedLevel, st.cfg.preloadedTimeline);
+                        st.preloadFinished.store(true);
+                    });
                 st.page = Page::Preload;
             } else {
                 st.page = Page::Hitsounds;

@@ -31,6 +31,10 @@ public:
         float rateMin        = 60.0f;
         float rateMax        = 4000.0f;
         float maxPoints      = 8192.0f;
+        // true = 这个 rate 是**自适应governor**给出的（受 rateMin/rateMax 夹）；
+        // false = 用户显式选的固定率（Launcher/CLI），只受 maxPoints 约束 ——
+        // 否则"把采样率调到 64000"会被 rateMax 静默夹回 4000，设置等于没生效。
+        bool  adaptive       = false;
     };
     struct TrailWindow {
         double startTime = 0.0;

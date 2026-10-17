@@ -281,6 +281,7 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
     sc.speedAware     = m_trailPerTile;
     sc.samplesPerTile = m_trailSamplesPerTile;
     sc.fixedRate      = m_trailSampleRate;      // possibly governor-adjusted
+    sc.adaptive       = m_trailAdaptive;        // true = 受 rateMax 夹；false = 用户显式固定率
     sc.rateMin        = m_trailRateMin;
     sc.rateMax        = m_trailRateMax;
 

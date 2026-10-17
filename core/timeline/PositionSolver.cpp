@@ -183,7 +183,10 @@ PositionSolver::TrailWindow PositionSolver::trailWindow(const Timeline& timeline
         rate = (double)cfg.fixedRate;
         if (cfg.speedAware)
             rate = std::max(rate, tilePathSpeed(timeline, t) * (double)cfg.samplesPerTile);
-        rate = std::clamp(rate, (double)cfg.rateMin, (double)cfg.rateMax);
+        // rateMax 是**自适应**的上限（docs/rendering.md 的拖尾 governor）；用户显式给的固定率
+        // 不该被它静默夹掉 —— 只保留 rateMin 与后面的 maxPoints 硬上限。
+        if (cfg.adaptive) rate = std::clamp(rate, (double)cfg.rateMin, (double)cfg.rateMax);
+        else              rate = std::max(rate, (double)cfg.rateMin);
     }
 
     // 3) Hard bound on the point count, whatever the mode.

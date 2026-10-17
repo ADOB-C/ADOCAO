@@ -3,6 +3,23 @@
 > 本文 2026-10 从 `AGENTS.md` **整段搬出**（内容一字未改，只换了文件）；AGENTS.md 里
 > 留了指针。改这一块之前先读它，改完按 AGENTS.md 的验收清单跑对应护栏。
 
+## 拖尾采样率：固定率 vs 自适应上限（2026-10-17）
+
+拖尾采样率有两个来源，**语义不同**：
+
+* **用户显式固定率**（Launcher Trail 页的 Sample rate / `--trail-sample-rate`，此时
+  `trailAdaptive=false`）：只受 **`maxPoints = 8192`** 的硬上限约束。
+* **自适应 governor**（默认）：把帧预算换算成采样率，夹在 `[trailRateMin, trailRateMax]`
+  （默认 60..4000）。
+
+以前两条路都走 `clamp(rate, rateMin, rateMax)`，于是用户在 Launcher 里把 Sample rate 调到
+64000 会被**静默夹回 4000** —— 设置形同虚设。The Moon（BPM 14817，一砖 ~4ms）在 4000/s 下
+只有 **0.75 采样/砖**，拖尾是折线、看着一顿一顿的，正是这个原因。现在
+`TrailSamplingConfig::adaptive` 区分两条路：显式固定率只保留 `rateMin` 与 `maxPoints`
+（64000 → 实际 20480/s、8194 点；实测每帧采样 ~0.9ms，仍远低于 3.1ms 的 320fps 预算）。
+
+抓帧路径不受影响：`--capture` 强制 `trailAdaptive=false` 且门槛状态的率都是默认 200/s。
+
 ## Coordinate System
 
 OpenGL world space: X right, Y up. View matrix always at origin —— 相机相对偏移在 **double** 里算完，

@@ -203,6 +203,11 @@ bool parseSettings(const std::vector<std::string>& pool, const uint8_t* p, size_
     s.stickToFloors = (b != 0);
     if (!idx(s.planetEase) || !idx(s.trackDisappearAnimation) || !idx(s.trackAnimation)) return false;
     if (!f32(s.beatsBehind) || !f32(s.beatsAhead)) return false;
+    // 2026-10-17 追加的字段（记录末尾）。**旧文件没有这两个字节** → 保留调用方给的默认值，
+    // 不是坏数据（这也是不 bump 版本号的原因：两个方向都兼容）。
+    if (off + 2 <= n) {
+        if (!idx(s.songFilename)) return false;
+    }
     return true;
 }
 

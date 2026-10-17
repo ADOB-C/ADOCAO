@@ -128,6 +128,8 @@ public:
     bool buildRawPcm(std::vector<float>& out, double& sampleRateOut) const;
 
     std::vector<double> getHitsoundTimestamps() const;
+    // 按 (音色, 音量) 分组的时间戳。**必须在 `LevelData::releaseMemory()` 之前调**：
+    // 那之后每砖覆盖/音量已被释放，函数会 LOG_E 并返回空表（不再静默给错值）。
     std::vector<HitsoundTimestampGroup> getHitsoundTimestampGroups() const;
 
 private:

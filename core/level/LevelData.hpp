@@ -38,6 +38,7 @@ struct LevelData {
         float  rotation = 0.0f;
         std::string relativeTo = "Player";
         std::array<float, 2> position = {0.0f, 0.0f};
+        std::string songFilename;
         std::string hitsound = "Kick";
         float  hitsoundVolume = 100.0f;
         std::string trackColor = "debb7b";
@@ -136,6 +137,15 @@ struct LevelData {
     };
 
     // Per-tile event data (computed from actions)
+    //
+    // ⚠️ **存活契约**（2026-10-17 补，之前只散在 app/GameWindow.cpp 的注释里）：
+    //   `TileMesh` 在**绘制期**（而不是只在 build 期）读这三张表 —— 每砖图标位是剔除时按窗口
+    //   现派生的（`TileMesh::deriveRange`），而 provider 合成 SetSpeed 事件也要 `tileBPMs`
+    //   （`FloorWindow::computeFloorWindow`）。所以：
+    //     * `releaseMemory()` **必须留着它们**（4 B/层 + 2 bit/层），谁清谁负责；
+    //     * 窗口化（`dropTilesArray()`）之后 `tileHasTwirl/tileHasSetSpeed` **绝对不能清**：
+    //       清了就会派生出 icon=0（实测块 0 有 2148 处不一致、出图 858 个边缘散点）；
+    //     * 用 `refreshDerivedCaches()` 重建，别手搓。
     std::vector<float> tileBPMs;      // BPM for each tile (after SetSpeed events)
     std::vector<bool>  tileHasTwirl;  // true if tile has a Twirl event
     std::vector<bool>  tileHasSetSpeed; // true if tile has a SetSpeed event
@@ -160,6 +170,11 @@ struct LevelData {
     // 释放之后，所以不能再看 .empty()。三处判据（Timeline.cpp、app/LevelScene.cpp、
     // tests/level_parse_test.cpp 的自检）必须一起用它。
     bool hasAtStates = false;
+    // 粘性标志（同 hasAtStates 的理由）：`releaseMemory()` 会清掉每砖 hitsound 覆盖与音量
+    // （它们只服务加载期的打拍音合成）。清完之后 `Timeline::getHitsoundTimestampGroups()`
+    // 再算就是**静默错值**（类型退化成 settings.hitsound、音量退化成 settings.hitsoundVolume），
+    // 所以用这个标志让它**明确报错**而不是给一份看起来正常的错表。
+    bool hitsoundCachesReleased = false;
 
     // ---- 所有权与拷贝/移动（2026-10-17 补）----
     // 这里原来只有析构、没有禁拷贝：`LevelData a; LevelData b = a;` 会让两个对象各持同一个
@@ -183,6 +198,23 @@ struct LevelData {
 
     using ProgressCb = std::function<void(float pct, const char* stage)>;
 
+    // ---- 派生病重与写回（ADOCAO-E 编辑器要用的公开入口；2026-10-17）----
+    // 幂等地从 `actions` 重建**全部每砖派生缓存**：tileBPMs / tileHasTwirl / tileHasSetSpeed /
+    // tileHitsounds / tileHitsoundVolumes / tilePositionOffsets / bookmarkFloors / atStates。
+    // 每次调用都先清空再重建，所以可以反复调（加载收尾就是调它一次）；**不碰 `tiles`**。
+    // 层数取自 `angleCount()` → `releaseAngleData()` 之后也能用。
+    void refreshDerivedCaches();
+
+    // 角度写回。`releaseAngleData()` 之后角度只剩位打包下标（AngleStore 只允许改成字典里
+    // **已有**的取值），所以编辑任意角度前要先 `expandAngles()` 回到密集数组。
+    // 改完谁改了谁负责重建：`refreshDerivedCaches()`（事件派生）+ `rebuildPositions()`（几何）。
+    bool expandAngles();                          // 紧凑 → 密集；已是密集时无操作
+    bool setAngles(std::vector<double> angles);   // 整体替换（顺带展开）
+    bool setAngle(int64_t i, double v);           // 单点替换（需要时自动展开）
+    // 从当前 `angleData` 重建 `tiles` 的位置/方向 + PositionTrack 偏移。
+    // 窗口化（`dropTilesArray()` 之后）不可用 —— 那时几何只能由容器窗口重算。
+    bool rebuildPositions(std::string* err = nullptr);
+
     bool loadFromFile(const std::string& filepath, ProgressCb onProgress = nullptr, bool exportOnly = false);
     bool loadFromString(const std::string& jsonStr, ProgressCb onProgress = nullptr, bool exportOnly = false);
     // Same thing on a raw buffer (used by loadFromFile's mmap and by tests)
@@ -201,7 +233,6 @@ private:
 
     void calculateTilePositions();
     void convertPathToAngles();
-    void processActions();
     void applyPositionTrackOffsets();
     static float pathCharToAngle(char c);
 };

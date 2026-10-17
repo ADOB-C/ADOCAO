@@ -601,8 +601,11 @@ bool Timeline::buildRawPcm(std::vector<float>& out, double& sampleRateOut) const
 // "一击不多一击不少"的谱上直接量得出来）。
 int Timeline::realTileCount() const {
     int n = (int)tileCount();
-    if (m_level && !m_level->angleData.empty() && (int)m_level->angleData.size() < n)
-        n = (int)m_level->angleData.size();
+    // ⚠️ 必须走 `angleCount()`，不能用 `angleData.size()`：后者在 `releaseAngleData()`
+    // 之后是**空**的，于是这条夹取被整段跳过 → 末尾那块合成砖被算成真砖（实测 729 → 730，
+    // 多排一次打拍音；这个 bug 只在"压缩了角度"的路径上出现，明文加载看不出来）。
+    const int64_t ac = m_level ? m_level->angleCount() : 0;
+    if (ac > 0 && ac < n) n = (int)ac;
     return n;
 }
 
@@ -618,6 +621,14 @@ std::vector<double> Timeline::getHitsoundTimestamps() const {
 
 std::vector<HitsoundTimestampGroup> Timeline::getHitsoundTimestampGroups() const {
     std::vector<HitsoundTimestampGroup> groups;
+    // 每砖 hitsound 覆盖/音量在 `releaseMemory()` 里被释放之后，这里会**静默**退化成
+    // "全部用 settings 的默认类型/音量" —— 那看起来完全正常，却是一份错表（ADOCAO-E 拿它
+    // 做音频预览会听到错的音色）。所以宁可明确失败：日志 + 空表，调用方必须自己判断。
+    if (m_level && m_level->hitsoundCachesReleased) {
+        LOG_E("getHitsoundTimestampGroups：每砖 hitsound 覆盖/音量已被 releaseMemory() 释放，"
+              "结果不可信 —— 请在释放之前取，或重新加载关卡");
+        return groups;
+    }
     int n = realTileCount();
     if (n < 2) return groups;
 

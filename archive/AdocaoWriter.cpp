@@ -139,6 +139,9 @@ void writeSettings(const LevelData::Settings& s, Pool& pool, std::vector<uint8_t
     putU16(b, pool.add(s.trackAnimation));
     putF32(b, s.beatsBehind);
     putF32(b, s.beatsAhead);
+    // 2026-10-17 追加（**末尾**，所以读侧既能读新文件也能读旧文件；旧读者会忽略尾部多余字节）：
+    // `.adofai` 的 `"song"`，ADOCAO-E 的"另存/重打包"需要它。
+    putU16(b, pool.add(s.songFilename));
 }
 
 }  // namespace

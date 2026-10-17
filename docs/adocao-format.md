@@ -118,8 +118,12 @@ Header (76 B) | SectionEntry × sectionCount (40 B each) | padding → 8 B 对�
 zoom(f32) | rotation(f32) | relativeTo(u16 池下标) | position[2](f32) | hitsound(u16) |
 hitsoundVolume(f32) | trackColor(u16) | secondaryTrackColor(u16) | backgroundColor(u16) |
 stickToFloors(u8) | planetEase(u16) | trackDisappearAnimation(u16) | trackAnimation(u16) |
-beatsBehind(f32) | beatsAhead(f32)`
+beatsBehind(f32) | beatsAhead(f32) | songFilename(u16 池下标)`
 
+* **末尾的 `songFilename` 是 2026-10-17 追加的**（ADOCAO-E 另存/重打包要 `.adofai` 的 `"song"`）。
+  追加在**末尾**是为了双向兼容：读侧 `parseSettings()` 只在 `off + 2 <= 段长度` 时才读它
+  （旧文件没有这两个字节 → 保留默认值，不是坏数据）；旧读者按原有字段顺序读完就返回，
+  尾部多余字节本来就被忽略。因此**不用** bump 版本号。
 * `f32` 按**位模式**原样存（float 列必须逐位无损）。
 * 未知 settings 键与今天两条解析路径的行为一致（本来就只读已知字段）；无损回写靠 `Preserved` 段。
 

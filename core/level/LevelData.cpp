@@ -1011,6 +1011,8 @@ static void readSettings(const rapidjson::Value& s, LevelData::Settings& out) {
     auto getS = [&](const char* k, const std::string& d) -> std::string {
         return (s.HasMember(k) && s[k].IsString()) ? s[k].GetString() : d;
     };
+    out.songFilename    = getS("song", s.HasMember("songFilename") ? getS("songFilename", out.songFilename)
+                                                                  : out.songFilename);
     out.bpm             = getF("bpm", out.bpm);
     out.offset          = getF("offset", out.offset);
     out.countdownTicks  = getI("countdownTicks", out.countdownTicks);
@@ -1472,7 +1474,7 @@ bool LevelData::finishLoad(ProgressCb onProgress, bool exportOnly) {
         calculateTilePositions();
     }
     if (onProgress) onProgress(0.40f, "Processing actions...");
-    processActions();
+    refreshDerivedCaches();
     if (!exportOnly) {
         applyPositionTrackOffsets();
     }
@@ -1578,11 +1580,14 @@ float LevelData::pathCharToAngle(char c) {
     }
 }
 
-void LevelData::processActions() {
+void LevelData::refreshDerivedCaches() {
+    // **幂等**：先清空全部派生结构再按 `actions` 重建（ADOCAO-E 改完事件可以反复调）。
+    // 层数走 `angleCount()` —— `releaseAngleData()` 之后 `angleData` 是空的，而位打包存储里
+    // 还有层数（原来这里读 `angleData.size()`，等于要求"必须在压缩之前调"的隐式约束）。
     // +1 是第 0 层那一格；用 int64 算，避免 2^31−1 时 `+1` 有符号溢出（UBSan 报过）。
-    const int64_t nFull = countFromAngleCount((int64_t)angleData.size());
+    const int64_t nFull = countFromAngleCount(angleCount());
     if (!fitsInt32(nFull)) {
-        LOG_E("processActions 需要 64 位索引（2^31−1 目标 #0 阶段 3）：%lld 层超出 int32",
+        LOG_E("refreshDerivedCaches 需要 64 位索引（2^31−1 目标 #0 阶段 3）：%lld 层超出 int32",
               (long long)nFull);
         return;
     }
@@ -1590,6 +1595,12 @@ void LevelData::processActions() {
     tileBPMs.assign(n, settings.bpm);
     tileHasTwirl.assign(n, false);
     tileHasSetSpeed.assign(n, false);
+    // 稀疏/有条件分配的几支：不清就会留下上一次的条目（改完事件后"幽灵 hitsound/偏移"）
+    tileHitsounds.clear();
+    tileHitsoundVolumes.clear();
+    tilePositionOffsets.clear();
+    atStates.clear();
+    hasAtStates = false;
     bookmarkFloors.clear();
 
     // ③ 2026-10-16：SetSpeed 改成**事件表**（旧的是"每层一个槽"的 12 B/层稠密数组）：
@@ -1736,6 +1747,48 @@ void WinCacheDeleter::operator()(FloorWindowCache* p) const { delete p; }
 
 LevelData::~LevelData() = default;
 
+bool LevelData::expandAngles() {
+    if (!m_angleStore.valid()) return !angleData.empty();   // 本来就是密集数组
+    if (angleData.empty()) {
+        const int64_t n = m_angleStore.size();
+        angleData.resize((size_t)n);
+        for (int64_t i = 0; i < n; ++i) angleData[(size_t)i] = m_angleStore.at(i);
+    }
+    m_angleStore = AngleStore{};                            // 失效：之后 angleAt() 走密集数组
+    return !angleData.empty();
+}
+
+bool LevelData::setAngles(std::vector<double> angles) {
+    m_angleStore = AngleStore{};                            // 整段换掉，位打包下标作废
+    angleData = std::move(angles);
+    return !angleData.empty();
+}
+
+bool LevelData::setAngle(int64_t i, double v) {
+    if (!expandAngles()) return false;
+    if (i < 0 || (size_t)i >= angleData.size()) return false;
+    angleData[(size_t)i] = v;
+    return true;
+}
+
+bool LevelData::rebuildPositions(std::string* err) {
+    if (tilesWindowed()) {
+        if (err) *err = "已丢弃密集 tiles（窗口化），不能就地重建几何 —— 只能由容器窗口重算";
+        return false;
+    }
+    if (angleData.empty()) {
+        if (err) *err = "angleData 为空：先 expandAngles()（或 setAngles()）";
+        return false;
+    }
+    // 顺序有讲究：位置是角度的纯函数（`calculateTilePositions` 会整段重写 tiles），
+    // 派生缓存重建（含 tilePositionOffsets）之后再叠加一次偏移 —— 这样反复调用不会
+    // 把 PositionTrack 的偏移叠加两遍。
+    calculateTilePositions();
+    refreshDerivedCaches();
+    applyPositionTrackOffsets();
+    return true;
+}
+
 bool LevelData::releaseAngleData(std::string* err) {
     const size_t rawBytes = angleData.size() * sizeof(double);
     std::string e;
@@ -1759,6 +1812,9 @@ void LevelData::releaseMemory() {
     if (!tilesWindowed()) tilePositionOffsets.clear();
     tileHitsounds.clear();
     tileHitsoundVolumes.clear(); tileHitsoundVolumes.shrink_to_fit();
+    // 粘性：这两支清掉之后，`Timeline::getHitsoundTimestampGroups()` 再也算不出正确的分组
+    // （类型/音量都会退化成 settings 里的默认值）→ 让那个函数明确报错，而不是静默给错表。
+    hitsoundCachesReleased = true;
     // atStates 只有 Timeline::build() 用（它在本函数之前就跑完了），运行时只靠 hasAtStates 判定，
     // 所以实体可以释放：每条 101 B（两个 std::string + 2 float + bool），AnimateTrack 密集的谱上很可观。
     atStates.clear();

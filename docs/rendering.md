@@ -240,6 +240,13 @@ ADOCAO_TILE_EXACT=1 ./build/tests/adocao_tile_expansion_test tests/charts/shapes
   生产 `tile.vert`，画点进 RGBA32F FBO 再读回来比）、`scripts/capture-gate.sh`（像素）。
 - `fma()` 要 GLSL 4.00+ → 上下文请求是 **4.1**（`app/GameWindow.cpp`；macOS 上限也是 4.1）。
   实测 3.3 ↔ 4.1 **像素中性**（当时的 34 个验收状态逐字节相同）。
+- **`tileBPMs` / `tileHasTwirl` / `tileHasSetSpeed` 是"绘制期依赖"，不是加载期临时数据**：
+  `TileMesh` 在**每帧**派生可见窗口的每砖数据时会读这三张表（`deriveRange` 读图标位、
+  provider 合成 SetSpeed 事件读 `tileBPMs`）。所以：
+  * `LevelData::releaseMemory()` **必须留着它们**（4 B/层 + 2 bit/层）；
+  * 窗口化之后**绝对不能清** `tileHasTwirl/tileHasSetSpeed`（清了图标全变 0：实测块 0 有
+    2148 处不一致、出图 858 个边缘散点）；
+  * 编辑器改完事件用 `LevelData::refreshDerivedCaches()` 重建，别手搓这几张表。
 - **拿不到 4.x 的退路（2026-10-17 落地）**：砖块 VS 有两支 —— `tile.vert`（410，fma 展开）与
   `tile_cpu.vert`（330，**查表**）。后者不在 GPU 上算几何：`TileShape::expand()` 在 CPU 上把每个
   canonical 槽位展开成 RG32F 纹理（每形状 175 texel，texel i = 槽位 i 的 (x,y)），VS 里只有

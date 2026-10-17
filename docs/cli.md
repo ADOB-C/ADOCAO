@@ -49,6 +49,12 @@ adocao stitch <dir> <out.png>           [--scale N] [--threads N]
 Trail sampling — two independent axes, both optional and **off by default** (wizard
 Visuals page / CLI):
 
+### 从指定时刻开始（`--start-at SEC`）
+
+`--start-at SEC` 让播放从关卡时间的该秒数开始，等价于"选砖后按空格"：时钟、音乐 seek、
+音色游标一起跳过去。给 profiling/自动化用（配合 `ADOCAO_PROFILE=1 ADOCAO_EXIT_AFTER_MS=N`
+就能量"从某个中途点开始播"的整段剖面，而不必从头播）。
+
 ### 抓帧与关卡相机（`--capture` / `--capture-camera`）
 
 `--capture <out.png>` 是**确定性抓帧**（不走 wall clock / 音频 / 帧时间反馈），

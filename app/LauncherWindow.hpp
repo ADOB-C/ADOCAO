@@ -18,6 +18,9 @@ struct LauncherConfig {
     bool   enableHitsounds = true;
     std::string forceHitsoundType;  // force "None" hitsound to this type (empty = disabled)
     bool   autoPlay = false;       // auto-start playback after loading
+    // 播放从这一时刻（关卡时间，秒）开始；>0 时等价于"选砖后按空格"（含音乐 seek）。
+    // 诊断/自动化用（CLI `--start-at`）。
+    float  startAt = 0.0f;
     int    msaaSamples = 0;        // MSAA samples (0=off, 2, 4, 8)
     bool   exclusiveFullscreen = true; // exclusive fullscreen (vs borderless windowed)
     int  resolutionW = 1920;

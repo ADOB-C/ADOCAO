@@ -740,7 +740,24 @@ void GameWindow::run() {
         return;
     }
 
+    // `--start-at`：等价于"选砖后按空格"——时钟/音乐/音色都 seek 到该时刻再开播。
+    if (m_cfg->startAt > 0.0f) {
+        const float audioPos = m_cfg->startAt + m_playback->preRoll() - m_playback->audioStartOffset();
+        m_playback->startAt(glfwGetTime(), audioPos, 0.0f);
+        m_hitsoundMgr->resetAt(audioPos);
+        if (m_audioEngine->hasMusic()) {
+            m_audioEngine->seek(audioPos);
+            m_audioEngine->play();
+        }
+        LOG_I("start-at: %.3fs（audioPos=%.3fs）", (double)m_cfg->startAt, (double)audioPos);
+    }
+
     double targetFrameTime = 1.0 / 320.0;
+    // 诊断钩子：跑到 N 毫秒后**正常退出**（好让 `profile::reportSteady()` 打分段报告）。
+    // 只给 `ADOCAO_PROFILE=1` 的全流程剖面用；不设 = 行为完全不变。
+    double exitAfterMs = 0.0;
+    if (const char* e = std::getenv("ADOCAO_EXIT_AFTER_MS")) exitAfterMs = std::atof(e);
+    const double runT0 = glfwGetTime();
 
     std::vector<double> soakWork, soakFrame;
     std::vector<int> soakDrawn;
@@ -786,6 +803,10 @@ void GameWindow::run() {
             profile::frameEnd();
             m_scene->setMeasuredFrameMs(workMs);
             glfwSwapBuffers(m_window);
+            if (exitAfterMs > 0.0 && (glfwGetTime() - runT0) * 1000.0 >= exitAfterMs) {
+                LOG_I("run: ADOCAO_EXIT_AFTER_MS=%.0f 到点，正常退出（输出分段 profile）", exitAfterMs);
+                glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+            }
             if (profile::enabled()) {
                 // 浸泡统计：`work` = update+render，`frame` = 算上 swap/pacing 的整圈
                 soakWork.push_back(workMs);

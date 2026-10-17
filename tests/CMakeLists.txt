@@ -227,3 +227,11 @@ add_executable(adocao_camera_timeline_test camera_timeline_test.cpp)
 target_include_directories(adocao_camera_timeline_test PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(adocao_camera_timeline_test PRIVATE adocao_core)
 add_test(NAME camera_timeline COMMAND adocao_camera_timeline_test)
+
+# 两层摄像机（core/camera/CameraDirector）：**跨语言金标** —— 同一批事件分别喂给
+# Re_ADOJAS 的 CameraController.ts（node 直跑）与我们的移植版，逐帧比较。生成器：
+# tests/gen_camera_gold.mjs（金标 tests/camera_gold.inc；wrapper 见 gen_camera_gold.sh）。
+add_executable(adocao_camera_test camera_test.cpp)
+target_include_directories(adocao_camera_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(adocao_camera_test PRIVATE adocao_core)
+add_test(NAME camera COMMAND adocao_camera_test)

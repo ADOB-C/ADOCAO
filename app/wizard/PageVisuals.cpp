@@ -104,8 +104,9 @@ void drawVisualsPage(State& st, const Chrome& ch) {
     ImGui::ColorEdit3("##bg", st.bgColor.data(), ImGuiColorEditFlags_DisplayHex);
     ImGui::Spacing();
 
-    if (drawNavButton(ch, false, true)) {
-        st.page = Page::Music;
+    bool back = false;
+    if (drawNavButton(ch, false, true, /*showBack=*/true, &back) || back) {
+        st.page = back ? Page::Graphics : Page::Visuals;
     }
 }
 

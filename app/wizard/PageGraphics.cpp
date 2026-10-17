@@ -44,8 +44,9 @@ void drawGraphicsPage(State& st, const Chrome& ch) {
                           "floors, 256 ~= 320 MB). Never changes what is drawn.");
     ImGui::Spacing();
 
-    if (drawNavButton(ch, false, true)) {
-        st.page = Page::Visuals;
+    bool back = false;
+    if (drawNavButton(ch, false, true, /*showBack=*/true, &back) || back) {
+        st.page = back ? Page::Hitsounds : Page::Graphics;
     }
 }
 

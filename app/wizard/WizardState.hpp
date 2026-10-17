@@ -67,7 +67,8 @@ static_assert(kCullBlockDefaultIdx < (int)kCullBlockValues.size(), "剔除块粒
 static_assert(kCullBlockValues[kCullBlockDefaultIdx] == 4096, "剔除块粒度：默认值应当是 4096");
 
 // Wizard page ids, in display order.
-enum class Page : int { Welcome = 0, Preload, Hitsounds, Graphics, Visuals, Music };
+// 没有单独的 Preload 页：预载在后台跑，进度内联在 Hitsounds 页里 ✓
+enum class Page : int { Welcome = 0, Hitsounds, Graphics, Visuals, Music };
 
 // All cross-page UI edit state. User selections are staged in the editor
 // buffers below and committed into cfg when leaving the wizard (Start on the

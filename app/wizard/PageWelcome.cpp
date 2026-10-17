@@ -93,29 +93,10 @@ void drawWelcomePage(State& st, const Chrome& ch) {
             } else {
                 st.lastError.clear();
             }
-            if (st.preloadEnabled) {
-                // Start background preload (parse + timeline)
-                st.preloadProgress.percent.store(0.0f);
-                st.preloadProgress.stage.store(0);
-                {
-                    std::lock_guard<std::mutex> lk(st.preloadProgress.textMutex);
-                    snprintf(st.preloadProgress.stageText, sizeof(st.preloadProgress.stageText),
-                             "Starting...");
-                }
-                st.preloadFinished.store(false);
-                st.preloadRunning = true;
-                st.cfg.preloadedLevel.reset();
-                st.cfg.preloadedTimeline.reset();
-                st.preloadThread = Scheduler::instance().submit(
-                    Lane::Background, [&st](Scheduler::CancelToken) {
-                        runLevelPreload(st.cfg, st.preloadProgress,
-                                        st.cfg.preloadedLevel, st.cfg.preloadedTimeline);
-                        st.preloadFinished.store(true);
-                    });
-                st.page = Page::Preload;
-            } else {
-                st.page = Page::Hitsounds;
-            }
+            // ② 不再有单独的"Preloading level..."页 ✗：预载在后台跑，用户直接进 Hitsounds，
+            // 进度与"再预载一次"的按钮都放在那一页里（页内联显示 ✓）。
+            if (st.preloadEnabled) wizard::startPreload(st);
+            st.page = Page::Hitsounds;
         }
     }
     ImGui::SameLine(0.0f, 12.0f * S);

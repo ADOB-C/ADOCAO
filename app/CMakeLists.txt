@@ -25,7 +25,6 @@ set(ADOCAO_APP_SOURCES
     wizard/FileDialogs.cpp
     wizard/FileDialogs.hpp
     wizard/PageWelcome.cpp
-    wizard/PagePreload.cpp
     wizard/PageHitsounds.cpp
     wizard/PageGraphics.cpp
     wizard/PageVisuals.cpp

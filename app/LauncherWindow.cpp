@@ -40,9 +40,9 @@ LauncherConfig showLauncher() {
                 st.preloadThread.clear();
             }
             st.preloadRunning = false;
+            // ② 不再切页（用户已经在 Hitsounds 上了 ✓）：成功就顺手回填音乐，失败只留错误信息
+            // （页面右侧会红字显示，Back 可回去改谱 ✓）。
             if (st.cfg.preloadedLevel && st.cfg.preloadedTimeline) {
-                st.page = wizard::Page::Hitsounds;
-                // Auto-fill music from the parsed level (settings.musicFile)
                 if (st.musicBuf[0] == '\0') {
                     std::string autoMusic = wizard::detectMusicFile(st.cfg.levelPath);
                     if (!autoMusic.empty())
@@ -50,7 +50,6 @@ LauncherConfig showLauncher() {
                 }
             } else {
                 st.lastError = "Failed to load level. Please check the file.";
-                st.page = wizard::Page::Welcome;
             }
         }
 
@@ -67,7 +66,6 @@ LauncherConfig showLauncher() {
 
         switch (st.page) {
             case wizard::Page::Welcome:   wizard::drawWelcomePage(st, chrome);   break;
-            case wizard::Page::Preload:   wizard::drawPreloadPage(st, chrome);   break;
             case wizard::Page::Hitsounds: wizard::drawHitsoundsPage(st, chrome); break;
             case wizard::Page::Graphics:  wizard::drawGraphicsPage(st, chrome);  break;
             case wizard::Page::Visuals:   wizard::drawVisualsPage(st, chrome);   break;

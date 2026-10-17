@@ -1,10 +1,15 @@
+#include "core/util/Scheduler.hpp"   // startPreload
 #include "WizardChrome.hpp"
+#include "WizardState.hpp"
+#include "app/LevelLoader.hpp"   // runLevelPreload（startPreload 用）
 
 #include "app/FontSetup.hpp"           // 字体候选表 + "只认真正加载成功"的加载器
 #include "core/util/Logger.hpp"     // CJK 字体加载失败要喊一声（否则只看到 `????`）
 #include "glad/gl_core.hpp"
 #include <GLFW/glfw3.h>
 #include <imgui.h>
+#include <cstdio>
+#include <mutex>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 #include <algorithm>
@@ -134,12 +139,20 @@ void drawConfigHeader(const Chrome& chrome, const char* title, float progressPct
     ImGui::Spacing();
 }
 
-bool drawNavButton(const Chrome& chrome, bool isStart, bool canContinue) {
+bool drawNavButton(const Chrome& chrome, bool isStart, bool canContinue,
+                   bool showBack, bool* backPressed) {
     const float S = 1.0f;  // hardcoded sizes are in logical pixels
     const float btnW = 110.0f * S;
     const float btnH = 30.0f * S;
 
+    if (backPressed) *backPressed = false;
     ImGui::SetCursorPosY((float)chrome.winH - 56.0f * S);
+    // Back 在 Next 左侧 12px；窗口比两个按钮宽得多，不会挤到标题栏
+    if (showBack) {
+        const float xb = ((float)chrome.winW - btnW) / 2.0f - btnW - 12.0f * S;
+        ImGui::SetCursorPosX(xb);
+        if (ImGui::Button("Back", ImVec2(btnW, btnH)) && backPressed) *backPressed = true;
+    }
     float xb = ((float)chrome.winW - btnW) / 2.0f;
     ImGui::SetCursorPosX(xb);
     if (!canContinue) ImGui::BeginDisabled();
@@ -147,6 +160,31 @@ bool drawNavButton(const Chrome& chrome, bool isStart, bool canContinue) {
     bool pressed = ImGui::Button(label, ImVec2(btnW, btnH));
     if (!canContinue) ImGui::EndDisabled();
     return pressed;
+}
+
+void startPreload(State& st) {
+    // 已有任务在跑：先取消 + 汇合，否则两个任务会同时写 preloadedLevel/Timeline ✗
+    if (st.preloadRunning && st.preloadThread.valid()) {
+        st.preloadThread.cancel();
+        st.preloadThread.wait();
+        st.preloadThread.clear();
+    }
+    st.preloadProgress.percent.store(0.0f);
+    st.preloadProgress.stage.store(0);
+    {
+        std::lock_guard<std::mutex> lk(st.preloadProgress.textMutex);
+        snprintf(st.preloadProgress.stageText, sizeof(st.preloadProgress.stageText), "Starting...");
+    }
+    st.preloadFinished.store(false);
+    st.preloadRunning = true;
+    st.cfg.preloadedLevel.reset();
+    st.cfg.preloadedTimeline.reset();
+    st.lastError.clear();
+    st.preloadThread = adofai::Scheduler::instance().submit(
+        adofai::Lane::Background, [&st](adofai::Scheduler::CancelToken) {
+            runLevelPreload(st.cfg, st.preloadProgress, st.cfg.preloadedLevel, st.cfg.preloadedTimeline);
+            st.preloadFinished.store(true);
+        });
 }
 
 } // namespace wizard

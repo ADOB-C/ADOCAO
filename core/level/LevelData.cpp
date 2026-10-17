@@ -52,6 +52,16 @@ static void setFastStage(const char* what, long long off) {
     g_fastStage = g_fastStageBuf;
 }
 
+// 事件字符串驻留表（`actionStrTable`）当前归谁所有。**进程级单例**，理由：驻留要在
+// `buildAction()`（并行分块里跑的纯函数）中访问表，传指针会污染整条调用链。
+// ⚠️ 因此**不支持"同时加载两个 LevelData"**：并行加载两份谱时后者会把前者的表覆盖掉，
+// buildAction 于是把字符串驻留进别的关卡的表（strId 语义错，症状是 hitsound 名/动画名串台）。
+// 现在所有入口都是"一次加载一份"（GUI 单关卡、CLI 单谱、测试串行），要支持并发加载
+// 得先把这张表挪进加载上下文（`LoadContext`）再传下去 —— 别只把这行改成 thread_local ✗
+// （并行分块的 worker 之间要共享同一份表，per-thread 会各自建表、strId 对不上）。
+// parseNumber 的栈上 token 缓冲：双精度十进制最长 ~24 字符，128 是宽裕上限（超了走堆）
+constexpr size_t kNumBufLen = 128;
+
 static LevelData* g_internOwner = nullptr;
 
 namespace {
@@ -189,7 +199,8 @@ inline bool parseNumber(const char*& p, const char* e, double& out) {
         if (q <= start) { p = start; return false; }
         // 到这里 [start, q) 是完整 token，复制到本地缓冲再 NUL 终止后转换
         // （仍然走 strtod，保证与旧路径 parseAngleDataFast 逐位同值）。
-        char buf[128];
+        // 128 = 双精度十进制的最长表示（~24 字符）+ 大量余量；超长罕见 token 走堆，不截断。
+        char buf[kNumBufLen];
         const size_t n = (size_t)(q - start);
         std::string heap;
         char* dst = buf;
@@ -289,6 +300,10 @@ inline bool scanRootMembers(const char* s, const char* e, Regions& r,
             if (!r.path && *p == '"') { r.path = p; r.pathEnd = vEnd - 1; }
         }
         p = vEnd;
+        // ⚠️ 这里的根成员扫描（成员名/逗号容错/值跳过）与 `WindowParser::step()` 是**两份实现**：
+        // 快路径吃整块缓冲、窗口路径要能跨窗挂起，没法直接共用。改 cleanJson 的容错规则时
+        // **两处一起改**，否则"明文能读、压缩谱放弃快路径"——`tests/level_parse_test.cpp` 的对拍
+        // 会红（两条路各跑一遍），但只在覆盖到的语法上红，逐条扫一遍更稳。
     }
 }
 
@@ -986,28 +1001,32 @@ struct WindowParser {
 };
 
 // settings 的读取：新旧两条路共用，保证字段语义一致。
+// **缺省值一律用 `out` 里已有的值**（不是字面量）：这正是"文件里没出现的字段沿用调用方给的
+// 默认值"那条约定的实现（CLI/向导可以预置颜色等）。`Settings` 的构造函数默认值与旧的字面量
+// 完全相同，所以对"新建对象 + 完整文件"这条常态路径**逐位等价**；
+// 区别只出现在"调用方预置了某字段、而文件里恰好没有"的时候 —— 那时旧实现会把预置值冲掉 ✗。
 static void readSettings(const rapidjson::Value& s, LevelData::Settings& out) {
     auto getF = [&](const char* k, float d) { return s.HasMember(k) ? s[k].GetFloat() : d; };
     auto getI = [&](const char* k, int d) { return s.HasMember(k) ? s[k].GetInt() : d; };
-    auto getS = [&](const char* k, const char* d) -> std::string {
+    auto getS = [&](const char* k, const std::string& d) -> std::string {
         return (s.HasMember(k) && s[k].IsString()) ? s[k].GetString() : d;
     };
-    out.bpm             = getF("bpm", 100.0f);
-    out.offset          = getF("offset", 0.0f);
-    out.countdownTicks  = getI("countdownTicks", 4);
-    out.zoom            = getF("zoom", 100.0f);
-    out.rotation        = getF("rotation", 0.0f);
-    out.relativeTo      = getS("relativeTo", "Player");
-    out.hitsound        = getS("hitsound", "Kick");
-    out.hitsoundVolume  = getF("hitsoundVolume", 100.0f);
-    out.trackColor      = getS("trackColor", "debb7b");
-    out.secondaryTrackColor = getS("secondaryTrackColor", "ffffff");
-    out.backgroundColor = getS("backgroundColor", "000000");
-    out.planetEase      = getS("planetEase", "Linear");
-    out.trackDisappearAnimation = getS("trackDisappearAnimation", "None");
-    out.trackAnimation  = getS("trackAnimation", "None");
-    out.beatsBehind     = getF("beatsBehind", 4.0f);
-    out.beatsAhead      = getF("beatsAhead", 3.0f);
+    out.bpm             = getF("bpm", out.bpm);
+    out.offset          = getF("offset", out.offset);
+    out.countdownTicks  = getI("countdownTicks", out.countdownTicks);
+    out.zoom            = getF("zoom", out.zoom);
+    out.rotation        = getF("rotation", out.rotation);
+    out.relativeTo      = getS("relativeTo", out.relativeTo);
+    out.hitsound        = getS("hitsound", out.hitsound);
+    out.hitsoundVolume  = getF("hitsoundVolume", out.hitsoundVolume);
+    out.trackColor      = getS("trackColor", out.trackColor);
+    out.secondaryTrackColor = getS("secondaryTrackColor", out.secondaryTrackColor);
+    out.backgroundColor = getS("backgroundColor", out.backgroundColor);
+    out.planetEase      = getS("planetEase", out.planetEase);
+    out.trackDisappearAnimation = getS("trackDisappearAnimation", out.trackDisappearAnimation);
+    out.trackAnimation  = getS("trackAnimation", out.trackAnimation);
+    out.beatsBehind     = getF("beatsBehind", out.beatsBehind);
+    out.beatsAhead      = getF("beatsAhead", out.beatsAhead);
     if (s.HasMember("stickToFloors")) {
         if (s["stickToFloors"].IsBool()) out.stickToFloors = s["stickToFloors"].GetBool();
         else if (s["stickToFloors"].IsString()) {
@@ -1084,6 +1103,16 @@ bool LevelData::loadFromString(const std::string& jsonStr, ProgressCb onProgress
 }
 
 bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgress, bool exportOnly) {
+    // **幂等**：同一个对象加载两次必须与"新建一个再加载"等价。以前只清了驻留表，于是
+    // `actions` 会被追加（两条路都是 `if (actions.empty()) … else insert(...)`）而
+    // `angleData` 是替换 —— 结果是"角度新的、事件两份"。现在先回到刚构造的状态。
+    // ⚠️ `settings` **例外**：它是"文件里没出现的字段沿用调用方给的值"的载体
+    // （CLI 预置颜色、向导的配置），必须留着（见 parseLegacy / 窗口路径里的沿用逻辑）。
+    {
+        Settings keep = settings;
+        *this = LevelData{};
+        settings = keep;
+    }
     g_internOwner = this;                                  // 事件字符串驻留表归本次加载所有
     actionStrTable.resize(1);                              // id 0 = 空串
     tlsOwner = nullptr;                                // thread-local 缓存失效
@@ -1238,8 +1267,8 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
 // 每窗口 32 KB、最多 8 个 → 扫描量与谱面大小无关（总共 256 KB 上限，微秒级）。
 static size_t estimateAngleCount(const char* p, size_t span) {
     if (span == 0) return 0;
-    const size_t kW = 32u << 10;
-    const int    kMaxWin = 8;
+    const size_t kW = 32u << 10;     // 每个采样窗 32 KB
+    const int    kMaxWin = 8;        // 最多 8 个窗（总扫描 ≤ 256 KB，与谱面大小无关）
     size_t best = 0;
     for (int w = 0; w < kMaxWin; ++w) {
         // 均匀铺开：窗口中心按 (w+0.5)/kMaxWin 落在整段上
@@ -1255,7 +1284,9 @@ static size_t estimateAngleCount(const char* p, size_t span) {
         if (est > best) best = est;
     }
     if (best == 0) return span / 3;        // 退化（一个逗号都没采到）：退回旧启发式
-    return best + best / 8 + 16;           // +12.5% 余量，确保不触发倍增
+    // +12.5% 余量确保不触发倍增；末尾 +16 是**极小谱面的下限**：窗口采到 1 个逗号时
+    // 外推值可能是 1~2，直接 reserve 会让 push_back 立刻扩容一次（白白两倍峰值）。
+    return best + best / 8 + 16;
 }
 
 bool LevelData::tryFastParse(const char* data, size_t len, ProgressCb onProgress) {
@@ -1701,7 +1732,9 @@ void LevelData::applyPositionTrackOffsets() {
     }
 }
 
-LevelData::~LevelData() { delete m_winCache; m_winCache = nullptr; }
+void WinCacheDeleter::operator()(FloorWindowCache* p) const { delete p; }
+
+LevelData::~LevelData() = default;
 
 bool LevelData::releaseAngleData(std::string* err) {
     const size_t rawBytes = angleData.size() * sizeof(double);

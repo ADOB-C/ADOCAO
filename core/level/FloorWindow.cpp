@@ -111,14 +111,17 @@ bool computeCheckpoints(const LevelData& level, uint32_t stride,
             return false;
         }
 
-        const double a = level.angleData[i];
+        // 走访问器（密集数组或 releaseAngleData 之后的紧凑存储都能读）——
+        // 以前直接 `level.angleData[i]`，等于把"必须在 releaseAngleData 之前调用"这条
+        // 隐式约束焊在源码里，顺序错一步就是静默 UB ✗
+        const double a = level.angleAt(i);
         if (a == 999.0) { lastWasSentinel = true; ++sentinelRun; }
         else { lastReal = a; haveLast = true; lastWasSentinel = false; sentinelRun = 0; }
         // angleDir = "进下一层的方向"（ADOFAI-JS 语义，与 Phase 1 的收尾更新逐字同序）
         if (a == 999.0) {
             int minus = 1;
-            while ((int64_t)i - minus >= 0 && level.angleData[i - minus] == 999.0) ++minus;
-            const double realAngle = ((int64_t)i - minus >= 0) ? level.angleData[i - minus] : 0.0;
+            while ((int64_t)i - minus >= 0 && level.angleAt(i - minus) == 999.0) ++minus;
+            const double realAngle = ((int64_t)i - minus >= 0) ? level.angleAt(i - minus) : 0.0;
             angleDir = (float)std::fmod(realAngle + (minus - 1) * 180.0, 360.0);
         } else {
             angleDir = (float)std::fmod(a + 180.0, 360.0);
@@ -175,7 +178,7 @@ int64_t LevelData::tileCount() const {
 }
 
 std::array<double, 2> LevelData::tilePositionAt(int64_t i, FloorWindowCache* wc) const {
-    FloorWindowCache* c = wc ? wc : m_winCache;
+    FloorWindowCache* c = wc ? wc : m_winCache.get();
     if (c && c->windowed()) {
         const Tile* t = c->tileAt(i);
         if (t) return t->position;
@@ -185,7 +188,7 @@ std::array<double, 2> LevelData::tilePositionAt(int64_t i, FloorWindowCache* wc)
 }
 
 float LevelData::tileDirectionAt(int64_t i, FloorWindowCache* wc) const {
-    FloorWindowCache* c = wc ? wc : m_winCache;
+    FloorWindowCache* c = wc ? wc : m_winCache.get();
     if (c && c->windowed()) {
         const Tile* t = c->tileAt(i);
         if (t) return t->direction;
@@ -210,12 +213,11 @@ FloorWindowCache* LevelData::threadWindowCache() const {
 bool LevelData::buildFloorWindowCache(const std::vector<double>& startTimes,
                                       const std::vector<float>& bpms,
                                       const std::vector<bool>& isCW, std::string* err) {
-    m_winCache = new FloorWindowCache();
+    m_winCache.reset(new FloorWindowCache());
     std::string e;
     if (m_winCache->init(*this, startTimes, bpms, isCW, e)) return true;
     if (err) *err = e;
-    delete m_winCache;
-    m_winCache = nullptr;
+    m_winCache.reset();          // 失败就别留半成品（原来手写 delete + nullptr）
     return false;
 }
 

@@ -206,3 +206,10 @@ add_test(NAME kick_chord
 add_executable(adocao_ilytx_test ilytx_test.cpp)
 target_link_libraries(adocao_ilytx_test PRIVATE adocao_archive)
 add_test(NAME ilytx COMMAND adocao_ilytx_test "${CMAKE_CURRENT_SOURCE_DIR}/level_fixtures")
+
+# 关卡对象的**所有权 / 幂等**：LevelData 不可拷贝（缓存所有权）、可安全移动、
+# `loadFromBuffer` 两次 == 一次（actions 不许被追加）、settings 的"沿用默认值"例外、
+# 以及 `releaseAngleData()` 之后仍能建窗口缓存（过去那里直接读 angleData[i] = UB）。
+add_executable(adocao_level_reload_test level_reload_test.cpp)
+target_link_libraries(adocao_level_reload_test PRIVATE adocao_core)
+add_test(NAME level_reload COMMAND adocao_level_reload_test "${CMAKE_SOURCE_DIR}/tests/charts/angles360.adofai")

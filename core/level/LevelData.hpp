@@ -8,6 +8,7 @@
 #include <map>
 #include <unordered_map>
 #include <functional>
+#include <memory>
 #include <rapidjson/document.h>
 
 #include "core/level/AngleStore.hpp"   // ③ 切片 4：angleData 的紧凑存储
@@ -22,6 +23,10 @@ uint16_t internActionStrIn(std::vector<std::string>& table, const std::string& v
 
 struct LevelData;
 class FloorWindowCache;
+
+// 缓存句柄的删除器：`operator()` 定义在 LevelData.cpp（那里 FloorWindowCache 是完整类型）。
+// 这样头里可以安全地持有 `unique_ptr<FloorWindowCache, …>` —— 见下面 m_winCache 的注释。
+struct WinCacheDeleter { void operator()(FloorWindowCache* p) const; };
 
 struct LevelData {
     struct Settings {
@@ -156,14 +161,24 @@ struct LevelData {
     // tests/level_parse_test.cpp 的自检）必须一起用它。
     bool hasAtStates = false;
 
-    ~LevelData();   // 定义在 LevelData.cpp（unique_ptr<FloorWindowCache> 需要完整类型）
+    // ---- 所有权与拷贝/移动（2026-10-17 补）----
+    // 这里原来只有析构、没有禁拷贝：`LevelData a; LevelData b = a;` 会让两个对象各持同一个
+    // `m_winCache`，析构时 **double free**（缓存自己删了拷贝，但裸指针绕过了那层保护）。
+    // 现在缓存是 move-only 的 unique_ptr（自定义删除器，见下），于是拷贝自动禁用、移动安全。
+    LevelData() = default;
+    ~LevelData();   // 定义在 LevelData.cpp（FloorWindowCache 在那里才是完整类型）
+    LevelData(const LevelData&) = delete;
+    LevelData& operator=(const LevelData&) = delete;
+    LevelData(LevelData&&) = default;              // unique_ptr 的 move 会把源置空 ✓
+    LevelData& operator=(LevelData&&) = default;
     void releaseMemory();  // free data no longer needed after loading
     // ③ 切片 4：按块物化缓存（未建/未窗口化时为 null，访问器走密集数组）。
-    // ⚠️ **裸指针**而不是 unique_ptr：libc++ 里 `unique_ptr<不完整类型>` 的宿主只要被本 TU
-    // 构造/析构就会实例化成员的析构（实测 `struct B{unique_ptr<A> p; ~B();}` + `B b;` 直接报
-    // "cannot delete an incomplete type"），而 `LevelData.hpp` 不能包含 `FloorWindow.hpp`
-    // （后者要 LevelData 的嵌套类型）。析构在 `LevelData.cpp`，那里类型完整。
-    FloorWindowCache* m_winCache = nullptr;
+    // 用 unique_ptr + **自定义删除器**（`WinCacheDeleter::operator()` 在 .cpp 里定义）：
+    // libc++ 里 `unique_ptr<不完整类型>` 的默认删除器只要被本 TU 构造/析构就会实例化
+    // "delete an incomplete type"（原来因此写成裸指针），而 `LevelData.hpp` 不能包含
+    // `FloorWindow.hpp`（后者要 LevelData 的嵌套类型）。自定义删除器的 `operator()`
+    // 只声明不定义，就没有那个实例化问题 —— 同时白拿 move-only 语义。
+    std::unique_ptr<FloorWindowCache, WinCacheDeleter> m_winCache;
     AngleStore m_angleStore;   // ③ 切片 4：`angleData` 的紧凑存储（releaseAngleData 之后生效）
 
     using ProgressCb = std::function<void(float pct, const char* stage)>;

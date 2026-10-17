@@ -17,6 +17,7 @@ struct Chrome {
     GLFWwindow* window = nullptr;
     int winW = 0, winH = 0;        // window size in logical points
     ImFont* mainFont = nullptr;    // UI font (CJK-capable when available)
+    ImFont* subtitleFont = nullptr; // page title font (between main and title)
     ImFont* titleFont = nullptr;   // large Latin title font (welcome page)
 };
 

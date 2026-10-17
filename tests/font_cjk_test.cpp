@@ -65,6 +65,19 @@ int main() {
     check(io.FontDefault == latin,
           "io.FontDefault 指向主字体（否则没 PushFont 的控件仍走内建 ProggyClean → 中日韩还是 ?）");
 
+    // 三档字号必须**递增**：正文 < 页小标题 < 大标题（"比正文大一点、又没有大标题大"是这个
+    // 效果的全部含义 —— 改字号的人很容易把 subtitle 也写成 1.8x，那两档就撞在一起了）。
+    // 字体一支都没加载出来时 subtitle/title 会**退回 main**（见 setupUiFonts 的兜底），
+    // 那种情况下不检查，免得在没装字体的环境里误报。
+    if (f.title && f.subtitle && f.title != f.main && f.subtitle != f.main) {
+        std::printf("字号: main=%.2f  subtitle=%.2f  title=%.2f\n",
+                    f.main->LegacySize, f.subtitle->LegacySize, f.title->LegacySize);
+        check(f.subtitle->LegacySize > f.main->LegacySize + 2.0f, "页小标题明显大于正文");
+        check(f.title->LegacySize > f.subtitle->LegacySize + 2.0f, "大标题明显大于页小标题");
+    } else {
+        std::printf("SKIP: 字体退回主字体，跳过字号档位检查\n");
+    }
+
     ImFont* def = io.FontDefault ? io.FontDefault : (io.Fonts->Fonts.empty() ? nullptr : io.Fonts->Fonts[0]);
     if (def) {
         check(def->IsGlyphInFont(0x3042), "**默认字体**画得出日文平假名 あ（U+3042）");

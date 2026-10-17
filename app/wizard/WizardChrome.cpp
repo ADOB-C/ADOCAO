@@ -93,9 +93,10 @@ bool createChrome(Chrome& chrome) {
     }
     // 1.92：字号是**逻辑**尺寸，清晰度由 ImFontConfig::RasterizerDensity 决定
     // （旧写法是"按物理像素烘字体 + FontGlobalScale 反缩放回逻辑尺寸"，已废弃）
-    // Fonts：正文（含 CJK 合并源）+ 大标题（1.8x）；主字体同时设为默认字体
+    // Fonts：正文（含 CJK 合并源）+ 页小标题（1.4x）+ 大标题（1.8x）；主字体同时设为默认字体
     const fonts::UiFonts f = fonts::setupUiFonts(dpiScale);
     ImFont* mainFont = f.main;
+    ImFont* subtitleFont = f.subtitle;
     ImFont* titleFont = f.title;
     if (f.cjkSources == 0) LOG_W("CJK 字体一个都没加载成功，中日韩字符会显示成 `????`");
 
@@ -108,6 +109,7 @@ bool createChrome(Chrome& chrome) {
     chrome.winW = winW;
     chrome.winH = winH;
     chrome.mainFont = mainFont;
+    chrome.subtitleFont = subtitleFont;
     chrome.titleFont = titleFont;
     return true;
 }
@@ -134,11 +136,18 @@ void drawConfigHeader(const Chrome& chrome, const char* title, float progressPct
     ImGui::Spacing();
     ImGui::Spacing();
     ImGui::SetCursorPosX(padX);
+    // 页小标题：比正文大一档、又明显小于 Welcome 的 "Welcome to ADOCAO"（1.4x vs 1.8x）。
+    // 1.92 起 PushFont 的 size 必填，`LegacySize` = `AddFontFromFileTTF` 时给的字号 ✓
+    // （传 0.0f 是"保持当前字号"，等于什么都没变 ✗ —— 见 FontSetup.hpp 的注释）。
+    if (chrome.subtitleFont) ImGui::PushFont(chrome.subtitleFont, chrome.subtitleFont->LegacySize);
     ImGui::Text("%s", title);
+    if (chrome.subtitleFont) ImGui::PopFont();
     ImGui::Spacing();
     ImGui::SetCursorPosX(padX);
     ImGui::Separator();
-    ImGui::Spacing();
+    // 分隔线下面只留一个 Spacing：页标题换成 1.4x 字体后这一栏高了 ~5px，而 Visuals 页
+    // （最长的一页，最后一行 Background）离底部按钮原本就只剩 ~13px —— 多了这 5px 就**压到按钮上**
+    // （实测截图：Background 的输入框被 Back/Next 盖住）。从这里的空白补回来，别动页内容。
     ImGui::Spacing();
 }
 

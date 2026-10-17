@@ -106,6 +106,7 @@ inline int mergeAllAvailableFonts(const char* const* paths, float size, const Im
 // ---- 启动器/向导/加载窗统一的一套字体 ----
 struct UiFonts {
     ImFont* main = nullptr;      // 正文（含 CJK 合并源）
+    ImFont* subtitle = nullptr;  // 页小标题（1.4x，比正文大、比大标题小）
     ImFont* title = nullptr;     // 大标题（1.8x，拉丁即可）
     int cjkSources = 0;          // 成功合并进来的 CJK 源数（0 = 中日韩会变 `????`，调用方应 LOG_W）
 };
@@ -130,6 +131,13 @@ inline UiFonts setupUiFonts(float dpiScale, float baseSize = 12.0f) {
 
     out.title = addFirstAvailableFont(latinCandidates(), baseSize * 1.8f, &baseCfg);
     if (!out.title) out.title = out.main;
+
+    // 页小标题（"Hitsounds"/"Graphics"/…）：**比正文大、比大标题小**的一档。
+    // 刻意放在 CJK 合并**之后**（合并是往"最近加入的那支"里塞源，插在中间会把源合并进它，
+    // 主字体反而拿不到中日韩 ✗ —— 见上面那段注释）。与大标题一样只挂拉丁候选：这两档
+    // 现在只画英文页名，真要画中文页名时再给它补一次 merge。
+    out.subtitle = addFirstAvailableFont(latinCandidates(), baseSize * 1.4f, &baseCfg);
+    if (!out.subtitle) out.subtitle = out.main;
 
     // ★ 必须把主字体设成**默认字体**：不显式 PushFont 的控件（路径 InputText、Checkbox 之类）
     //   默认用 `io.FontDefault`，为 NULL 时退回 ImGui 内建的 ProggyClean —— 那个字体

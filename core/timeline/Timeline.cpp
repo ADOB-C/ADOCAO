@@ -309,6 +309,7 @@ void Timeline::precalculateTiming() {
         totalTime += (double)durationAt(i);   // 时长不存了：后面按块重算用同一个 durationAt() 现算
     }
     if (n > 0) m_tileStartTimes[n - 1] = totalTime;
+    if (!m_tileStartTimes.empty()) m_firstStartTime = m_tileStartTimes[0];
 
     double preShiftTotal = totalTime;
     if (n > 1) {

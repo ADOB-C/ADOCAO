@@ -107,6 +107,35 @@ soak(结束-分段): cull=0.008[0.000..0.883] upload=0.001 draw=0.009 trails=0.0
 * 音频（`--force-hitsound Kick`）：`Synthesized 6377687 hits from 1 groups into 215.4s buffer`
   —— 6.38M 次打拍音一次合成 ≈76 MB PCM（44.1k 立体声 float）。**这就是"音频墙"那笔常驻 PCM。**
 
+**从某个中途点开始 + 到点自动退出**（"定点整段"）：
+
+```
+ADOCAO_PROFILE=1 ADOCAO_EXIT_AFTER_MS=20000 build/adocao <谱> \
+    --music <音乐> --start-at 49 --width 1920 --height 1080 --trail-sample-rate 64000
+```
+
+`--start-at SEC` = 选砖后按空格（时钟/音乐 seek/音色游标一起跳）；`ADOCAO_EXIT_AFTER_MS=N` 会
+**正常退出**（`windowShouldClose`），这样 `reportSteady()` 的 `soak(结束-分段)` 才不会被 SIGTERM
+丢掉。2026-10-17 起分段里还有 `playback-sync` / `applyFrame` / `camera`（`GameWindow::update`）与
+`trailWindow` / `trailSample`（`LevelScene::applyFrame`），能直接区分"时间步进 / 拖尾取样 / 相机"。
+
+### 逐采样路径别碰 block 0（2026-10-17）
+
+The Moon（60 万层，BPM 14817）**结尾段**每帧 1.06 s、沙滩球。分段计时直接给出
+`trailSample=1067 ms`（8194 个采样点 → **128 µs/点**；正常是 0.1 µs/点）。
+
+`sample` 显示热点在 `totalAngleAt` / `angleDirBefore`（**假线索**：`positionAtTile` 被内联后
+符号归到了它们身上）。真因是 `positionAtTile()` 顶部那句 `if (t < timeline.startTimeAt(0))`：
+`startTimeAt` 走**单块缓存**，每个采样点先把它撕回 block 0，紧接着的 `startTimeAt(tileIdx)`
+又撕回来 → **每点两次 4096 层重算**。t=20 时 tileIdx 就在 block 0，所以看不出来；t≥90 就炸。
+
+修法：`Timeline::firstStartTime()`（建表时存的标量），逐采样路径不再访问 block 0。实测
+`sampleTrailRange` 1050 ms → **0.4~1.1 ms**（同一 8194 点），整帧 1069 → **2.2 ms**。
+
+**通用规则**：单块缓存的窗口访问器（`startTimeAt` / `tilePositionAt` / `tileDirectionAt`）在
+**逐采样 / 逐砖循环**里只能命中"当前块"；跨块访问一次就是一次 4096 层物化。常量（首层时间、
+总时长）要预先存成标量。
+
 **注意**：这张谱的 `settings.hitsound` 是 `"None"`（谱师防普通播放器炸）—— 要听/要测打拍音必须
 `--force-hitsound Kick`。另外这类谱的打拍音**本身就是曲子**，别再加 `--music`（会叠一层）。
 

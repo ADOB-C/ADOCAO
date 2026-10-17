@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include <chrono>
 #include "core/util/CountLimits.hpp"
 #include "core/util/Logger.hpp"
 
@@ -23,12 +24,12 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
     int tileIdx = timeline.findTileIndex(t);
 
     // Before first tile: orbit backward at constant BPM
-    if (t < timeline.startTimeAt(0)) {
+    if (t < timeline.firstStartTime()) {
         const auto& p0 = L.tilePositionAt(0);
         double bpm = timeline.tileBPMs()[0];
         bool cw = timeline.tileIsCW()[0];
         double startAngle = (timeline.level()->settings.rotation + 180.0) * 3.14159265358979 / 180.0;
-        double dt = timeline.startTimeAt(0) - t;
+        double dt = timeline.firstStartTime() - t;
         double rps = (bpm / 60.0) * 3.14159265358979;
         double angle = cw ? (startAngle + dt * rps) : (startAngle - dt * rps);
         double dist = 1.0;
@@ -79,11 +80,11 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
     }
     const int n = (int)nFull;
     if (n < 2) return;
-    if (t < timeline.startTimeAt(0)) {
+    if (t < timeline.firstStartTime()) {
         const auto& p0 = L.tilePositionAt(0);
         double bpm = timeline.tileBPMs()[0]; bool cw = timeline.tileIsCW()[0];
         double startAngle = (timeline.level()->settings.rotation + 180.0) * 3.14159265358979 / 180.0;
-        double dts = timeline.startTimeAt(0) - t;
+        double dts = timeline.firstStartTime() - t;
         double rps = (bpm / 60.0) * 3.14159265358979;
         double angle = cw ? (startAngle + dts * rps) : (startAngle - dts * rps);
         glm::dvec2 mv(p0[0] + std::cos(angle), p0[1] + std::sin(angle));
@@ -211,6 +212,7 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
     int tileIdx = timeline.findTileIndex(startTime);
     if (tileIdx < 0) tileIdx = 0;
     const int tsz = (int)timeline.tileCount();
+
 
     for (int i = 0; i < maxSamples; i++) {
         double tt = startTime + dt * (double)i;

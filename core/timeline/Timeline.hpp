@@ -112,6 +112,11 @@ public:
         return (i + 1 == m_distCount) ? m_lastEndDist : 1.0f;
     }
 
+    // 第 0 层的起始时间（= 倒计时起点，通常为负）。**别在逐采样路径里调
+    // `startTimeAt(0)`**：那是单块缓存，会把当前块的缓存撕回 block 0（The Moon 实测
+    // 每次多两次 4096 层重算 → 拖尾采样 128µs/点、1 秒/帧）。这里存一个标量。
+    double firstStartTime() const { return m_firstStartTime; }
+
     float preRoll() const { return m_preRoll; }
     float audioStartOffset() const { return m_audioStartOffset; }
 
@@ -167,6 +172,7 @@ private:
     float  m_lastStartDist = 1.0f;   // 只有最后一层用得上（其余恒 1.0f）
     float  m_lastEndDist   = 1.0f;
 
+    double m_firstStartTime = 0.0;
     float m_preRoll = 0.0f;
     float m_audioStartOffset = 0.0f;
 

@@ -30,6 +30,11 @@ add_test(NAME limits COMMAND adocao_limits_test)
 
 # 快路径必须吃下非整数 action 字段（parseNumber 曾把"token 正好填满值跨度"误判为截断，
 # 于是所有含小数 action 字段的谱整份退回旧路径）。进程外跑，带负向对照。
+# 砖色模型：trackStyle 的 fill/stroke 派生 + 颜色类型 + pulse（金标来自 Re_ADOJAS）
+add_executable(adocao_tile_color_test tile_color_test.cpp)
+target_link_libraries(adocao_tile_color_test PRIVATE adocao_core)
+add_test(NAME tile_color COMMAND adocao_tile_color_test)
+
 add_test(NAME fast_path_noninteger COMMAND ${CMAKE_SOURCE_DIR}/scripts/check-fast-path.sh)
 
 # `.adocao` 列编码器自测：逐位往返 + 编码选择（字典/常量/差分/位打包）+ 坏数据必须干净失败

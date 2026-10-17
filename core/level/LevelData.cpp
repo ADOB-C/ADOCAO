@@ -1306,6 +1306,12 @@ static void readSettings(const rapidjson::Value& s, LevelData::Settings& out) {
     out.hitsoundVolume  = getF("hitsoundVolume", out.hitsoundVolume);
     out.trackColor      = getS("trackColor", out.trackColor);
     out.secondaryTrackColor = getS("secondaryTrackColor", out.secondaryTrackColor);
+    out.trackColorType  = getS("trackColorType", out.trackColorType);
+    out.trackColorPulse = getS("trackColorPulse", out.trackColorPulse);
+    out.trackColorAnimDuration = getF("trackColorAnimDuration", out.trackColorAnimDuration);
+    out.trackPulseLength = getF("trackPulseLength", out.trackPulseLength);
+    out.trackStyle      = getS("trackStyle", out.trackStyle);
+    out.trackGlowIntensity = getF("trackGlowIntensity", out.trackGlowIntensity);
     out.backgroundColor = getS("backgroundColor", out.backgroundColor);
     out.planetEase      = getS("planetEase", out.planetEase);
     out.trackDisappearAnimation = getS("trackDisappearAnimation", out.trackDisappearAnimation);
@@ -1326,6 +1332,21 @@ static void readSettings(const rapidjson::Value& s, LevelData::Settings& out) {
 }
 
 }  // namespace
+
+TileColorConfig LevelData::baseColorConfig() const {
+    TileColorConfig cfg;
+    cfg.colorType = settings.trackColorType;
+    cfg.color = settings.trackColor;
+    cfg.secondary = settings.secondaryTrackColor;
+    cfg.pulse = settings.trackColorPulse;
+    cfg.animDuration = settings.trackColorAnimDuration;
+    cfg.pulseLength = settings.trackPulseLength;
+    cfg.style = settings.trackStyle;
+    cfg.glowIntensity = settings.trackGlowIntensity;
+    cfg.startFloor = 0;
+    cfg.startTime = 0.0;
+    return cfg;
+}
 
 // Fast parser: extract angleData float array from JSON without DOM allocation.
 // 保留：它是旧路径（也是回退路径）用的参考实现。

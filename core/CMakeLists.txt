@@ -4,6 +4,7 @@ add_library(adocao_core STATIC
     level/ByteSource.cpp
     level/LevelPath.cpp
     level/JsonCleaner.cpp
+    level/TileColor.cpp
     util/AssetPaths.cpp
     util/Logger.cpp
     util/Progress.cpp

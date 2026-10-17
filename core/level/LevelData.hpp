@@ -12,6 +12,7 @@
 #include <rapidjson/document.h>
 
 #include "core/level/AngleStore.hpp"   // ③ 切片 4：angleData 的紧凑存储
+#include "core/level/TileColor.hpp"   // baseColorConfig() / TileColorConfig
 
 // Parsed .adofai level file
 // 驻留实现：互斥量与 thread-local 缓存都在 .cpp 文件作用域，按驻留表地址做缓存键；
@@ -43,6 +44,13 @@ struct LevelData {
         float  hitsoundVolume = 100.0f;
         std::string trackColor = "debb7b";
         std::string secondaryTrackColor = "ffffff";
+        // 砖色/样式（Re_ADOJAS TileColorManager 的 settings 默认段）：
+        std::string trackColorType = "Single";     // Single/Stripes/Glow/Blink/Switch/Rainbow/Volume
+        std::string trackColorPulse = "None";      // None/Forward/Backward
+        float  trackColorAnimDuration = 2.0f;      // 秒
+        float  trackPulseLength = 10.0f;           // 层
+        std::string trackStyle = "Standard";       // Standard/Neon/NeonLight/Basic/Gems/Minimal
+        float  trackGlowIntensity = 100.0f;        // 只透传（辉光），不参与 fill/stroke
         std::string backgroundColor = "000000";
         bool   stickToFloors = true;
         std::string planetEase = "Linear";
@@ -56,6 +64,9 @@ struct LevelData {
         // 老语义：事件没写 relativeTo 时，position 变成"相对当前相机"的**增量**（docs/camera.md §4.7）。
         bool   legacyCamRelativeTo = false;
     };
+
+    // settings 里的默认砖色 → 颜色模型配置（加载后不随事件变的那一段）。
+    TileColorConfig baseColorConfig() const;
 
     // 32 B → 24 B：`index` 从来只被写入（`= i`），没有任何读者 —— 层号就是它在 `tiles` 里的位置。
     struct Tile {

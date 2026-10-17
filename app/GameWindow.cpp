@@ -225,7 +225,6 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     if (!m_sharedWindow) {
         // Sync: build on main thread (window already visible)
         m_scene->buildSync(*m_level);
-        releaseMeshTemporaries();
     }
 
     // Hitsound attach
@@ -478,25 +477,13 @@ void GameWindow::toggleFullscreen() {
     }
 }
 
-void GameWindow::releaseMeshTemporaries() {
-    // ③ 切片 4：窗口化时 **不能**释放 `angleData` —— provider 物化块要用它当角度来源
-    // （非窗口化路径照旧释放，保持异步构建那条路的内存特性）
-    // ⚠️ **`angleData` 不能再释放了**（2026-10-15 修的先在 bug）：`Timeline::totalAngleAt()` 与
-    // `angleDirBefore()` **每一帧**都要读 `m_level->angleData` 来算行星/拖尾的转动 —— 之前这里
-    // 无条件 swap 掉它，于是运行时读到的是空数组（`rawAngleData` 全变 180°），行星沿错误的弧转
-    // （像素门槛只差 21 个像素，所以一直没被发现；是 ③ 窗口化"顺便"照出来的）。
-    // 代价 +8 B/层（MYC 54 MB），换来正确的行星转动。
-    // `tileBPMs` 也**不能**释放：provider 合成 SetSpeed 事件要用它（非窗口化时它同样没人再读，
-    // 但保持一致更简单，且它是 4 B/层）。
-    (void)m_level;
-    // ⚠️ 这两张位图**窗口化时不能清**：每砖图标位是**剔除时**才派生的（`deriveRange` 读它们），
-    // 而本函数在网格建完就跑 —— 清掉的话窗口派生出 icon=0（实测：块 0 有 2148 处不一致，
-    // 出图表现为砖边缘 858 个散点）。非窗口化时 `m_iconBits` 在建网格时就固化好了，可以清。
-    if (!m_level->tilesWindowed()) {
-        m_level->tileHasTwirl.clear(); m_level->tileHasTwirl.shrink_to_fit();
-        m_level->tileHasSetSpeed.clear(); m_level->tileHasSetSpeed.shrink_to_fit();
-    }
-}
+// （原来这里是 `releaseMeshTemporaries()`：网格建完就清 `tileHasTwirl/tileHasSetSpeed`
+//  「省内存」。**那是个真 bug**（2026-10-17 用户报"事件图标呢？2021 没有"）：
+//  ③ 切片 4 之后每砖图标位**不再有**任何密集数组（`m_iconBits` 已删），图标位是 `deriveRange`
+//  在**绘制时**按窗口现从这两张位图派生的 —— 清掉它们，非窗口化的谱面图标就**全部消失**，
+//  而且不崩、不报错（`i < size()` 保护把条件变成恒假）。像素门槛也没抓到：基线是在同一个
+//  bug 下存的（两边一起丢图标 = 逐字节相同）。整条链现在就靠 `releaseMemory()` 那句
+//  "必须留着 tileBPMs / tileHasTwirl / tileHasSetSpeed"（见 LevelData.hpp 的存活契约）。
 
 // 确定性抓帧：固定"关卡时刻 + 相机 + 缩放"渲染**一帧**，写 PNG 后退出。
 //
@@ -512,7 +499,6 @@ void GameWindow::captureAndExit() {
         if (m_sharedWindow && m_scene->pollAsyncBuild()) {
             glfwDestroyWindow(m_sharedWindow);
             m_sharedWindow = nullptr;
-            releaseMeshTemporaries();
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -706,7 +692,6 @@ void GameWindow::run() {
             if (m_scene->pollAsyncBuild()) {
                 glfwDestroyWindow(m_sharedWindow);
                 m_sharedWindow = nullptr;
-                releaseMeshTemporaries();
                 LOG_D("Async mesh build complete");
             }
         }

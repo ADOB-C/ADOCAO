@@ -133,7 +133,7 @@ void runLevelLoading(const LauncherConfig& cfg, LoadingProgress& progress, LoadR
     // ③ 切片 4：`tiles` 按块物化 **默认开**（2026-10-15 起）。
     // 关掉做 A/B：`ADOCAO_FLOOR_WINDOW=0`。
     // 历史上这里曾"默认关"过一次，原因有三处真 bug（`TileShape::keyForTile` 直接读
-    // `lv.tiles[i].direction` 越界崩、`tileCount()` 丢完归零、`releaseMeshTemporaries` 清
+    // `lv.tiles[i].direction` 越界崩、`tileCount()` 丢完归零、`releaseMeshTemporaries`（已删）清
     // `tileBPMs`）+ 一处**先在 bug**（它无条件释放 `angleData`，而 `totalAngleAt()` 每帧要读它
     // → 行星沿错误的弧转）。四处都修好后，provider 开/关两种模式的像素门槛都 51/51 逐字节。
     const char* fw = std::getenv("ADOCAO_FLOOR_WINDOW");

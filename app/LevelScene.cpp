@@ -76,11 +76,16 @@ bool LevelScene::compileShaders() {
     // 同 `archive/LzmaMtCompat` 的教训：版本区间 ≠ 实际能力（有的驱动给 4.1 上下文但 GLSL
     // 编译器的 fma 行为不同，反过来也有）。高亮与砖共用同一支 VS，只有 FS 不同。
     auto compileTile = [&](const char* vsFile, const char* vsInline) -> bool {
-        const char* vp = resolveAsset(vsFile).c_str();
-        return compileShader(*m_tileShader, vp, resolveAsset("assets/shaders/tile.frag").c_str(),
-                             vsInline, Shaders::kTileFragSrc)
-            && compileShader(*m_highlightShader, vp, resolveAsset("assets/shaders/highlight.frag").c_str(),
-                             vsInline, Shaders::kHighlightFragSrc);
+        // ⚠️ 路径必须存成 std::string：`resolveAsset(...).c_str()` 绑到 `const char*` 上时，
+        // 那个临时 string 在本行结束时就被销毁 → 指针悬空 → 文件永远"加载失败"、静默退回内嵌串。
+        // （2026-10-17 真踩过：一路走内嵌串渲染，改 assets/shaders/*.vert 全无效果，日志里只有
+        //  一条 "Shader file loading failed, using inline fallback"。）
+        const std::string vp = resolveAsset(vsFile);
+        const std::string fpTile = resolveAsset("assets/shaders/tile.frag");
+        const std::string fpHighlight = resolveAsset("assets/shaders/highlight.frag");
+        return compileShader(*m_tileShader, vp.c_str(), fpTile.c_str(), vsInline, Shaders::kTileFragSrc)
+            && compileShader(*m_highlightShader, vp.c_str(), fpHighlight.c_str(), vsInline,
+                             Shaders::kHighlightFragSrc);
     };
     const bool forceCpu = [] {
         const char* e = std::getenv("ADOCAO_CPU_GEOMETRY");   // 验收/救急开关

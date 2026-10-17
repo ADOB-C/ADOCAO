@@ -68,7 +68,6 @@ private:
     void update(float deltaMs);
     void render();
     void toggleFullscreen();
-    void releaseMeshTemporaries();
 
     // 开发：确定性抓帧（--capture）—— 固定时刻/相机/缩放渲染一帧写 PNG 后退出。
     // 只给"像素 diff"当验收工具用，不进正常主循环。

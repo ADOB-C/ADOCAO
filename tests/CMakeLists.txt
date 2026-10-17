@@ -200,3 +200,9 @@ add_test(NAME kick_chord
                  "${CMAKE_CURRENT_SOURCE_DIR}/charts/diag_chord.adofai"
                  "${CMAKE_SOURCE_DIR}/assets/hitsounds"
                  "${CMAKE_BINARY_DIR}/diag/chord_kick.wav")
+
+# `.ilytx`（Re_ADOJAS 自研容器：xz(tar(ilybin))）：与参照谱逐位等价 + 紧凑模式 f32 误差 +
+# 三个坏样本必须干净失败。样本由 `tests/gen_ilytx_fixtures.mjs` 用**他们的编码器**生成。
+add_executable(adocao_ilytx_test ilytx_test.cpp)
+target_link_libraries(adocao_ilytx_test PRIVATE adocao_archive)
+add_test(NAME ilytx COMMAND adocao_ilytx_test "${CMAKE_CURRENT_SOURCE_DIR}/level_fixtures")

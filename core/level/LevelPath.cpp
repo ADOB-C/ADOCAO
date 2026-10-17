@@ -25,7 +25,8 @@ bool isLevelFile(const fs::path& p) {
     std::transform(n.begin(), n.end(), n.begin(),
                    [](unsigned char c) { return (char)std::tolower(c); });
     return endsWithLower(n, ".adofai") || endsWithLower(n, ".adofai.xz")
-        || endsWithLower(n, ".adofai.zst") || endsWithLower(n, ".adocao");
+        || endsWithLower(n, ".adofai.zst") || endsWithLower(n, ".adocao")
+        || endsWithLower(n, ".ilytx");   // Re_ADOJAS 的自研容器（xz(tar(ilybin))，见 docs/ilytx.md）
 }
 
 // descend=false：只看 dir 的直接子文件；true：再看一层子目录
@@ -73,7 +74,7 @@ std::string resolveLevelPath(const std::string& path) {
         std::string n = p.filename().string();
         std::transform(n.begin(), n.end(), n.begin(),
                        [](unsigned char c) { return (char)std::tolower(c); });
-        const char* kExts[] = {".adofai", ".adofai.xz", ".adofai.zst", ".adocao"};
+        const char* kExts[] = {".adofai", ".adofai.xz", ".adofai.zst", ".adocao", ".ilytx"};
         bool hasKnownExt = false;
         for (const char* e : kExts)
             if (endsWithLower(n, e)) { hasKnownExt = true; break; }

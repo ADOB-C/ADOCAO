@@ -21,6 +21,16 @@
     （实测 1.67 → 4.06 GB）；多留一个 chunk 免得最后一次 resize 又触发全长拷贝；
   * 于是"解码 + 1.18 GB 输出"峰值 4.06 → 2.19 GB；整份加载（含解析结构）峰值 5.32 → 3.20 GB
     （1.40 GB 那张：5.92 → 4.41 GB）。明文路径不受影响。
+**`.ilytx`（Re_ADOJAS 的自研容器）**：压缩层与 `.adofai.xz` **完全一样**（都是 xz magic），区别
+只在解压后的载荷 —— 它是 **tar**（`manifest.json` + `level.ilybin` + `audio/…`），不是 JSON。
+所以"是不是 ilytx"只能**解压之后**才知道（core 的 `isTarPayload()`：ustar magic 在偏移 257）：
+  * 半窗流式路径在首块就认出 tar、**主动让路**（它解析不了 tar），日志写明理由；
+  * 整份解压之后由 `archive/Ilytx.cpp` 拆 tar、`archive/Ilybin.cpp` 解 ilybin，再**翻译成等价的
+    `.adofai` 明文**交回给下面这条唯一的解析路径（不建第二条 LevelData 填充链）。
+    ⇒ ilytx 与 .adofai 的语义/像素天然一致（`tests/ilytx_test.cpp` 逐位比对 + 出图逐字节相同）。
+规范与取舍（不解 `angle`/`twirl` 派生段、忽略 `extraProps`、不抽内置音频、翻译的文本开销）见
+`docs/ilytx.md`。
+
 `tests/level_parse_test.cpp` 会把每个明文 fixture 在内存里压成 xz/zstd 再加载一遍，要求逐位一致，
 并检查截断的流是干净失败而不是崩。
 

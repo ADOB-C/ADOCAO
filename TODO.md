@@ -22,6 +22,13 @@
 
 ## 未完成
 
+### 容器 / 格式
+- [x] **`.ilytx` 读取**（Re_ADOJAS 自研容器，2026-10-16，见 `docs/ilytx.md`）：xz(tar(ilybin)) →
+  翻译成等价 `.adofai` 明文，复用唯一解析路径；ctest `ilytx` 逐位比对 + 出图逐字节相同。
+- [ ] `.ilytx` 的**导出（写）**未做：要先跟对方规范对齐，且 ADOCAO 已有列式 `.adocao`。
+- [ ] `.ilytx` 内置成员 `audio/…`、`decor/…`、`bg/…` 目前**跳过**（要定"抽到哪、何时清"）。
+- [ ] 裸 tar（未压缩的 `.ilytx`）不认 —— Re_ADOJAS 导出总是 xz 压缩，等真出现再说。
+
 ### 打拍音
 - [ ] ColorTrack（COLOR_FUNCS / FLOOR_FUNCS / RecolorTrack）
   - 蓝图决策 8/9：只做静态；颜色逻辑归 render；几十万事件走 GPU/GLSL。

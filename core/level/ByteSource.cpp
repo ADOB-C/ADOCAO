@@ -23,6 +23,13 @@ LevelArchiveKind sniffLevelArchive(const char* data, size_t length) {
     return LevelArchiveKind::Plain;
 }
 
+bool isTarPayload(const char* data, size_t length) {
+    // ustar：0..100 name、124..136 size 八进制、257..262 "ustar\0"（v7 老格式为 "ustar "）。
+    // .ilytx 解开后的载荷就是这一层容器 —— core 只做"认出它"，拆 tar 是 archive 的事。
+    if (!data || length < 512) return false;
+    return std::memcmp(data + 257, "ustar", 5) == 0;
+}
+
 void setArchiveBackend(const ArchiveBackend& backend) { g_backend = backend; }
 const ArchiveBackend& archiveBackend() { return g_backend; }
 

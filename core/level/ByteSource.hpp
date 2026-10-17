@@ -28,6 +28,12 @@ using AdocaoDecoder = bool (*)(const char* data, size_t length, LevelData& out, 
 // 按 **magic** 判断容器种类（不看扩展名，所以改过名/抹掉扩展名的谱面照样能读）
 LevelArchiveKind sniffLevelArchive(const char* data, size_t length);
 
+// 解压后的载荷是不是 **tar**（ustar magic 在偏移 257）。目前只有 `.ilytx` 是这种：
+//   `.ilytx` = xz( tar( manifest.json, level.ilybin, audio/…, decor/… ) )
+// 它在压缩层上与 `.adofai.xz` 完全一样（都是 xz magic），所以"是不是 tar"只能**解压后**才知道。
+// core 只负责认出这一层；拆 tar / 解 ilybin / 拼回明文都在 archive 模块（`archive/Ilytx.cpp`）。
+bool isTarPayload(const char* data, size_t length);
+
 // 窗口式解压源：不把整份解压结果摊在内存里，而是交替使用两块固定地址的"半窗"
 // （实现见 archive/LevelArchive.cpp 的 ArchiveStream，那儿有完整的使用说明与内存实测）。
 class WindowSource {

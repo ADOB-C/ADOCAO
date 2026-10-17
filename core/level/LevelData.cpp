@@ -718,6 +718,7 @@ struct WindowParser {
     std::string pathText;
     std::string settingsText;
     bool failed = false;
+    bool tarContainer = false;           // .ilytx：解压后是 tar，不是 JSON（见 run() 顶部）
     const char* failAt = nullptr;       // 诊断用：失败发生在窗口里的哪个位置
     const char* failWhy = "";
     long failA = -1, failB = -1;         // 诊断用：附加数字（如对象长度 / 窗口剩余）
@@ -915,6 +916,13 @@ struct WindowParser {
         if (!stream.next()) {
             if (dbg) std::fprintf(stderr, "[win] 首块就失败 failed=%d err=%s\n", (int)stream.failed(), stream.error().c_str());
             return stream.failed() ? -1 : 0;
+        }
+        // `.ilytx` = xz(tar(…))：压缩层认不出来，解开才知道载荷是 tar 而不是 JSON。
+        // 它不是"结构解析失败"，而是**这条路根本不适用** —— 明确让路，由 archive 的
+        // ilytx 解码接手（LevelData 会退回整份解压那条路，理由走 tarContainer 打印）。
+        if (isTarPayload(stream.data(), stream.size())) {
+            tarContainer = true;
+            return 0;
         }
         const char* p = stream.data();
         const char* end = p + stream.size();
@@ -1147,7 +1155,8 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
                 // rc == 0 或 settings 解析失败 -> 落到整份解压，行为与以前完全一致。
                 // 但**不许静默**：回退本身只会在内存峰值与耗时上表现出来，2026-10 那个
                 // "大谱上窗口路径其实一次都没被用上"就是这么藏了一轮（docs/2e9.md §3）。
-                const char* why = wp.failed       ? (wp.failWhy && *wp.failWhy ? wp.failWhy : "结构解析失败")
+                const char* why = wp.tarContainer ? "ilytx（tar 容器）只能整份解压"
+                                : wp.failed       ? (wp.failWhy && *wp.failWhy ? wp.failWhy : "结构解析失败")
                                 : stream->stuck() ? "单个值大于半窗"
                                                   : "流式结构不可解析（需要更多数据 / 已到流末尾）";
                 if (requireWindow) {

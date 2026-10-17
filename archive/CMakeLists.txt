@@ -21,6 +21,10 @@ add_library(adocao_archive STATIC
     AdocaoWindow.cpp
     # v3 的判据统计（`--codec-report` 的"为什么"）：纯诊断，不参与任何编码决策
     AdocaoDiagnostics.cpp
+    # Re_ADOJAS 的 `.ilytx`（xz(tar(ilybin))）：解 ilybin 的核心二进制
+    Ilybin.cpp
+    #   …… 再把它翻译成等价的 .adofai 明文，交回 core 那条唯一路径（不建第二条解析链）
+    Ilytx.cpp
 )
 
 target_include_directories(adocao_archive PUBLIC ${CMAKE_SOURCE_DIR})

@@ -1,4 +1,5 @@
 #include "LevelArchive.hpp"
+#include "Ilytx.hpp"
 #include "archive/AdocaoWindow.hpp"   // computeFloorWindow（③ 重算，注册给 core）
 #include "LzmaMtCompat.hpp"
 
@@ -346,7 +347,20 @@ namespace {
 bool decodeWholeImpl(const char* data, size_t length, LevelArchiveKind kind,
                      std::string& out, std::string& reason,
                      const std::function<void(float)>& onProgress) {
-    return decompressLevelArchive(data, length, kind, out, reason, onProgress);
+    if (!decompressLevelArchive(data, length, kind, out, reason, onProgress)) return false;
+    // `.ilytx` 与 `.adofai.xz` 在压缩层上**一模一样**（都是 xz magic），区别只有解压后的载荷：
+    // 前者是 tar（ustar），后者是 JSON 文本。所以这里才第一次能分辨：
+    //   tar → 翻译成等价的 .adofai 明文（archive/Ilytx.cpp），再交给 core 原有明文路径。
+    // 反过来说：**不看扩展名**也能读，改过名的 .ilytx 照样打开（与 .adofai.xz 一致的规矩）。
+    if (isTarPayload(out.data(), out.size())) {
+        std::string json, why;
+        if (!ilytxToAdofaiJson(out.data(), out.size(), json, why)) {
+            reason = "ilytx 解码失败: " + why;
+            return false;
+        }
+        out = std::move(json);
+    }
+    return true;
 }
 
 WindowSource* makeWindowImpl() { return new ArchiveStream(); }

@@ -49,9 +49,13 @@ bool AudioEngine::init() {
     }
 
     m_initialized = true;
-    LOG_I("AudioEngine: Initialized (%dHz, backend=%s)",
+    m_deviceRate = (int)m_device->playback.internalSampleRate;
+    if (m_deviceRate <= 0) m_deviceRate = AUDIO_SAMPLE_RATE;
+    LOG_I("AudioEngine: Initialized (%dHz, backend=%s)%s",
           (int)m_device->playback.internalSampleRate,
-          ma_get_backend_name(m_device->pContext->backend));
+          ma_get_backend_name(m_device->pContext->backend),
+          m_deviceRate == AUDIO_SAMPLE_RATE ? ""
+              : " —— 设备不是 48k：解码器与音色按设备率重采样（回调不做重采样）");
     return true;
 }
 
@@ -112,7 +116,9 @@ bool AudioEngine::loadMusic(const std::string& filepath) {
     }
 
     m_decoder = new ma_decoder;
-    ma_decoder_config dc = ma_decoder_config_init(ma_format_f32, 2, AUDIO_SAMPLE_RATE);
+    // 解码器按**设备率**输出（miniaudio 在解码时重采样）—— 否则回调 1:1 拷贝会让
+    // 音乐以 设备率/48000 的速度播放，`position()` 也会按同样的比例跑偏（关卡时钟跟着错）。
+    ma_decoder_config dc = ma_decoder_config_init(ma_format_f32, 2, (ma_uint32)m_deviceRate);
     if (ma_decoder_init_memory(data.data(), data.size(), &dc, m_decoder) != MA_SUCCESS) {
         LOG_E("AudioEngine: Unsupported format: %s", filepath.c_str());
         delete m_decoder;
@@ -122,7 +128,7 @@ bool AudioEngine::loadMusic(const std::string& filepath) {
 
     ma_uint64 total = 0;
     ma_decoder_get_length_in_pcm_frames(m_decoder, &total);
-    m_sampleRate = AUDIO_SAMPLE_RATE;
+    m_sampleRate = m_deviceRate;
     m_readCursor = 0;
     m_duration = (m_sampleRate > 0) ? (float)total / (float)m_sampleRate : 0.0f;
     m_fileData = std::move(data);  // keep alive for memory-backed decoder
@@ -186,6 +192,9 @@ void AudioEngine::attachExternal(const float* buffer, size_t totalFrames, int ch
     m_extTotalFrames = totalFrames;
     m_extChannels = channels;
     m_extSampleRate = sampleRate;
+    if (sampleRate != m_deviceRate)
+        LOG_W("AudioEngine: 外部音源 %dHz ≠ 设备 %dHz —— 回调不做重采样，播放速度会偏",
+              sampleRate, m_deviceRate);
     m_extCursor = cursor;
     m_extPlaying = playing;
 }

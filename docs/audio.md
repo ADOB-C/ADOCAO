@@ -5,12 +5,42 @@
 
 ## Audio System
 
+### 设备采样率：解码器与音色都必须跟着 `internalSampleRate`（2026-10-17）
+
+`ma_device` **要 48000 不一定拿得到**：本机（macOS Core Audio）实测日志就是
+`Initialized (44100Hz)`——请求 48000 失败后退回设备原生率。而 `dataCallback` 是**按设备帧 1:1
+拷贝**、没有任何重采样：
+
+```
+解码器固定 48000  →  device 44100：音乐以 0.919× 速度播放（调也低 8.8%）
+                         device 64000：1.333×（快 33%）
+```
+
+更糟的是 `position() = readCursor / m_sampleRate` 也按同一个错误比例走 —— 而关卡时钟
+（`PlaybackClock::syncToAudio`）是**由音频位置驱动**的，于是整关的时间线跟着跑偏；音色缓冲同样
+按 48000 合成、按设备率消费，和音乐一起错。
+
+修法（2026-10-17）：
+
+* `AudioEngine` 记录 `m_deviceRate = ma_device::playback.internalSampleRate`，解码器
+  `ma_decoder_config_init(..., m_deviceRate)`（miniaudio 在**解码时**重采样），`m_sampleRate`
+  与 `position()/seek()/duration()` 全部改用它。
+* `HitsoundManager::setOutputSampleRate(hz)`：`preSynthesize()` / `preSynthesizeRawPcm()` 按它
+  合成，`writeWav()` 头部写**缓冲的真实采样率**。`LevelLoader` 在合成前把设备率传进去。
+* **CLI 导出固定 48000**（`Application.cpp` 显式 `setOutputSampleRate(AUDIO_SAMPLE_RATE)`）——
+  导出文件的可复现性不该取决于当前插着哪块声卡。
+* `attachExternal()` 在 `sampleRate != m_deviceRate` 时 `LOG_W`（正常路径不该出现）。
+
+诊断：日志里现在会写 `Initialized (44100Hz, …) —— 设备不是 48k：解码器与音色按设备率重采样`，
+`Loaded (44100Hz, stereo, …)` 与设备一致。
+
+
 ### audio-as-chart（每层一个采样的巨型谱）
 
 `--force-hitsound raw-pcm`（向导 Override 下拉里也有）走**直通**，不做 hitsound 混音：
 `Timeline::buildRawPcm()` 把"每层音量"当 PCM 采样值导出（1 层 = 1 采样，采样率 = `bpm/60`，
 映射与 `Song.adofai` 的 `volume = int16 / 655.36` 严格互逆），`HitsoundManager::preSynthesizeRawPcm()`
-线性重采样到设备采样率（48 kHz）再复制成双声道。249 s 的谱导出只要 9–25 ms。
+线性重采样到**输出采样率**（游戏内 = 设备率，导出 = 48 kHz）再复制成双声道。249 s 的谱导出只要 9–25 ms。
 
 为什么必须直通：那种谱是"**每个采样一个 Kick**"。Unity.wav_rate 实测 10,993,500 命中 / 249.3 s =
 44.1 kHz，而 `Kick.wav` 有 9,499 帧（215 ms）→ **每个输出采样上叠 ~9,499 次相加**，而混音规则是

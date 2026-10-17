@@ -39,6 +39,11 @@ public:
 
     void setVolume(float v);
 
+    // 设备的**实际**采样率（`ma_device` 的 internalSampleRate）。请求 48000 拿不到时会退回
+    // 设备原生率（本机实测 44100）。解码器与音色缓冲都必须按它来 —— 回调是 1:1 拷贝，
+    // 不做重采样（docs/audio.md）。
+    int deviceSampleRate() const { return m_deviceRate; }
+
     // External audio source for mixing (hitsounds)
     void attachExternal(const float* buffer, size_t totalFrames, int channels, int sampleRate,
                         size_t* cursor, bool* playing);
@@ -49,6 +54,7 @@ private:
     ma_decoder* m_decoder = nullptr;
     std::vector<uint8_t> m_fileData;  // keep file memory alive for decoder
     int m_sampleRate = 44100;
+    int m_deviceRate = AUDIO_SAMPLE_RATE;
     uint64_t m_readCursor = 0;  // current decoder position in frames
     float m_duration = 0.0f;
     float m_volume = 1.0f;

@@ -280,6 +280,7 @@ int runApplication(bool debugConsole) {
         Timeline timeline;
         timeline.build(lvl, true);
         HitsoundManager hm;
+        hm.setOutputSampleRate(AUDIO_SAMPLE_RATE);   // 导出固定 48k（与设备无关，保证可复现）
         hm.init();
         bool rawOk = false;
         if (isRawPcmType(cfg.forceHitsoundType)) {
@@ -380,6 +381,7 @@ int runApplicationFromCLI(const LauncherConfig& cfg, bool debugConsole) {
         Timeline timeline;
         timeline.build(lvl, true);
         HitsoundManager hm;
+        hm.setOutputSampleRate(AUDIO_SAMPLE_RATE);   // 导出固定 48k（与设备无关，保证可复现）
         hm.init();
         bool rawOk2 = false;
         if (isRawPcmType(config.forceHitsoundType)) {

@@ -120,6 +120,9 @@ void runLevelLoading(const LauncherConfig& cfg, LoadingProgress& progress, LoadR
 
     report(progress, 0.80f, "Synthesizing hitsounds...");
     if (cfg.enableHitsounds) {
+        // 音色缓冲必须按**设备率**合成：AudioEngine 的回调是 1:1 拷贝（不做重采样）。
+        // 设备拿不到 48k 时（本机实测 44100）不这么做，音色会比音乐快/慢 设备率/48000 倍。
+        result.hitsounds.setOutputSampleRate(result.audio.deviceSampleRate());
         result.hitsounds.init();
         if (isRawPcmType(cfg.forceHitsoundType)) {                 // audio-as-chart：直通，不混音
             std::vector<float> pcm; double rate = 0.0;

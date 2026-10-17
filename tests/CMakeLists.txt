@@ -220,3 +220,10 @@ add_executable(adocao_easing_test easing_test.cpp)
 target_include_directories(adocao_easing_test PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(adocao_easing_test PRIVATE adocao_core)
 add_test(NAME easing COMMAND adocao_easing_test)
+
+# 相机时间线（core/camera/CameraTimeline）：MoveCamera 时间 + RepeatEvents 展开 + 排序键。
+# 金标手算（Beat/Floor 两种模式、executeOnCurrentFloor、entryBeat 的 -1 哨兵、多 tag、id tie-break）。
+add_executable(adocao_camera_timeline_test camera_timeline_test.cpp)
+target_include_directories(adocao_camera_timeline_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(adocao_camera_timeline_test PRIVATE adocao_core)
+add_test(NAME camera_timeline COMMAND adocao_camera_timeline_test)

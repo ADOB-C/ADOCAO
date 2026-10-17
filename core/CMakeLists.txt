@@ -13,6 +13,7 @@ add_library(adocao_core STATIC
     timeline/Timeline.cpp
     timeline/PositionSolver.cpp
     timeline/PlaybackClock.cpp
+    camera/CameraTimeline.cpp
     map/LevelMap.cpp
     map/PngStream.cpp
     map/PngBand.cpp

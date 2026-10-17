@@ -248,8 +248,8 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--width") == 0     && i+1<argc) cli.resolutionW = atoi(argv[++i]);
             else if (std::strcmp(a, "--height") == 0    && i+1<argc) cli.resolutionH = atoi(argv[++i]);
             else if (std::strcmp(a, "--fullscreen") == 0)           cli.fullscreen = true;
-            else if (std::strcmp(a, "--fill") == 0      && i+1<argc) cli.trackFillColor = argv[++i];
-            else if (std::strcmp(a, "--stroke") == 0    && i+1<argc) cli.trackStrokeColor = argv[++i];
+            else if (std::strcmp(a, "--fill") == 0      && i+1<argc) { cli.trackFillColor = argv[++i]; cli.trackColorOverride = true; }
+            else if (std::strcmp(a, "--stroke") == 0    && i+1<argc) { cli.trackStrokeColor = argv[++i]; cli.trackColorOverride = true; }
             else if (std::strcmp(a, "--bg") == 0        && i+1<argc) cli.backgroundColor = argv[++i];
             else if (std::strcmp(a, "--no-auto-stroke") == 0)        cli.autoStroke = false;
             else if (std::strcmp(a, "--no-hitsound") == 0)           cli.enableHitsounds = false;

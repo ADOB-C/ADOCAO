@@ -1426,17 +1426,26 @@ TileColorConfig LevelData::baseColorConfig() const {
 }
 
 const LevelData::ColorEvent* LevelData::colorEventAt(int64_t floor) const {
-    const ColorEvent* persistent = nullptr;
+    // colorEvents 在 finishLoad 里按 (floor, order) 排好。
+    // justThisTile：只覆盖它所在的那一层，同层后者赢。
+    auto lo = std::lower_bound(colorEvents.begin(), colorEvents.end(), (int32_t)floor,
+                               [](const ColorEvent& e, int32_t f) { return e.floor < f; });
+    auto ub = std::upper_bound(colorEvents.begin(), colorEvents.end(), (int32_t)floor,
+                               [](int32_t f, const ColorEvent& e) { return f < e.floor; });
     const ColorEvent* single = nullptr;
-    for (const auto& e : colorEvents) {
-        if (e.flags & (kColorInactive | kColorEditorOnly)) continue;
-        if (e.flags & kColorJustThisTile) {
-            if ((int64_t)e.floor == floor) single = &e;   // 仅覆盖本层，文件顺序后者赢
-        } else if ((int64_t)e.floor <= floor) {
-            persistent = &e;                              // floor<=f 的最后一条持久段
-        }
+    for (auto it = lo; it != ub; ++it) {
+        if (it->flags & (kColorInactive | kColorEditorOnly)) continue;
+        if (it->flags & kColorJustThisTile) single = &*it;
     }
-    return single ? single : persistent;
+    if (single) return single;
+    // 持久段：floor<=f 的最后一条（从 upper_bound 往前找第一条非 inactive 的持久事件）。
+    for (auto it = ub; it != colorEvents.begin();) {
+        --it;
+        if (it->flags & (kColorInactive | kColorEditorOnly)) continue;
+        if (it->flags & kColorJustThisTile) continue;
+        return &*it;
+    }
+    return nullptr;
 }
 
 TileColors LevelData::tileColorsAt(int64_t floor, double timeSec, float amplitude) const {
@@ -2041,6 +2050,12 @@ bool LevelData::finishLoad(ProgressCb onProgress, bool exportOnly) {
         cameraEvents[i].order = (uint32_t)i;
     for (size_t i = 0; i < colorEvents.size(); i++)
         colorEvents[i].order = (uint32_t)i;
+    // 按 (floor, 文件顺序) 排好：`colorEventAt` 用二分找"最后一条 floor<=f 的持久段"，
+    // 渲染侧每帧每砖查一次，不能线性扫。order 保留文件顺序（同 floor 后者赢）。
+    std::stable_sort(colorEvents.begin(), colorEvents.end(),
+                     [](const ColorEvent& a, const ColorEvent& b) {
+                         return a.floor != b.floor ? a.floor < b.floor : a.order < b.order;
+                     });
 
     // Convert pathData → angleData if needed
     if (!pathData.empty() && angleData.empty()) {

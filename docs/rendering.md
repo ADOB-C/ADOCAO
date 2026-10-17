@@ -26,10 +26,23 @@
 | ColorTrack 生效 / style 变更 | 事件时一次 |
 | 几何/mask | 按 `(pred,dir,is999,style)` 缓存 |
 
-**还没接渲染**（下一步）：现在 `LevelScene` 仍是全局 `uFillColor`/`uStrokeColor` 两个 uniform。
-接线时要按 style 走两条路：Standard/Gems 用顶点 mask（内芯 fill、外圈 stroke）；
-Neon/NeonLight/Basic/Minimal 用 2×128 渐变条（`base × strip(uv.y)`，uv.y 0=外缘、1=中心，
-base 的取法见 `TRACK_STYLE_EDGE`：Neon/NeonLight 取 stroke，Basic/Minimal 取 fill）。
+**渲染接线（2026-10-17 已落地）**：
+
+* 实例 VBO 由 5 float 扩到 **11 float/实例**（offset xyz + shape + iconBits + fill rgb + stroke rgb，44 B）。
+  示例缓冲本来就只装**可见列表**（每帧几百砖），所以逐砖色不占全谱内存。
+* `TileMesh::draw(..., InstanceColorFn, void*)`：色回调只对可见砖调用；`LevelScene` 传
+  `LevelData::tileColorsAt(tile, timeInLevel)`。
+* shader：`uUseInstColor=1` → `mix(aStrokeColor, aFillColor, layer)`；`=0` 回退 uniform
+  （高亮砖、以及显式 `--fill/--stroke` 的"整条轨道一套颜色"）。
+* **默认可视化 = 谱面颜色**（settings + ColorTrack），`--fill/--stroke` 仍可整体覆盖（CLI 显式给才生效）。
+  像素门槛 54 个状态因此按新行为**重存**（原基线的描边是启动器默认 0.5×，现在是 chart 的 0.7×）。
+
+**还没做**：
+* Neon/NeonLight/Basic/Minimal 的 **2×128 渐变条**（需要给每个顶点补一个"距外缘归一化"的 v，
+  在 `TileShape::expand` 侧算；现在是硬边 ring，颜色对、过渡不对）。
+* style 的几何差异（Gems 宝石网格、Minimal/Basic 的尺寸微调、Neon 的搭接放大）。
+* Volume 的逐帧幅度（现在传 0）与逐砖 alpha（8 位 hex 的 AA）。
+* TweenColor（`duration`/`ease` 已解析进 `ColorEvent`，插值未接）。
 
 ## 拖尾采样率：固定率 vs 自适应上限（2026-10-17）
 

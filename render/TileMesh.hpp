@@ -62,7 +62,11 @@ public:
     // 现在图标跟着砖走，在拖尾之前，拖尾正常盖在图标上。这个修复会让"图标与拖尾重叠"的像素
     // 与旧版不同（The Moon t=1s / MYC t=30s 等），是**预期内**的差异，基线已按新行为重存。
     // 视锥边界是**世界坐标** → double（float 在 x≈6.8e7 上会被量化到 8 砖，剔除边界跟着错）
-    void draw(double viewL, double viewR, double viewB, double viewT, double camX, double camY) const;
+    // 逐实例砖色（fill/stroke，0..255）。fn = nullptr 时实例色全 0，由 uniform 决定颜色
+    // （高亮/旧行为）。回调只对**可见列表**里的砖调用（每帧几百次），ctx 由调用方保证生命周期。
+    using InstanceColorFn = void (*)(void* ctx, uint32_t tile, uint8_t fill[3], uint8_t stroke[3]);
+    void draw(double viewL, double viewR, double viewB, double viewT, double camX, double camY,
+              InstanceColorFn colorFn = nullptr, void* colorCtx = nullptr) const;
     // 视口像素高度（每帧由 app 侧设入；LOD 用它算"每世界单位多少像素"）
     void setViewportHeightPx(int h) const { m_viewportH = h; }
     // 抓帧（确定性）模式：LOD 步长只能由"当前视口 + 两段式"决定，**不许用上一帧的反馈种子**
@@ -185,6 +189,10 @@ private:
     // ---- 每帧可见实例（compaction 结果；draw 时上传）----
     mutable std::vector<uint32_t> m_listTiles;
     mutable std::vector<float> m_listAttr;    // 5 float/实例：offX offY offZ shape iconBits
+    mutable std::vector<float> m_listColors;  // 6 float/实例：fill rgb + stroke rgb（0..1）
+    mutable std::vector<float> m_instData;    // 上传用交错缓冲：11 float/实例（5 + 6）
+    mutable InstanceColorFn m_colorFn = nullptr;
+    mutable void* m_colorCtx = nullptr;
     mutable bool m_listValid = false;
     mutable int m_viewportH = 720;
     mutable size_t m_lodStride = 1;      // 当前帧的抽稀步长（1 = 不抽）

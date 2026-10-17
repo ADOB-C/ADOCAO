@@ -80,6 +80,8 @@ private:
     adofai::Shader* m_highlightShader = nullptr;
 
     adofai::TileMesh* m_tileMesh = nullptr;
+    const adofai::LevelData* m_level = nullptr;   // 砖色（ColorTrack）查询用；生命周期由调用方保证
+    bool m_trackColorOverride = false;            // --fill/--stroke：整条轨道用同一套颜色
     std::unique_ptr<adofai::Planet> m_redPlanet;
     std::unique_ptr<adofai::Planet> m_bluePlanet;
 

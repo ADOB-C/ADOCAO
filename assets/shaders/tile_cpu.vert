@@ -32,6 +32,10 @@ uniform mat4  uVP;
 uniform vec3  uFillColor;
 uniform vec3  uStrokeColor;
 uniform float uOpacity;
+// 逐实例砖色：uUseInstColor=1 时用实例色（ColorTrack），0 时用上面的 uniform（高亮/旧行为）。
+layout(location = 4) in vec3 aFillColor;
+layout(location = 5) in vec3 aStrokeColor;
+uniform float uUseInstColor;
 
 out vec3  vColor;
 out float vOpacity;
@@ -58,7 +62,8 @@ void main() {
     int   v     = int(gl_VertexID);
     vec3  pos   = vec3(0.0);                  // 塌陷点
     float type  = (v < 62) ? 0.0 : 1.0;
-    vec3  color = mix(uStrokeColor, uFillColor, type);
+    vec3  color = mix(mix(uStrokeColor, uFillColor, type),
+                      mix(aStrokeColor, aFillColor, type), uUseInstColor);
 
     if (part > 5.5) {
         // ---- 图标：算式与 tile.vert 相同（不含 fma，3.3 直接能算）----

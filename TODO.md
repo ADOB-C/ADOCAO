@@ -758,8 +758,9 @@ off 那两个采样值相等=被钳住，on 是正常插值，差值正好是**�
 内循环形状，且**形状分组的插入序必须是绘制序**（`unordered_map` 的桶增长序列不能变 → 派生要按
 层号顺序做）。另外容器路径应把 `tiles`/`actions`/`angleData` 都换成 blocked 列 + 预取。
 
-- [ ] **砖色渲染接线**（core 模型与 `ColorTrack` 解析已落地，2026-10-17）：`LevelScene` 仍是
-      全局 `uFillColor`/`uStrokeColor`。要接：① 每实例 fill/stroke（或按段染色的实例流）；
-      ② Standard/Gems 的顶点 mask 路 + Neon/NeonLight/Basic/Minimal 的 2×128 渐变条；
-      ③ TweenColor 的逐帧插值（只有 Tween 期间的 Single/Stripes + 时间驱动类型进"可见 ∪ 动画"集合）；
-      ④ 抓帧状态补 6 种 trackStyle + 4 种脉冲的对照图。
+- [x] 砖色渲染接线第一段（2026-10-17）：每实例 fill/stroke（11 float/实例）+ shader
+      `uUseInstColor`，默认可视化 = 谱面颜色；像素门槛 54 个状态按新行为重存。
+- [ ] 砖色渲染剩余：① Neon/NeonLight/Basic/Minimal 的 **2×128 渐变条**（要给顶点补
+      "距外缘归一化 v"，在 `TileShape::expand` 侧算，别动几何位精确）；② style 的几何差异
+      （Gems / Minimal / Basic 尺寸、Neon 搭接）；③ Volume 幅度与逐砖 alpha；④ TweenColor 插值；
+      ⑤ 抓帧状态补 6 种 trackStyle + 3 种 pulse 的对照图。

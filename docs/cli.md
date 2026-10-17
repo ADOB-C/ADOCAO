@@ -49,6 +49,12 @@ adocao stitch <dir> <out.png>           [--scale N] [--threads N]
 Trail sampling — two independent axes, both optional and **off by default** (wizard
 Visuals page / CLI):
 
+### 砖色：`--fill` / `--stroke` 现在是"整体覆盖"
+
+默认可视化用**谱面自己的颜色**（settings 的 trackColor/trackColorType/trackStyle + ColorTrack 事件）。
+`--fill`/`--stroke`（以及向导 Colors 页）只在显式给出时把整条轨道画成一套颜色 —— 旧行为，
+保留给"只想看几何/单色"的场合；不给出时按 chart 颜色逐砖着色。
+
 ### 从指定时刻开始（`--start-at SEC`）
 
 `--start-at SEC` 让播放从关卡时间的该秒数开始，等价于"选砖后按空格"：时钟、音乐 seek、

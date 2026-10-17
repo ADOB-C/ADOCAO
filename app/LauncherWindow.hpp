@@ -11,6 +11,9 @@ namespace adofai { class Timeline; }   // 库侧类型：前置声明也要在 a
 struct LauncherConfig {
     std::string levelPath;
     std::string musicPath;
+    // 逐砖颜色（ColorTrack / trackStyle）默认开启；只有显式 `--fill/--stroke` 才整体覆盖
+    // （把整条轨道画成同一套颜色 —— 旧行为，保留给"只想看几何"的场合）。
+    bool   trackColorOverride = false;
     std::string trackFillColor   = "DEBB7B";  // 6-char hex
     std::string trackStrokeColor = "6F5D3D";  // 6-char hex (DEBB7B * 0.5)
     std::string backgroundColor  = "000000";  // 6-char hex

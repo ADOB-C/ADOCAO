@@ -22,6 +22,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -146,6 +147,9 @@ int main(int argc, char** argv) {
           "三个音能量同量级 → 是和弦（同时发声）而不是琶音");
 
     if (!wavPath.empty()) {
+        // 别假设 build/diag/ 存在：CI 是全新目录（2026-10-17 Linux 红过）。
+        std::error_code ec;
+        std::filesystem::create_directories(std::filesystem::path(wavPath).parent_path(), ec);
         const bool w = hm.writeWav(wavPath);
         std::printf("     %s %s\n", w ? "已写出" : "写不出", wavPath.c_str());
         check(w, "能导出 WAV（给耳朵复核用）");

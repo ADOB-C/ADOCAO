@@ -9,7 +9,10 @@
 # 为什么不做成进程内自检：它跟前序自检共用进程状态，换工作目录就会假红（踩过）。
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-APP="$ROOT/build/adocao"
+# 产物名是 `ADOCAO`（app/CMakeLists.txt 的 OUTPUT_NAME）。macOS 文件系统大小写不敏感，
+# 所以 `build/adocao` 一直能碰巧命中；Linux 上必须用真名（2026-10-17 CI 红过）。
+APP="$ROOT/build/ADOCAO"
+[ -x "$APP" ] || APP="$ROOT/build/adocao"
 if [ ! -x "$APP" ]; then echo "缺少 ${APP}（先构建）"; exit 1; fi
 fail=0
 

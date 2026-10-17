@@ -57,6 +57,7 @@ void printHelp(Mode mode, bool all) {
             "  只存输入（角度 + 事件）；砖位置/朝向/BPM/时间线都由输入重算，不占文件。\n"
             "\n"
             "  --codec-report            打印每列的编码、元素数、朴素/编码后字节、字典项数、位宽\n"
+            "  --checkpoints             额外写 Derived 段（每 4096 层的续算快照，默认关）\n"
             "\n"
             "  例：adocao pack \"<谱>\" out.adocao --codec-report\n");
         return;
@@ -143,6 +144,7 @@ void printHelp(Mode mode, bool all) {
             "\n开发:\n"
             "  --debug                                  调试控制台 + 默认关 hitsounds\n"
             "  --capture <out.png> [--capture-time SEC | --capture-tile N] [--capture-zoom Z]\n"
+            "            [--capture-camera]   # 抓帧也走关卡相机（settings + MoveCamera；此时 zoom 由相机决定）\n"
             "                                           确定性抓一帧写 PNG 后退出（像素 diff 用）\n"
             "\n环境变量（测试/调参钩子，正常不用）:\n"
             "  ADOCAO_MIX_THREADS  ADOCAO_FORCE_DOM_PARSE  ADOCAO_PARSE_PIECES  ADOCAO_WINDOW_KB\n"
@@ -282,6 +284,8 @@ int main(int argc, char* argv[]) {
                 cli.captureTile = (int)v;
             }
             else if (std::strcmp(a, "--capture-zoom") == 0 && i+1<argc) cli.captureZoom = (float)atof(argv[++i]);
+            // 抓帧也走关卡相机（settings + MoveCamera 时间线）；默认关，保住既有像素基线的口径
+            else if (std::strcmp(a, "--capture-camera") == 0) cli.captureCamera = true;
             else if (std::strcmp(a, "--trail-duration") == 0 && i+1<argc) cli.trailDuration = (float)atof(argv[++i]);
             else if (std::strcmp(a, "--trail-sample-rate") == 0 && i+1<argc) { cli.trailSampleRate = (float)atof(argv[++i]); cli.trailAdaptive = false; }
             else if (std::strcmp(a, "--trail-target-fps") == 0 && i+1<argc) { cli.trailTargetFps = (float)atof(argv[++i]); cli.trailAdaptive = true; }

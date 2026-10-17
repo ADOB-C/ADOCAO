@@ -49,6 +49,22 @@ adocao stitch <dir> <out.png>           [--scale N] [--threads N]
 Trail sampling — two independent axes, both optional and **off by default** (wizard
 Visuals page / CLI):
 
+### 抓帧与关卡相机（`--capture` / `--capture-camera`）
+
+`--capture <out.png>` 是**确定性抓帧**（不走 wall clock / 音频 / 帧时间反馈），
+`--capture-time SEC` 与 `--capture-tile N` 二选一，`--capture-zoom Z` 指定缩放。
+
+`--capture-camera` 让抓帧也走**关卡相机**：`settings.relativeTo/position/rotation/zoom` +
+到目标时刻为止的全部 `MoveCamera`（含 `RepeatEvents` 展开）。这条模式下：
+
+* **zoom 由相机决定**，`--capture-zoom` 被忽略（否则运镜的 zoom 事件会被 CLI 覆盖，等于没测）；
+* 相机状态会打到日志：`capture-selfcheck: 关卡相机 t=… pos=(x,y) rot=… zoom=…`；
+* 默认**不开**：既有 51 个像素基线是"snap 到砖心、无旋转"的口径，而 The Moon 的
+  `settings.relativeTo=Tile` 会让整幅画面平移 —— 改默认口径等于一次性废掉全部基线。
+
+播放路径（不经 `--capture`）一直走关卡相机；两份实现是同一个 `CameraDirector`，
+语义见 `docs/camera.md`。
+
 ### 剔除块粒度（`--cull-block`）
 
 `--cull-block N` 选"每 N 层一个 AABB"的粗块索引粒度（wizard 的 Graphics 页同一个开关，

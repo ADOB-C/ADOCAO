@@ -2,6 +2,7 @@
 
 #include "CameraController.hpp"
 #include "render/Camera.hpp"
+#include "core/camera/CameraDirector.hpp"
 #include <memory>
 
 struct GLFWwindow;
@@ -39,6 +40,13 @@ private:
     std::unique_ptr<LevelScene> m_scene;
     adofai::Camera m_camera;
     CameraController m_camCtrl;   // attached to m_camera in init()
+    // 关卡相机（docs/camera.md）：settings 是第一层，MoveCamera 时间线是第二层。
+    // 只在播放/抓帧（--capture-camera）时驱动；停下后回到用户拖拽的导航相机。
+    const adofai::CameraTimeline* m_cameraTimeline = nullptr;   // 归 LoadResult 所有
+    adofai::CameraDirector m_cameraDirector;
+    bool   m_cameraActive = false;   // false = 下一帧要 seek（开始播/跳转/回退）
+    double m_camLastTime = 0.0;
+    bool   m_wasPlaying = false;
 
     const LauncherConfig* m_cfg = nullptr;
     adofai::LevelData* m_level = nullptr;
@@ -64,6 +72,7 @@ private:
     double m_lastFrameTime = 0;
 
     void navigateToTile(int floor);
+    void rebuildCameraTimeline();
     void handleInput();
     void update(float deltaMs);
     void render();

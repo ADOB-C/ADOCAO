@@ -1,0 +1,66 @@
+{
+  "angleData": [
+    180,
+    180,
+    180,
+    180,
+    180,
+    180,
+    180,
+    180,
+    180,
+    180
+  ],
+  "settings": {
+    "version": 15,
+    "bpm": 120,
+    "offset": 0,
+    "countdownTicks": 4,
+    "pitch": 100,
+    "zoom": 100,
+    "rotation": 0,
+    "relativeTo": "Player",
+    "position": [
+      0,
+      0
+    ],
+    "trackColor": "debb7b",
+    "secondaryTrackColor": "ffffff",
+    "backgroundColor": "000000",
+    "stickToFloors": true,
+    "planetEase": "Linear",
+    "trackAnimation": "None",
+    "trackDisappearAnimation": "None",
+    "beatsBehind": 4,
+    "beatsAhead": 3,
+    "legacyCamRelativeTo": false
+  },
+  "actions": [
+    {
+      "floor": 2,
+      "eventType": "MoveCamera",
+      "duration": 0,
+      "rotation": 90,
+      "zoom": 200,
+      "position": [
+        0,
+        0
+      ],
+      "relativeTo": "Global",
+      "ease": "Linear"
+    },
+    {
+      "floor": 4,
+      "eventType": "MoveCamera",
+      "duration": 4,
+      "rotation": 0,
+      "zoom": 100,
+      "position": [
+        0,
+        1
+      ],
+      "relativeTo": "Tile",
+      "ease": "OutCubic"
+    }
+  ]
+}

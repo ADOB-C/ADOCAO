@@ -10,6 +10,7 @@
 #include "core/level/LevelData.hpp"
 #include "core/level/FloorWindow.hpp"   // kCheckpointStride（③ 切片 4 日志用）
 #include "core/timeline/Timeline.hpp"
+#include "core/camera/CameraTimeline.hpp"
 #include "core/timeline/PlaybackClock.hpp"
 #include <cstring>
 #include <thread>
@@ -97,6 +98,12 @@ void runLevelLoading(const LauncherConfig& cfg, LoadingProgress& progress, LoadR
         result.timeline = cfg.preloadedTimeline;
         report(progress, 0.50f, "Applying final settings...");
     }
+
+    // 运镜时间线：必须在下面任何"丢数组"之前建好（它要逐层起始时间与砖位）。
+    // 谱面没有 MoveCamera 时这是一次空构建（零分配），有的话也只是几十~几百条。
+    result.cameraTimeline = std::make_shared<CameraTimeline>();
+    result.cameraTimeline->build(*result.level, result.timeline->tileStartTimes(),
+                                 result.timeline->tileBPMs());
 
     // PlaybackClock is created after final Timeline settings are known.
     result.playback = std::make_shared<PlaybackClock>();

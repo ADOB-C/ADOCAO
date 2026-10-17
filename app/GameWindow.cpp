@@ -9,6 +9,9 @@
 #include "core/level/LevelData.hpp"
 #include "core/timeline/Timeline.hpp"
 #include "core/timeline/PlaybackClock.hpp"
+#include "core/util/Easing.hpp"
+#include <algorithm>
+#include <array>
 #include "core/util/Logger.hpp"
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
@@ -69,6 +72,7 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     m_cfg = &cfg;
     m_level = result.level.get();
     m_timeline = result.timeline.get();
+    m_cameraTimeline = result.cameraTimeline.get();
     m_playback = result.playback.get();
     m_hitsoundMgr = &result.hitsounds;
     m_audioEngine = &result.audio;
@@ -204,6 +208,7 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
         const auto& p0 = m_level->tilePositionAt(0);
         m_camCtrl.snapTo(p0[0], p0[1]);
     }
+    rebuildCameraTimeline();
 
     // Mesh build: async on a shared GL context (NVIDIA), sync otherwise
     if (useAsyncBuild) {
@@ -256,6 +261,21 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     m_lastFrameTime = glfwGetTime();
     m_autoPlayTriggerTime = glfwGetTime() + (cfg.autoPlay ? 0.5 : 999999.0);
     return true;
+}
+
+// 建运镜时间线 + 把控制器摆到 settings 的初始状态。加载后调用一次；换关卡要重调。
+void GameWindow::rebuildCameraTimeline() {
+    if (!m_level || !m_timeline || !m_cameraTimeline) return;
+    std::array<double, 2> p0{0.0, 0.0};
+    if (m_level->tileCount() > 0) p0 = m_level->tilePositionAt(0);
+    const float bpm0 = m_timeline->tileBPMs().empty() ? 100.0f : m_timeline->tileBPMs()[0];
+    m_cameraDirector.reset(m_level->settings, m_cameraTimeline->keys(), p0[0], p0[1], bpm0);
+    m_cameraActive = false;
+    m_wasPlaying = false;
+    if (m_cameraTimeline && !m_cameraTimeline->empty()) {
+        LOG_I("camera: %zu 条运镜事件（已展开/已排序），settings.relativeTo=%s",
+              m_cameraTimeline->keys().size(), m_level->settings.relativeTo.c_str());
+    }
 }
 
 void GameWindow::navigateToTile(int floor) {
@@ -384,7 +404,7 @@ void GameWindow::handleInput() {
     }
 }
 
-void GameWindow::update(float) {
+void GameWindow::update(float deltaMs) {
     double now = glfwGetTime();
 
     // Playback update
@@ -408,14 +428,40 @@ void GameWindow::update(float) {
         m_scene->applyFrame(m_playback->frame(), *m_timeline);
     }
 
-    // Camera follow during playback
-    if (m_playback->isPlaying()) {
+    // 关卡相机：播放时由 CameraDirector 驱动（settings + MoveCamera 时间线）。
+    // 时间用 PlaybackClock::timeInLevel()（与 tileStartTimes 同一条基准）。
+    const bool playing = m_playback->isPlaying();
+    if (playing && m_level->tileCount() > 0) {
         int tileIdx = m_playback->currentTileIndex();
-        if (tileIdx >= 0 && tileIdx < (int)m_level->tileCount()) {
-            const auto& p = m_level->tilePositionAt(tileIdx);
-            m_camCtrl.snapTo(p[0], p[1]);
+        if (tileIdx < 0) tileIdx = 0;
+        if (tileIdx >= (int)m_level->tileCount()) tileIdx = (int)m_level->tileCount() - 1;
+        const auto p = m_level->tilePositionAt(tileIdx);
+        const auto& bpms = m_timeline->tileBPMs();
+        const float bpm = (tileIdx >= 0 && (size_t)tileIdx < bpms.size()) ? bpms[(size_t)tileIdx] : 100.0f;
+        const double pitch = std::max(0.1, (double)m_level->settings.pitch / 100.0);
+        const double t = m_playback->timeInLevel();
+
+        // 跳转/回退/第一次播放 → seek（重放全部事件并强制跟随层稳态），否则逐帧 update。
+        // 0.25 s 是"跨了一次跳转"的判据：正常帧间隔远小于它。
+        if (!m_cameraActive || t < m_camLastTime - 1e-6 || t - m_camLastTime > 0.25) {
+            m_cameraDirector.seek(t, p[0], p[1], tileIdx, pitch);
+            m_cameraActive = true;
+        } else {
+            m_cameraDirector.update(t, (double)deltaMs / 1000.0, bpm, pitch, p[0], p[1], tileIdx);
         }
+        m_camLastTime = t;
+
+        m_camera.setTarget(m_cameraDirector.x(), m_cameraDirector.y());
+        m_camera.setZoom((float)m_cameraDirector.zoom());
+        m_camera.setRotation((float)m_cameraDirector.rotation());
+    } else if (m_wasPlaying) {
+        // 停下：把当前视角接收为拖拽的基准（否则会跳回播放前的位置）。
+        // **保留旋转**（Re_ADOJAS 也保留）：CameraController 的 screenToWorld/拖动已经
+        // 按 camera.rotation() 反旋转，所以暂停时点击选中仍然准确。
+        m_camCtrl.snapTo(m_camera.targetX(), m_camera.targetY());
+        m_cameraActive = false;
     }
+    m_wasPlaying = playing;
 
     // Pan/drag (only when not playing)
     int fbW, fbH;
@@ -538,9 +584,28 @@ void GameWindow::captureAndExit() {
     m_scene->applyFrame(m_playback->frame(), *m_timeline);
 
     int tileIdx = m_playback->currentTileIndex();
-    if (tileIdx >= 0 && tileIdx < (int)m_level->tileCount())
+    if (tileIdx < 0) tileIdx = 0;
+    if (tileIdx >= (int)m_level->tileCount()) tileIdx = (int)m_level->tileCount() - 1;
+    if (m_cfg->captureCamera && m_level->tileCount() > 0) {
+        // 与播放时同一条相机路径：settings + 到目标时刻为止的全部运镜事件。
+        const auto p = m_level->tilePositionAt(tileIdx);
+        const auto& bpms = m_timeline->tileBPMs();
+        const float bpm = ((size_t)tileIdx < bpms.size()) ? bpms[(size_t)tileIdx] : 100.0f;
+        const double pitch = std::max(0.1, (double)m_level->settings.pitch / 100.0);
+        m_cameraDirector.seek(m_playback->timeInLevel(), p[0], p[1], tileIdx, pitch);
+        m_camCtrl.snapTo(m_cameraDirector.x(), m_cameraDirector.y());
+        m_camera.setRotation((float)m_cameraDirector.rotation());
+        LOG_I("capture-selfcheck: 关卡相机 t=%.4f pos=(%.4f, %.4f) rot=%.3f zoom=%.3f",
+              m_playback->timeInLevel(), m_cameraDirector.x(), m_cameraDirector.y(),
+              m_cameraDirector.rotation(), m_cameraDirector.zoom());
+    } else if (tileIdx >= 0 && tileIdx < (int)m_level->tileCount()) {
         m_camCtrl.snapTo(m_level->tilePositionAt(tileIdx)[0], m_level->tilePositionAt(tileIdx)[1]);
-    m_camera.setZoom(m_cfg->captureZoom);
+    }
+    // `--capture-camera` 下 **zoom 由关卡相机说了算**（`--capture-zoom` 被忽略）——
+    // 否则运镜的 zoom 事件会被 CLI 覆盖掉，等于没测。普通抓帧仍走 --capture-zoom。
+    const float captureZoom = m_cfg->captureCamera ? (float)m_cameraDirector.zoom()
+                                                   : m_cfg->captureZoom;
+    m_camera.setZoom(captureZoom);
 
     int fbW = 0, fbH = 0;
     glfwGetFramebufferSize(m_window, &fbW, &fbH);

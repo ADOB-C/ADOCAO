@@ -50,6 +50,10 @@ struct LauncherConfig {
     float  captureTime = 0.0f;     // 关卡时间（秒）
     int    captureTile = -1;       // ≥0 = 用该砖的起始时刻（谱面再长也不会漂；与 captureTime 二选一）
     float  captureZoom = 100.0f;   // 相机缩放（100 = 视野高 12 单位）
+    // true = 抓帧也走**关卡相机**（settings.relativeTo/position + MoveCamera 时间线）。
+    // 默认 false：保住既有 51 个像素基线的口径（它们的谱面没有运镜，且 The Moon 的
+    // settings.relativeTo=Tile 会让整幅画面平移）。新加的运镜抓帧状态用这个开关 opt-in。
+    bool   captureCamera = false;
 
     // Wizard (5.0.0): result of the "Next" preload step (parse + timeline).
     // Hitsound synthesis + audio are finished after Start in runLevelLoading.

@@ -308,6 +308,12 @@ def main():
         state(name, FIXTURE, "tile", str(tile_of(mark, off)), zoom)
     # 一条**真的加载音色**的状态：门槛其余状态都是 --no-hitsound，音色路径得有人覆盖
     state("hitsound_path", FIXTURE, "tile", "359", 6.0, "+hitsounds")
+    # 运镜（docs/camera.md）：`--capture-camera` 让抓帧也走关卡相机（settings + MoveCamera，
+    # 此时 --capture-zoom 被忽略、zoom 由相机决定）。三个时刻覆盖：稳定的 rotation+zoom、
+    # 2s tween 的中点、tween 终点。谱面=tests/charts/camera_basic.adofai（10 砖、BPM120）。
+    CAMERA_FIXTURE = "tests/charts/camera_basic.adofai"
+    for cam_name, cam_t in (("camera_rot", 1.5), ("camera_tween_mid", 3.0), ("camera_tween_end", 4.5)):
+        state(cam_name, CAMERA_FIXTURE, "time", "%.1f" % cam_t, 100.0, "--capture-camera")
 
     for name, mark in icon_states:
         # 锚在图标砖**之后 2 砖**（zoom 120）：行星在图标前方，拖尾正好从行星往回扫过图标 ——

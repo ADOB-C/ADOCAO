@@ -50,6 +50,8 @@ enum class SectionId : uint8_t {
     Preserved  = 6,   // 未识别成员的原始字节（decorations、未知 eventType）—— 供 ADOCAO-E 无损回写
     Derived    = 7,   // checkpoint（每 4096 层的续算状态，§8.8）：v2 不写，v3 起写
     ActionIndex = 8,  // 按层索引（③ 的"稀疏 checkpoint"）：每 4096 层一条 action 下标区间
+    Camera     = 9,   // MoveCamera 富事件（定长记录 38 B；docs/camera.md §4.1）
+    Repeat     = 10,  // RepeatEvents（定长记录 19 B；运镜展开用，docs/camera.md §2.3）
 };
 
 // 列/段的编码方式。`ColumnHeader::codec` 与 `SectionEntry::codec` 共用这一套。

@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <iterator>
 #include "core/util/CountLimits.hpp"
+#include "core/util/Easing.hpp"
 
 
 // ===========================================================================
@@ -252,18 +253,28 @@ struct Regions {
     const char* pathEnd = nullptr;     // 闭引号
 };
 
+// 运镜/重复事件的输出槽。热路径只带一个空 sink，几乎零成本；
+// 并行分块各自一个 sink，最后按段序合并（文件顺序 = 稳定次序）。
+struct CameraSink {
+    std::vector<LevelData::CameraEvent> cameras;
+    std::vector<LevelData::RepeatEvent> repeats;
+};
+
 // 前置声明：actions 在根扫描过程中就地解析（见 scanRootMembers）。
 inline bool parseActionRegion(const char* b, const char* end,
-                              std::vector<LevelData::FastAction>& out, const char** outEnd);
+                              std::vector<LevelData::FastAction>& out,
+                              CameraSink& sink, const char** outEnd);
 inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
-                                      std::vector<LevelData::FastAction>& out, const char** outEnd);
+                                      std::vector<LevelData::FastAction>& out,
+                                      CameraSink& sink, const char** outEnd);
 
 // 只遍历根对象的直接成员。逗号允许缺失（cleanJson 会给漏写逗号的文件补上），
 // 未知成员和 decorations 整体跳过，全程不复制。
 // actions 是边扫边解析的：解析器自己在配对的 ']' 处停下并回报结束位置，于是整段
 // actions 只被走一遍（1.5 GB 的谱上，多走一遍就是 840 ms）。
 inline bool scanRootMembers(const char* s, const char* e, Regions& r,
-                            std::vector<LevelData::FastAction>& actionsOut) {
+                            std::vector<LevelData::FastAction>& actionsOut,
+                            CameraSink& cameraSink) {
     const char* p = skipWs(s, e);
     if (p >= e || *p != '{') return false;
     for (++p;;) {
@@ -282,7 +293,7 @@ inline bool scanRootMembers(const char* s, const char* e, Regions& r,
         if (*p == '[' && keyIs(key, "actions") && !r.actions) {
             const char* aEnd = nullptr;
             setFastStage("scanRootMembers/actions", (long long)(p - s));
-            if (!parseActionRegionParallel(p, e, actionsOut, &aEnd)) return false;
+            if (!parseActionRegionParallel(p, e, actionsOut, cameraSink, &aEnd)) return false;
             r.actions = p;
             r.actionsEnd = aEnd;
             p = aEnd;
@@ -331,6 +342,8 @@ inline LevelData::FastAction::Type eventTypeOf(KeyRef k) {
     if (keyIs(k, "Bookmark"))      return T::Bookmark;
     if (keyIs(k, "Pause"))         return T::Pause;
     if (keyIs(k, "AnimateTrack"))  return T::AnimateTrack;
+    if (keyIs(k, "MoveCamera"))    return T::MoveCamera;     // → cameraEvents（富结构）
+    if (keyIs(k, "RepeatEvents"))  return T::RepeatEvents;   // → repeatEvents（富结构）
     return T::Other;
 }
 
@@ -350,7 +363,23 @@ struct ActionFields {
     float offX = 0.0f, offY = 0.0f;
     bool justThisTile = false;
     std::string hitsound, trackDisappear;
+
+    // ── 以下只给 MoveCamera / RepeatEvents 用（rich 模式才填；热路径一个字段都不碰） ──
+    bool hasAngleOffset = false; double angleOffset = 0.0;
+    bool hasPosition = false;                 // position 数组存在（分量可能全是 null）
+    bool hasPosX = false, hasPosY = false; double posX = 0.0, posY = 0.0;
+    bool hasRotation = false; double rotation = 0.0;
+    bool hasZoom = false; double zoom = 100.0;
+    bool hasEase = false; int easeId = 0;
+    int  relativeTo = -1;            // -1 未写；0..4 合法；100 写了但名字不认得
+    bool hasId = false; double idNum = 0.0;
+    const char* tagPtr = nullptr; const char* tagEnd = nullptr;
+    bool inactive = false, editorOnly = false;
+    uint8_t disabledMask = 0;
+    bool isBeat = true, executeOnCurrentFloor = false;
+    double repetitions = 0.0, floorCount = 0.0, interval = 1.0, gapLength = 1.0;
 };
+
 
 // 取出字符串值。带转义或裸 CR 的一律交回旧路径（旧路径会解转义 / 删 CR）。
 inline bool stringValue(const char* p, const char* vEnd, std::string& out) {
@@ -361,8 +390,123 @@ inline bool stringValue(const char* p, const char* vEnd, std::string& out) {
     return true;
 }
 
+
+// ── rich 模式的小工具（只给 MoveCamera / RepeatEvents 用） ───────────────────
+// 原则：rich 解析**从不 return false** —— 它跑在已经成功过一次的对象上，任何看不懂的
+// 值（怪类型/转义字符串/非对象）都只是"这个字段没写"，绝不能让整份谱加载失败。
+inline bool parseBoolValue(const char* v, const char* e, bool& out) {
+    if (e - v == 4 && std::memcmp(v, "true", 4) == 0) { out = true; return true; }
+    if (e - v == 5 && std::memcmp(v, "false", 5) == 0) { out = false; return true; }
+    if (e > v && *v == '"') {
+        std::string s;
+        if (!stringValue(v, e, s)) return false;
+        out = (s == "Enabled" || s == "true" || s == "True");
+        return true;
+    }
+    return false;
+}
+
+// `active: false` / `active: "Disabled"` → 整条事件失效（Re_ADOJAS isEventActive）。
+inline void parseActiveValue(const char* v, const char* e, ActionFields& f) {
+    if (e - v == 5 && std::memcmp(v, "false", 5) == 0) { f.inactive = true; return; }
+    if (e > v && *v == '"') {
+        std::string s;
+        if (stringValue(v, e, s) && s == "Disabled") f.inactive = true;
+    }
+}
+
+// `disabled: { "position": true, … }` —— 字段级过滤器（true = 该字段不生效）。
+inline void parseDisabledObject(const char* v, const char* e, ActionFields& f) {
+    if (e <= v || *v != '{') return;
+    const char* p = v + 1;
+    for (;;) {
+        p = skipWs(p, e);
+        if (p >= e || *p == '}') return;
+        if (*p == ',') { ++p; continue; }
+        if (*p != '"') return;
+        const char* kEnd = scanStringEndExact(p, e);
+        if (!kEnd) return;
+        KeyRef key{p + 1, (size_t)(kEnd - p - 1)};
+        p = skipWs(kEnd + 1, e);
+        if (p >= e || *p != ':') return;
+        p = skipWs(p + 1, e);
+        const char* vEnd = skipValue(p, e);
+        if (!vEnd) return;
+        bool on = false;
+        if (parseBoolValue(p, vEnd, on) && on) {
+            if (keyIs(key, "position"))        f.disabledMask |= LevelData::kCamDisPosition;
+            else if (keyIs(key, "rotation"))   f.disabledMask |= LevelData::kCamDisRotation;
+            else if (keyIs(key, "zoom"))       f.disabledMask |= LevelData::kCamDisZoom;
+            else if (keyIs(key, "relativeTo")) f.disabledMask |= LevelData::kCamDisRel;
+            else if (keyIs(key, "active"))     f.inactive = true;
+        }
+        p = vEnd;
+    }
+}
+
+// `ease: "OutCubic"` → Ease id（未知名字 = Linear，与 Re_ADOJAS 的 `|| Linear` 一致）。
+inline bool easeIdOf(const char* v, const char* e, int& out) {
+    std::string s;
+    if (!stringValue(v, e, s)) return false;
+    out = (int)easeFromName(s);
+    return true;
+}
+
+// `position: [x, y]`，两个分量各自可以是 null（Re_ADOJAS：分量 null/缺失 → 该轴不动）。
+inline void parsePositionPair(const char* v, const char* e, ActionFields& f) {
+    if (e <= v || *v != '[') return;          // 非数组：旧路径与 Re_ADOJAS 都当"没写"
+    f.hasPosition = true;
+    const char* p = v + 1;
+    for (int axis = 0; axis < 2; axis++) {
+        p = skipWs(p, e);
+        if (p >= e || *p == ']') return;
+        if (axis) {                              // 第二轴之前要有逗号
+            if (*p != ',') return;
+            p = skipWs(p + 1, e);
+            if (p >= e || *p == ']') return;
+        }
+        double num;
+        if (parseNumber(p, e, num)) {
+            if (axis == 0) { f.posX = num; f.hasPosX = true; }
+            else           { f.posY = num; f.hasPosY = true; }
+        }
+        // else: null / 其它字面量 → 这一轴保持"没写"
+        while (p < e && *p != ',' && *p != ']') ++p;
+    }
+}
+
+// `relativeTo`：字符串（5 个名字之一）或数字（0..4）。
+// 语义差别要照抄 Re_ADOJAS 的 parseMovementType：
+//   数字越界/非整数 → **Player**（`MOVEMENT_TYPES[raw] || 'Player'`）；
+//   字符串认不得   → **Unknown**（原函数返回 undefined → 运行时沿用上一次模式）。
+inline void parseRelativeToValue(const char* v, const char* e, ActionFields& f) {
+    using C = LevelData;
+    if (e > v && *v == '"') {
+        std::string s;
+        if (!stringValue(v, e, s)) return;
+        if      (s == "Player")                f.relativeTo = C::CamPlayer;
+        else if (s == "Tile")                  f.relativeTo = C::CamTile;
+        else if (s == "Global")                f.relativeTo = C::CamGlobal;
+        else if (s == "LastPosition")          f.relativeTo = C::CamLastPosition;
+        else if (s == "LastPositionNoRotation")f.relativeTo = C::CamLastPositionNoRotation;
+        else                                   f.relativeTo = C::CamUnknown;
+        return;
+    }
+    double d;
+    if (parseNumber(v, e, d)) {
+        if (d == 0) f.relativeTo = C::CamPlayer;
+        else if (d == 1) f.relativeTo = C::CamTile;
+        else if (d == 2) f.relativeTo = C::CamGlobal;
+        else if (d == 3) f.relativeTo = C::CamLastPosition;
+        else if (d == 4) f.relativeTo = C::CamLastPositionNoRotation;
+        else f.relativeTo = C::CamPlayer;        // 数字越界 → Player（照抄）
+    }
+}
+
 // p 指向 action 对象的 '{' 之后（调用方已经跳过 '{'）
-inline bool parseActionObject(const char* p, const char* e, ActionFields& f) {
+// rich=false 是热路径：一个相机字段都不解析（9M action 的成本必须保持原样）；
+// rich=true 只在认出事 MoveCamera / RepeatEvents 之后对**同一个对象**再跑一遍。
+inline bool parseActionObject(const char* p, const char* e, ActionFields& f, bool rich = false) {
     for (;;) {
         p = skipWs(p, e);
         if (p >= e) return false;
@@ -387,6 +531,9 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f) {
             if (keyIs(key, "floor")) {
                 if (!parseInt(v, vEnd, f.floor)) return false;
                 f.hasFloor = true;
+            } else if (rich && keyIs(key, "floorCount")) {
+                // RepeatEvents 的 Floor 模式：重复次数取 floorCount（不是 repetitions）
+                double fc; if (parseNumber(v, vEnd, fc)) f.floorCount = fc;
             }
             break;
         case 'e':
@@ -396,6 +543,12 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f) {
                     if (*q == '\\' || *q == '\r') return false;
                 f.type = eventTypeOf(KeyRef{v + 1, (size_t)(vEnd - v - 2)});
                 f.hasEvent = true;
+            } else if (rich && keyIs(key, "ease")) {
+                if (easeIdOf(v, vEnd, f.easeId)) f.hasEase = true;
+            } else if (rich && keyIs(key, "editorOnly")) {
+                bool b; if (parseBoolValue(v, vEnd, b) && b) f.editorOnly = true;
+            } else if (rich && keyIs(key, "executeOnCurrentFloor")) {
+                bool b; if (parseBoolValue(v, vEnd, b)) f.executeOnCurrentFloor = b;
             }
             break;
         case 's':
@@ -424,6 +577,8 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f) {
             if (keyIs(key, "duration")) {
                 if (!parseNumber(v, vEnd, d)) return false;
                 f.duration = (float)d; f.hasDuration = true;
+            } else if (rich && keyIs(key, "disabled")) {
+                parseDisabledObject(v, vEnd, f);
             }
             break;
         case 'h':
@@ -441,6 +596,9 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f) {
             } else if (keyIs(key, "trackAnimation")) {
                 if (*v != '"') return false;
                 f.hasTrackAnimation = true;
+            } else if (rich && keyIs(key, "tag")) {
+                std::string tagTmp;
+                if (*v == '"' && stringValue(v, vEnd, tagTmp)) { f.tagPtr = v + 1; f.tagEnd = vEnd - 1; }
             }
             break;
         case 'p':
@@ -456,6 +614,50 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f) {
                         }
                     }
                 }
+            } else if (rich && keyIs(key, "position")) {
+                parsePositionPair(v, vEnd, f);
+            }
+            break;
+        case 'r':
+            if (rich) {
+                if (keyIs(key, "rotation")) {
+                    double rd; if (parseNumber(v, vEnd, rd)) { f.rotation = rd; f.hasRotation = true; }
+                } else if (keyIs(key, "relativeTo")) {
+                    parseRelativeToValue(v, vEnd, f);
+                } else if (keyIs(key, "repeatType")) {
+                    std::string s2;
+                    if (stringValue(v, vEnd, s2)) f.isBeat = (s2 != "Floor");
+                } else if (keyIs(key, "repetitions")) {
+                    double rn; if (parseNumber(v, vEnd, rn)) f.repetitions = rn;
+                }
+            }
+            break;
+        case 'z':
+            if (rich && keyIs(key, "zoom")) {
+                double zd; if (parseNumber(v, vEnd, zd)) { f.zoom = zd; f.hasZoom = true; }
+            }
+            break;
+        case 'a':
+            if (rich) {
+                if (keyIs(key, "angleOffset")) {
+                    double ad; if (parseNumber(v, vEnd, ad)) { f.angleOffset = ad; f.hasAngleOffset = true; }
+                } else if (keyIs(key, "active")) {
+                    parseActiveValue(v, vEnd, f);
+                }
+            }
+            break;
+        case 'i':
+            if (rich) {
+                if (keyIs(key, "id")) {
+                    double iv; if (parseNumber(v, vEnd, iv)) { f.idNum = iv; f.hasId = true; }
+                } else if (keyIs(key, "interval")) {
+                    double in; if (parseNumber(v, vEnd, in)) f.interval = in;
+                }
+            }
+            break;
+        case 'g':
+            if (rich && keyIs(key, "gapLength")) {
+                double gl; if (parseNumber(v, vEnd, gl)) f.gapLength = gl;
             }
             break;
         case 'j':
@@ -514,13 +716,60 @@ inline bool buildAction(const ActionFields& f, LevelData::FastAction& a, bool& k
         break;
     }
     // 缺 floor 或缺 eventType、以及未知 eventType 的 action 旧路径直接丢弃
-    keep = f.hasFloor && f.hasEvent && f.type != T::Other;
+    keep = f.hasFloor && f.hasEvent && f.type != T::Other &&
+           f.type != T::MoveCamera && f.type != T::RepeatEvents;   // 后两者进富结构
     return true;
+}
+
+// 把 rich 解析出来的字段落进富结构。**不做任何数值变换** —— 单位/缺省语义全部原样保留，
+// 解释权在 core/camera（docs/camera.md §4）。
+inline void decodeSpecialEvent(const ActionFields& f, CameraSink& sink) {
+    using T = LevelData::FastAction;
+    using C = LevelData;
+    if (f.type == T::MoveCamera) {
+        C::CameraEvent ev;
+        ev.floor = f.floor;
+        if (f.hasId && f.idNum >= 0.0 && f.idNum < 4294967295.0) ev.id = (uint32_t)f.idNum;
+        ev.angleOffset = (float)f.angleOffset;
+        ev.duration = (float)f.duration;
+        ev.x = (float)f.posX;
+        ev.y = (float)f.posY;
+        ev.rotation = (float)f.rotation;
+        ev.zoom = (float)f.zoom;
+        ev.ease = (uint8_t)f.easeId;
+        ev.relativeTo = (f.relativeTo < 0) ? (uint8_t)C::CamAbsent : (uint8_t)f.relativeTo;
+        uint8_t flags = 0;
+        if (f.hasPosition) flags |= C::kCamHasPosition;
+        if (f.hasPosX) flags |= C::kCamHasX;
+        if (f.hasPosY) flags |= C::kCamHasY;
+        if (f.hasRotation) flags |= C::kCamHasRotation;
+        if (f.hasZoom) flags |= C::kCamHasZoom;
+        if (f.inactive) flags |= C::kCamInactive;
+        if (f.editorOnly) flags |= C::kCamEditorOnly;
+        if (f.hasEase) flags |= C::kCamEaseWritten;
+        ev.flags = flags;
+        ev.disabled = f.disabledMask;
+        if (f.tagPtr && f.tagEnd > f.tagPtr) ev.tag.assign(f.tagPtr, (size_t)(f.tagEnd - f.tagPtr));
+        sink.cameras.push_back(std::move(ev));
+    } else if (f.type == T::RepeatEvents) {
+        C::RepeatEvent rp;
+        rp.floor = f.floor;
+        // Beat 模式取 repetitions，Floor 模式取 floorCount（Re_ADOJAS 的 isBeat 分支）
+        rp.repetitions = (float)(f.isBeat ? f.repetitions : f.floorCount);
+        rp.interval = (float)f.interval;
+        rp.gapLength = (float)f.gapLength;
+        uint8_t flags = f.isBeat ? 1 : 0;
+        if (f.executeOnCurrentFloor) flags |= 2;
+        rp.flags = flags;
+        if (f.tagPtr && f.tagEnd > f.tagPtr) rp.tag.assign(f.tagPtr, (size_t)(f.tagEnd - f.tagPtr));
+        sink.repeats.push_back(std::move(rp));
+    }
 }
 
 // b 指向 '['，end 是整个缓冲区的末尾；遇到配对的 ']' 停下并回报其后的位置。
 inline bool parseActionRegion(const char* b, const char* end,
-                              std::vector<LevelData::FastAction>& out, const char** outEnd) {
+                              std::vector<LevelData::FastAction>& out,
+                              CameraSink& sink, const char** outEnd) {
     const char* p = b + 1;
     for (;;) {
         p = skipWs(p, end);
@@ -538,6 +787,12 @@ inline bool parseActionRegion(const char* b, const char* end,
         g_failPos = p;
         if (!buildAction(f, a, keep)) return false;
         if (keep) out.push_back(std::move(a));
+        else if (f.type == LevelData::FastAction::MoveCamera ||
+                 f.type == LevelData::FastAction::RepeatEvents) {
+            // 罕见事件：对同一个对象再解析一遍富字段（热路径零成本，这里最多几百次）
+            ActionFields rich;
+            if (parseActionObject(p + 1, objEnd, rich, /*rich=*/true)) decodeSpecialEvent(rich, sink);
+        }
         p = objEnd;
     }
 }
@@ -589,7 +844,8 @@ inline bool findActionSplits(const char* begin, const char* fileEnd,
 // actions 写两遍，实测峰值 3.20 -> 5.18 GB，在内存紧张的机器上直接翻车。
 constexpr size_t kFail = (size_t)-1;
 inline size_t parseActionRangeInto(const char* b, const char* end,
-                                   LevelData::FastAction* dst, size_t slot) {
+                                   LevelData::FastAction* dst, size_t slot,
+                                   CameraSink& sink) {
     size_t n = 0;
     const char* p = b;
     for (;;) {
@@ -608,13 +864,18 @@ inline size_t parseActionRangeInto(const char* b, const char* end,
         if (keep) {
             if (n >= slot) return kFail;                 // 槽位估算错了，别越界
             dst[n++] = std::move(a);
+        } else if (f.type == LevelData::FastAction::MoveCamera ||
+                   f.type == LevelData::FastAction::RepeatEvents) {
+            ActionFields rich;
+            if (parseActionObject(p + 1, objEnd, rich, /*rich=*/true)) decodeSpecialEvent(rich, sink);
         }
         p = objEnd;
     }
 }
 
 inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
-                                      std::vector<LevelData::FastAction>& out, const char** outEnd) {
+                                      std::vector<LevelData::FastAction>& out,
+                                      CameraSink& sink, const char** outEnd) {
     const size_t remaining = (size_t)(fileEnd - b);
 
     // 测试钩子（同 ADOCAO_MIX_THREADS 的路子）：显式指定段数就照办，哪怕文件很小——
@@ -628,7 +889,7 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
         if (v > 0) { pieces = (unsigned)v; forced = true; }
     }
     if (pieces < 2) {
-        if (forced) return parseActionRegion(b, fileEnd, out, outEnd);
+        if (forced) return parseActionRegion(b, fileEnd, out, sink, outEnd);
         // 小文件不值得多扫一遍、也不值得开线程：直接用融合的单遍解析。
         //
         // 上界同理：1.2 GB 以上的 actions 区间上，多线程读不同区段会把内存带宽/局域性
@@ -637,7 +898,7 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
         // 扫描本身就要 0.5 s，与其白花不如省掉。真正的解法是让解析在小的常驻窗口上
         // 做（见 TODO：滑窗流水线），那时并行分段是免费的。
         if (remaining < (32u << 20) || remaining >= (768u << 20))
-            return parseActionRegion(b, fileEnd, out, outEnd);
+            return parseActionRegion(b, fileEnd, out, sink, outEnd);
         pieces = std::thread::hardware_concurrency();
         if (pieces < 2) pieces = 2;
         if (pieces > 8) pieces = 8;                      // 再多边际收益很小
@@ -660,7 +921,7 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
     std::vector<size_t> counts;
     const char* regionEnd = nullptr;
     if (!findActionSplits(b, fileEnd, targets, splits, counts, &regionEnd) || splits.empty()) {
-        return parseActionRegion(b, fileEnd, out, outEnd);   // 结构不对/切不出两段
+        return parseActionRegion(b, fileEnd, out, sink, outEnd);   // 结构不对/切不出两段
     }
 
     std::vector<const char*> bounds;
@@ -669,7 +930,7 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
     for (const char* sp : splits) bounds.push_back(sp);
     bounds.push_back(regionEnd);
     const size_t n = bounds.size() - 1;
-    if (n < 2) return parseActionRegion(b, fileEnd, out, outEnd);
+    if (n < 2) return parseActionRegion(b, fileEnd, out, sink, outEnd);
 
     const double scanMs = msSince(tScan);
     const size_t base = out.size();
@@ -677,6 +938,9 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
     for (size_t i = 0; i < n; i++) slots[i + 1] = slots[i] + counts[i];
     out.resize(base + slots[n]);                         // 一次分配，之后不再增长
 
+    const size_t camBase = sink.cameras.size();
+    const size_t repBase = sink.repeats.size();
+    std::vector<CameraSink> pieceSinks(n);
     auto tParse = now();
     std::vector<size_t> kept(n, 0);
     std::atomic<bool> failed{false};
@@ -688,7 +952,7 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
         Scheduler::instance().parallelFor(n, 1, Lane::Background, [&](size_t lo, size_t hi) {
             for (size_t i = lo; i < hi && !failed.load(std::memory_order_relaxed); i++) {
                 size_t k = parseActionRangeInto(bounds[i], bounds[i + 1],
-                                                out.data() + base + slots[i], counts[i]);
+                                                out.data() + base + slots[i], counts[i], pieceSinks[i]);
                 if (k == kFail) failed.store(true, std::memory_order_relaxed);
                 else kept[i] = k;
             }
@@ -699,7 +963,18 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
                           scanMs, parseMs, n, poolThreads, (int)failed.load());
     if (failed.load()) {
         out.resize(base);
-        return parseActionRegion(b, fileEnd, out, outEnd);   // 只有切分不可信时才会走到
+        sink.cameras.resize(camBase); sink.repeats.resize(repBase);
+        return parseActionRegion(b, fileEnd, out, sink, outEnd);   // 只有切分不可信时才会走到
+    }
+    // 相机/重复事件按**段序**合并 —— 段是按文件顺序切的，所以结果就是文件顺序。
+    for (size_t i = 0; i < n; i++) {
+        auto& ps = pieceSinks[i];
+        sink.cameras.insert(sink.cameras.end(),
+                            std::make_move_iterator(ps.cameras.begin()),
+                            std::make_move_iterator(ps.cameras.end()));
+        sink.repeats.insert(sink.repeats.end(),
+                            std::make_move_iterator(ps.repeats.begin()),
+                            std::make_move_iterator(ps.repeats.end()));
     }
 
     // 压实：每段末尾的空槽（被丢弃的 action）移走。没有丢弃时位移为 0，直接零拷贝。
@@ -729,6 +1004,7 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
 struct WindowParser {
     std::vector<double> angles;
     std::vector<LevelData::FastAction> actions;
+    CameraSink cameraSink;               // MoveCamera / RepeatEvents（罕见，富结构）
     LevelData::Settings settings;
     std::string pathText;
     std::string settingsText;
@@ -788,6 +1064,12 @@ struct WindowParser {
             bool keep = false;
             if (!buildAction(f, a, keep)) { fail(p, "action 组装失败"); return p; }
             if (keep) actions.push_back(std::move(a));
+            else if (f.type == LevelData::FastAction::MoveCamera ||
+                     f.type == LevelData::FastAction::RepeatEvents) {
+                ActionFields rich;
+                if (parseActionObject(p + 1, objEnd, rich, /*rich=*/true))
+                    decodeSpecialEvent(rich, cameraSink);
+            }
             p = objEnd;
         }
     }
@@ -1014,6 +1296,7 @@ static void readSettings(const rapidjson::Value& s, LevelData::Settings& out) {
     out.songFilename    = getS("song", s.HasMember("songFilename") ? getS("songFilename", out.songFilename)
                                                                   : out.songFilename);
     out.bpm             = getF("bpm", out.bpm);
+    out.pitch           = getF("pitch", out.pitch);
     out.offset          = getF("offset", out.offset);
     out.countdownTicks  = getI("countdownTicks", out.countdownTicks);
     out.zoom            = getF("zoom", out.zoom);
@@ -1038,6 +1321,8 @@ static void readSettings(const rapidjson::Value& s, LevelData::Settings& out) {
     }
     if (s.HasMember("position") && s["position"].IsArray() && s["position"].Size() >= 2)
         out.position = {s["position"][0].GetFloat(), s["position"][1].GetFloat()};
+    if (s.HasMember("legacyCamRelativeTo") && s["legacyCamRelativeTo"].IsBool())
+        out.legacyCamRelativeTo = s["legacyCamRelativeTo"].GetBool();
 }
 
 }  // namespace
@@ -1180,6 +1465,14 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
                         if (actions.empty()) actions = std::move(wp.actions);
                         else actions.insert(actions.end(), std::make_move_iterator(wp.actions.begin()),
                                             std::make_move_iterator(wp.actions.end()));
+                        if (cameraEvents.empty()) cameraEvents = std::move(wp.cameraSink.cameras);
+                        else cameraEvents.insert(cameraEvents.end(),
+                                                 std::make_move_iterator(wp.cameraSink.cameras.begin()),
+                                                 std::make_move_iterator(wp.cameraSink.cameras.end()));
+                        if (repeatEvents.empty()) repeatEvents = std::move(wp.cameraSink.repeats);
+                        else repeatEvents.insert(repeatEvents.end(),
+                                                 std::make_move_iterator(wp.cameraSink.repeats.begin()),
+                                                 std::make_move_iterator(wp.cameraSink.repeats.end()));
                         return finishLoad(onProgress, exportOnly);
                     }
                 }
@@ -1296,9 +1589,10 @@ bool LevelData::tryFastParse(const char* data, size_t len, ProgressCb onProgress
     g_bufBase = data;
     g_failPos = nullptr;
     std::vector<FastAction> newActions;   // actions 在根扫描里就地解析
+    CameraSink newCamera;
     Regions r;
     g_fastStage = "scanRootMembers";
-    if (!scanRootMembers(data, data + len, r, newActions)) return false;
+    if (!scanRootMembers(data, data + len, r, newActions, newCamera)) return false;
 
     if (onProgress) onProgress(0.12f, "Parsing JSON...");
 
@@ -1336,12 +1630,111 @@ bool LevelData::tryFastParse(const char* data, size_t len, ProgressCb onProgress
     if (actions.empty()) actions = std::move(newActions);
     else actions.insert(actions.end(), std::make_move_iterator(newActions.begin()),
                         std::make_move_iterator(newActions.end()));
+    if (cameraEvents.empty()) cameraEvents = std::move(newCamera.cameras);
+    else cameraEvents.insert(cameraEvents.end(), std::make_move_iterator(newCamera.cameras.begin()),
+                             std::make_move_iterator(newCamera.cameras.end()));
+    if (repeatEvents.empty()) repeatEvents = std::move(newCamera.repeats);
+    else repeatEvents.insert(repeatEvents.end(), std::make_move_iterator(newCamera.repeats.begin()),
+                             std::make_move_iterator(newCamera.repeats.end()));
     settings = newSettings;
     pathData = std::move(newPath);
     return true;
 }
 
 // 旧路径：cleanJson + RapidJSON DOM。保持原样，是回退路径也是对拍基准。
+
+// ── DOM（旧路径）版本的相机/重复事件读取 ─────────────────────────────────────
+// 旧路径是**对拍基准**：字段语义必须与快路径的 rich 解析逐字段一致（测试里直接比结构体）。
+namespace {
+
+int jsonCamRelativeTo(const rapidjson::Value& v) {
+    using C = LevelData;
+    if (v.IsString()) {
+        std::string s = v.GetString();
+        if (s == "Player") return C::CamPlayer;
+        if (s == "Tile") return C::CamTile;
+        if (s == "Global") return C::CamGlobal;
+        if (s == "LastPosition") return C::CamLastPosition;
+        if (s == "LastPositionNoRotation") return C::CamLastPositionNoRotation;
+        return C::CamUnknown;
+    }
+    if (v.IsNumber()) {
+        double d = v.GetDouble();
+        if (d == 0) return C::CamPlayer;
+        if (d == 1) return C::CamTile;
+        if (d == 2) return C::CamGlobal;
+        if (d == 3) return C::CamLastPosition;
+        if (d == 4) return C::CamLastPositionNoRotation;
+        return C::CamPlayer;                 // 数字越界 → Player（照抄 parseMovementType）
+    }
+    return C::CamAbsent;
+}
+
+void jsonReadCameraEvent(const rapidjson::Value& a, std::vector<LevelData::CameraEvent>& out) {
+    using C = LevelData;
+    C::CameraEvent ev;
+    ev.floor = a["floor"].GetInt();
+    if (a.HasMember("id") && a["id"].IsNumber()) {
+        double d = a["id"].GetDouble();
+        if (d >= 0.0 && d < 4294967295.0) ev.id = (uint32_t)d;
+    }
+    if (a.HasMember("angleOffset") && a["angleOffset"].IsNumber()) ev.angleOffset = a["angleOffset"].GetFloat();
+    if (a.HasMember("duration") && a["duration"].IsNumber()) ev.duration = a["duration"].GetFloat();
+    if (a.HasMember("position") && a["position"].IsArray()) {
+        ev.flags |= C::kCamHasPosition;
+        auto& p = a["position"];
+        if (p.Size() >= 1 && p[0].IsNumber()) { ev.x = p[0].GetFloat(); ev.flags |= C::kCamHasX; }
+        if (p.Size() >= 2 && p[1].IsNumber()) { ev.y = p[1].GetFloat(); ev.flags |= C::kCamHasY; }
+    }
+    if (a.HasMember("rotation") && a["rotation"].IsNumber()) { ev.rotation = a["rotation"].GetFloat(); ev.flags |= C::kCamHasRotation; }
+    if (a.HasMember("zoom") && a["zoom"].IsNumber()) { ev.zoom = a["zoom"].GetFloat(); ev.flags |= C::kCamHasZoom; }
+    if (a.HasMember("ease") && a["ease"].IsString()) {
+        ev.ease = (uint8_t)easeFromName(a["ease"].GetString());
+        ev.flags |= C::kCamEaseWritten;
+    }
+    if (a.HasMember("relativeTo")) ev.relativeTo = (uint8_t)jsonCamRelativeTo(a["relativeTo"]);
+    if (a.HasMember("disabled") && a["disabled"].IsObject()) {
+        auto& d = a["disabled"];
+        auto on = [&](const char* k) { return d.HasMember(k) && d[k].IsBool() && d[k].GetBool(); };
+        if (on("position"))   ev.disabled |= C::kCamDisPosition;
+        if (on("rotation"))   ev.disabled |= C::kCamDisRotation;
+        if (on("zoom"))       ev.disabled |= C::kCamDisZoom;
+        if (on("relativeTo")) ev.disabled |= C::kCamDisRel;
+        if (on("active"))     ev.flags |= C::kCamInactive;
+    }
+    if (a.HasMember("active")) {
+        auto& v = a["active"];
+        if (v.IsBool() && !v.GetBool()) ev.flags |= C::kCamInactive;
+        else if (v.IsString() && std::string(v.GetString()) == "Disabled") ev.flags |= C::kCamInactive;
+    }
+    if (a.HasMember("editorOnly") && a["editorOnly"].IsBool() && a["editorOnly"].GetBool())
+        ev.flags |= C::kCamEditorOnly;
+    if (a.HasMember("tag") && a["tag"].IsString()) ev.tag = a["tag"].GetString();
+    out.push_back(std::move(ev));
+}
+
+void jsonReadRepeatEvent(const rapidjson::Value& a, std::vector<LevelData::RepeatEvent>& out) {
+    using C = LevelData;
+    C::RepeatEvent rp;
+    rp.floor = a["floor"].GetInt();
+    bool isBeat = true;
+    if (a.HasMember("repeatType") && a["repeatType"].IsString())
+        isBeat = std::string(a["repeatType"].GetString()) != "Floor";
+    if (isBeat) rp.repetitions = (a.HasMember("repetitions") && a["repetitions"].IsNumber())
+                                     ? a["repetitions"].GetFloat() : 0.0f;
+    else        rp.repetitions = (a.HasMember("floorCount") && a["floorCount"].IsNumber())
+                                     ? a["floorCount"].GetFloat() : 0.0f;
+    rp.interval = (a.HasMember("interval") && a["interval"].IsNumber()) ? a["interval"].GetFloat() : 1.0f;
+    rp.gapLength = (a.HasMember("gapLength") && a["gapLength"].IsNumber()) ? a["gapLength"].GetFloat() : 1.0f;
+    rp.flags = isBeat ? 1 : 0;
+    if (a.HasMember("executeOnCurrentFloor") && a["executeOnCurrentFloor"].IsBool()
+        && a["executeOnCurrentFloor"].GetBool()) rp.flags |= 2;
+    if (a.HasMember("tag") && a["tag"].IsString()) rp.tag = a["tag"].GetString();
+    out.push_back(std::move(rp));
+}
+
+}  // namespace
+
 bool LevelData::parseLegacy(const std::string& jsonStr, ProgressCb onProgress, bool exportOnly) {
     // Fast path: parse angleData directly without JSON DOM allocation
     size_t angleDataEnd = 0;
@@ -1412,6 +1805,8 @@ bool LevelData::parseLegacy(const std::string& jsonStr, ProgressCb onProgress, b
             else if (et == "Bookmark") act.type = FastAction::Bookmark;
             else if (et == "Pause") act.type = FastAction::Pause;
             else if (et == "AnimateTrack") act.type = FastAction::AnimateTrack;
+            else if (et == "MoveCamera") { jsonReadCameraEvent(a, cameraEvents); continue; }
+            else if (et == "RepeatEvents") { jsonReadRepeatEvent(a, repeatEvents); continue; }
             else continue;
             if (act.type == FastAction::SetSpeed) {
                 if (a.HasMember("speedType") && std::string(a["speedType"].GetString()) == "Multiplier") {
@@ -1463,6 +1858,11 @@ bool LevelData::parseLegacy(const std::string& jsonStr, ProgressCb onProgress, b
 
 bool LevelData::finishLoad(ProgressCb onProgress, bool exportOnly) {
     if (onProgress) onProgress(0.20f, "Processing level data...");
+
+    // 相机事件的 `order` = 文件顺序（同 time 同 id 时的最终 tie-break）。
+    // 所有解析路径（快/窗口/DOM/容器）都在这里收口，所以只在这一处赋值。
+    for (size_t i = 0; i < cameraEvents.size(); i++)
+        cameraEvents[i].order = (uint32_t)i;
 
     // Convert pathData → angleData if needed
     if (!pathData.empty() && angleData.empty()) {

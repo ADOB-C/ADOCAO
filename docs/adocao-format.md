@@ -104,8 +104,11 @@ Header (76 B) | SectionEntry × sectionCount (40 B each) | padding → 8 B 对�
 | 3 | `AngleData` | **一列 double**（§4）|
 | 4 | `Actions` | `u32 columnCount(=6)` + 每列 `u64 byteLen + bytes`。**v2 起 `strId`/`val1`/`val2` 是稀疏列**：列内容 = `u32 typeMask` + `u64 usedCount` + 一列（只含掩码内的类型）；掩码自描述（某类型在这一列出现过非默认值即入掩码），读取方按事件顺序只在掩码命中时取下一个值，其余取 0 —— 顺序与语义逐位不变 |
 | 5 | `PathData` | `u64 len + bytes`（仅当非空）|
-| 6 | `Preserved` | 未识别成员的原始字节 —— **待做**（v1 不写，今天这些本来就被丢弃）|
-| 7 | `Derived` | 预计算/检查点 —— **待做**（v1 不写）|
+| 6 | `Preserved` | 未识别成员的原始字节 —— **待做**（今天这些本来就被丢弃；注意 `MoveCamera`/`RepeatEvents` 已走 9/10 段，不在这里）|
+| 7 | `Derived` | 预计算/检查点 —— ✅ v3 起写（§8.11）|
+| 8 | `ActionIndex` | 按层索引 —— ✅ v3 起写（§8.12 之后的 ActionIndex 小节）|
+| 9 | `Camera` | **MoveCamera 富事件**，每记录 38 B（§3.4）。仅当谱面有运镜时写 |
+| 10 | `Repeat` | **RepeatEvents**，每记录 19 B（§3.5）。仅当谱面有重复事件时写 |
 
 **只存输入，不存派生数据**：`Tile::position`（全局前缀和）、`direction`、`tileBPMs`、
 `Timeline` 全部由 `angleData` + `actions` 重算。
@@ -118,9 +121,11 @@ Header (76 B) | SectionEntry × sectionCount (40 B each) | padding → 8 B 对�
 zoom(f32) | rotation(f32) | relativeTo(u16 池下标) | position[2](f32) | hitsound(u16) |
 hitsoundVolume(f32) | trackColor(u16) | secondaryTrackColor(u16) | backgroundColor(u16) |
 stickToFloors(u8) | planetEase(u16) | trackDisappearAnimation(u16) | trackAnimation(u16) |
-beatsBehind(f32) | beatsAhead(f32) | songFilename(u16 池下标)`
+beatsBehind(f32) | beatsAhead(f32) | songFilename(u16 池下标) | pitch(f32) | legacyCamRelativeTo(u8)`
 
-* **末尾的 `songFilename` 是 2026-10-17 追加的**（ADOCAO-E 另存/重打包要 `.adofai` 的 `"song"`）。
+* **末尾的 `pitch`(f32) + `legacyCamRelativeTo`(u8) 是 2026-10-17 追加的**（运镜要用：pitch
+  同时缩放事件时长与跟随速度，legacy 开关是老语义）。读侧同样按"尾部还在才读"处理。
+* **`songFilename` 也是 2026-10-17 追加的**（ADOCAO-E 另存/重打包要 `.adofai` 的 `"song"`）。
   追加在**末尾**是为了双向兼容：读侧 `parseSettings()` 只在 `off + 2 <= 段长度` 时才读它
   （旧文件没有这两个字节 → 保留默认值，不是坏数据）；旧读者按原有字段顺序读完就返回，
   尾部多余字节本来就被忽略。因此**不用** bump 版本号。
@@ -142,6 +147,39 @@ beatsBehind(f32) | beatsAhead(f32) | songFilename(u16 池下标)`
   → `Dict`）。
 
 每列前缀 `u64 byteLen`，于是读取方可以跳过不关心的列（`u64` 允许单列 > 4 GB）。
+
+### 3.4 Camera（段 id 9）
+
+`MoveCamera` 事件与砖数无关（一张谱最多几十~几百条），所以**不塞进 16 B 的 `FastAction`**，
+用定长记录单独一段。记录 38 B（小端）：
+
+```
+floor(i32) | id(u32) | angleOffset(f32) | duration(f32) | x(f32) | y(f32)
+| rotation(f32) | zoom(f32) | ease(u8) | relativeTo(u8) | flags(u8) | disabled(u8) | tag(u16 池下标)
+```
+
+* `id` 缺失写 `0xFFFFFFFF`（排序时等同 Re_ADOJAS 的 `Infinity`）。
+* `flags` 的位是**跨实现契约**（`LevelData::CamFlags`，`static_assert` 钉住）：
+  `1 hasPosition / 2 hasX / 4 hasY / 8 hasRotation / 16 hasZoom / 32 inactive / 64 editorOnly / 128 easeWritten`。
+  `hasPosition` 与 `hasX/hasY` 是两件事：`position:[null,null]` 时前者置位、后两者不置位
+  （docs/camera.md §4.3/§4.4 的 dedup 就靠这个区分）。
+* `disabled` 的位：`1 position / 2 rotation / 4 zoom / 8 relativeTo`。
+* `relativeTo`：`0 Player / 1 Tile / 2 Global / 3 LastPosition / 4 LastPositionNoRotation /
+  0xFE 写了但认不得 / 0xFF 没写`。
+* `tag` 走字符串池（与 `strId` 同一张表；**写入方必须在序列化池之前**把这些 tag 加进去）。
+* 记录顺序 = 文件顺序（`order` 不入库，读侧按记录下标重排）。
+
+### 3.5 Repeat（段 id 10）
+
+`RepeatEvents` 只服务运镜展开（其它事件暂不消费）。记录 19 B：
+
+```
+floor(i32) | repetitions(f32) | interval(f32) | gapLength(f32) | flags(u8) | tag(u16 池下标)
+```
+
+`flags`：`bit0 = isBeat（repeatType != Floor）`、`bit1 = executeOnCurrentFloor`。语义见
+docs/camera.md §2.3。两段都**只在非空时写**；旧文件没有它们 → 读侧得到空 vector（正确结果：
+这张谱没有运镜）。
 
 ## 4. 列编码（Codec）
 

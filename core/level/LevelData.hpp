@@ -50,7 +50,11 @@ struct LevelData {
         std::string trackAnimation = "None";
         float  beatsBehind = 4.0f;
         float  beatsAhead  = 3.0f;
-        // ... more fields as needed
+        // 音高（%）：运镜的事件时长与跟随速度都按 1/(pitch/100) 缩放（docs/camera.md §5.5）。
+        // 缺省 100 = 不变调；Re_ADOJAS 用 `Math.max(0.1, pitch/100)` 兜底。
+        float  pitch = 100.0f;
+        // 老语义：事件没写 relativeTo 时，position 变成"相对当前相机"的**增量**（docs/camera.md §4.7）。
+        bool   legacyCamRelativeTo = false;
     };
 
     // 32 B → 24 B：`index` 从来只被写入（`= i`），没有任何读者 —— 层号就是它在 `tiles` 里的位置。
@@ -62,10 +66,71 @@ struct LevelData {
     // 内存预算护栏：1e9 层时每 8 B 就是 8 GB。加字段前先问"这个值能不能推导/能不能窗口化"。
     static_assert(sizeof(Tile) == 24, "Tile 膨胀了：先确认这 8 B/层（1e9 层 = 8 GB）是必要的");
 
+    // ── 相机：MoveCamera / RepeatEvents ────────────────────────────────────
+    // 运镜事件**与砖数无关**（一个事件一条，最多几百条），所以存富结构、单独一个 vector，
+    // 不塞进 16 B 的 FastAction（那会把 9M action 的 16 B 变成 24 B = 白扔 72 MB）。
+    // 字段语义、缺省值、单位见 docs/camera.md §4.1：
+    //   position = 砖（TILE_SIZE=1）｜rotation = 度｜zoom = 百分比｜duration = 拍｜angleOffset = 度。
+    // "字段没写" 与 "写了 0" 必须能区分 —— 所以有 hasX/hasY/hasRotation/hasZoom 位。
+    enum CamMove : uint8_t {
+        CamPlayer = 0,
+        CamTile,
+        CamGlobal,
+        CamLastPosition,
+        CamLastPositionNoRotation,
+        CamUnknown = 0xFE,   // 写了 relativeTo 但不是合法值（→ 沿用上一次模式）
+        CamAbsent  = 0xFF,   // 没写 relativeTo
+    };
+    // 位序是**跨实现契约**：tests/camera_gold.inc 里写的就是这些数值（static_assert 钉住）。
+    enum CamFlags : uint8_t {
+        // `position` **数组存在**（哪怕两个分量都是 null）。它和 hasX/hasY 是两件事：
+        // Re_ADOJAS 用 `Array.isArray(event.position)` 判 positionUsed，`[null,null]` 会走
+        // dedup/NaN 归零路径，而"没写 position"不会 —— docs/camera.md §4.3/§4.4。
+        kCamHasPosition = 1 << 0,
+        kCamHasX        = 1 << 1,
+        kCamHasY        = 1 << 2,
+        kCamHasRotation = 1 << 3,
+        kCamHasZoom     = 1 << 4,
+        kCamInactive    = 1 << 5,   // active:false / "Disabled" / disabled.active
+        kCamEditorOnly  = 1 << 6,
+        kCamEaseWritten = 1 << 7,
+    };
+    enum CamDisabled : uint8_t {
+        kCamDisPosition = 1 << 0,
+        kCamDisRotation = 1 << 1,
+        kCamDisZoom     = 1 << 2,
+        kCamDisRel      = 1 << 3,
+    };
+    struct CameraEvent {
+        int32_t  floor = 0;
+        uint32_t id = 0xFFFFFFFFu;   // 缺失 = 排最后（Re_ADOJAS 的 `event.id ?? Infinity`）
+        uint32_t order = 0;          // 文件顺序（同 time 同 id 时的最终 tie-break；finishLoad 里赋值）
+        float    angleOffset = 0.0f;
+        float    duration = 0.0f;
+        float    x = 0.0f, y = 0.0f;
+        float    rotation = 0.0f;
+        float    zoom = 100.0f;
+        uint8_t  ease = 0;           // Ease id（core/util/Easing.hpp）；未写/未知 = Linear
+        uint8_t  relativeTo = CamAbsent;
+        uint8_t  flags = 0;          // CamFlags
+        uint8_t  disabled = 0;       // CamDisabled（disabled 字段级过滤）
+        std::string tag;             // eventTag（RepeatEvents 按空格拆 tag 匹配）
+    };
+    struct RepeatEvent {
+        int32_t  floor = 0;
+        float    repetitions = 0.0f; // Beat: 重复次数；Floor: floorCount
+        float    interval = 1.0f;    // 拍（Beat 模式；Re_ADOJAS 用 `interval > 0` 判 Beat）
+        float    gapLength = 1.0f;   // 砖（Floor 模式）
+        uint8_t  flags = 0;          // bit0 isBeat(repeatType != Floor) / bit1 executeOnCurrentFloor
+        std::string tag;             // 原样（空格分隔的多个 tag，展开时拆）
+    };
+
     Settings settings;
     std::vector<double> angleData;
     std::string        pathData;       // raw pathData string (alternative to angleData)
     std::vector<Tile>  tiles;
+    std::vector<CameraEvent> cameraEvents;   // MoveCamera（未展开 RepeatEvents）
+    std::vector<RepeatEvent> repeatEvents;   // RepeatEvents（只服务运镜展开；其他事件暂不消费）
     // Lightweight action (avoids nlohmann DOM allocation for millions of actions)
     // 事件里的字符串（hitsound 名、trackDisappear 动画名）绝大多数是重复的少数几个值，
     // 而又只有这两类事件用到。以前每个 action 内联一个 std::string（32 B）：1.18 GB / 912 万
@@ -74,7 +139,9 @@ struct LevelData {
     struct FastAction {
         int floor = 0;
         uint16_t strId = 0;                 // 0 = 空串；索引进 actionStrTable
-        enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, Other } type = Other;
+        // MoveCamera / RepeatEvents **不留在 actions 里**（keep=false）：它们走 cameraEvents /
+        // repeatEvents 两个富结构。这两个枚举值只用于"解析时认出它"。
+        enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, MoveCamera, RepeatEvents, Other } type = Other;
         bool flag = false;
         float val1 = 0, val2 = 0;
     };

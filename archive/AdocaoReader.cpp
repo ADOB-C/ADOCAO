@@ -208,6 +208,14 @@ bool parseSettings(const std::vector<std::string>& pool, const uint8_t* p, size_
     if (off + 2 <= n) {
         if (!idx(s.songFilename)) return false;
     }
+    // 再往后是运镜用的两个字段；旧文件没有 → 保留默认值（同 songFilename 的规则）。
+    if (off + 4 <= n) {
+        if (!f32(s.pitch)) return false;
+    }
+    if (off + 1 <= n) {
+        if (!u8(b)) return false;
+        s.legacyCamRelativeTo = (b != 0);
+    }
     return true;
 }
 
@@ -396,6 +404,56 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
     }
 
     // ⑤ pathData
+    // ⑥ 相机 / 重复事件（可选段：没有 = 这张谱没有运镜，空 vector 就是正确结果）
+    if (const Sec* camSec = findSec(secs, SectionId::Camera)) {
+        constexpr size_t kRec = 38;   // floor(4) id(4) angleOffset/duration/x/y/rotation/zoom(24)
+                                      // ease/relativeTo/flags/disabled(4) tag(2)
+        if (camSec->size % kRec != 0) { err = "camera 段长度不是记录整数倍"; return false; }
+        const size_t cnt = camSec->size / kRec;
+        out.cameraEvents.clear();
+        out.cameraEvents.reserve(cnt);
+        for (size_t i = 0; i < cnt; ++i) {
+            const uint8_t* q = camSec->p + i * kRec;
+            LevelData::CameraEvent e;
+            e.floor = (int32_t)rdU32(q);
+            e.id = rdU32(q + 4);
+            std::memcpy(&e.angleOffset, q + 8, 4);
+            std::memcpy(&e.duration, q + 12, 4);
+            std::memcpy(&e.x, q + 16, 4);
+            std::memcpy(&e.y, q + 20, 4);
+            std::memcpy(&e.rotation, q + 24, 4);
+            std::memcpy(&e.zoom, q + 28, 4);
+            e.ease = q[32];
+            e.relativeTo = q[33];
+            e.flags = q[34];
+            e.disabled = q[35];
+            const uint16_t ti = rdU16(q + 36);
+            if (ti >= out.actionStrTable.size()) { err = "camera 段 tag 下标越界"; return false; }
+            e.tag = (ti == 0) ? std::string() : out.actionStrTable[ti];
+            out.cameraEvents.push_back(std::move(e));
+        }
+    }
+    if (const Sec* repSec = findSec(secs, SectionId::Repeat)) {
+        constexpr size_t kRec = 19;   // floor(4) repetitions/interval/gapLength(12) flags(1) tag(2)
+        if (repSec->size % kRec != 0) { err = "repeat 段长度不是记录整数倍"; return false; }
+        const size_t cnt = repSec->size / kRec;
+        out.repeatEvents.clear();
+        out.repeatEvents.reserve(cnt);
+        for (size_t i = 0; i < cnt; ++i) {
+            const uint8_t* q = repSec->p + i * kRec;
+            LevelData::RepeatEvent r;
+            r.floor = (int32_t)rdU32(q);
+            std::memcpy(&r.repetitions, q + 4, 4);
+            std::memcpy(&r.interval, q + 8, 4);
+            std::memcpy(&r.gapLength, q + 12, 4);
+            r.flags = q[16];
+            const uint16_t ti = rdU16(q + 17);
+            if (ti >= out.actionStrTable.size()) { err = "repeat 段 tag 下标越界"; return false; }
+            r.tag = (ti == 0) ? std::string() : out.actionStrTable[ti];
+            out.repeatEvents.push_back(std::move(r));
+        }
+    }
+
     const Sec* pathSec = findSec(secs, SectionId::PathData);
     if (pathSec && pathSec->size) {
         if (!have(pathSec->size, 0, 8)) {

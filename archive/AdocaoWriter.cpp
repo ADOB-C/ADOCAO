@@ -142,6 +142,10 @@ void writeSettings(const LevelData::Settings& s, Pool& pool, std::vector<uint8_t
     // 2026-10-17 追加（**末尾**，所以读侧既能读新文件也能读旧文件；旧读者会忽略尾部多余字节）：
     // `.adofai` 的 `"song"`，ADOCAO-E 的"另存/重打包"需要它。
     putU16(b, pool.add(s.songFilename));
+    // 运镜要用的两个 settings 字段（同样在末尾追加，缺省 = 旧文件 → 保留调用方默认值）：
+    // pitch 同时缩放事件时长与跟随速度；legacyCamRelativeTo 是老语义开关。
+    putF32(b, s.pitch);
+    putU8(b, s.legacyCamRelativeTo ? 1 : 0);
 }
 
 }  // namespace
@@ -158,6 +162,15 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
     if (pool.v.empty()) pool.v.emplace_back();
     std::vector<uint8_t> settingsBlob;
     writeSettings(level.settings, pool, settingsBlob);
+
+    // 相机/重复事件的 tag 也要进字符串池 —— **必须在 poolBlob 之前**加，
+    // 否则池已经序列化完，段里的下标会越界。
+    std::vector<uint16_t> camTagIdx(level.cameraEvents.size());
+    for (size_t i = 0; i < level.cameraEvents.size(); ++i)
+        camTagIdx[i] = pool.add(level.cameraEvents[i].tag);
+    std::vector<uint16_t> repTagIdx(level.repeatEvents.size());
+    for (size_t i = 0; i < level.repeatEvents.size(); ++i)
+        repTagIdx[i] = pool.add(level.repeatEvents[i].tag);
 
     // ---- ② 字符串池（原序保留 actionStrTable，末尾是 settings 追加的）----
     std::vector<uint8_t> poolBlob;
@@ -400,6 +413,43 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
     if (actionIndexOk) {
         Section s; s.id = (uint8_t)SectionId::ActionIndex; s.elements = 0;
         s.blob = std::move(actionIndexBlob);
+        secs.push_back(std::move(s));
+    }
+    // ---- 相机 / 重复事件：罕见但**必须无损往返**（否则 .adocao 里的运镜会整段消失）----
+    // 定长记录、字段顺序固定（打包确定性）；tag 走字符串池下标。order 不存 —— 它 = 记录下标。
+    if (!level.cameraEvents.empty()) {
+        Section s; s.id = (uint8_t)SectionId::Camera; s.elements = level.cameraEvents.size();
+        s.blob.reserve(level.cameraEvents.size() * 38);
+        for (size_t i = 0; i < level.cameraEvents.size(); ++i) {
+            const LevelData::CameraEvent& e = level.cameraEvents[i];
+            putU32(s.blob, (uint32_t)e.floor);
+            putU32(s.blob, e.id);
+            putF32(s.blob, e.angleOffset);
+            putF32(s.blob, e.duration);
+            putF32(s.blob, e.x);
+            putF32(s.blob, e.y);
+            putF32(s.blob, e.rotation);
+            putF32(s.blob, e.zoom);
+            putU8(s.blob, e.ease);
+            putU8(s.blob, e.relativeTo);
+            putU8(s.blob, e.flags);
+            putU8(s.blob, e.disabled);
+            putU16(s.blob, camTagIdx[i]);
+        }
+        secs.push_back(std::move(s));
+    }
+    if (!level.repeatEvents.empty()) {
+        Section s; s.id = (uint8_t)SectionId::Repeat; s.elements = level.repeatEvents.size();
+        s.blob.reserve(level.repeatEvents.size() * 19);
+        for (size_t i = 0; i < level.repeatEvents.size(); ++i) {
+            const LevelData::RepeatEvent& r = level.repeatEvents[i];
+            putU32(s.blob, (uint32_t)r.floor);
+            putF32(s.blob, r.repetitions);
+            putF32(s.blob, r.interval);
+            putF32(s.blob, r.gapLength);
+            putU8(s.blob, r.flags);
+            putU16(s.blob, repTagIdx[i]);
+        }
         secs.push_back(std::move(s));
     }
     if (!level.pathData.empty()) {

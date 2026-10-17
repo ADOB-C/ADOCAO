@@ -62,7 +62,10 @@ LauncherConfig showLauncher() {
         ImGui::SetNextWindowSize(ImVec2((float)chrome.winW, (float)chrome.winH));
         ImGui::Begin("Launcher", nullptr,
             ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar);
+            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar |
+            // 导航按钮是**绝对定位**在窗口底部的：一旦内容超高一滚动，它们就跟着内容跑
+            // （实测截图：Next 被切在窗口底边外 ✗）→ 直接禁掉滚动。
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
         switch (st.page) {
             case wizard::Page::Welcome:   wizard::drawWelcomePage(st, chrome);   break;

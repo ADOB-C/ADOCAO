@@ -153,6 +153,9 @@ bool drawNavButton(const Chrome& chrome, bool isStart, bool canContinue,
         ImGui::SetCursorPosX(xb);
         if (ImGui::Button("Back", ImVec2(btnW, btnH)) && backPressed) *backPressed = true;
     }
+    // ⚠️ 必须**同时**重设 Y：画完 Back 后光标已经往下走了一个按钮高，
+    // 只重设 X 会让 Next 掉到 Back 下面（实测截图：Next 被切在窗口底边外 ✗）。
+    ImGui::SetCursorPosY((float)chrome.winH - 56.0f * S);
     float xb = ((float)chrome.winW - btnW) / 2.0f;
     ImGui::SetCursorPosX(xb);
     if (!canContinue) ImGui::BeginDisabled();

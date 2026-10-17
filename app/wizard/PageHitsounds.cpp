@@ -31,27 +31,32 @@ void drawHitsoundsPage(State& st, const Chrome& ch) {
     if (!st.enableHitsounds) ImGui::EndDisabled();
 
     // ---- Preload（原先是单独一页 ✗，现在内联在这里）----
+    // **控件与 Welcome 页一致 = 复选框**（用户明确要求：别做成蓝色按钮 ✗ —— 同一个词两种控件很乱）
     ImGui::Spacing();
     ImGui::Spacing();
     ImGui::SetCursorPosX(colX);
     ImGui::Separator();
     ImGui::Spacing();
     ImGui::SetCursorPosX(colX);
-    if (ImGui::Button("Preload", ImVec2(110.0f * S, 30.0f * S))) {
-        wizard::startPreload(st);        // 再预载一次（会先取消并汇合已在跑的那个）
-    }
+    const bool wasOn = st.preloadEnabled;
+    ImGui::Checkbox("Preload", &st.preloadEnabled);
+    // 在这里**勾上**就立刻预载（Welcome 那边没勾、或上次失败时，这是一个补救入口 ✓）
+    const bool running = st.preloadRunning && !st.preloadFinished.load();
+    const bool done = st.cfg.preloadedLevel && st.cfg.preloadedTimeline;
+    if (st.preloadEnabled && !wasOn && !running && !done) wizard::startPreload(st);
     ImGui::SameLine();
-    if (st.preloadRunning && !st.preloadFinished.load()) {
+    if (running) {
         ImGui::TextUnformatted("Preloading level...");
-    } else if (st.cfg.preloadedLevel && st.cfg.preloadedTimeline) {
+    } else if (done) {
         ImGui::TextUnformatted("Preloaded - start will be fast.");
     } else {
         ImGui::TextUnformatted("Not preloaded (loads on Start).");
     }
-    if (st.preloadRunning && !st.preloadFinished.load()) {
+    if (running) {
         float pct = st.preloadProgress.percent.load();
         ImGui::SetCursorPosX(colX);
-        ImGui::ProgressBar(pct / 100.0f, ImVec2(ImGui::GetContentRegionAvail().x - 24.0f * S, 20.0f * S));
+        ImGui::ProgressBar(pct / 100.0f,
+                           ImVec2(ImGui::GetContentRegionAvail().x - 24.0f * S, 20.0f * S));
         std::lock_guard<std::mutex> lock(st.preloadProgress.textMutex);
         ImGui::SetCursorPosX(colX);
         ImGui::TextDisabled("%s", st.preloadProgress.stageText);

@@ -213,3 +213,10 @@ add_test(NAME ilytx COMMAND adocao_ilytx_test "${CMAKE_CURRENT_SOURCE_DIR}/level
 add_executable(adocao_level_reload_test level_reload_test.cpp)
 target_link_libraries(adocao_level_reload_test PRIVATE adocao_core)
 add_test(NAME level_reload COMMAND adocao_level_reload_test "${CMAKE_SOURCE_DIR}/tests/charts/angles360.adofai")
+
+# 缓动模块（core/util/Easing）：32 个名字 = 谱面 `ease` 字符串全集。金标由 Re_ADOJAS 的
+# `Easing.ts` 用 node 直接算出来（tests/easing_gold.inc），容差 1e-12（跨 JS/libm 的 ulp 差）。
+add_executable(adocao_easing_test easing_test.cpp)
+target_include_directories(adocao_easing_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(adocao_easing_test PRIVATE adocao_core)
+add_test(NAME easing COMMAND adocao_easing_test)

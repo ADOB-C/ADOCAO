@@ -43,24 +43,9 @@ void drawHitsoundsPage(State& st, const Chrome& ch) {
     // 在这里**勾上**就立刻预载（Welcome 那边没勾、或上次失败时，这是一个补救入口 ✓）
     const bool running = st.preloadRunning && !st.preloadFinished.load();
     const bool done = st.cfg.preloadedLevel && st.cfg.preloadedTimeline;
+    // 用户要求："加载就别显示出来" → 这一页**不显示任何加载指示**（进度条/状态文字都去掉 ✓），
+    // 只保留复选框与失败时的红字。
     if (st.preloadEnabled && !wasOn && !running && !done) wizard::startPreload(st);
-    ImGui::SameLine();
-    if (running) {
-        ImGui::TextUnformatted("Preloading level...");
-    } else if (done) {
-        ImGui::TextUnformatted("Preloaded - start will be fast.");
-    } else {
-        ImGui::TextUnformatted("Not preloaded (loads on Start).");
-    }
-    if (running) {
-        float pct = st.preloadProgress.percent.load();
-        ImGui::SetCursorPosX(colX);
-        ImGui::ProgressBar(pct / 100.0f,
-                           ImVec2(ImGui::GetContentRegionAvail().x - 24.0f * S, 20.0f * S));
-        std::lock_guard<std::mutex> lock(st.preloadProgress.textMutex);
-        ImGui::SetCursorPosX(colX);
-        ImGui::TextDisabled("%s", st.preloadProgress.stageText);
-    }
     if (!st.lastError.empty()) {
         ImGui::SetCursorPosX(colX);
         ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", st.lastError.c_str());

@@ -301,9 +301,15 @@ int runApplication(bool debugConsole) {
 
     // Stage 2: Loading
     LoadResult loadResult;
-    showLoadingWindow([&](LoadingProgress& progress) {
-        runLevelLoading(cfg, progress, loadResult);
-    }, /*cliOnly=*/!cfg.capturePath.empty());
+    if (cfg.preloadedLevel && cfg.preloadedTimeline) {
+        // 已预载 → 直接加载，**不弹加载窗**（用户："加载就别显示出来"）
+        LoadingProgress silent;
+        runLevelLoading(cfg, silent, loadResult);
+    } else {
+        showLoadingWindow([&](LoadingProgress& progress) {
+            runLevelLoading(cfg, progress, loadResult);
+        }, /*cliOnly=*/!cfg.capturePath.empty());
+    }
 
     if (!loadResult.level) {
         LOG_E("Failed to load level");
@@ -394,9 +400,15 @@ int runApplicationFromCLI(const LauncherConfig& cfg, bool debugConsole) {
     }
 
     LoadResult loadResult;
-    showLoadingWindow([&](LoadingProgress& progress) {
-        runLevelLoading(config, progress, loadResult);
-    }, /*cliOnly=*/!config.capturePath.empty());
+    if (config.preloadedLevel && config.preloadedTimeline) {
+        // 已预载 → 直接加载，**不弹加载窗**（用户："加载就别显示出来"）
+        LoadingProgress silent;
+        runLevelLoading(config, silent, loadResult);
+    } else {
+        showLoadingWindow([&](LoadingProgress& progress) {
+            runLevelLoading(config, progress, loadResult);
+        }, /*cliOnly=*/!config.capturePath.empty());
+    }
 
     if (!loadResult.level) {
         LOG_E("Failed to load level");

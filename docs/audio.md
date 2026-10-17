@@ -5,42 +5,34 @@
 
 ## Audio System
 
-### 设备采样率：解码器与音色都必须跟着 `internalSampleRate`（2026-10-17）
+### 采样率：跟**回调率**，不是 `internalSampleRate`（2026-10-17 踩坑）
 
-`ma_device` **要 48000 不一定拿得到**：本机（macOS Core Audio）实测日志就是
-`Initialized (44100Hz)`——请求 48000 失败后退回设备原生率。而 `dataCallback` 是**按设备帧 1:1
-拷贝**、没有任何重采样：
+miniaudio 的 `ma_device` 有两个率，含义不同：
 
-```
-解码器固定 48000  →  device 44100：音乐以 0.919× 速度播放（调也低 8.8%）
-                         device 64000：1.333×（快 33%）
-```
+| 字段 | 含义 | 本机实测 |
+|---|---|---|
+| `pDevice->sampleRate` | **回调率**：`dataCallback` 按它被调用（我们请求 48000） | **48000** |
+| `pDevice->playback.internalSampleRate` | **硬件率**（Core Audio 实际跑多少） | 44100 |
 
-更糟的是 `position() = readCursor / m_sampleRate` 也按同一个错误比例走 —— 而关卡时钟
-（`PlaybackClock::syncToAudio`）是**由音频位置驱动**的，于是整关的时间线跟着跑偏；音色缓冲同样
-按 48000 合成、按设备率消费，和音乐一起错。
+两者不一致时 miniaudio 会**内部重采样**（回调 48000 → 硬件 44100），我们不需要做任何事。
+所以解码器与音色缓冲必须按**回调率**；`internalSampleRate` 只用于日志。
 
-修法（2026-10-17）：
+反例（我 2026-10-17 真犯过）：看到日志 `Initialized (44100Hz)` 就断言"设备是 44.1k"，
+把解码器改成按 `internalSampleRate` 输出 —— 但回调仍是 48000，于是音乐变成 **0.919×**、
+音调低 8.8%，`Loaded (44100Hz)` 也和 `ffprobe`（**48000 Hz / 2ch / 206.2485 s**）对不上。
+**判据**：`Loaded (…Hz, …)` 必须与 `ffprobe -show_entries stream=sample_rate` 一致；
+日志现在把两个率都打出来（`callback=… internal=…`）。
 
-* `AudioEngine` 记录 `m_deviceRate = ma_device::playback.internalSampleRate`，解码器
-  `ma_decoder_config_init(..., m_deviceRate)`（miniaudio 在**解码时**重采样），`m_sampleRate`
-  与 `position()/seek()/duration()` 全部改用它。
-* `HitsoundManager::setOutputSampleRate(hz)`：`preSynthesize()` / `preSynthesizeRawPcm()` 按它
-  合成，`writeWav()` 头部写**缓冲的真实采样率**。`LevelLoader` 在合成前把设备率传进去。
-* **CLI 导出固定 48000**（`Application.cpp` 显式 `setOutputSampleRate(AUDIO_SAMPLE_RATE)`）——
-  导出文件的可复现性不该取决于当前插着哪块声卡。
-* `attachExternal()` 在 `sampleRate != m_deviceRate` 时 `LOG_W`（正常路径不该出现）。
-
-诊断：日志里现在会写 `Initialized (44100Hz, …) —— 设备不是 48k：解码器与音色按设备率重采样`，
-`Loaded (44100Hz, stereo, …)` 与设备一致。
-
+`HitsoundManager::setOutputSampleRate()` 保留：只有 `ma_device_init` 第一次失败、重试
+`sampleRate = 0` 时，回调率才等于硬件率（那时音色缓冲确实要跟着变）。CLI 导出固定 48k
+（不随声卡变化，保证可复现）。
 
 ### audio-as-chart（每层一个采样的巨型谱）
 
 `--force-hitsound raw-pcm`（向导 Override 下拉里也有）走**直通**，不做 hitsound 混音：
 `Timeline::buildRawPcm()` 把"每层音量"当 PCM 采样值导出（1 层 = 1 采样，采样率 = `bpm/60`，
 映射与 `Song.adofai` 的 `volume = int16 / 655.36` 严格互逆），`HitsoundManager::preSynthesizeRawPcm()`
-线性重采样到**输出采样率**（游戏内 = 设备率，导出 = 48 kHz）再复制成双声道。249 s 的谱导出只要 9–25 ms。
+线性重采样到**输出采样率**（游戏内 = 回调率，导出 = 48 kHz）再复制成双声道。249 s 的谱导出只要 9–25 ms。
 
 为什么必须直通：那种谱是"**每个采样一个 Kick**"。Unity.wav_rate 实测 10,993,500 命中 / 249.3 s =
 44.1 kHz，而 `Kick.wav` 有 9,499 帧（215 ms）→ **每个输出采样上叠 ~9,499 次相加**，而混音规则是

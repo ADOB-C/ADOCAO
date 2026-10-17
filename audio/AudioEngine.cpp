@@ -49,13 +49,18 @@ bool AudioEngine::init() {
     }
 
     m_initialized = true;
-    m_deviceRate = (int)m_device->playback.internalSampleRate;
+    // **回调率**才是我们该跟的：miniaudio 在 internal 率与回调率不一致时**内部重采样**，
+    // dataCallback 永远按 `pDevice->sampleRate` 被调用（本机实测 callback=48000、internal=44100，
+    // 而音乐的 ffprobe 也是 48000 —— 拿 internal 率去配解码器会把音乐弄慢 8.8%）。
+    // 只有在 `ma_device_init` 第一次失败、我们重试 sampleRate=0 时，回调率才会等于硬件率。
+    m_deviceRate = (int)m_device->sampleRate;
     if (m_deviceRate <= 0) m_deviceRate = AUDIO_SAMPLE_RATE;
-    LOG_I("AudioEngine: Initialized (%dHz, backend=%s)%s",
+    LOG_I("AudioEngine: Initialized (callback=%dHz, internal=%dHz, backend=%s)%s",
+          (int)m_device->sampleRate,
           (int)m_device->playback.internalSampleRate,
           ma_get_backend_name(m_device->pContext->backend),
           m_deviceRate == AUDIO_SAMPLE_RATE ? ""
-              : " —— 设备不是 48k：解码器与音色按设备率重采样（回调不做重采样）");
+              : " —— 回调率不是 48k：解码器与音色按回调率输出（miniaudio 已内部重采样）");
     return true;
 }
 

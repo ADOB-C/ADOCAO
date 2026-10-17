@@ -39,9 +39,9 @@ public:
 
     void setVolume(float v);
 
-    // 设备的**实际**采样率（`ma_device` 的 internalSampleRate）。请求 48000 拿不到时会退回
-    // 设备原生率（本机实测 44100）。解码器与音色缓冲都必须按它来 —— 回调是 1:1 拷贝，
-    // 不做重采样（docs/audio.md）。
+    // **回调率**（`ma_device::sampleRate`）—— dataCallback 就是按它被调用的，解码器与音色
+    // 缓冲必须按它来。注意不是 internalSampleRate：那是硬件率，miniaudio 会在两者之间
+    // **内部重采样**（本机 callback=48000 / internal=44100，见 docs/audio.md）。
     int deviceSampleRate() const { return m_deviceRate; }
 
     // External audio source for mixing (hitsounds)

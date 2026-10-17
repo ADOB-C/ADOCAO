@@ -9,34 +9,27 @@ using namespace adofai;      // 库侧公共 API 在 adofai:: 里（P1：为 ADO
 
 namespace wizard {
 
+// 版面走 WizardChrome 的表单栅格（docs/ui-design.md）：组头是左列复选框，
+// 它的从属行缩进 24（`sub = true`）。
 void drawHitsoundsPage(State& st, const Chrome& ch) {
-    const float S = 1.0f;  // hardcoded sizes are in logical pixels
-    const float padX = 24.0f * S;
-
+    formStyleBegin();
     drawConfigHeader(ch, "Hitsounds", 20.0f);
 
-    const float colX = padX;
-    ImGui::SetCursorPosX(colX);
-    ImGui::Checkbox("Enable hitsounds", &st.enableHitsounds);
+    formCheckbox(ch, "Enable hitsounds", &st.enableHitsounds);
     if (!st.enableHitsounds) ImGui::BeginDisabled();
-    ImGui::Spacing();
-    ImGui::Indent(24.0f * S);
-    ImGui::Checkbox("Override hit sound type", &st.forceHS);
+    formCheckbox(ch, "Override hit sound type", &st.forceHS, /*sub=*/true);
     if (st.forceHS) {
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(150.0f * S);
+        // 与复选框同一行的小控件：用内联宽度（控件列在这行会被标签占满 ✗）
+        ImGui::SameLine(0.0f, kFormGap);
+        ImGui::SetNextItemWidth(kFormInlineW);
         ImGui::Combo("##forceHSType", &st.forceHSIdx, kHitsoundTypes.data(), (int)kHitsoundTypes.size());
     }
-    ImGui::Unindent(24.0f * S);
     if (!st.enableHitsounds) ImGui::EndDisabled();
 
     // ---- Preload（原先是单独一页 ✗，现在内联在这里）----
     // **控件与 Welcome 页一致 = 复选框**（用户明确要求：别做成蓝色按钮 ✗ —— 同一个词两种控件很乱）
-    ImGui::Spacing();
-    ImGui::Spacing();
-    ImGui::SetCursorPosX(colX);
     const bool wasOn = st.preloadEnabled;
-    ImGui::Checkbox("Preload", &st.preloadEnabled);
+    formCheckbox(ch, "Preload", &st.preloadEnabled);
     // 在这里**勾上**就立刻预载（Welcome 那边没勾、或上次失败时，这是一个补救入口 ✓）
     const bool running = st.preloadRunning && !st.preloadFinished.load();
     const bool done = st.cfg.preloadedLevel && st.cfg.preloadedTimeline;
@@ -44,9 +37,11 @@ void drawHitsoundsPage(State& st, const Chrome& ch) {
     // 只保留复选框与失败时的红字。
     if (st.preloadEnabled && !wasOn && !running && !done) wizard::startPreload(st);
     if (!st.lastError.empty()) {
-        ImGui::SetCursorPosX(colX);
+        ImGui::SetCursorPosX(kFormPadX);
         ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", st.lastError.c_str());
     }
+
+    formStyleEnd();
 
     bool back = false;
     // Back 时 drawNavButton 返回 false（只有 `back` 出参知道按下去了）→ 必须 `|| back`

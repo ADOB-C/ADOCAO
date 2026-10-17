@@ -124,7 +124,7 @@ void destroyChrome(Chrome& chrome) {
 
 void drawConfigHeader(const Chrome& chrome, const char* title, float progressPct) {
     const float S = 1.0f;  // hardcoded sizes are in logical pixels
-    const float padX = 24.0f * S;
+    const float padX = kFormPadX * S;
     const float contentW = (float)chrome.winW - 2.0f * padX;
 
     ImGui::SetCursorPosY(18.0f * S);
@@ -149,6 +149,37 @@ void drawConfigHeader(const Chrome& chrome, const char* title, float progressPct
     // 离底部按钮原本只剩 ~13px —— 多了这 5px 就**压到按钮上**（实测截图：最后一行被 Back/Next
     // 盖住）。那页后来拆成了 Trail / Colors 两页，但这里仍只留一个 Spacing，别再加回去。
     ImGui::Spacing();
+}
+
+// ---- 表单栅格（唯一定义处，见 docs/ui-design.md §2）----
+// 页面里**别再写坐标/宽度**：这里算出来的右边缘一律是 `winW - kFormPadX`，
+// 和进度条、分隔线的右边缘重合 —— 那才是"看着统一"的来源。
+float formCtrlX(bool sub) {
+    return kFormPadX + kFormLabelW + (sub ? kFormSubIndent : 0.0f);
+}
+
+float formCtrlW(const Chrome& chrome, bool sub) {
+    return (float)chrome.winW - kFormPadX - formCtrlX(sub);
+}
+
+void formLabel(const Chrome&, const char* label, bool sub) {
+    ImGui::SetCursorPosX(kFormPadX + (sub ? kFormSubIndent : 0.0f));
+    ImGui::Text("%s", label);
+    // SameLine 用**绝对** x：标签多长都不影响控件列（这正是栅格的意义）
+    ImGui::SameLine(formCtrlX(sub));
+}
+
+void formCheckbox(const Chrome&, const char* label, bool* value, bool sub) {
+    ImGui::SetCursorPosX(kFormPadX + (sub ? kFormSubIndent : 0.0f));
+    ImGui::Checkbox(label, value);
+}
+
+void formStyleBegin() {
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(kFormGap, kFormRowGap));
+}
+
+void formStyleEnd() {
+    ImGui::PopStyleVar();
 }
 
 bool drawNavButton(const Chrome& chrome, bool isStart, bool canContinue,

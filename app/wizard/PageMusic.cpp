@@ -11,10 +11,10 @@ using namespace adofai;      // 库侧公共 API 在 adofai:: 里（P1：为 ADO
 
 namespace wizard {
 
+// 版面走 WizardChrome 的表单栅格（docs/ui-design.md）：标签在左列，输入框 + Choose 占满控件列，
+// 按钮右边缘与页头/分隔线对齐。
 void drawMusicPage(State& st, const Chrome& ch) {
-    const float S = 1.0f;  // hardcoded sizes are in logical pixels
-    const float padX = 24.0f * S;
-
+    formStyleBegin();
     drawConfigHeader(ch, "Music", 100.0f);
 
     // Auto-detect music once (from parsed level + same-dir files)
@@ -27,23 +27,20 @@ void drawMusicPage(State& st, const Chrome& ch) {
         }
     }
 
-    const float colX = padX;
-    float fileW = 300.0f * S;
-    float chooseW = 62.0f * S;
-    ImGui::SetCursorPosX(colX);
-    ImGui::Text("Music file");
-    ImGui::Spacing();
-    ImGui::SetCursorPosX(colX);
-    ImGui::SetNextItemWidth(fileW);
+    formLabel(ch, "Music file");
+    const float rowW = formCtrlW(ch);
+    ImGui::SetNextItemWidth(rowW - kFormButtonW - kFormGap);   // 输入框 + 间距 + 按钮 = 控件列宽
     ImGui::InputText("##music", st.musicBuf, sizeof(st.musicBuf));
-    ImGui::SameLine();
-    if (ImGui::Button("Choose##mus", ImVec2(chooseW, 0))) {
+    ImGui::SameLine(0.0f, kFormGap);
+    if (ImGui::Button("Choose##mus", ImVec2(kFormButtonW, 0))) {
         auto result = openFileDialog("Select music file",
                                      {"*.ogg", "*.mp3", "*.wav", "*.flac", "*.m4a", "*.aiff"},
                                      "Audio files");
         if (!result.empty())
             snprintf(st.musicBuf, sizeof(st.musicBuf), "%s", result.c_str());
     }
+
+    formStyleEnd();
 
     // Start is always available
     bool back = false;

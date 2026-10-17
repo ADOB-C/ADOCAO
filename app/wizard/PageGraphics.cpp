@@ -7,41 +7,32 @@ using namespace adofai;      // 库侧公共 API 在 adofai:: 里（P1：为 ADO
 
 namespace wizard {
 
+// 版面全部走 WizardChrome 的表单栅格（docs/ui-design.md）：标签在左列、控件在控件列、
+// 右边距与页头一致。这一页**不写任何坐标/宽度数字**。
 void drawGraphicsPage(State& st, const Chrome& ch) {
-    const float S = 1.0f;  // hardcoded sizes are in logical pixels
-    const float padX = 24.0f * S;
-    const int winW = ch.winW;
-
+    formStyleBegin();
     drawConfigHeader(ch, "Graphics", 40.0f);
 
-    const float contentW = (float)winW - 2.0f * padX;
-    const float colX = padX;
-    const float ctrlX = padX + 150.0f * S;
-
-    // Resolution
-    ImGui::SetCursorPosX(colX); ImGui::Text("Resolution");
-    ImGui::SameLine(ctrlX);
-    ImGui::SetNextItemWidth(contentW - (ctrlX - padX) - 24.0f * S);
+    formLabel(ch, "Resolution");
+    ImGui::SetNextItemWidth(formCtrlW(ch));
     ImGui::Combo("##reso", &st.resoIdx, kResoNames.data(), (int)kResoNames.size());
-    ImGui::Spacing();
-    ImGui::SetCursorPosX(colX); ImGui::Checkbox("Fullscreen", &st.fullscreen);
-    ImGui::Spacing();
-    // MSAA (Off/2x/4x/8x)
-    ImGui::SetCursorPosX(colX); ImGui::Text("MSAA");
-    ImGui::SameLine(ctrlX);
-    ImGui::SetNextItemWidth(contentW - (ctrlX - padX) - 24.0f * S);
+
+    formLabel(ch, "Fullscreen");   // 布尔字段：标签在左列、框在控件列
+    ImGui::Checkbox("##fullscreen", &st.fullscreen);
+
+    formLabel(ch, "MSAA");         // Off/2x/4x/8x
+    ImGui::SetNextItemWidth(formCtrlW(ch));
     ImGui::Combo("##msaa", &st.msaaIdx, kMsaaNames.data(), (int)kMsaaNames.size());
-    ImGui::Spacing();
-    // Cull block granularity (coarse AABB index: cost/memory only, output is unaffected)
-    ImGui::SetCursorPosX(colX); ImGui::Text("Cull block");
-    ImGui::SameLine(ctrlX);
-    ImGui::SetNextItemWidth(contentW - (ctrlX - padX) - 24.0f * S);
+
+    formLabel(ch, "Cull block");   // 粗块 AABB 索引：只影响成本/内存，不影响出图
+    ImGui::SetNextItemWidth(formCtrlW(ch));
     ImGui::Combo("##cullblock", &st.cullBlockIdx, kCullBlockNames.data(),
                  (int)kCullBlockNames.size());
     // 这里原来挂过一个悬停说明（"每块多少层 / 4k≈21MB / 256≈320MB / 不改变出图"）——
     // 用户指出"其他地方都没有"，向导里只有这一个控件有 tooltip，很突兀 → 去掉 ✗。
     // 这份权衡有正式去处：`docs/rendering.md`「可见性/剔除缓存」+ `tests/cull_cost_probe.cpp`。
-    ImGui::Spacing();
+
+    formStyleEnd();
 
     bool back = false;
     // Back 时 drawNavButton 返回 false（只有 `back` 出参知道按下去了）→ 必须 `|| back`

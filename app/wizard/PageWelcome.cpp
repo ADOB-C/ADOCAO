@@ -37,9 +37,10 @@ void drawWelcomePage(State& st, const Chrome& ch) {
     ImGui::Spacing();
 
     // Level file picker (path + Choose), centered as a group
+    // Welcome 是 hero 版式（居中），不套表单栅格；但按钮宽度/间距跟表单页共用常量
     float fileW = 300.0f * S;
-    float chooseW = 62.0f * S;
-    float gap = 8.0f * S;
+    float chooseW = kFormButtonW;
+    float gap = kFormGap;
     float groupW = fileW + gap + chooseW;
     float x0 = ((float)winW - groupW) / 2.0f;
 

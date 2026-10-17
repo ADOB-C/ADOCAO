@@ -6,6 +6,16 @@
 
 namespace adofai {
 
+namespace {
+// 两套"100"的对照（docs/camera.md §7.3 / §12.2）：
+//   * 本类：`halfH = 6/(zoom/100)` → 可见高度 12 砖 @ zoom=100；
+//   * Re_ADOJAS：`baseFrustumSize = 5.47` → 可见高度 5.47 砖 @ adoZoom=100。
+// 谱面 zoom 想表达的可见高度 = 5.47 * adoZoom/100，所以：
+//   本类 zoom = 100 * 12 / (5.47 * adoZoom/100) = 21937.8427... / adoZoom
+// 两个"100"都不动：`--capture-zoom` 与滚轮仍然是本类的放大倍数（既有像素基线靠它）。
+constexpr double kAdoZoomNumerator = 120000.0 / 5.47;
+}  // namespace
+
 Camera::Camera() {
     m_view = glm::lookAt(
         glm::vec3(0.0f, 0.0f, 10.0f),
@@ -18,6 +28,15 @@ void Camera::setZoom(float zoom) {
     if (m_zoom == zoom) return;
     m_zoom = zoom;
     m_projDirty = true;
+}
+
+void Camera::setAdoZoom(float adoZoom) {
+    // clamp：谱面里出现 0/负数时别把投影做成 inf（视觉上"整屏空白"比不缩放更糟）
+    double z = (double)adoZoom;
+    if (!(z > 0.0)) z = 100.0;
+    if (z < 1.0) z = 1.0;
+    if (z > 100000.0) z = 100000.0;
+    setZoom((float)(kAdoZoomNumerator / z));
 }
 
 void Camera::setRotation(float degrees) {

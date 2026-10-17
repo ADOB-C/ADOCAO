@@ -235,3 +235,10 @@ add_executable(adocao_camera_test camera_test.cpp)
 target_include_directories(adocao_camera_test PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(adocao_camera_test PRIVATE adocao_core)
 add_test(NAME camera COMMAND adocao_camera_test)
+
+# 两套 zoom 口径的换算（render/Camera）：本类 = 放大倍数（100 → 12 砖），谱面/ADOFAI =
+# 越大看得越远（100 → 5.47 砖）。方向搞反会让 settings.zoom=200 变成"放大 2 倍"。
+add_executable(adocao_camera_zoom_test camera_zoom_test.cpp)
+target_include_directories(adocao_camera_zoom_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(adocao_camera_zoom_test PRIVATE adocao_render)
+add_test(NAME camera_zoom COMMAND adocao_camera_zoom_test)

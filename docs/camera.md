@@ -615,9 +615,14 @@ camera.zoom = zoom * zoomMultiplier;                 // zoomMultiplier = 用户�
 camera.rotation.z = controller.getCameraRotation() * Math.PI / 180;
 ```
 
-- **视野**：`baseFrustumSize = 5.47`（**全高**，砖单位）→ `adoZoom=100` 时可见高 5.47 砖。
-  代码注释：官方可视高 10 单位、砖距 1.71，折算约 5.85 砖，Re_ADOJAS 取 5.47。
+- **视野**：Re_ADOJAS 的 `baseFrustumSize = 5.47`（**全高**，砖单位）→ `adoZoom=100` 时可见高
+  5.47 砖。代码注释：官方可视高 10 单位、砖距 1.71，折算约 5.85 砖，Re_ADOJAS 取 5.47。
   实际可见高 = `5.47 / camera.zoom = 5.47 * adoZoom/100 / zoomMultiplier`。
+  我们的 `render/Camera` 内部是**放大倍数**（`halfH = 6/(zoom/100)`，100 → 可见高 12 砖），
+  所以谱面给的 zoom（`settings.zoom` 与事件 zoom，**越大看得越远**）一律走
+  `Camera::setAdoZoom()`：`本类 zoom = 120000/(5.47·adoZoom)`，等价于可见高 `5.47·adoZoom/100`。
+  **两套口径方向相反**，混用会出现"zoom 200 反而放大 2 倍"（真踩过：Fledgling 的
+  371 条运镜全反，用户第一反应是 Retina 问题）。`--capture-zoom` 与滚轮仍是本类口径。
 - **旋转方向**：直接乘 π/180 交给 three.js。three.js 里 **正的 `camera.rotation.z` = 相机逆时针**，
   画面里的世界因此**顺时针**转。移植时用一张 `rotation: 90` 的谱拍帧对齐符号，不要凭"应该朝哪边"猜。
 - **`zoom <= 0` 的守卫在 Player 侧**：`if (adoZoom > 0)` 才写 `camera.zoom`。controller 本身不防
@@ -832,6 +837,7 @@ planetWorldPos, currentTileIndex})`；世界是 40 块砖沿 +x、间距 1 砖�
 | ⑥ | 两层控制器 | `core/camera/CameraDirector.{hpp,cpp}`（rig + 跟随层 + 4 条 tween + dedup + legacy + seek/回退） | `tests/camera_test.cpp`：**跨语言逐帧金标** —— 同一批事件喂给 Re_ADOJAS 的 `CameraController.ts` 与 C++，8 个场景 × 每 15 帧一个采样点，容差 1e-9 |
 | ⑦ | 相机旋转 | `render/Camera::setRotation`（`proj = ortho · R(-θ)`） | 抓帧目检（`tests/charts/camera_basic.adofai`，rotation 90 那张轨道是竖的）+ 单元测试不动像素 |
 | ⑧ | 剔除扩边 | `render/Camera::frustumBounds` 返回**旋转矩形的世界 AABB**（θ=0 时逐位退化） | 像素门槛：51 个旧基线（θ=0）逐字节不变 + 3 个新运镜状态（54/54 ✓） |
+| ⑨ | **谱面 zoom 口径** | `render/Camera::setAdoZoom`（ADOFAI：越大看得越远；内部放大倍数不变，`--capture-zoom`/滚轮仍走本类口径） | `tests/camera_zoom_test.cpp`（方向 + 100/200/50/500 的可见高 + 非法值兜底 + 与 `setZoom` 的换算一致） |
 
 **顺便补的两处口径**（不补就会静默错）：
 
@@ -859,7 +865,7 @@ planetWorldPos, currentTileIndex})`；世界是 40 块砖沿 +x、间距 1 砖�
 
 | 项 | 现状 | 影响 |
 |---|---|---|
-| **视野基准** | 我们 `halfH = 6/(zoom/100)`（100 → 12 砖全高），Re_ADOJAS `5.47` 全高 | 所有 zoom 事件**数值语义正确、视觉尺度差 2.19×**。改基准会动全部像素基线，是产品决策，不是移植问题 |
+| ~~**视野基准**~~ | ✅ 已对齐：谱面 zoom 走 `Camera::setAdoZoom()`（100 → 5.47 砖，越大越远）。内部仍是"放大倍数"（`--capture-zoom` / 滚轮不变） | 两套口径的换算由 `tests/camera_zoom_test.cpp` 钉住（方向、100/200/50/500 的可见高、非法值兜底） |
 | **Hold 的 `holdOffset`** | 控制器有接口（`setHoldOffset`），app 恒写 0 | ADOCAO 还没有 Hold 事件；等 Hold 落地后接上即可（docs/camera.md §5.3） |
 | **`MoveTrack` 的砖位** | 相机锚点用**静态**砖位（与 Re_ADOJAS 的 `tilePositions` 一致） | 贴砖移动的谱面，相机不会跟着砖逐帧走（Re_ADOJAS 的 `followMovingPlatforms` 也是死支，行为一致） |
 | **抓帧门槛的运镜状态** | ✅ 已进门槛：`tests/charts/camera_basic.adofai` 三个时刻（`camera_rot` / `camera_tween_mid` / `camera_tween_end`），基线已 store | 全量 `check` = **54/54 逐字节相同**（51 旧 + 3 新） |

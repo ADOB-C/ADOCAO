@@ -203,7 +203,7 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
             m_bgR=r/255.0f; m_bgG=g/255.0f; m_bgB=b/255.0f; }
     }
     m_camCtrl.attach(m_camera);
-    m_camera.setZoom(m_level->settings.zoom);
+    m_camera.setAdoZoom(m_level->settings.zoom);   // 谱面 zoom 是 ADOFAI 口径（越大看得越远）
     if (m_level->tileCount() > 0) {
         const auto& p0 = m_level->tilePositionAt(0);
         m_camCtrl.snapTo(p0[0], p0[1]);
@@ -452,7 +452,7 @@ void GameWindow::update(float deltaMs) {
         m_camLastTime = t;
 
         m_camera.setTarget(m_cameraDirector.x(), m_cameraDirector.y());
-        m_camera.setZoom((float)m_cameraDirector.zoom());
+        m_camera.setAdoZoom((float)m_cameraDirector.zoom());
         m_camera.setRotation((float)m_cameraDirector.rotation());
     } else if (m_wasPlaying) {
         // 停下：把当前视角接收为拖拽的基准（否则会跳回播放前的位置）。
@@ -603,9 +603,8 @@ void GameWindow::captureAndExit() {
     }
     // `--capture-camera` 下 **zoom 由关卡相机说了算**（`--capture-zoom` 被忽略）——
     // 否则运镜的 zoom 事件会被 CLI 覆盖掉，等于没测。普通抓帧仍走 --capture-zoom。
-    const float captureZoom = m_cfg->captureCamera ? (float)m_cameraDirector.zoom()
-                                                   : m_cfg->captureZoom;
-    m_camera.setZoom(captureZoom);
+    if (m_cfg->captureCamera) m_camera.setAdoZoom((float)m_cameraDirector.zoom());
+    else                      m_camera.setZoom(m_cfg->captureZoom);   // 本类口径：100 = 视野高 12 砖
 
     int fbW = 0, fbH = 0;
     glfwGetFramebufferSize(m_window, &fbW, &fbH);

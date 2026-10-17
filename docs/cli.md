@@ -58,6 +58,8 @@ Visuals page / CLI):
 到目标时刻为止的全部 `MoveCamera`（含 `RepeatEvents` 展开）。这条模式下：
 
 * **zoom 由相机决定**，`--capture-zoom` 被忽略（否则运镜的 zoom 事件会被 CLI 覆盖，等于没测）；
+  注意两者**口径不同**：谱面 zoom 是 ADOFAI 语义（越大看得越远，100 → 可见高 5.47 砖）；
+  `--capture-zoom` 是本程序内部的放大倍数（100 → 可见高 12 砖，既有基线用它）；
 * 相机状态会打到日志：`capture-selfcheck: 关卡相机 t=… pos=(x,y) rot=… zoom=…`；
 * 默认**不开**：既有 51 个像素基线是"snap 到砖心、无旋转"的口径，而 The Moon 的
   `settings.relativeTo=Tile` 会让整幅画面平移 —— 改默认口径等于一次性废掉全部基线。

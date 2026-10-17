@@ -98,8 +98,10 @@
       与 C++，8 个场景 × 每 15 帧，容差 1e-9）、`render/Camera` 旋转（`proj = ortho·R(-θ)`）、
       剔除按旋转矩形 AABB 扩边、`--capture-camera`、暂停时导航反旋转（`screenToWorld`/拖动）。
       剩下的是**决策与接线**，不是移植：
-      ① **视野基准**：我们 12 砖全高 @100 vs Re_ADOJAS 5.47 → 所有 zoom 事件的**视觉尺度差 2.19×**
-         （语义/数值是对的）。改基准要重存全部像素基线，需拍板 —— `docs/camera.md` §12.2 第 1 行。
+      ① ~~**视野基准**~~ ✅ 2026-10-17 已对齐：谱面 zoom 走 `Camera::setAdoZoom()`
+         （ADOFAI 口径：越大看得越远，100 → 可见高 5.47 砖）；内部放大倍数（滚轮 / `--capture-zoom`）
+         不变。方向搞反过一次（Fledgling 的 200 zoom 被当成"放大 2 倍"），现有
+         `tests/camera_zoom_test.cpp` 钉住。
       ② `holdOffset`：控制器接口已就位（`setHoldOffset`），app 恒写 0，等 Hold 事件落地后接上。
       ③ 抓帧门槛的运镜状态：`tests/charts/camera_basic.adofai` 已备好（rotation / tween 中点 / 终点三个
          时刻），基线待 store：`capture-gate.sh store --only '^camera_'`（写 `~/Projects/.ADOCAO` 要一次提权）。

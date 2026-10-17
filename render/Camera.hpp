@@ -12,7 +12,12 @@ class Camera {
 public:
     Camera();
 
+    // 本类的 `zoom` 是**放大倍数**：越大越近（100 = 视野高 12 砖）。
+    // 谱面给的 zoom（`settings.zoom` / `MoveCamera.zoom`）是 ADOFAI 口径：**越大看得越远**
+    // （Re_ADOJAS：`camera.zoom = 100/adoZoom`）。两者方向相反，谱面的值一律走 setAdoZoom()。
     void setZoom(float zoom);
+    // ADOFAI 口径的缩放（100 = 默认；数值越大看得越远）。换算见 .cpp 的常数说明。
+    void setAdoZoom(float adoZoom);
     void setAspect(float width, float height);
     void setTarget(double x, double y);
     // 相机绕视线轴旋转（度）。正值 = 相机逆时针 → 画面里的世界顺时针转

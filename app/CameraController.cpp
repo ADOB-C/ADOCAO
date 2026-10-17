@@ -80,7 +80,9 @@ void CameraController::onCursorPos(double x, double y) {
 }
 
 void CameraController::onScroll(double yOffset) {
-    float minZoom = ADOCAO_MIN_ZOOM, maxZoom = 1000.0f;
+    // 上限从 1000 放宽：谱面 zoom 是 ADOFAI 口径、会映射成较大的放大倍数
+    // （ADOFAI zoom=10 → 本类约 2194）。滚轮本身仍是本类口径。
+    float minZoom = ADOCAO_MIN_ZOOM, maxZoom = 100000.0f;
     float z = m_camera->zoom() * (1.0f + (float)yOffset * 0.1f);
     if (z < minZoom) z = minZoom;
     if (z > maxZoom) z = maxZoom;

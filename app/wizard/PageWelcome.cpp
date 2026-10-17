@@ -96,7 +96,7 @@ void drawWelcomePage(State& st, const Chrome& ch) {
             // ② 不再有单独的"Preloading level..."页 ✗：预载在后台跑，用户直接进 Hitsounds，
             // 进度与"再预载一次"的按钮都放在那一页里（页内联显示 ✓）。
             if (st.preloadEnabled) wizard::startPreload(st);
-            st.page = Page::Hitsounds;
+            st.page = nextPage(st.page);              // Welcome → Hitsounds（页序见 WizardState.hpp）
         }
     }
     ImGui::SameLine(0.0f, 12.0f * S);

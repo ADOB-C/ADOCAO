@@ -49,8 +49,9 @@ void drawHitsoundsPage(State& st, const Chrome& ch) {
     }
 
     bool back = false;
+    // Back 时 drawNavButton 返回 false（只有 `back` 出参知道按下去了）→ 必须 `|| back`
     if (drawNavButton(ch, false, true, /*showBack=*/true, &back) || back) {
-        st.page = back ? Page::Welcome : Page::Graphics;   // Back → 回 Welcome（能改谱/重新预载）
+        st.page = back ? prevPage(st.page) : nextPage(st.page);   // Back → Welcome（能改谱/重新预载）
     }
 }
 

@@ -70,6 +70,46 @@ static_assert(kCullBlockValues[kCullBlockDefaultIdx] == 4096, "剔除块粒度�
 // 没有单独的 Preload 页：预载在后台跑，进度内联在 Hitsounds 页里 ✓
 enum class Page : int { Welcome = 0, Hitsounds, Graphics, Visuals, Music };
 
+// ---- 页序（**唯一定义处**）----
+// 页面自己**不许**再写死目标页（`st.page = Page::X`）：2026-10-16 就是这么坏掉的 ——
+// 去掉 Preload 页时机械改了一遍，结果 Graphics/Visuals 的 Next 写成"跳到本页"，
+// 点了**完全没反应** ✗（用户报"Graphics 这个 Next 点不动"）。前进/后退一律走这两个函数。
+// 末页的 Next 是 Start（提交配置并退出向导），不参与前进链。
+inline constexpr Page nextPage(Page p) {
+    switch (p) {
+        case Page::Welcome:   return Page::Hitsounds;
+        case Page::Hitsounds: return Page::Graphics;
+        case Page::Graphics:  return Page::Visuals;
+        case Page::Visuals:   return Page::Music;
+        case Page::Music:     return Page::Music;
+    }
+    return p;
+}
+inline constexpr Page prevPage(Page p) {
+    switch (p) {
+        case Page::Music:     return Page::Visuals;
+        case Page::Visuals:   return Page::Graphics;
+        case Page::Graphics:  return Page::Hitsounds;
+        case Page::Hitsounds: return Page::Welcome;
+        case Page::Welcome:   return Page::Welcome;
+    }
+    return p;
+}
+// 编译期护栏：非末页"前进必须换一页"、"前进再后退必须回到原页"。这两条一破，
+// 表现就是按钮点不动（正是这次报的 bug），而运行时看不出区别 —— 所以卡在 build 上。
+constexpr bool pageNavSelfCheck() {
+    constexpr int last = (int)Page::Music;
+    for (int i = 0; i < last; ++i) {
+        const Page p = (Page)i;
+        if (nextPage(p) == p) return false;                   // 前进不换页 = 点了没反应
+        if (prevPage(nextPage(p)) != p) return false;         // 前进再后退必须回到原页
+        if (i > 0 && nextPage(prevPage(p)) != p) return false;   // 后退再前进同理（首页没有"后退"）
+    }
+    if (prevPage((Page)last) != (Page)(last - 1)) return false;   // 末页的 Back 落到倒数第二页
+    return true;
+}
+static_assert(pageNavSelfCheck(), "向导页序自检失败：某个 Next/Back 会点到原地（按钮点不动）");
+
 // All cross-page UI edit state. User selections are staged in the editor
 // buffers below and committed into cfg when leaving the wizard (Start on the
 // Music page / Export on the Welcome page). preloadedLevel/preloadedTimeline

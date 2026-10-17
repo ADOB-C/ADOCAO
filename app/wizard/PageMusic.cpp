@@ -47,8 +47,9 @@ void drawMusicPage(State& st, const Chrome& ch) {
 
     // Start is always available
     bool back = false;
+    // Back 时 drawNavButton 返回 false（只有 `back` 出参知道按下去了）→ 必须 `|| back`
     if (drawNavButton(ch, true, /*canContinue=*/true, /*showBack=*/true, &back) || back) {
-        if (back) { st.page = Page::Visuals; return; }
+        if (back) { st.page = prevPage(st.page); return; }   // Music → Visuals
         // Collect everything into cfg and leave the wizard
         st.cfg.musicPath         = st.musicBuf;
         // Colors are edited as float RGB; commit them in the config's hex form.

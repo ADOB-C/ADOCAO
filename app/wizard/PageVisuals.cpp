@@ -105,8 +105,9 @@ void drawVisualsPage(State& st, const Chrome& ch) {
     ImGui::Spacing();
 
     bool back = false;
+    // Back 时 drawNavButton 返回 false（只有 `back` 出参知道按下去了）→ 必须 `|| back`
     if (drawNavButton(ch, false, true, /*showBack=*/true, &back) || back) {
-        st.page = back ? Page::Graphics : Page::Visuals;
+        st.page = back ? prevPage(st.page) : nextPage(st.page);   // Visuals → Music（别再写死 ✗）
     }
 }
 

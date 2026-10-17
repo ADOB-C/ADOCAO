@@ -13,7 +13,7 @@ void drawHitsoundsPage(State& st, const Chrome& ch) {
     const float S = 1.0f;  // hardcoded sizes are in logical pixels
     const float padX = 24.0f * S;
 
-    drawConfigHeader(ch, "Hitsounds", 25.0f);
+    drawConfigHeader(ch, "Hitsounds", 20.0f);
 
     const float colX = padX;
     ImGui::SetCursorPosX(colX);

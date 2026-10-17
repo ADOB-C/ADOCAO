@@ -71,7 +71,8 @@ LauncherConfig showLauncher() {
             case wizard::Page::Welcome:   wizard::drawWelcomePage(st, chrome);   break;
             case wizard::Page::Hitsounds: wizard::drawHitsoundsPage(st, chrome); break;
             case wizard::Page::Graphics:  wizard::drawGraphicsPage(st, chrome);  break;
-            case wizard::Page::Visuals:   wizard::drawVisualsPage(st, chrome);   break;
+            case wizard::Page::Trail:     wizard::drawTrailPage(st, chrome);     break;
+            case wizard::Page::Colors:    wizard::drawColorsPage(st, chrome);    break;
             case wizard::Page::Music:     wizard::drawMusicPage(st, chrome);     break;
         }
 

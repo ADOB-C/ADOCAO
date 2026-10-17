@@ -27,7 +27,8 @@ set(ADOCAO_APP_SOURCES
     wizard/PageWelcome.cpp
     wizard/PageHitsounds.cpp
     wizard/PageGraphics.cpp
-    wizard/PageVisuals.cpp
+    wizard/PageTrail.cpp
+    wizard/PageColors.cpp
     wizard/PageMusic.cpp
 )
 

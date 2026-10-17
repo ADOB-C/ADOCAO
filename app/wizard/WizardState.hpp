@@ -68,27 +68,29 @@ static_assert(kCullBlockValues[kCullBlockDefaultIdx] == 4096, "剔除块粒度�
 
 // Wizard page ids, in display order.
 // 没有单独的 Preload 页：预载在后台跑，进度内联在 Hitsounds 页里 ✓
-enum class Page : int { Welcome = 0, Hitsounds, Graphics, Visuals, Music };
+enum class Page : int { Welcome = 0, Hitsounds, Graphics, Trail, Colors, Music };
 
 // ---- 页序（**唯一定义处**）----
 // 页面自己**不许**再写死目标页（`st.page = Page::X`）：2026-10-16 就是这么坏掉的 ——
-// 去掉 Preload 页时机械改了一遍，结果 Graphics/Visuals 的 Next 写成"跳到本页"，
+// 去掉 Preload 页时机械改了一遍，结果 Graphics（当时的 Visuals）的 Next 写成"跳到本页"，
 // 点了**完全没反应** ✗（用户报"Graphics 这个 Next 点不动"）。前进/后退一律走这两个函数。
 // 末页的 Next 是 Start（提交配置并退出向导），不参与前进链。
 inline constexpr Page nextPage(Page p) {
     switch (p) {
         case Page::Welcome:   return Page::Hitsounds;
         case Page::Hitsounds: return Page::Graphics;
-        case Page::Graphics:  return Page::Visuals;
-        case Page::Visuals:   return Page::Music;
+        case Page::Graphics:  return Page::Trail;
+        case Page::Trail:     return Page::Colors;
+        case Page::Colors:    return Page::Music;
         case Page::Music:     return Page::Music;
     }
     return p;
 }
 inline constexpr Page prevPage(Page p) {
     switch (p) {
-        case Page::Music:     return Page::Visuals;
-        case Page::Visuals:   return Page::Graphics;
+        case Page::Music:     return Page::Colors;
+        case Page::Colors:    return Page::Trail;
+        case Page::Trail:     return Page::Graphics;
         case Page::Graphics:  return Page::Hitsounds;
         case Page::Hitsounds: return Page::Welcome;
         case Page::Welcome:   return Page::Welcome;
@@ -170,7 +172,8 @@ inline constexpr std::array<int, 5>         kResoH       = {540, 720, 1080, 1440
 void drawWelcomePage(State& st, const Chrome& ch);
 void drawHitsoundsPage(State& st, const Chrome& ch);
 void drawGraphicsPage(State& st, const Chrome& ch);
-void drawVisualsPage(State& st, const Chrome& ch);
+void drawTrailPage(State& st, const Chrome& ch);
+void drawColorsPage(State& st, const Chrome& ch);
 void drawMusicPage(State& st, const Chrome& ch);
 
 } // namespace wizard

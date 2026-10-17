@@ -154,7 +154,7 @@ ADOCAO/
 │       ├── WizardChrome.hpp/.cpp      # 向导窗口/ImGui 引导 + 配置页公共 chrome（进度条/Next/Start）
 │       ├── FileDialogs.hpp/.cpp       # 文件/文件夹对话框（Win32 COM / tinyfd）+ 音乐自动检测
 │       ├── PageWelcome.cpp            # Welcome 页 + 预加载线程启动 + Export
-│       ├── PageHitsounds.cpp / PageGraphics.cpp / PageVisuals.cpp
+│       ├── PageHitsounds.cpp / PageGraphics.cpp / PageTrail.cpp / PageColors.cpp
 │       └── PageMusic.cpp              # Music 页 + Start（提交全部配置）
 │
 ├── assets/                     # ★ 运行时资产（P5 已执行：shaders/、hitsounds/ 并入）
@@ -268,11 +268,11 @@ GameWindow 内剩下的成员职责：LevelScene（GL 对象，异步 build 轮�
 
 ```
 app/wizard/
-├── WizardState.hpp          # 页面枚举（Welcome/Hitsounds/Graphics/Visuals/Music）+ State + 选项表
+├── WizardState.hpp          # 页面枚举（Welcome/Hitsounds/Graphics/Trail/Colors/Music）+ State + 选项表
 ├── WizardChrome.hpp/.cpp    # 窗口/GL/ImGui 引导（原 LauncherWindow init）+ 配置页公共 chrome
 ├── FileDialogs.hpp/.cpp     # openFileDialog/selectFolderDialog（Win32 COM/tinyfd）+ detectMusicFile
 ├── PageWelcome.cpp          # Welcome → (Preload 后台线程) → Hitsounds；Export 出口
-├── PageHitsounds.cpp / PageGraphics.cpp / PageVisuals.cpp
+├── PageHitsounds.cpp / PageGraphics.cpp / PageTrail.cpp / PageColors.cpp
 └── PageMusic.cpp            # Music 页 + Start 按钮（提交全部配置 → done）
 ```
 

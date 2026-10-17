@@ -145,9 +145,9 @@ void drawConfigHeader(const Chrome& chrome, const char* title, float progressPct
     ImGui::Spacing();
     ImGui::SetCursorPosX(padX);
     ImGui::Separator();
-    // 分隔线下面只留一个 Spacing：页标题换成 1.4x 字体后这一栏高了 ~5px，而 Visuals 页
-    // （最长的一页，最后一行 Background）离底部按钮原本就只剩 ~13px —— 多了这 5px 就**压到按钮上**
-    // （实测截图：Background 的输入框被 Back/Next 盖住）。从这里的空白补回来，别动页内容。
+    // 分隔线下面只留一个 Spacing：页标题换成 1.4x 字体后这一栏高了 ~5px，而当时最长的那页
+    // 离底部按钮原本只剩 ~13px —— 多了这 5px 就**压到按钮上**（实测截图：最后一行被 Back/Next
+    // 盖住）。那页后来拆成了 Trail / Colors 两页，但这里仍只留一个 Spacing，别再加回去。
     ImGui::Spacing();
 }
 

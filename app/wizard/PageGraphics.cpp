@@ -12,7 +12,7 @@ void drawGraphicsPage(State& st, const Chrome& ch) {
     const float padX = 24.0f * S;
     const int winW = ch.winW;
 
-    drawConfigHeader(ch, "Graphics", 50.0f);
+    drawConfigHeader(ch, "Graphics", 40.0f);
 
     const float contentW = (float)winW - 2.0f * padX;
     const float colX = padX;
@@ -46,7 +46,7 @@ void drawGraphicsPage(State& st, const Chrome& ch) {
     bool back = false;
     // Back 时 drawNavButton 返回 false（只有 `back` 出参知道按下去了）→ 必须 `|| back`
     if (drawNavButton(ch, false, true, /*showBack=*/true, &back) || back) {
-        st.page = back ? prevPage(st.page) : nextPage(st.page);   // Graphics → Visuals（别再写死 ✗）
+        st.page = back ? prevPage(st.page) : nextPage(st.page);   // Graphics → Trail（别再写死 ✗）
     }
 }
 

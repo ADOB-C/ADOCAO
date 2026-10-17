@@ -136,12 +136,45 @@ struct LevelData {
         std::string tag;             // 原样（空格分隔的多个 tag，展开时拆）
     };
 
+    // ── 砖色：ColorTrack ────────────────────────────────────────────────
+    // 与相机事件同理：一条事件一个富结构（最多几百条），不塞进 FastAction。
+    // 缺省值按 Re_ADOJAS `createShiftType(event)`：事件没写的字段用**硬编码**默认值
+    // （不是 settings —— settings 只提供 level 的默认段）。唯一例外是 trackGlowIntensity：
+    // 没写时回落到 settings.trackGlowIntensity，由 kColorHasGlow 标记。
+    enum ColorFlags : uint8_t {
+        kColorJustThisTile = 1 << 0,
+        kColorInactive     = 1 << 1,   // active:false / "Disabled"
+        kColorEditorOnly   = 1 << 2,
+        kColorHasGlow      = 1 << 3,   // 写了 trackGlowIntensity（否则用 settings）
+    };
+    struct ColorEvent {
+        TileColorConfig cfg;           // 已把事件缺省值填好（startFloor = floor, startTime = 0）
+        int32_t  floor = 0;
+        uint32_t order = 0;            // 文件顺序（同 floor 时后者覆盖）
+        float    duration = 0.0f;      // TweenColor 时长（秒；0 = 瞬切）
+        uint8_t  ease = 0;
+        uint8_t  flags = 0;            // ColorFlags
+    };
+
     Settings settings;
     std::vector<double> angleData;
     std::string        pathData;       // raw pathData string (alternative to angleData)
     std::vector<Tile>  tiles;
     std::vector<CameraEvent> cameraEvents;   // MoveCamera（未展开 RepeatEvents）
     std::vector<RepeatEvent> repeatEvents;   // RepeatEvents（只服务运镜展开；其他事件暂不消费）
+    std::vector<ColorEvent> colorEvents;     // ColorTrack（未展开；按 floor 查最后一条）
+
+    // floor 处生效的颜色事件：
+    //   * f 正好是某条 `justThisTile` 事件的层 → 该层**最后一条** justThisTile（覆盖持久段）；
+    //   * 否则 floor <= f 的最后一条持久事件；
+    //   * 都没有 → nullptr（用 settings 默认段）。
+    // inactive / editorOnly 的一律跳过（Re_ADOJAS `isEventActive`）。
+    // 注意：这是**线性**查找，给测试/一次性查询用；渲染侧应先建段表（下一步）。
+    const ColorEvent* colorEventAt(int64_t floor) const;
+
+    // floor/t 时刻的最终 fill/stroke（含 Volume 幅度）。
+    TileColors tileColorsAt(int64_t floor, double timeSec, float amplitude = 0.0f) const;
+
     // Lightweight action (avoids nlohmann DOM allocation for millions of actions)
     // 事件里的字符串（hitsound 名、trackDisappear 动画名）绝大多数是重复的少数几个值，
     // 而又只有这两类事件用到。以前每个 action 内联一个 std::string（32 B）：1.18 GB / 912 万
@@ -152,7 +185,7 @@ struct LevelData {
         uint16_t strId = 0;                 // 0 = 空串；索引进 actionStrTable
         // MoveCamera / RepeatEvents **不留在 actions 里**（keep=false）：它们走 cameraEvents /
         // repeatEvents 两个富结构。这两个枚举值只用于"解析时认出它"。
-        enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, MoveCamera, RepeatEvents, Other } type = Other;
+        enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, MoveCamera, RepeatEvents, ColorTrack, Other } type = Other;
         bool flag = false;
         float val1 = 0, val2 = 0;
     };

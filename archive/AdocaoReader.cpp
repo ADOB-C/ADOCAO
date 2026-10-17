@@ -216,6 +216,13 @@ bool parseSettings(const std::vector<std::string>& pool, const uint8_t* p, size_
         if (!u8(b)) return false;
         s.legacyCamRelativeTo = (b != 0);
     }
+    // 砖色（2026-10-17 追加在末尾）：旧文件读不到就保留默认值。
+    if (off + 2 <= n) { if (!idx(s.trackStyle)) return false; }
+    if (off + 2 <= n) { if (!idx(s.trackColorType)) return false; }
+    if (off + 2 <= n) { if (!idx(s.trackColorPulse)) return false; }
+    if (off + 4 <= n) { if (!f32(s.trackColorAnimDuration)) return false; }
+    if (off + 4 <= n) { if (!f32(s.trackPulseLength)) return false; }
+    if (off + 4 <= n) { if (!f32(s.trackGlowIntensity)) return false; }
     return true;
 }
 
@@ -451,6 +458,38 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
             if (ti >= out.actionStrTable.size()) { err = "repeat 段 tag 下标越界"; return false; }
             r.tag = (ti == 0) ? std::string() : out.actionStrTable[ti];
             out.repeatEvents.push_back(std::move(r));
+        }
+    }
+    if (const Sec* colSec = findSec(secs, SectionId::Colour)) {
+        constexpr size_t kRec = 32;   // floor(4) + 5 个池下标(10) + anim/pulseLen/glow/duration(16) + ease/flags(2)
+        if (colSec->size % kRec != 0) { err = "colour 段长度不是记录整数倍"; return false; }
+        const size_t cnt = colSec->size / kRec;
+        out.colorEvents.clear();
+        out.colorEvents.reserve(cnt);
+        for (size_t i = 0; i < cnt; ++i) {
+            const uint8_t* q = colSec->p + i * kRec;
+            LevelData::ColorEvent e;
+            e.floor = (int32_t)rdU32(q);
+            const uint16_t it = rdU16(q + 4), ic = rdU16(q + 6), is = rdU16(q + 8),
+                           ip = rdU16(q + 10), ist = rdU16(q + 12);
+            if (it >= out.actionStrTable.size() || ic >= out.actionStrTable.size() ||
+                is >= out.actionStrTable.size() || ip >= out.actionStrTable.size() ||
+                ist >= out.actionStrTable.size()) { err = "colour 段池下标越界"; return false; }
+            e.cfg.colorType = (it == 0) ? std::string("Single") : out.actionStrTable[it];
+            e.cfg.color = (ic == 0) ? std::string("debb7b") : out.actionStrTable[ic];
+            e.cfg.secondary = (is == 0) ? std::string("ffffff") : out.actionStrTable[is];
+            e.cfg.pulse = (ip == 0) ? std::string("None") : out.actionStrTable[ip];
+            e.cfg.style = (ist == 0) ? std::string("Standard") : out.actionStrTable[ist];
+            std::memcpy(&e.cfg.animDuration, q + 14, 4);
+            std::memcpy(&e.cfg.pulseLength, q + 18, 4);
+            std::memcpy(&e.cfg.glowIntensity, q + 22, 4);
+            std::memcpy(&e.duration, q + 26, 4);
+            e.ease = q[30];
+            e.flags = q[31];
+            e.cfg.startFloor = e.floor;
+            e.cfg.startTime = 0.0;
+            e.order = (uint32_t)i;
+            out.colorEvents.push_back(std::move(e));
         }
     }
 

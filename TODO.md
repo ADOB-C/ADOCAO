@@ -757,3 +757,9 @@ off 那两个采样值相等=被钳住，on 是正常插值，差值正好是**�
 难点是 **cull 内循环**现在直接下标取数组（~0.47 ns/砖），改成"块窗口 + 每块派生一次"要保持同样的
 内循环形状，且**形状分组的插入序必须是绘制序**（`unordered_map` 的桶增长序列不能变 → 派生要按
 层号顺序做）。另外容器路径应把 `tiles`/`actions`/`angleData` 都换成 blocked 列 + 预取。
+
+- [ ] **砖色渲染接线**（core 模型与 `ColorTrack` 解析已落地，2026-10-17）：`LevelScene` 仍是
+      全局 `uFillColor`/`uStrokeColor`。要接：① 每实例 fill/stroke（或按段染色的实例流）；
+      ② Standard/Gems 的顶点 mask 路 + Neon/NeonLight/Basic/Minimal 的 2×128 渐变条；
+      ③ TweenColor 的逐帧插值（只有 Tween 期间的 Single/Stripes + 时间驱动类型进"可见 ∪ 动画"集合）；
+      ④ 抓帧状态补 6 种 trackStyle + 4 种脉冲的对照图。

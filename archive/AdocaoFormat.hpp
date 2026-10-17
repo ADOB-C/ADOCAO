@@ -52,6 +52,7 @@ enum class SectionId : uint8_t {
     ActionIndex = 8,  // 按层索引（③ 的"稀疏 checkpoint"）：每 4096 层一条 action 下标区间
     Camera     = 9,   // MoveCamera 富事件（定长记录 38 B；docs/camera.md §4.1）
     Repeat     = 10,  // RepeatEvents（定长记录 19 B；运镜展开用，docs/camera.md §2.3）
+    Colour     = 11,  // ColorTrack（定长记录 32 B；砖色，docs/rendering.md「砖色」）
 };
 
 // 列/段的编码方式。`ColumnHeader::codec` 与 `SectionEntry::codec` 共用这一套。

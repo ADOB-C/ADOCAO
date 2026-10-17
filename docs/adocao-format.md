@@ -109,6 +109,7 @@ Header (76 B) | SectionEntry × sectionCount (40 B each) | padding → 8 B 对�
 | 8 | `ActionIndex` | 按层索引 —— ✅ v3 起写（§8.12 之后的 ActionIndex 小节）|
 | 9 | `Camera` | **MoveCamera 富事件**，每记录 38 B（§3.4）。仅当谱面有运镜时写 |
 | 10 | `Repeat` | **RepeatEvents**，每记录 19 B（§3.5）。仅当谱面有重复事件时写 |
+| 11 | `Colour` | **ColorTrack**，每记录 32 B（§3.6）。仅当谱面有颜色事件时写 |
 
 **只存输入，不存派生数据**：`Tile::position`（全局前缀和）、`direction`、`tileBPMs`、
 `Timeline` 全部由 `angleData` + `actions` 重算。
@@ -180,6 +181,20 @@ floor(i32) | repetitions(f32) | interval(f32) | gapLength(f32) | flags(u8) | tag
 `flags`：`bit0 = isBeat（repeatType != Floor）`、`bit1 = executeOnCurrentFloor`。语义见
 docs/camera.md §2.3。两段都**只在非空时写**；旧文件没有它们 → 读侧得到空 vector（正确结果：
 这张谱没有运镜）。
+
+### 3.6 Colour（段 id 11，2026-10-17）
+
+`ColorTrack` 与运镜同理：一条事件一个富结构，**不塞进 16 B 的 `FastAction`**。记录 32 B：
+
+`floor(i32) | colorType(u16 池) | color(u16 池) | secondary(u16 池) | pulse(u16 池) | style(u16 池) |
+ animDuration(f32) | pulseLength(f32) | glowIntensity(f32) | duration(f32) | ease(u8) | flags(u8)`
+
+- 池下标 0 = 空串；读侧把空串还原成 Re_ADOJAS 的硬编码缺省（Single/debb7b/ffffff/None/Standard）。
+- `flags` 与 `LevelData::ColorFlags` 同值：bit0 justThisTile / bit1 inactive / bit2 editorOnly /
+  bit3 hasGlow（写了 `trackGlowIntensity`；否则用 settings 的值）。
+- `order` 不存 —— 它 = 记录下标（文件顺序）。`startFloor` = `floor`，`startTime` = 0（与
+  Re_ADOJAS `createShiftType` 一致）。
+- 旧读者遇到未知段 id 会跳过（段目录带长度），所以这是向后兼容的追加。
 
 ## 4. 列编码（Codec）
 

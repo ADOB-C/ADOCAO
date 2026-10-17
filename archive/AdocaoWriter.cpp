@@ -146,6 +146,13 @@ void writeSettings(const LevelData::Settings& s, Pool& pool, std::vector<uint8_t
     // pitch 同时缩放事件时长与跟随速度；legacyCamRelativeTo 是老语义开关。
     putF32(b, s.pitch);
     putU8(b, s.legacyCamRelativeTo ? 1 : 0);
+    // 2026-10-17 砖色：样式/颜色类型/脉冲 + 三个数值（全部追加在末尾，旧文件读不到就保留默认）。
+    putU16(b, pool.add(s.trackStyle));
+    putU16(b, pool.add(s.trackColorType));
+    putU16(b, pool.add(s.trackColorPulse));
+    putF32(b, s.trackColorAnimDuration);
+    putF32(b, s.trackPulseLength);
+    putF32(b, s.trackGlowIntensity);
 }
 
 }  // namespace
@@ -171,6 +178,13 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
     std::vector<uint16_t> repTagIdx(level.repeatEvents.size());
     for (size_t i = 0; i < level.repeatEvents.size(); ++i)
         repTagIdx[i] = pool.add(level.repeatEvents[i].tag);
+    struct ColorIdx { uint16_t type, color, secondary, pulse, style; };
+    std::vector<ColorIdx> colIdx(level.colorEvents.size());
+    for (size_t i = 0; i < level.colorEvents.size(); ++i) {
+        const auto& c = level.colorEvents[i].cfg;
+        colIdx[i] = {pool.add(c.colorType), pool.add(c.color), pool.add(c.secondary),
+                     pool.add(c.pulse), pool.add(c.style)};
+    }
 
     // ---- ② 字符串池（原序保留 actionStrTable，末尾是 settings 追加的）----
     std::vector<uint8_t> poolBlob;
@@ -449,6 +463,26 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
             putF32(s.blob, r.gapLength);
             putU8(s.blob, r.flags);
             putU16(s.blob, repTagIdx[i]);
+        }
+        secs.push_back(std::move(s));
+    }
+    if (!level.colorEvents.empty()) {
+        Section s; s.id = (uint8_t)SectionId::Colour; s.elements = level.colorEvents.size();
+        s.blob.reserve(level.colorEvents.size() * 32);
+        for (size_t i = 0; i < level.colorEvents.size(); ++i) {
+            const LevelData::ColorEvent& e = level.colorEvents[i];
+            putU32(s.blob, (uint32_t)e.floor);
+            putU16(s.blob, colIdx[i].type);
+            putU16(s.blob, colIdx[i].color);
+            putU16(s.blob, colIdx[i].secondary);
+            putU16(s.blob, colIdx[i].pulse);
+            putU16(s.blob, colIdx[i].style);
+            putF32(s.blob, e.cfg.animDuration);
+            putF32(s.blob, e.cfg.pulseLength);
+            putF32(s.blob, e.cfg.glowIntensity);
+            putF32(s.blob, e.duration);
+            putU8(s.blob, e.ease);
+            putU8(s.blob, e.flags);
         }
         secs.push_back(std::move(s));
     }

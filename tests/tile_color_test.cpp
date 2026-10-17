@@ -97,6 +97,29 @@ int main() {
         }
     }
 
+    // ColorTrack 查询语义：持久段 / justThisTile 覆盖 / inactive 跳过
+    {
+        const char* json = R"({"angleData":[0,90,180,270,0,90],"settings":{
+            "bpm":120,"trackStyle":"Minimal","trackColor":"101010"},
+            "actions":[
+              {"floor":1,"eventType":"ColorTrack","trackColor":"FF0000","trackStyle":"Standard"},
+              {"floor":2,"eventType":"ColorTrack","trackColor":"00FF00","justThisTile":true},
+              {"floor":3,"eventType":"ColorTrack","trackColor":"0000FF","active":false}]})";
+        LevelData lv;
+        if (!lv.loadFromBuffer(json, std::strlen(json))) { std::printf("FAIL colors: load\n"); fail++; }
+        else if (lv.colorEvents.size() != 3) {
+            std::printf("FAIL colors: %zu events\n", lv.colorEvents.size()); fail++;
+        } else {
+            auto hexAt = [&](int f) { const TileColors c = lv.tileColorsAt(f, 0.0); return hex3(c.fill) + "/" + hex3(c.stroke); };
+            if (lv.colorEventAt(0) != nullptr) { std::printf("FAIL colors: floor0 should be default\n"); fail++; }
+            if (hexAt(0) != "101010/101010") { std::printf("FAIL colors floor0: %s\n", hexAt(0).c_str()); fail++; }
+            if (hexAt(1) != "ff0000/b30000") { std::printf("FAIL colors floor1: %s\n", hexAt(1).c_str()); fail++; }
+            if (hexAt(2) != "00ff00/00b300") { std::printf("FAIL colors floor2 (justThisTile): %s\n", hexAt(2).c_str()); fail++; }
+            if (hexAt(3) != "ff0000/b30000") { std::printf("FAIL colors floor3 (inactive skipped): %s\n", hexAt(3).c_str()); fail++; }
+            if (hexAt(5) != "ff0000/b30000") { std::printf("FAIL colors floor5: %s\n", hexAt(5).c_str()); fail++; }
+        }
+    }
+
     if (fail) {
         std::printf("%d 项失败（%d 例金标）\n", fail, n);
         return 1;

@@ -1,0 +1,23 @@
+{
+  "angleData": [0, 90, 180, 270, 0],
+  "settings": {
+    "bpm": 120,
+    "trackColor": "112233",
+    "secondaryTrackColor": "445566",
+    "trackColorType": "Glow",
+    "trackColorPulse": "Backward",
+    "trackColorAnimDuration": 0.5,
+    "trackPulseLength": 4,
+    "trackStyle": "NeonLight",
+    "trackGlowIntensity": 77
+  },
+  "actions": [
+    {"floor": 1, "eventType": "ColorTrack", "trackColor": "#AABBCC", "secondaryTrackColor": "DDEEFF",
+     "trackColorType": "Stripes", "trackColorPulse": "Forward", "trackColorAnimDuration": 1.5,
+     "trackPulseLength": 6, "trackStyle": "Basic", "trackGlowIntensity": 33, "duration": 0.75, "ease": "OutQuad"},
+    {"floor": 2, "eventType": "ColorTrack", "trackColor": "010203", "justThisTile": true},
+    {"floor": 3, "eventType": "ColorTrack", "trackColor": "111111", "active": false},
+    {"floor": 4, "eventType": "ColorTrack", "trackColor": "222222", "editorOnly": true},
+    {"floor": 4, "eventType": "ColorTrack", "trackColor": "333333", "trackStyle": "Minimal"}
+  ]
+}

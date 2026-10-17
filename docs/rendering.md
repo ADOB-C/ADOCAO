@@ -3,6 +3,34 @@
 > 本文 2026-10 从 `AGENTS.md` **整段搬出**（内容一字未改，只换了文件）；AGENTS.md 里
 > 留了指针。改这一块之前先读它，改完按 AGENTS.md 的验收清单跑对应护栏。
 
+## 砖色（ColorTrack / trackStyle，2026-10-17）
+
+颜色分两层（与 Re_ADOJAS `src/lib/Player/TileColorManager.ts` 逐条对齐）：
+
+1. **基色**：`trackColorType` 从 `trackColor` / `secondaryTrackColor` 算出一支本体色
+   （Single / Stripes / Glow / Blink / Switch / Rainbow / Volume）。
+2. **样式**：`trackStyle` 决定 fill / stroke 怎么从本体色派生
+   （Standard 0.7×｜Neon 黑本体+本体描边｜NeonLight 半亮本体｜Basic 黑描边｜
+   Gems 同 Standard｜Minimal 无描边）。`addBlack(0.7)` 是**逐通道 ×0.7**，不是向黑混合 70%。
+
+实现：`core/level/TileColor.{hpp,cpp}`；settings 字段与 `ColorTrack` 富事件在 `LevelData`
+（`colorEvents`，线性查找的 `colorEventAt` / `tileColorsAt` 只给测试与一次性查询用）。
+`isTimeDrivenColorType()`（Glow/Blink/Rainbow/Volume）是"要不要逐帧"的判据。
+
+**逐帧/静态的划分**（别每帧全谱重算；Re_ADOJAS 同款）：
+
+| 东西 | 频率 |
+|---|---|
+| 每段 fill/stroke（非动画类型） | 加载时一次 |
+| Glow/Blink/Rainbow/Volume、TweenColor | 每帧，仅**可见**砖 |
+| ColorTrack 生效 / style 变更 | 事件时一次 |
+| 几何/mask | 按 `(pred,dir,is999,style)` 缓存 |
+
+**还没接渲染**（下一步）：现在 `LevelScene` 仍是全局 `uFillColor`/`uStrokeColor` 两个 uniform。
+接线时要按 style 走两条路：Standard/Gems 用顶点 mask（内芯 fill、外圈 stroke）；
+Neon/NeonLight/Basic/Minimal 用 2×128 渐变条（`base × strip(uv.y)`，uv.y 0=外缘、1=中心，
+base 的取法见 `TRACK_STYLE_EDGE`：Neon/NeonLight 取 stroke，Basic/Minimal 取 fill）。
+
 ## 拖尾采样率：固定率 vs 自适应上限（2026-10-17）
 
 拖尾采样率有两个来源，**语义不同**：

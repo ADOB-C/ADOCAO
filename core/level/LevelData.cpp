@@ -258,6 +258,7 @@ struct Regions {
 struct CameraSink {
     std::vector<LevelData::CameraEvent> cameras;
     std::vector<LevelData::RepeatEvent> repeats;
+    std::vector<LevelData::ColorEvent> colors;   // ColorTrack（与相机同一个 rich 通道）
 };
 
 // 前置声明：actions 在根扫描过程中就地解析（见 scanRootMembers）。
@@ -344,6 +345,7 @@ inline LevelData::FastAction::Type eventTypeOf(KeyRef k) {
     if (keyIs(k, "AnimateTrack"))  return T::AnimateTrack;
     if (keyIs(k, "MoveCamera"))    return T::MoveCamera;     // → cameraEvents（富结构）
     if (keyIs(k, "RepeatEvents"))  return T::RepeatEvents;   // → repeatEvents（富结构）
+    if (keyIs(k, "ColorTrack"))    return T::ColorTrack;     // → colorEvents（富结构）
     return T::Other;
 }
 
@@ -378,6 +380,16 @@ struct ActionFields {
     uint8_t disabledMask = 0;
     bool isBeat = true, executeOnCurrentFloor = false;
     double repetitions = 0.0, floorCount = 0.0, interval = 1.0, gapLength = 1.0;
+
+    // ── ColorTrack ────────────────────────────────────────────────────
+    bool hasTrackColor = false;        std::string trackColor;
+    bool hasSecondaryTrackColor = false; std::string secondaryTrackColor;
+    bool hasTrackColorType = false;    std::string trackColorType;
+    bool hasTrackColorPulse = false;   std::string trackColorPulse;
+    bool hasTrackStyle = false;        std::string trackStyle;
+    bool hasTrackAnimDuration = false; float trackAnimDuration = 2.0f;
+    bool hasTrackPulseLength = false;  float trackPulseLength = 10.0f;
+    bool hasTrackGlow = false;         float trackGlow = 100.0f;
 };
 
 
@@ -552,7 +564,11 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
             }
             break;
         case 's':
-            if (keyIs(key, "speedType")) {
+            if (keyIs(key, "secondaryTrackColor")) {
+                std::string tmp;
+                if (!stringValue(v, vEnd, tmp)) return false;
+                f.secondaryTrackColor = std::move(tmp); f.hasSecondaryTrackColor = true;
+            } else if (keyIs(key, "speedType")) {
                 std::string str;
                 if (!stringValue(v, vEnd, str)) return false;
                 f.isMultiplier = (str == "Multiplier");
@@ -599,6 +615,31 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
             } else if (rich && keyIs(key, "tag")) {
                 std::string tagTmp;
                 if (*v == '"' && stringValue(v, vEnd, tagTmp)) { f.tagPtr = v + 1; f.tagEnd = vEnd - 1; }
+            } else if (keyIs(key, "trackColor")) {
+                std::string tmp;
+                if (!stringValue(v, vEnd, tmp)) return false;
+                f.trackColor = std::move(tmp); f.hasTrackColor = true;
+            } else if (keyIs(key, "trackColorType")) {
+                std::string tmp;
+                if (!stringValue(v, vEnd, tmp)) return false;
+                f.trackColorType = std::move(tmp); f.hasTrackColorType = true;
+            } else if (keyIs(key, "trackColorPulse")) {
+                std::string tmp;
+                if (!stringValue(v, vEnd, tmp)) return false;
+                f.trackColorPulse = std::move(tmp); f.hasTrackColorPulse = true;
+            } else if (keyIs(key, "trackStyle")) {
+                std::string tmp;
+                if (!stringValue(v, vEnd, tmp)) return false;
+                f.trackStyle = std::move(tmp); f.hasTrackStyle = true;
+            } else if (keyIs(key, "trackColorAnimDuration")) {
+                double d2; if (!parseNumber(v, vEnd, d2)) return false;
+                f.trackAnimDuration = (float)d2; f.hasTrackAnimDuration = true;
+            } else if (keyIs(key, "trackPulseLength")) {
+                double d2; if (!parseNumber(v, vEnd, d2)) return false;
+                f.trackPulseLength = (float)d2; f.hasTrackPulseLength = true;
+            } else if (keyIs(key, "trackGlowIntensity")) {
+                double d2; if (!parseNumber(v, vEnd, d2)) return false;
+                f.trackGlow = (float)d2; f.hasTrackGlow = true;
             }
             break;
         case 'p':
@@ -717,12 +758,18 @@ inline bool buildAction(const ActionFields& f, LevelData::FastAction& a, bool& k
     }
     // 缺 floor 或缺 eventType、以及未知 eventType 的 action 旧路径直接丢弃
     keep = f.hasFloor && f.hasEvent && f.type != T::Other &&
-           f.type != T::MoveCamera && f.type != T::RepeatEvents;   // 后两者进富结构
+           f.type != T::MoveCamera && f.type != T::RepeatEvents &&
+           f.type != T::ColorTrack;   // 后三者进富结构
     return true;
 }
 
 // 把 rich 解析出来的字段落进富结构。**不做任何数值变换** —— 单位/缺省语义全部原样保留，
 // 解释权在 core/camera（docs/camera.md §4）。
+inline std::string stripColorHash(std::string c) {
+    if (!c.empty() && c.front() == '#') c.erase(c.begin());
+    return c;
+}
+
 inline void decodeSpecialEvent(const ActionFields& f, CameraSink& sink) {
     using T = LevelData::FastAction;
     using C = LevelData;
@@ -763,6 +810,29 @@ inline void decodeSpecialEvent(const ActionFields& f, CameraSink& sink) {
         rp.flags = flags;
         if (f.tagPtr && f.tagEnd > f.tagPtr) rp.tag.assign(f.tagPtr, (size_t)(f.tagEnd - f.tagPtr));
         sink.repeats.push_back(std::move(rp));
+    } else if (f.type == T::ColorTrack) {
+        C::ColorEvent ev;
+        ev.floor = f.floor;
+        // Re_ADOJAS `createShiftType(event)`：事件没写的字段用硬编码默认值（不是 settings）。
+        ev.cfg.colorType = f.hasTrackColorType ? f.trackColorType : std::string("Single");
+        ev.cfg.color = stripColorHash(f.hasTrackColor ? f.trackColor : std::string("debb7b"));
+        ev.cfg.secondary = stripColorHash(f.hasSecondaryTrackColor ? f.secondaryTrackColor : std::string("ffffff"));
+        ev.cfg.pulse = f.hasTrackColorPulse ? f.trackColorPulse : std::string("None");
+        ev.cfg.animDuration = f.hasTrackAnimDuration ? f.trackAnimDuration : 2.0f;
+        ev.cfg.pulseLength = f.hasTrackPulseLength ? f.trackPulseLength : 10.0f;
+        ev.cfg.style = f.hasTrackStyle ? f.trackStyle : std::string("Standard");
+        ev.cfg.glowIntensity = f.hasTrackGlow ? f.trackGlow : 100.0f;
+        ev.cfg.startFloor = f.floor;
+        ev.cfg.startTime = 0.0;
+        ev.duration = f.hasDuration ? f.duration : 0.0f;
+        ev.ease = (uint8_t)f.easeId;
+        uint8_t flags = 0;
+        if (f.justThisTile)            flags |= C::kColorJustThisTile;
+        if (f.inactive)                flags |= C::kColorInactive;
+        if (f.editorOnly)              flags |= C::kColorEditorOnly;
+        if (f.hasTrackGlow)            flags |= C::kColorHasGlow;
+        ev.flags = flags;
+        sink.colors.push_back(std::move(ev));
     }
 }
 
@@ -788,7 +858,8 @@ inline bool parseActionRegion(const char* b, const char* end,
         if (!buildAction(f, a, keep)) return false;
         if (keep) out.push_back(std::move(a));
         else if (f.type == LevelData::FastAction::MoveCamera ||
-                 f.type == LevelData::FastAction::RepeatEvents) {
+                 f.type == LevelData::FastAction::RepeatEvents ||
+                 f.type == LevelData::FastAction::ColorTrack) {
             // 罕见事件：对同一个对象再解析一遍富字段（热路径零成本，这里最多几百次）
             ActionFields rich;
             if (parseActionObject(p + 1, objEnd, rich, /*rich=*/true)) decodeSpecialEvent(rich, sink);
@@ -865,7 +936,8 @@ inline size_t parseActionRangeInto(const char* b, const char* end,
             if (n >= slot) return kFail;                 // 槽位估算错了，别越界
             dst[n++] = std::move(a);
         } else if (f.type == LevelData::FastAction::MoveCamera ||
-                   f.type == LevelData::FastAction::RepeatEvents) {
+                   f.type == LevelData::FastAction::RepeatEvents ||
+                   f.type == LevelData::FastAction::ColorTrack) {
             ActionFields rich;
             if (parseActionObject(p + 1, objEnd, rich, /*rich=*/true)) decodeSpecialEvent(rich, sink);
         }
@@ -940,6 +1012,7 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
 
     const size_t camBase = sink.cameras.size();
     const size_t repBase = sink.repeats.size();
+    const size_t colBase = sink.colors.size();
     std::vector<CameraSink> pieceSinks(n);
     auto tParse = now();
     std::vector<size_t> kept(n, 0);
@@ -963,7 +1036,7 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
                           scanMs, parseMs, n, poolThreads, (int)failed.load());
     if (failed.load()) {
         out.resize(base);
-        sink.cameras.resize(camBase); sink.repeats.resize(repBase);
+        sink.cameras.resize(camBase); sink.repeats.resize(repBase); sink.colors.resize(colBase);
         return parseActionRegion(b, fileEnd, out, sink, outEnd);   // 只有切分不可信时才会走到
     }
     // 相机/重复事件按**段序**合并 —— 段是按文件顺序切的，所以结果就是文件顺序。
@@ -975,6 +1048,9 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
         sink.repeats.insert(sink.repeats.end(),
                             std::make_move_iterator(ps.repeats.begin()),
                             std::make_move_iterator(ps.repeats.end()));
+        sink.colors.insert(sink.colors.end(),
+                           std::make_move_iterator(ps.colors.begin()),
+                           std::make_move_iterator(ps.colors.end()));
     }
 
     // 压实：每段末尾的空槽（被丢弃的 action）移走。没有丢弃时位移为 0，直接零拷贝。
@@ -1065,7 +1141,8 @@ struct WindowParser {
             if (!buildAction(f, a, keep)) { fail(p, "action 组装失败"); return p; }
             if (keep) actions.push_back(std::move(a));
             else if (f.type == LevelData::FastAction::MoveCamera ||
-                     f.type == LevelData::FastAction::RepeatEvents) {
+                     f.type == LevelData::FastAction::RepeatEvents ||
+                     f.type == LevelData::FastAction::ColorTrack) {
                 ActionFields rich;
                 if (parseActionObject(p + 1, objEnd, rich, /*rich=*/true))
                     decodeSpecialEvent(rich, cameraSink);
@@ -1348,6 +1425,29 @@ TileColorConfig LevelData::baseColorConfig() const {
     return cfg;
 }
 
+const LevelData::ColorEvent* LevelData::colorEventAt(int64_t floor) const {
+    const ColorEvent* persistent = nullptr;
+    const ColorEvent* single = nullptr;
+    for (const auto& e : colorEvents) {
+        if (e.flags & (kColorInactive | kColorEditorOnly)) continue;
+        if (e.flags & kColorJustThisTile) {
+            if ((int64_t)e.floor == floor) single = &e;   // 仅覆盖本层，文件顺序后者赢
+        } else if ((int64_t)e.floor <= floor) {
+            persistent = &e;                              // floor<=f 的最后一条持久段
+        }
+    }
+    return single ? single : persistent;
+}
+
+TileColors LevelData::tileColorsAt(int64_t floor, double timeSec, float amplitude) const {
+    TileColorConfig cfg = baseColorConfig();
+    if (const ColorEvent* e = colorEventAt(floor)) {
+        cfg = e->cfg;
+        if (!(e->flags & kColorHasGlow)) cfg.glowIntensity = settings.trackGlowIntensity;
+    }
+    return computeTileColors(cfg, timeSec, (int)floor, amplitude);
+}
+
 // Fast parser: extract angleData float array from JSON without DOM allocation.
 // 保留：它是旧路径（也是回退路径）用的参考实现。
 static std::vector<double> parseAngleDataFast(const char* json, size_t len, size_t& outArrayEnd) {
@@ -1494,6 +1594,10 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
                         else repeatEvents.insert(repeatEvents.end(),
                                                  std::make_move_iterator(wp.cameraSink.repeats.begin()),
                                                  std::make_move_iterator(wp.cameraSink.repeats.end()));
+                        if (colorEvents.empty()) colorEvents = std::move(wp.cameraSink.colors);
+                        else colorEvents.insert(colorEvents.end(),
+                                                std::make_move_iterator(wp.cameraSink.colors.begin()),
+                                                std::make_move_iterator(wp.cameraSink.colors.end()));
                         return finishLoad(onProgress, exportOnly);
                     }
                 }
@@ -1654,6 +1758,9 @@ bool LevelData::tryFastParse(const char* data, size_t len, ProgressCb onProgress
     if (cameraEvents.empty()) cameraEvents = std::move(newCamera.cameras);
     else cameraEvents.insert(cameraEvents.end(), std::make_move_iterator(newCamera.cameras.begin()),
                              std::make_move_iterator(newCamera.cameras.end()));
+    if (colorEvents.empty()) colorEvents = std::move(newCamera.colors);
+    else colorEvents.insert(colorEvents.end(), std::make_move_iterator(newCamera.colors.begin()),
+                            std::make_move_iterator(newCamera.colors.end()));
     if (repeatEvents.empty()) repeatEvents = std::move(newCamera.repeats);
     else repeatEvents.insert(repeatEvents.end(), std::make_move_iterator(newCamera.repeats.begin()),
                              std::make_move_iterator(newCamera.repeats.end()));
@@ -1754,6 +1861,53 @@ void jsonReadRepeatEvent(const rapidjson::Value& a, std::vector<LevelData::Repea
     out.push_back(std::move(rp));
 }
 
+void jsonReadColorEvent(const rapidjson::Value& a, std::vector<LevelData::ColorEvent>& out) {
+    using C = LevelData;
+    C::ColorEvent ev;
+    ev.floor = a["floor"].GetInt();
+    auto str = [&](const char* k, const char* dflt) -> std::string {
+        if (a.HasMember(k) && a[k].IsString()) {
+            std::string v = a[k].GetString();
+            if (!v.empty() && v.front() == '#') v.erase(v.begin());
+            return v;
+        }
+        return dflt;
+    };
+    ev.cfg.colorType = str("trackColorType", "Single");
+    ev.cfg.color = str("trackColor", "debb7b");
+    ev.cfg.secondary = str("secondaryTrackColor", "ffffff");
+    ev.cfg.pulse = str("trackColorPulse", "None");
+    ev.cfg.style = str("trackStyle", "Standard");
+    ev.cfg.animDuration = (a.HasMember("trackColorAnimDuration") && a["trackColorAnimDuration"].IsNumber())
+                              ? a["trackColorAnimDuration"].GetFloat() : 2.0f;
+    ev.cfg.pulseLength = (a.HasMember("trackPulseLength") && a["trackPulseLength"].IsNumber())
+                             ? a["trackPulseLength"].GetFloat() : 10.0f;
+    if (a.HasMember("trackGlowIntensity") && a["trackGlowIntensity"].IsNumber()) {
+        ev.cfg.glowIntensity = a["trackGlowIntensity"].GetFloat();
+        ev.flags |= C::kColorHasGlow;
+    }
+    ev.cfg.startFloor = ev.floor;
+    ev.cfg.startTime = 0.0;
+    if (a.HasMember("duration") && a["duration"].IsNumber()) ev.duration = a["duration"].GetFloat();
+    if (a.HasMember("ease") && a["ease"].IsString()) ev.ease = (uint8_t)easeFromName(a["ease"].GetString());
+    if (a.HasMember("justThisTile")) {
+        auto& v = a["justThisTile"];
+        if (v.IsBool()) ev.flags |= v.GetBool() ? C::kColorJustThisTile : 0;
+        else if (v.IsString()) {
+            std::string sv = v.GetString();
+            if (sv == "Enabled" || sv == "true" || sv == "True") ev.flags |= C::kColorJustThisTile;
+        }
+    }
+    if (a.HasMember("active")) {
+        auto& v = a["active"];
+        if (v.IsBool() && !v.GetBool()) ev.flags |= C::kColorInactive;
+        else if (v.IsString() && std::string(v.GetString()) == "Disabled") ev.flags |= C::kColorInactive;
+    }
+    if (a.HasMember("editorOnly") && a["editorOnly"].IsBool() && a["editorOnly"].GetBool())
+        ev.flags |= C::kColorEditorOnly;
+    out.push_back(std::move(ev));
+}
+
 }  // namespace
 
 bool LevelData::parseLegacy(const std::string& jsonStr, ProgressCb onProgress, bool exportOnly) {
@@ -1828,6 +1982,7 @@ bool LevelData::parseLegacy(const std::string& jsonStr, ProgressCb onProgress, b
             else if (et == "AnimateTrack") act.type = FastAction::AnimateTrack;
             else if (et == "MoveCamera") { jsonReadCameraEvent(a, cameraEvents); continue; }
             else if (et == "RepeatEvents") { jsonReadRepeatEvent(a, repeatEvents); continue; }
+            else if (et == "ColorTrack") { jsonReadColorEvent(a, colorEvents); continue; }
             else continue;
             if (act.type == FastAction::SetSpeed) {
                 if (a.HasMember("speedType") && std::string(a["speedType"].GetString()) == "Multiplier") {
@@ -1884,6 +2039,8 @@ bool LevelData::finishLoad(ProgressCb onProgress, bool exportOnly) {
     // 所有解析路径（快/窗口/DOM/容器）都在这里收口，所以只在这一处赋值。
     for (size_t i = 0; i < cameraEvents.size(); i++)
         cameraEvents[i].order = (uint32_t)i;
+    for (size_t i = 0; i < colorEvents.size(); i++)
+        colorEvents[i].order = (uint32_t)i;
 
     // Convert pathData → angleData if needed
     if (!pathData.empty() && angleData.empty()) {

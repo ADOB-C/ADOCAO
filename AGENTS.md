@@ -199,7 +199,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 几何测试（三层，2026-10 起）：`tests/tile_geometry_test.cpp`（中旋五边形不变量 + 调用点护栏）→
   `tests/tile_expansion_test.cpp`（**CPU 逐位**：形状表展开 vs 参考实现，168491 形状 / 3.3e7 坐标）→
   `tests/geom_probe_test.cpp`（**GPU 逐位**：真跑 `assets/shaders/tile.vert`，4.7e7 坐标；无显示时 SKIP）
-  → `scripts/capture-gate.sh store|check`（**像素逐字节**，51 个状态，基线默认 `~/Projects/.ADOCAO/gate/baseline`、不入库；带 `+hitsounds` 的状态会真的加载音色）；
+  → `scripts/capture-gate.sh store|check`（**像素逐字节**，54 个状态：51 个渲染基线 + 3 个运镜状态（`--capture-camera`，见 `docs/camera.md` §12）；基线默认 `~/Projects/.ADOCAO/gate/baseline`、不入库；带 `+hitsounds` 的状态会真的加载音色）；
   默认口径是几何尺度容差 1e-5 砖，`ADOCAO_TILE_EXACT=1` 才要求逐位（见 `docs/rendering.md` 的"砖块几何"段）
 - shader 一致性：`scripts/check-shader-fallback.sh`（`render/Shaders.hpp` 的内嵌回退 GLSL 必须与
   `assets/shaders/*` 逐字相同）
@@ -233,6 +233,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |---|---|
 | `docs/level-loading.md` | 动解析 / 流式窗口 / 快路径回退 / `Timeline::build` / 加载时间与内存 |
 | `docs/rendering.md` | 动渲染、几何、实例流、剔除、图标、坐标约定、**像素门槛怎么用** |
+| `docs/camera.md` | 动相机 / 移植 `MoveCamera` / 对齐 Re_ADOJAS 运镜时读：两层模型（rig+跟随层）、4 条独立 tween、5 种 `relativeTo`、camspeed、探针实测与反直觉清单 |
 | `docs/ui-design.md` | 改向导/启动器版面时读：栅格常数（右边缘一律 496）、三档字号、组件清单、禁止项 |
 | `docs/parallelism.md` | **要并行什么、怎么并行**：调度器模型（车道/parallelFor/取消）、四条不变式、逐站点归类、迁移顺序 —— 动任何并行前先读 |
 | `docs/profiling.md` | **要量什么、用什么量**：分段计时（`ADOCAO_PROFILE=1`）、整帧/常驻口径、`sample`/`vmmap`/`xctrace` 配方、已知盲区 |

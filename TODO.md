@@ -89,7 +89,24 @@
       真无头（不碰 GL/窗口），整条路径等比铺满 —— 6.77M 层的 MYC 出 4096² 只要 6.3 s
 - [ ] 无头视频（构想）：那个 fork `rech114/ADOCAO` 用离屏 FBO + ffmpeg 管道做过（Apache-2.0，可参考）
   - core 侧已有先例：headless 探针直接跑 PositionSolver/sampleTrail（见拖尾调研用的 trailprobe）；缺口在离屏 GL 上下文（headless GLFW / EGL）+ 渲染循环的时间源——无音频设备时不能依赖音频回调推进 m_readCursor，需固定步长驱动
-- [ ] MoveCamera（5 种 relativeTo 模式）——Easing 唯一规划使用方（Camera 缓动）
+- [ ] MoveCamera（5 种 relativeTo 模式）—— **八步依赖链 2026-10-17 全部落地，详见 `docs/camera.md` §12**
+      ✅ 已完成（都有独立验收）：32 个缓动（`core/util/Easing`，金标由 `Easing.ts` 直接跑出来，32×25 点）、
+      `angleOffset`、`RepeatEvents` 展开（Beat/Floor + `entryBeat` 的 -1 哨兵 + 多 tag）、`MoveCamera`
+      富事件（快路径/分块并行/流式窗口/DOM 四条路径 + `.adocao` 段 9/10，容器往返逐字段对拍）、
+      相机时间线（`tileStartTimes[floor] + angleOffset/180*60/bpm`，`(time,id,文件序)` 排序）、
+      两层 `CameraDirector`（**跨语言逐帧金标**：同一批事件喂给 Re_ADOJAS 的 `CameraController.ts`
+      与 C++，8 个场景 × 每 15 帧，容差 1e-9）、`render/Camera` 旋转（`proj = ortho·R(-θ)`）、
+      剔除按旋转矩形 AABB 扩边、`--capture-camera`、暂停时导航反旋转（`screenToWorld`/拖动）。
+      剩下的是**决策与接线**，不是移植：
+      ① **视野基准**：我们 12 砖全高 @100 vs Re_ADOJAS 5.47 → 所有 zoom 事件的**视觉尺度差 2.19×**
+         （语义/数值是对的）。改基准要重存全部像素基线，需拍板 —— `docs/camera.md` §12.2 第 1 行。
+      ② `holdOffset`：控制器接口已就位（`setHoldOffset`），app 恒写 0，等 Hold 事件落地后接上。
+      ③ 抓帧门槛的运镜状态：`tests/charts/camera_basic.adofai` 已备好（rotation / tween 中点 / 终点三个
+         时刻），基线待 store：`capture-gate.sh store --only '^camera_'`（写 `~/Projects/.ADOCAO` 要一次提权）。
+      ④ `.adocao` 的 `Preserved` 段仍未做 → MoveTrack/Decorations 等**未知事件打包后仍然会丢**
+         （运镜已经不再受影响，但它和运镜是同一类问题）。
+      ⑤ 砖上图标在 `rotation ≠ 0` 时**跟着世界转**，Re_ADOJAS 会反向补偿保持正立（`updateTileChildSpriteRotations`）。
+         现有像素基线全在 0°，抓不到；要对齐得把图标拆成独立绘制 + 传逆旋角（见 docs/camera.md §12.2）。
 - [ ] PositionTrack：relativeTo、rotation、scale、opacity、stickToFloors
       （`justThisTile` **已完成** 2026-10-11：官方语义 = **只作用于本层**（点加）；缺省/`"Disabled"` 才是
       "本层及之后所有层"。消费侧在 `applyPositionTrackOffsets()`，回归用例 `tests/position_offset_test.cpp`。
@@ -240,6 +257,10 @@
 - [x] DPI awareness + CPU pin to big cores
 - [x] Planet trail: Catmull-Rom spline + GPU rendering
 - [x] CMake options: ZOOM_LEVEL (7 levels), PORTABLE
+- [x] **Re_ADOJAS 摄像机语义调研**（2026-10-16）：`docs/camera.md` —— 两层模型（rig + 跟随层）、4 条独立
+      tween、5 种 `relativeTo`、`camspeed = 2 拍`。用 node 的类型擦除直接跑 `CameraController.ts` 做了
+      13 组探针，把 3 个反直觉行为（`Kill(complete)` 瞬跳、无 position + relativeTo 的怪路径、切砖那一帧
+      就吃掉 dt）钉成了实测金标。**这只是调研**：实现仍在「未完成 → 功能」的 MoveCamera 条目，依赖链见那里。
 
 ### 架构
 - [x] GameWindow 重构为类（init/update/render 分离）

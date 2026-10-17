@@ -35,9 +35,6 @@ void drawHitsoundsPage(State& st, const Chrome& ch) {
     ImGui::Spacing();
     ImGui::Spacing();
     ImGui::SetCursorPosX(colX);
-    ImGui::Separator();
-    ImGui::Spacing();
-    ImGui::SetCursorPosX(colX);
     const bool wasOn = st.preloadEnabled;
     ImGui::Checkbox("Preload", &st.preloadEnabled);
     // 在这里**勾上**就立刻预载（Welcome 那边没勾、或上次失败时，这是一个补救入口 ✓）

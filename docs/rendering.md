@@ -239,7 +239,22 @@ ADOCAO_TILE_EXACT=1 ./build/tests/adocao_tile_expansion_test tests/charts/shapes
   `tests/tile_expansion_test.cpp`（CPU 逐位）、`tests/geom_probe_test.cpp`（**GPU 逐位**，读的就是
   生产 `tile.vert`，画点进 RGBA32F FBO 再读回来比）、`scripts/capture-gate.sh`（像素）。
 - `fma()` 要 GLSL 4.00+ → 上下文请求是 **4.1**（`app/GameWindow.cpp`；macOS 上限也是 4.1）。
-  实测 3.3 ↔ 4.1 **像素中性**（当时的 34 个验收状态逐字节相同）。不想要 4.1 的退路见 TODO.md。
+  实测 3.3 ↔ 4.1 **像素中性**（当时的 34 个验收状态逐字节相同）。
+- **拿不到 4.x 的退路（2026-10-17 落地）**：砖块 VS 有两支 —— `tile.vert`（410，fma 展开）与
+  `tile_cpu.vert`（330，**查表**）。后者不在 GPU 上算几何：`TileShape::expand()` 在 CPU 上把每个
+  canonical 槽位展开成 RG32F 纹理（每形状 175 texel，texel i = 槽位 i 的 (x,y)），VS 里只有
+  `texelFetch` + 实例偏移的相加 —— **一次乘加都没有**，所以顶点值就是 CPU 参考值本身。
+  * 选择靠**试编**：410 编不过才切（`app/LevelScene.cpp` 的能力探测），不按版本号猜
+    （同 `archive/LzmaMtCompat` 的教训：版本区间 ≠ 实际能力）；`ADOCAO_CPU_GEOMETRY=1` 强制切。
+  * 上下文侧：`app/GameWindow.cpp` 有 4.1 → 3.3 的重试链（`ADOCAO_GL_VERSION` 可指定首试版本）。
+  * 两支**共用**同一个 VAO / 实例流 / 索引表 / 绘制序 / 剔除 / LOD，只有坐标来源不同 ⇒ 出图必须
+    逐字节相同。验收：`ADOCAO_CPU_GEOMETRY=1 scripts/capture-gate.sh check` → **51/51 逐字节**
+    （同一份基线）。单帧 A/B 也对过（angles360、4,838 形状，逐字节相同）。
+  * 代价：一次性 `expand()` + 形状数 × 175 × 8 B 的纹理（MYC 45 形状 63 KB、门槛最宽的
+    8192 形状 11 MB）。
+  * **平台事实**：macOS 核心 profile 的地板是 4.1，本机造不出真 3.3 上下文
+    （`ADOCAO_GL_VERSION=3.3` 请求到的仍是 4.1）—— 端到端只能靠强制开关验，
+    别以为在这台机器上"切 3.3"就算验过。
 - 跨平台备注：这套镜像结构是**对同一台机器/同一编译器**钉的；换编译器时 1 ULP 级差异在 8-bit
   输出上看不出来（见下），但 CPU/GPU 逐位对拍会红。
 

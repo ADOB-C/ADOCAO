@@ -103,6 +103,8 @@ private:
     double m_trailEmaMs = 0.0;
 
     // Track appear/disappear animation state
+    // 砖块几何走 CPU 展开表（GL 3.3 回退）而不是 GLSL 4.10 的 fma 展开
+    bool m_cpuGeometry = false;
     bool m_tileVisEnabled = false;
     int m_lastHiddenEnd = -1;
     bool m_sgVisibleLatch = false;

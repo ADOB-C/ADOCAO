@@ -71,12 +71,42 @@ bool LevelScene::compileShaders() {
         LOG_W("Shader file loading failed, using inline fallback");
         return s.compile(vs, fs);
     };
+    // 砖块 VS 有**两支**：410（用 `fma()` 逐字镜像 CPU 参考的融合结构）与 330 回退
+    // （查 CPU 展开表，见 assets/shaders/tile_cpu.vert）。选哪支靠**试编**，不按版本号猜 ——
+    // 同 `archive/LzmaMtCompat` 的教训：版本区间 ≠ 实际能力（有的驱动给 4.1 上下文但 GLSL
+    // 编译器的 fma 行为不同，反过来也有）。高亮与砖共用同一支 VS，只有 FS 不同。
+    auto compileTile = [&](const char* vsFile, const char* vsInline) -> bool {
+        const char* vp = resolveAsset(vsFile).c_str();
+        return compileShader(*m_tileShader, vp, resolveAsset("assets/shaders/tile.frag").c_str(),
+                             vsInline, Shaders::kTileFragSrc)
+            && compileShader(*m_highlightShader, vp, resolveAsset("assets/shaders/highlight.frag").c_str(),
+                             vsInline, Shaders::kHighlightFragSrc);
+    };
+    const bool forceCpu = [] {
+        const char* e = std::getenv("ADOCAO_CPU_GEOMETRY");   // 验收/救急开关
+        return e && std::atoi(e) != 0;
+    }();
+    if (forceCpu) {
+        LOG_I("砖块几何：**强制 CPU 回退**（ADOCAO_CPU_GEOMETRY）");
+        if (!compileTile("assets/shaders/tile_cpu.vert", Shaders::kTileCpuVertSrc)) {
+            LOG_E("Shader compilation failed (CPU 回退)");
+            return false;
+        }
+        m_cpuGeometry = true;
+    } else if (compileTile("assets/shaders/tile.vert", Shaders::kTileVertSrc)) {
+        m_cpuGeometry = false;
+    } else {
+        LOG_W("410 砖块管线编不过（GL 上下文没有 4.x？）→ 切 CPU 几何回退（GL 3.3 + 查表）");
+        if (!compileTile("assets/shaders/tile_cpu.vert", Shaders::kTileCpuVertSrc)) {
+            LOG_E("Shader compilation failed (两支砖块 VS 都编不过)");
+            return false;
+        }
+        m_cpuGeometry = true;
+    }
+    LOG_I("砖块几何：%s", m_cpuGeometry ? "CPU 展开表（GL 3.3 回退）" : "GPU 按形状表展开（GLSL 4.10, fma）");
 
-    if (!compileShader(*m_tileShader, resolveAsset("assets/shaders/tile.vert").c_str(), resolveAsset("assets/shaders/tile.frag").c_str(), Shaders::kTileVertSrc, Shaders::kTileFragSrc)
-     || !compileShader(*m_planetShader, resolveAsset("assets/shaders/planet.vert").c_str(), resolveAsset("assets/shaders/planet.frag").c_str(), Shaders::kPlanetVertSrc, Shaders::kPlanetFragSrc)
-     || !compileShader(*m_trailShader, resolveAsset("assets/shaders/trail.vert").c_str(), resolveAsset("assets/shaders/trail.frag").c_str(), Shaders::kTrailVertSrc, Shaders::kTrailFragSrc)
-     // 高亮与砖共用同一个 VS（几何展开只有一份实现在 tile.vert 里），只有 FS 不同
-     || !compileShader(*m_highlightShader, resolveAsset("assets/shaders/tile.vert").c_str(), resolveAsset("assets/shaders/highlight.frag").c_str(), Shaders::kTileVertSrc, Shaders::kHighlightFragSrc)) {
+    if (!compileShader(*m_planetShader, resolveAsset("assets/shaders/planet.vert").c_str(), resolveAsset("assets/shaders/planet.frag").c_str(), Shaders::kPlanetVertSrc, Shaders::kPlanetFragSrc)
+     || !compileShader(*m_trailShader, resolveAsset("assets/shaders/trail.vert").c_str(), resolveAsset("assets/shaders/trail.frag").c_str(), Shaders::kTrailVertSrc, Shaders::kTrailFragSrc)) {
         LOG_E("Shader compilation failed");
         return false;
     }
@@ -118,6 +148,7 @@ bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level) {
 
     // Track
     m_tileMesh = new TileMesh();
+    m_tileMesh->setCpuGeometry(m_cpuGeometry);   // 在 build() 之前：决定建哪张纹理
     // 抓帧 = 确定性剔除（LOD 步长只由视口 + 两段式决定，不用上一帧的反馈种子）
     m_tileMesh->setDeterministicCull(!cfg.capturePath.empty());
     m_tileMesh->setCullBlockFloors(cfg.cullBlockFloors);   // ④ 剔除粗块粒度（0 = 全扫）

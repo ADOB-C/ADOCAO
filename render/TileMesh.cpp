@@ -64,6 +64,7 @@ TileMesh::~TileMesh() { destroy(); }
 TileMesh::TileMesh(TileMesh&& o) noexcept
     : m_vao(o.m_vao), m_recipeVbo(o.m_recipeVbo), m_ebo(o.m_ebo), m_instVbo(o.m_instVbo),
       m_shapeTex(o.m_shapeTex), m_instCapacity(o.m_instCapacity), m_shapeRows(o.m_shapeRows),
+      m_slotTex(o.m_slotTex), m_slotRows(o.m_slotRows), m_cpuGeometry(o.m_cpuGeometry),
       m_shapes(std::move(o.m_shapes)), m_level(o.m_level),
       m_chunkX(std::move(o.m_chunkX)), m_chunkY(std::move(o.m_chunkY)),
       m_visible(std::move(o.m_visible)),
@@ -71,6 +72,7 @@ TileMesh::TileMesh(TileMesh&& o) noexcept
     std::memcpy(m_fill, o.m_fill, sizeof m_fill);
     std::memcpy(m_stroke, o.m_stroke, sizeof m_stroke);
     o.m_vao = o.m_recipeVbo = o.m_ebo = o.m_instVbo = o.m_shapeTex = 0;
+    o.m_slotTex = 0;
     o.m_nTiles = 0;
 }
 
@@ -99,7 +101,8 @@ void TileMesh::destroyStaticGL() {
     if (m_recipeVbo) glDeleteBuffers(1, &m_recipeVbo);
     if (m_vao) glDeleteVertexArrays(1, &m_vao);
     if (m_shapeTex) glDeleteTextures(1, &m_shapeTex);
-    m_instVbo = m_ebo = m_recipeVbo = m_vao = m_shapeTex = 0;
+    if (m_slotTex) glDeleteTextures(1, &m_slotTex);
+    m_instVbo = m_ebo = m_recipeVbo = m_vao = m_shapeTex = m_slotTex = 0;
     m_instCapacity = 0;
 }
 
@@ -319,6 +322,39 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     }
 }
 
+// CPU 几何回退：把每个形状的 canonical 槽位坐标展开成纹理（RG32F，一个 texel 一个槽位）。
+// 值来自 `TileShape::expand()` —— 那正是 4.10 VS 的对拍基准，所以两条路画出来的顶点逐位相同，
+// 差别只剩"算在 GPU 还是 CPU"。表大小 = 形状数 × 175 texel × 8 B（MYC 45 形状 ≈ 63 KB，
+// 极端 8192 形状 ≈ 11 MB）。
+void TileMesh::buildSlotTable() {
+    const size_t slots = (size_t)TileShape::kTotalSlots;
+    const size_t total = m_shapes.size() * slots;
+    if (total == 0) { m_slotRows = 0; return; }
+    const size_t rowTexels = (size_t)TileShape::kTexW;
+    const size_t rows = (total + rowTexels - 1) / rowTexels;
+    std::vector<float> texels(rows * rowTexels * 2, 0.0f);   // RG32F
+    TileShape::Expanded ex;
+    for (size_t si = 0; si < m_shapes.size(); si++) {
+        TileShape::expand(m_shapes[si], ex);
+        float* dst = texels.data() + si * slots * 2;
+        for (size_t v = 0; v < slots; v++) {
+            dst[v * 2 + 0] = ex.pos[v * 3 + 0];
+            dst[v * 2 + 1] = ex.pos[v * 3 + 1];
+        }
+    }
+    glGenTextures(1, &m_slotTex);
+    glBindTexture(GL_TEXTURE_2D, m_slotTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, TileShape::kTexW, (GLsizei)rows, 0, GL_RG,
+                 GL_FLOAT, texels.data());
+    m_slotRows = (int)rows;
+    LOG_D("TileMesh: CPU 展开表 %zu 形状 × %zu 槽位 → %dx%d RG32F（%zu KB）", m_shapes.size(), slots,
+          TileShape::kTexW, m_slotRows, texels.size() * sizeof(float) / 1024);
+}
+
 void TileMesh::buildStaticGL() {
     const TileShape::Recipe* rc = TileShape::recipeTable();
     std::vector<float> recipes;
@@ -330,16 +366,22 @@ void TileMesh::buildStaticGL() {
         recipes.push_back(rc[i].k1);
     }
 
-    std::vector<float> texels;
-    m_shapeRows = TileShape::packShapeTable(m_shapes.data(), (int)m_shapes.size(), texels);
-    glGenTextures(1, &m_shapeTex);
-    glBindTexture(GL_TEXTURE_2D, m_shapeTex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, TileShape::kTexW, m_shapeRows, 0, GL_RGBA,
-                 GL_FLOAT, texels.data());
+    // 纹理单元 0（两支持平）：410 读"参数记录"，3.3 回退读"CPU 展开后的槽位坐标"。
+    // 回退路**不写**形状表：它的 VS 一次都不读那张表，白占 shapes×25 texel。
+    if (m_cpuGeometry) {
+        buildSlotTable();
+    } else {
+        std::vector<float> texels;
+        m_shapeRows = TileShape::packShapeTable(m_shapes.data(), (int)m_shapes.size(), texels);
+        glGenTextures(1, &m_shapeTex);
+        glBindTexture(GL_TEXTURE_2D, m_shapeTex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, TileShape::kTexW, m_shapeRows, 0, GL_RGBA,
+                     GL_FLOAT, texels.data());
+    }
 
     glGenVertexArrays(1, &m_vao);
     glBindVertexArray(m_vao);
@@ -753,9 +795,10 @@ void TileMesh::draw(double viewL, double viewR, double viewB, double viewT,
     { profile::Scoped _s("upload"); uploadIfNeeded(); }
     profile::Scoped _s("draw");
     glBindVertexArray(m_vao);
-    // 形状表绑到纹理单元 0；`uShapeTex` 的默认值就是 0，所以不用设 uniform
+    // 纹理单元 0：410 读形状表、3.3 回退读 CPU 展开表。两支 VS 的 sampler 默认值都是 0，
+    // 所以不用设 uniform —— 只要保证绑的是**当前程序要的那张**。
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_shapeTex);
+    glBindTexture(GL_TEXTURE_2D, m_cpuGeometry ? m_slotTex : m_shapeTex);
     // 一次画完：砖三角形 + 紧跟着的图标三角形（索引表布局，kIndexCount = 426）
     glDrawElementsInstanced(GL_TRIANGLES, TileShape::kIndexCount, GL_UNSIGNED_SHORT, nullptr,
                             (GLsizei)count);
@@ -783,7 +826,7 @@ void TileMesh::drawHighlightedTile(int ti, double cX, double cY) const {
     }
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(attr), attr);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_shapeTex);
+    glBindTexture(GL_TEXTURE_2D, m_cpuGeometry ? m_slotTex : m_shapeTex);   // 与 draw 同一支 VS
     glDrawElementsInstanced(GL_TRIANGLES, TileShape::kTileIndexCount, GL_UNSIGNED_SHORT, nullptr, 1);
     glBindVertexArray(0);
     m_listUploaded = false;   // 实例缓冲被这条高亮记录覆盖了（列表本身还有效）

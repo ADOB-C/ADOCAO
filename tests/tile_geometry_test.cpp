@@ -178,6 +178,12 @@ std::string callSiteSelfTest(const char* tileMeshCpp) {
         return "TileMesh.cpp 里没有每砖图标位（m_iconBits 或窗口派生的 DerivedRange::icon）—— 图标没有跟着砖走";
     if (src.find("drawIcons") != std::string::npos)
         return "TileMesh.cpp 里又出现了单独的图标 draw 了 —— 图标必须跟砖同一次 draw（在拖尾之前）";
+    // GL 3.3 回退（`assets/shaders/tile_cpu.vert`）的几何**必须**来自 `TileShape::expand()`
+    // 展开出来的槽位表 —— 那条路的意义就是"GPU 不算几何、用 CPU 参考值"。如果哪天有人给它
+    // 另写一份展开代码，这条护栏先红（另一份几何 = 另一套位精确性，正是本项目最怕的东西）。
+    if (src.find("m_cpuGeometry") != std::string::npos &&
+        src.find("TileShape::expand") == std::string::npos)
+        return "TileMesh.cpp 有 CPU 几何回退，但没有走 TileShape::expand（是不是又手写了一份几何？）";
     return {};
 }
 

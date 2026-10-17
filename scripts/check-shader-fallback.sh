@@ -14,6 +14,7 @@ def grab(name):
 def file(p):
     return open(p, encoding="utf-8").read()
 checks = [("kTileVertSrc", "assets/shaders/tile.vert"),
+          ("kTileCpuVertSrc", "assets/shaders/tile_cpu.vert"),
           ("kTileFragSrc", "assets/shaders/tile.frag"),
           ("kHighlightFragSrc", "assets/shaders/highlight.frag"),
           ("kPlanetVertSrc", "assets/shaders/planet.vert"),

@@ -68,6 +68,13 @@ public:
     // 抓帧（确定性）模式：LOD 步长只能由"当前视口 + 两段式"决定，**不许用上一帧的反馈种子**
     // （否则同一帧在不同运行/不同历史下步长可能不同 → 出图不再逐字节可复现 ✗）。
     void setDeterministicCull(bool b) const { m_detCull = b; }
+    // **GL 3.3 回退**（见 assets/shaders/tile_cpu.vert）：几何在 CPU 上按 `TileShape::expand()`
+    // 展开成"槽位坐标表"，VS 只查表 —— 于是不需要 GLSL 4.00 的 `fma()`。与 GPU 路共用
+    // 实例流/索引表/剔除/LOD/绘制序，**只有坐标来源不同**，出图必须逐字节相同
+    // （验收：`ADOCAO_CPU_GEOMETRY=1 scripts/capture-gate.sh check` 51/51）。
+    // 必须在 build() 之前设（buildStaticGL 里据此决定建哪张纹理）。
+    void setCpuGeometry(bool b) { m_cpuGeometry = b; }
+    bool cpuGeometry() const { return m_cpuGeometry; }
     void drawHighlightedTile(int tileIdx, double camX, double camY) const;
     void setVisibleThreshold(int lastVisible);
     // ④ 剔除粗块粒度（层/块；0 = 关闭索引走全扫）。必须在 build() 之前设。
@@ -108,6 +115,7 @@ public:
 private:
     void destroy();
     void buildStaticGL();
+    void buildSlotTable();          // CPU 回退：每形状 175 个槽位坐标 → RG32F 纹理
     void destroyStaticGL();
     void ensureDrawList(double vl, double vr, double vb, double vt, double camX, double camY) const;
     void uploadIfNeeded() const;
@@ -117,6 +125,10 @@ private:
 
     // ---- 静态 GL（所有实例共用）----
     GLuint m_vao = 0, m_recipeVbo = 0, m_ebo = 0, m_instVbo = 0, m_shapeTex = 0;
+    // CPU 回退路用的槽位坐标表（RG32F；两支持平，同一纹理单元 0）
+    GLuint m_slotTex = 0;
+    int m_slotRows = 0;
+    bool m_cpuGeometry = false;
     mutable size_t m_instCapacity = 0;   // 实例缓冲容量（draw() 里会按需增长）
     int m_shapeRows = 0;
     float m_fill[3] = {1, 1, 1}, m_stroke[3] = {0, 0, 0};

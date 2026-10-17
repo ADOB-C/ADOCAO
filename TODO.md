@@ -44,7 +44,17 @@
       GLSL 4.00+）"或"换编译器后 CPU/GPU 逐位对拍对不上"时才需要；架构（实例流/canonical 表/图标并入/
       剔除/测试）都不变，只换 `packShapeTable` 的内容与 VS 主体
 
-- [ ] **CPU 几何作为 3.3 回退路**（2026-10 用户拍板方案 B：4.1 拿不到 → 3.3 core 上下文 + CPU 几何）
+- [x] **CPU 几何作为 3.3 回退路**（2026-10-17 落地）—— 但落地方式与下面这条老计划**不同**：
+      老计划是"恢复 74cc5e0 那版每形状一次 draw 的 CPU 顶点汤"，那会丢掉窗口化派生 / 两级剔除索引 /
+      LOD / 容量闸，等于把 2026-10-15~16 的成果分叉成第二套渲染器 ✗。实际改成**只换坐标来源**：
+      `assets/shaders/tile_cpu.vert`（`#version 330 core`）不在 GPU 上算几何，而是查
+      `TileShape::expand()` 在 CPU 上展开的槽位表（RG32F，每形状 175 texel）。一支 VS、同一个
+      VAO/实例流/索引表/绘制序/剔除/LOD 全都共用 ⇒ 出图逐字节相同：`ADOCAO_CPU_GEOMETRY=1
+      scripts/capture-gate.sh check` → **51/51 逐字节**；单帧 A/B（angles360、4838 形状）也相同。
+      选择靠**试编 410**（失败才切，不按版本号猜）；`tests/tile_geometry_test.cpp` 加了
+      "回退路必须用 `TileShape::expand`"的护栏。本机造不出真 3.3 上下文（macOS 地板 4.1），
+      所以端到端只能靠强制开关验。以下是原计划的细节，仅作历史参考：
+      ~~**CPU 几何作为 3.3 回退路**（2026-10 用户拍板方案 B：4.1 拿不到 → 3.3 core 上下文 + CPU 几何）~~
       已落地的前提（两步行为中性、已验）：`tile.frag`/`highlight.frag` 降到 `#version 330 core`
       （**只有 `tile.vert` 必须留 410** —— 它是唯一用 `fma()` 的）；`app/GameWindow.cpp` 有
       4.1 → 3.3 的重试链（`ADOCAO_GL_VERSION=4.6` 可验重试真的会触发）+ `m_glMajor/gpuTileGeometryUsable()`。

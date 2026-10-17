@@ -408,6 +408,8 @@ void GameWindow::update(float deltaMs) {
     double now = glfwGetTime();
 
     // Playback update
+    {
+    profile::Scoped _sPlayback("playback-sync");
     if (m_playback->isPlaying()) {
         // Delayed music start: wait for audioStartOffset before playing from position 0
         if (m_musicPending && m_playback->elapsedTimeMs() >= m_playback->audioStartOffset() * 1000.0f) {
@@ -423,14 +425,17 @@ void GameWindow::update(float deltaMs) {
             m_playback->updateWallClock(now);
         }
     }
+    }
 
     if (m_playback->isPlaying()) {
+        profile::Scoped _s("applyFrame");
         m_scene->applyFrame(m_playback->frame(), *m_timeline);
     }
 
     // 关卡相机：播放时由 CameraDirector 驱动（settings + MoveCamera 时间线）。
     // 时间用 PlaybackClock::timeInLevel()（与 tileStartTimes 同一条基准）。
     const bool playing = m_playback->isPlaying();
+    profile::Scoped _sCam("camera");
     if (playing && m_level->tileCount() > 0) {
         int tileIdx = m_playback->currentTileIndex();
         if (tileIdx < 0) tileIdx = 0;

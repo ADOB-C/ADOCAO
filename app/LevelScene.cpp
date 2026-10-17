@@ -285,13 +285,18 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
     sc.rateMin        = m_trailRateMin;
     sc.rateMax        = m_trailRateMax;
 
-    const PositionSolver::TrailWindow win =
-        PositionSolver::trailWindow(timeline, frame.timeInLevel, sc);
-
+    PositionSolver::TrailWindow win;
+    {
+        profile::Scoped _s("trailWindow");
+        win = PositionSolver::trailWindow(timeline, frame.timeInLevel, sc);
+    }
     std::vector<glm::dvec2> redPts, bluePts;
-    PositionSolver::sampleTrailRange(timeline, win.startTime, frame.timeInLevel, win.sampleRate,
-                                     frame.redPosition, frame.bluePosition,
-                                     redPts, bluePts);
+    {
+        profile::Scoped _s("trailSample");
+        PositionSolver::sampleTrailRange(timeline, win.startTime, frame.timeInLevel, win.sampleRate,
+                                         frame.redPosition, frame.bluePosition,
+                                         redPts, bluePts);
+    }
 
     // 【诊断，env 门控】拖尾点哈希：A/B "按块物化 provider" 是否改变了拖尾
     if (std::getenv("ADOCAO_TRAIL_DUMP")) {

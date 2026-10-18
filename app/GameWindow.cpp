@@ -189,6 +189,7 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
         std::string v(vendor);
         useAsyncBuild = (v.find("NVIDIA") != std::string::npos);
     }
+    if (const char* e = std::getenv("ADOCAO_ASYNC_BUILD")) useAsyncBuild = std::atoi(e) != 0;
     LOG_D("Async build: %s", useAsyncBuild ? "ON" : "OFF (sync)");
 
     // Show window immediately so user sees it while heavy init runs
@@ -567,6 +568,8 @@ void GameWindow::captureAndExit() {
         if (m_sharedWindow && m_scene->pollAsyncBuild()) {
             glfwDestroyWindow(m_sharedWindow);
             m_sharedWindow = nullptr;
+            glfwMakeContextCurrent(m_window);
+            m_scene->rebindAsyncVAO();
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -679,6 +682,16 @@ void GameWindow::captureAndExit() {
     for (int y = 0; y < fbH; y++)
         std::memcpy(&flip[(size_t)y * rowBytes], &px[(size_t)(fbH - 1 - y) * rowBytes], rowBytes);
 
+    if (std::getenv("ADOCAO_CAPTURE_STATS")) {
+        size_t nonBlack = 0; double sum = 0.0;
+        for (size_t i = 0; i < flip.size(); i += 4) {
+            const int r = flip[i], g = flip[i+1], b = flip[i+2];
+            sum += (r + g + b) / 3.0;
+            if (r + g + b > 24) nonBlack++;
+        }
+        LOG_I("capture-selfcheck: px mean=%.1f nonblack=%zu/%zu", sum / (double)(flip.size()/4),
+              nonBlack, flip.size()/4);
+    }
     if (stbi_write_png(m_cfg->capturePath.c_str(), fbW, fbH, 4, flip.data(), (int)rowBytes))
         LOG_I("capture: %s %dx%d t=%.4fs zoom=%.1f tile=%d req=%d render_ms=%.3f first_ms=%.2f frames=%d drawn=%d",
               m_cfg->capturePath.c_str(), fbW, fbH, targetTime, m_cfg->captureZoom, tileIdx,
@@ -932,6 +945,9 @@ void GameWindow::run() {
             if (m_scene->pollAsyncBuild()) {
                 glfwDestroyWindow(m_sharedWindow);
                 m_sharedWindow = nullptr;
+                // VAO 是上下文私有的：共享上下文里建的 VAO 主上下文看不到 → 重建
+                glfwMakeContextCurrent(m_window);
+                m_scene->rebindAsyncVAO();
                 LOG_D("Async mesh build complete");
             }
         }

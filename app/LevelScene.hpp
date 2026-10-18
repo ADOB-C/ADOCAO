@@ -51,6 +51,7 @@ public:
     // Returns true once when the background build just finished; false
     // afterwards (and when no async build is running).
     bool pollAsyncBuild();
+    void rebindAsyncVAO();            // 异步构建完成后，在主上下文重建 VAO
 
     bool meshReady() const { return m_meshReady; }
     int drawnInstances() const;   // 开发/诊断：上一次 draw 画了多少个实例

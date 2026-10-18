@@ -459,6 +459,30 @@ void TileMesh::buildStaticGL() {
           TileShape::kTotalSlots, TileShape::kIndexCount);
 }
 
+void TileMesh::rebuildVAOForCurrentContext() {
+    if (m_recipeVbo == 0 || m_ebo == 0 || m_instVbo == 0) return;
+    glGenVertexArrays(1, &m_vao);
+    glBindVertexArray(m_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_recipeVbo);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
+    glBindBuffer(GL_ARRAY_BUFFER, m_instVbo);
+    const GLsizei stride = 19 * sizeof(float);
+    for (int a = 1; a <= 8; a++) glEnableVertexAttribArray(a);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void*)0);
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, stride, (void*)(3 * sizeof(float)));
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, stride, (void*)(4 * sizeof(float)));
+    glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, stride, (void*)(5 * sizeof(float)));
+    glVertexAttribPointer(5, 3, GL_FLOAT, GL_FALSE, stride, (void*)(8 * sizeof(float)));
+    glVertexAttribPointer(6, 4, GL_FLOAT, GL_FALSE, stride, (void*)(11 * sizeof(float)));
+    glVertexAttribPointer(7, 2, GL_FLOAT, GL_FALSE, stride, (void*)(15 * sizeof(float)));
+    glVertexAttribPointer(8, 2, GL_FLOAT, GL_FALSE, stride, (void*)(17 * sizeof(float)));
+    for (int a = 1; a <= 8; a++) glVertexAttribDivisor(a, 1);
+    glBindVertexArray(0);
+    LOG_D("TileMesh: 主上下文 VAO 已重建（异步构建后）");
+}
+
 // ---- 剔除 + 压实 ------------------------------------------------------
 
 // ③ 切片 4【二分实验】取/物化窗口；`ADOCAO_WINDOW_CHECK=1` 时与常驻数组**逐砖直比**

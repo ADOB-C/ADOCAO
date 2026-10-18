@@ -95,6 +95,9 @@ public:
     void setCpuGeometry(bool b) { m_cpuGeometry = b; }
     bool cpuGeometry() const { return m_cpuGeometry; }
     void drawHighlightedTile(int tileIdx, double camX, double camY) const;
+    // 异步构建后：VAO 是**上下文私有**的，共享上下文里建的 VAO 主上下文看不见 →
+    // Windows/NVIDIA 异步路径会整帧黑。主线程拿到主上下文后再建一次 VAO（缓冲区是共享的）。
+    void rebuildVAOForCurrentContext();
     void setVisibleThreshold(int lastVisible);
     // ④ 剔除粗块粒度（层/块；0 = 关闭索引走全扫）。必须在 build() 之前设。
     // 默认 4096；`ADOCAO_CULL_BLOCK=<n>` 环境变量可覆盖（测试/A-B 钩子）。

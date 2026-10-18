@@ -246,6 +246,10 @@ bool LevelScene::pollAsyncBuild() {
     return false;
 }
 
+void LevelScene::rebindAsyncVAO() {
+    if (m_tileMesh) m_tileMesh->rebuildVAOForCurrentContext();
+}
+
 void LevelScene::setMeasuredFrameMs(double workMs) {
     if (workMs <= 0.0) return;
     m_trailEmaMs = (m_trailEmaMs <= 0.0) ? workMs : m_trailEmaMs * 0.85 + workMs * 0.15;

@@ -159,7 +159,7 @@ bool HitsoundManager::readWav(const std::string& filepath,
     auto read16 = [&]() { if(p+2>end)return(uint16_t)0; uint16_t v; memcpy(&v,p,2); p+=2; return v; };
 
     if (memcmp(p, "RIFF", 4)) return false; p += 4;
-    uint32_t fs = read32();
+    read32();   // RIFF chunk size（不使用，但必须消费这 4 字节）
     if (memcmp(p, "WAVE", 4)) return false; p += 4;
 
     uint16_t bits=0, nch=0; uint32_t sr=0, dsize=0;

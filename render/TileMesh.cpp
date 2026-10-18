@@ -86,12 +86,12 @@ TileMesh::~TileMesh() { destroy(); }
 
 TileMesh::TileMesh(TileMesh&& o) noexcept
     : m_vao(o.m_vao), m_recipeVbo(o.m_recipeVbo), m_ebo(o.m_ebo), m_instVbo(o.m_instVbo),
-      m_shapeTex(o.m_shapeTex), m_instCapacity(o.m_instCapacity), m_shapeRows(o.m_shapeRows),
-      m_slotTex(o.m_slotTex), m_slotRows(o.m_slotRows), m_cpuGeometry(o.m_cpuGeometry),
+      m_shapeTex(o.m_shapeTex), m_slotTex(o.m_slotTex), m_slotRows(o.m_slotRows),
+      m_cpuGeometry(o.m_cpuGeometry), m_instCapacity(o.m_instCapacity), m_shapeRows(o.m_shapeRows),
       m_shapes(std::move(o.m_shapes)), m_level(o.m_level),
       m_chunkX(std::move(o.m_chunkX)), m_chunkY(std::move(o.m_chunkY)),
-      m_visible(std::move(o.m_visible)),
-      m_cullIndex(std::move(o.m_cullIndex)), m_cullHalf(o.m_cullHalf), m_nTiles(o.m_nTiles) {
+      m_cullIndex(std::move(o.m_cullIndex)), m_cullHalf(o.m_cullHalf),
+      m_visible(std::move(o.m_visible)), m_nTiles(o.m_nTiles) {
     std::memcpy(m_fill, o.m_fill, sizeof m_fill);
     std::memcpy(m_stroke, o.m_stroke, sizeof m_stroke);
     o.m_vao = o.m_recipeVbo = o.m_ebo = o.m_instVbo = o.m_shapeTex = 0;
@@ -251,7 +251,6 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
 
     for (auto& kv : shapeGroups) {
         const GeoKey& key = kv.first;
-        std::vector<int>& tileIndices = kv.second;
         const uint32_t shapeIdx = (uint32_t)m_shapes.size();
         m_shapes.push_back(TileShape::buildShape(key.sa / 100.0f, key.ea / 100.0f, key.mid,
                                                  styleWidthOf(key.style), styleLengthOf(key.style),

@@ -78,7 +78,6 @@ public:
 private:
     const uint8_t* m_file = nullptr;
     size_t m_fileLen = 0;
-    uint16_t m_version = 0;
     uint32_t m_stride = kCheckpointStride;
     uint64_t m_floors = 0;
     uint64_t m_blocks = 0;

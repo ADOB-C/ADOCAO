@@ -4,7 +4,7 @@
 #include <memory>
 #include <functional>
 
-namespace adofai { class LevelData; }   // 库侧类型：前置声明也要在 adofai 里
+namespace adofai { struct LevelData; }   // 库侧类型：前置声明也要在 adofai 里
 namespace adofai { class Timeline; }   // 库侧类型：前置声明也要在 adofai 里
 
 // User selections from the launcher

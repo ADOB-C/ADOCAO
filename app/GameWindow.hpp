@@ -8,7 +8,7 @@
 struct GLFWwindow;
 struct LauncherConfig;
 struct LoadResult;
-namespace adofai { class LevelData; }   // 库侧类型：前置声明也要在 adofai 里
+namespace adofai { struct LevelData; }   // 库侧类型：前置声明也要在 adofai 里
 namespace adofai { class Timeline; }   // 库侧类型：前置声明也要在 adofai 里
 namespace adofai { class PlaybackClock; }   // 库侧类型：前置声明也要在 adofai 里
 namespace adofai { class HitsoundManager; }   // 库侧类型：前置声明也要在 adofai 里

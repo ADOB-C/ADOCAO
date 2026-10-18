@@ -581,8 +581,6 @@ void GameWindow::captureAndExit() {
             LOG_I("capture-pos: tileIdx=%d p=(%.2f,%.2f) windowed=%d", tileIdx,
                   (double)p[0], (double)p[1], (int)m_level->tilesWindowed());
         }
-        const auto& bpms = m_timeline->tileBPMs();
-        const float bpm = ((size_t)tileIdx < bpms.size()) ? bpms[(size_t)tileIdx] : 100.0f;
         const double pitch = std::max(0.1, (double)m_level->settings.pitch / 100.0);
         m_cameraDirector.seek(m_playback->timeInLevel(), p[0], p[1], tileIdx, pitch);
         m_camCtrl.snapTo(m_cameraDirector.x(), m_cameraDirector.y());

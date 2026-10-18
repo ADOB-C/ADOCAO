@@ -81,10 +81,6 @@ HashGrid buildGrid(const LevelData& lv, double cell) {
     return g;
 }
 
-bool inRect(double x, double y, const Roi& q) {
-    return x >= q.l && x <= q.r && y >= q.b && y <= q.t;
-}
-
 // 防 DCE：三种策略的结果都要"被用掉"，否则编译器会把整个循环删掉（实测 B/C 计时变成 0.000 ms）
 volatile size_t g_sink = 0;
 

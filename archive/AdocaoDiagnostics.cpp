@@ -396,10 +396,6 @@ void diagnoseDoubles(const std::vector<double>& v, const ColumnSpec& spec,
             const uint64_t uniq = windowUnique(bits, p, &wc);
             return std::pair<uint64_t, uint64_t>(uniq, wc);
         };
-        auto better = [](uint64_t u1, uint64_t c1, uint64_t u2, uint64_t c2) {
-            // 唯一数占比更小者胜（用交叉相乘，避免浮点）
-            return c1 != 0 && (c2 == 0 || u1 * c2 < u2 * c1);
-        };
         if (bestLag >= 2 && bestLag <= opt.maxLag) {
             const auto r = measure(bestLag);
             if (r.second != 0 && r.first * 4 <= r.second) {

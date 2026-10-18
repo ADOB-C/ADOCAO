@@ -52,16 +52,6 @@ void fillSmooth(std::vector<double>& v, size_t from, size_t to) {
     for (size_t i = from; i < to; ++i) v[i] = kCycle[i % 4];
 }
 
-// 另一族"平滑"：黄金角滑音（4 位小数）。它每块有 1440 个不同取值 → **每块都要重付字典费**，
-// 正是 §8.3 警告的"字典主导列在小块下变大"。拿它当负向对照（分块不许赢）。
-void fillGlide(std::vector<double>& v, size_t from, size_t to, double& angle) {
-    for (size_t i = from; i < to; ++i) {
-        angle += 0.25;
-        if (angle >= 360.0) angle -= 360.0;
-        v[i] = std::round(angle * 1e4) / 1e4;
-    }
-}
-
 // 分段型：`blocks` 个 4096 块，其中约 `fraction` 的块是"不规则"（全精度均匀随机），
 // 且**均匀铺开**（不是挤在开头）。这正是 §8.3 量过的那一族：全局只能选一个编码，怎么选都亏一半。
 std::vector<double> segmentedColumn(int blocks, double fraction, uint32_t seed) {
@@ -69,7 +59,6 @@ std::vector<double> segmentedColumn(int blocks, double fraction, uint32_t seed) 
     std::uniform_real_distribution<double> uni(0.0, 360.0);
     std::vector<double> v((size_t)blocks * kBlockElems, 0.0);
     const int irregular = (int)std::lround(blocks * fraction);
-    double angle = 137.508;
     for (int b = 0; b < blocks; ++b) {
         // 均匀铺开：把 irregular 个块摊到 blocks 个位置上（第 b 块该放 iff 比例跨过了整数）
         const bool take = (irregular > 0) &&

@@ -91,8 +91,6 @@ bool gatherTyped(const ColumnView& v, uint64_t from, uint64_t to, std::vector<T>
         out.insert(out.end(), blk.begin() + (size_t)lo, blk.begin() + (size_t)hi);
         // 记账：这一块所在帧的存储字节（近似"碰了多少"）
         if (bytesDecoded) {
-            const uint8_t* e = v.frameTable + b / 0 * 0;   // 占位，下面用 locateBlock 拿真实帧
-            (void)e;
             uint64_t frame = 0, inFrame = 0;
             if (v.locateBlock(b, frame, inFrame)) {
                 const uint8_t* fe = v.frameTable + frame * kFrameEntry;
@@ -103,8 +101,6 @@ bool gatherTyped(const ColumnView& v, uint64_t from, uint64_t to, std::vector<T>
     return out.size() == (size_t)(to - from);
 }
 
-bool gatherD(const ColumnView& v, uint64_t from, uint64_t to, std::vector<double>& out,
-             uint64_t* bd) { return gatherTyped<double>(v, from, to, out, bd); }
 bool gatherI(const ColumnView& v, uint64_t from, uint64_t to, std::vector<int64_t>& out,
              uint64_t* bd) { return gatherTyped<int64_t>(v, from, to, out, bd); }
 bool gatherU(const ColumnView& v, uint64_t from, uint64_t to, std::vector<uint32_t>& out,

@@ -175,7 +175,7 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
         : std::max(0.5, std::min(6.0, scale * opts.thicknessScale * 0.5));         // 按 scale 推（下限 0.5）
 
     // ── 第二遍：逐段画（红蓝各一条，顺序即进度 → 渐变）
-    glm::dvec2 prevRed, prevBlue, cur;
+    glm::dvec2 prevRed, prevBlue;
     bool havePrev = false;
     for (int i = i0; i <= i1; ++i) {
         PositionSolver::positionAtTile(tl, tl.startTimeAt(i), i, red, blue);

@@ -13,7 +13,7 @@ namespace adofai {
 
 class Scheduler; struct PlaybackFrame; }   // 库侧类型：前置声明也要在 adofai 里
 namespace adofai { class Camera; }   // 库侧类型：前置声明也要在 adofai 里
-namespace adofai { class LevelData; }   // 库侧类型：前置声明也要在 adofai 里
+namespace adofai { struct LevelData; }   // 库侧类型：前置声明也要在 adofai 里
 namespace adofai { class Planet; }   // 库侧类型：前置声明也要在 adofai 里
 namespace adofai { class Shader; }   // 库侧类型：前置声明也要在 adofai 里
 namespace adofai { class TileMesh; }   // 库侧类型：前置声明也要在 adofai 里

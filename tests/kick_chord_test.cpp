@@ -83,7 +83,6 @@ int main(int argc, char** argv) {
     }
     Timeline tl;
     tl.build(lv, false);
-    const std::vector<double>& st = tl.tileStartTimes();
 
     // ---- ① 击打时刻 = 三个频率网格的并集（公共周期内 12 段，逐周期重复）----
     std::vector<double> gaps;
@@ -107,7 +106,6 @@ int main(int argc, char** argv) {
         keep.push_back(acc);
         acc += gaps[k % per];
     }
-    const double t0 = keep.empty() ? 0.0 : keep[0];
 
     // "真正会响的那些时刻" = 非 None 分组的时刻（细分相位的静音砖不进这组）
     std::vector<double> audible;

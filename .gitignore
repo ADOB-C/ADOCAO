@@ -11,3 +11,5 @@ ADOCAO.log
 # 预编译头是构建产物（曾被误提交过，含机器绝对路径）
 *.pch
 /build-win/
+
+build-audit/

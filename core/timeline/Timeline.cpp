@@ -25,65 +25,6 @@ void Timeline::build(const LevelData& level, bool exportOnly) {
     }
 }
 
-// Phase 2 worker: compute per-tile geometry for tiles [start, end).
-// Each tile is independent — reads pre-computed state arrays and const level data.
-static void precalcTileRange(
-    const LevelData& level,
-    const std::vector<bool>&  tileIsCW,
-    const std::vector<float>& tileBPM,
-    const std::vector<float>& preAngleDir,
-    const std::vector<float>& preExtraRot,
-    std::vector<float>& outStartAngles,
-    std::vector<float>& outTotalAngles,
-    std::vector<float>& outDurations,
-    int start, int end, int n)
-{
-    const auto& tiles = level.tiles;
-    const auto& angleData = level.angleData;
-
-    for (int i = start; i < end; i++) {
-        bool isCW = tileIsCW[i];
-        float currentBPM = tileBPM[i];
-
-        // startAngle = direction INTO tile i (from tile i-1).
-        // Unit-step tiles: incoming = tiles[i-1].direction + 180° (reverse).
-        float startAngle;
-        if (i == 0) {
-            startAngle = (level.settings.rotation + 180.0f) * 3.14159265f / 180.0f;
-        } else {
-            startAngle = std::fmod(tiles[i - 1].direction + 180.0f, 360.0f) * 3.14159265f / 180.0f;
-        }
-        outStartAngles[i] = startAngle;
-
-        double rawAngleData = (i < (int)angleData.size()) ? angleData[i] : 180.0;
-        double relAngle;
-        if (rawAngleData == 999.0) {
-            relAngle = 0.0;
-        } else {
-            double delta = std::fmod((double)preAngleDir[i] - rawAngleData, 360.0);
-            if (delta < 0) delta += 360.0;
-            if (!isCW) {
-                relAngle = 360.0 - delta;
-                if (relAngle >= 360.0) relAngle -= 360.0;
-            } else {
-                relAngle = delta;
-            }
-            if (delta < 0.0001) relAngle = 360.0;
-        }
-        float totalAngle = (float)relAngle * 3.14159265f / 180.0f;
-        if (isCW) totalAngle = -totalAngle;
-
-        if (isCW) totalAngle -= preExtraRot[i] * 2.0f * 3.14159265f;
-        else      totalAngle += preExtraRot[i] * 2.0f * 3.14159265f;
-
-        outTotalAngles[i] = totalAngle;
-
-        float rotationAmount = std::abs(totalAngle) / (2.0f * 3.14159265f);
-        float duration = rotationAmount * 2.0f * (60.0f / currentBPM);
-        outDurations[i] = duration;
-    }
-}
-
 // A/B 参考实现：Phase 1 的状态递推 + Phase 2 的逐层公式，**逐字**照抄一遍。
 // 与生产路径的唯一差别是"这段代码在另一个函数里" —— 这正是要被测量的变量。
 void Timeline::recomputeForTest(std::vector<float>& outStartAngles,
@@ -477,10 +418,10 @@ bool Timeline::recomputeBlock(int64_t i0, int64_t i1, BlockResult& out) const {
     const bool writeAA = (m_visAA != "None");
     const float bpm0 = (n > 0) ? m_tileBPM[0] : 0.0f;
     for (int64_t i = i0; i < i1 && i < n - 1; i++) {
-        // num5/num6 的推进规则与 Phase 5 逐字相同：i>0 时 num5=num6、num6=bpm[i]；i==0 用初值
-        float num5, num6;
-        if (i == 0) { num5 = m_visNum5; num6 = m_visNum5; }
-        else { num5 = (i - 1 == 0) ? bpm0 : m_tileBPM[(size_t)(i - 1)]; num6 = m_tileBPM[(size_t)i]; }
+        // num5 的推进规则与 Phase 5 逐字相同：i>0 时 num5=bpm[i-1]；i==0 用初值
+        float num5;
+        if (i == 0) { num5 = m_visNum5; }
+        else { num5 = (i - 1 == 0) ? bpm0 : m_tileBPM[(size_t)(i - 1)]; }
         const float refBPM = num5;   // flag2 == false（无 AT）
         const double st  = out.startTimes[(size_t)(i - i0)];
         const double st1 = out.startTimes[(size_t)(i - i0 + 1)];
@@ -633,7 +574,6 @@ std::vector<HitsoundTimestampGroup> Timeline::getHitsoundTimestampGroups() const
     int n = realTileCount();
     if (n < 2) return groups;
 
-    float countdown = (float)m_level->settings.countdownTicks * (60.0f / m_level->settings.bpm);
     float offsetSec = m_level->settings.offset / 1000.0f;
     float defaultVol = m_level->settings.hitsoundVolume;
     const std::string& defaultType = m_level->settings.hitsound;

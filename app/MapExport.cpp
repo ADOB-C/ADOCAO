@@ -318,7 +318,7 @@ int exportLevelMapNativeAll(const std::string& levelPath, const std::string& out
 // 再交给 writePngParallel 分带并行压缩（与 1-bit 单张导出同一套已验证机制）。
 // 像素与串行路径逐位一致（用 ADOCAO_STITCH_Y0/ROWS 取同一横条对拍验证过）。
 // ─────────────────────────────────────────────────────────────────────────────
-static int stitchNativeParallel(std::vector<StitchTile>& tiles, long long W, long long H,
+static int stitchNativeParallel(std::vector<StitchTile>& tiles, long long W,
                                 long long y0, long long outH, const std::string& outPng,
                                 int threads) {
     const uint32_t kBg = 0x000000FFu;                 // 与串行路径的填充一致：不透明黑
@@ -431,7 +431,7 @@ int stitchLevelMapTiles(const std::string& dir, const std::string& outPng, int s
     const long long outW = (W + scale - 1) / scale;
     const long long outH = (scale == 1) ? rows : (H + scale - 1) / scale;
     if (scale == 1 && !forceSeq)
-        return stitchNativeParallel(tiles, W, H, y0, outH, outPng, threads);
+        return stitchNativeParallel(tiles, W, y0, outH, outPng, threads);
     progress::reset();
     std::printf("拼接：%zu 块 → 画布 %lld x %lld px，输出 %lld x %lld（scale %d，串行流式）\n",
                 tiles.size(), W, H, outW, outH, scale);
@@ -441,7 +441,6 @@ int stitchLevelMapTiles(const std::string& dir, const std::string& outPng, int s
     std::vector<uint32_t> acc;                       // 降采样累加（每像素 RGB 各 32 位打包）
     if (scale > 1) acc.assign((size_t)outW * 3, 0);
     std::vector<uint8_t> full((size_t)W * 4, 0);     // 原生一行的拼装缓冲（7.8 MB @1.94M）
-    size_t ti = 0;
     long long rowsIn = 0;
     const long long loopBegin = (scale == 1) ? y0 : 0;              // scale==1：只走选中的横条
     const long long loopEnd   = (scale == 1) ? y0 + outH : H;

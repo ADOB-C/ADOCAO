@@ -176,6 +176,9 @@ bool decompressLevelArchive(const char* data, size_t length, LevelArchiveKind ki
     case LevelArchiveKind::Plain:
         out.assign(data, length);
         return true;
+    case LevelArchiveKind::Adocao:
+        reason = "Adocao 容器由 archive backend 解码，不走 decompressLevelArchive";
+        return false;
     }
     reason = "unknown container";
     return false;

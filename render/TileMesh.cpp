@@ -208,7 +208,7 @@ void TileMesh::deriveRange(const LevelData& level, int64_t i0, int64_t i1, Deriv
 }
 
 void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
-                     const std::string& strokeColorHex, const std::function<bool()>* shouldCancel) {
+                     const std::string& strokeColorHex) {
     destroy();
     hexToColor3(fillColorHex, m_fill);
     hexToColor3(strokeColorHex, m_stroke);
@@ -225,7 +225,6 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     // 全部是 stroke/fill 谁在上面）。改造前没有 reserve，这里也不加。
     std::unordered_map<GeoKey, std::vector<int>, GeoKeyHash> shapeGroups;
     for (int i = 0; i < n; i++) {
-        if (shouldCancel && (i & 0xFFFF) == 0 && (*shouldCancel)()) return;   // ④ 取消：块边界
         float sa, ea; bool mid;
         TileShape::keyForTile(level, i, sa, ea, mid);
         const uint8_t style = styleOfTile(level, i);

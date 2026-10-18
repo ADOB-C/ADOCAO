@@ -184,11 +184,10 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     const char* vendor = (const char*)glGetString(GL_VENDOR);
     const char* renderer = (const char*)glGetString(GL_RENDERER);
     LOG_D("GPU vendor=%s renderer=%s", vendor ? vendor : "?", renderer ? renderer : "?");
+    // 异步建网格默认**关闭**（同步建）：它只在 NVIDIA 上开过，收益仅是"建网格时加载窗口
+    // 还能动"，但共享上下文里建 VAO 的坑（2026-10-18 整帧黑屏）说明这条路的收益/风险
+    // 不划算。`ADOCAO_ASYNC_BUILD=1` 可显式打开（保留给以后排查/实验）。
     bool useAsyncBuild = false;
-    if (vendor) {
-        std::string v(vendor);
-        useAsyncBuild = (v.find("NVIDIA") != std::string::npos);
-    }
     if (const char* e = std::getenv("ADOCAO_ASYNC_BUILD")) useAsyncBuild = std::atoi(e) != 0;
     LOG_D("Async build: %s", useAsyncBuild ? "ON" : "OFF (sync)");
 

@@ -357,6 +357,10 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
 void LevelScene::updateTileVisibility(const Timeline& timeline, double t, bool playing) {
     if (!m_tileVisEnabled) return;
     if (!timeline.hasTrackVisTimes()) return;      // 这张谱不需要 TrackVis
+    // 倒计时（timeInLevel < 0）期间按 t=0 处理：原版在 countdown 里**看得到开头那段轨道**，
+    // 而 TrackVis 的 appear 时间是以 0 为基准的，直接拿负时间去比会把砖全藏掉 → 开头黑屏
+    // 直到 countdown 结束（2026-10-17 用户实测"快半秒"。）
+    if (t < 0.0) t = 0.0;
     const int64_t n = timeline.tileCount();
     if (n > 0 && playing) {
         // "最后一个 disappearTime <= t 的层"：**先在粗索引上二分**（每 kAnchorStride 层一份，

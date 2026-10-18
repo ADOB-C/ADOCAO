@@ -207,7 +207,6 @@ void AudioEngine::attachExternal(const float* buffer, size_t totalFrames, int ch
     m_extBuffer = buffer;
     m_extTotalFrames = totalFrames;
     m_extChannels = channels;
-    m_extSampleRate = sampleRate;
     if (sampleRate != m_deviceRate)
         LOG_W("AudioEngine: 外部音源 %dHz ≠ 设备 %dHz —— 回调不做重采样，播放速度会偏",
               sampleRate, m_deviceRate);

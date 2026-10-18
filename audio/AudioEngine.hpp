@@ -73,7 +73,6 @@ private:
     const float* m_extBuffer = nullptr;
     size_t m_extTotalFrames = 0;
     int m_extChannels = 0;
-    int m_extSampleRate = 44100;
     size_t* m_extCursor = nullptr;
     bool* m_extPlaying = nullptr;
 

@@ -78,7 +78,7 @@ void printHelp(Mode mode, bool all) {
             "  外观:\n"
             "    --time-color         按谱面时间六档彩虹（否则沿进度渐变）\n"
             "    --bg <hex>|transparent   --padding F（默认 0 = 贴边；给正数才留白）   --thickness N（<=1 = 1px 硬线）\n"
-            "    --time-color          按谱面时间六档彩虹（不开它时整条只用一种颜色 DEBB7B）\n"
+            "    （--size/--bg/--padding/--thickness/--native 只对矢量路线生效；--1px 不读取它们）\n"
             "    --range A-B          只画第 A..B 层（看密集“结”）   --native  1 像素 = 1 世界单位\n"
             "  资源:\n"
             "    --threads N          线程数（默认 4 = 2P+2E；stitch/mono 用）\n"
@@ -352,6 +352,10 @@ int main(int argc, char* argv[]) {
             return 2;
         }
         std::fprintf(stderr, "无法解析的参数: %s\n", a);
+        return 2;
+    }
+    if (cli.resolutionW <= 0 || cli.resolutionH <= 0) {
+        std::fprintf(stderr, "--width/--height 必须是正整数（收到 %dx%d）\n", cli.resolutionW, cli.resolutionH);
         return 2;
     }
     // CLI-FLAGS-END

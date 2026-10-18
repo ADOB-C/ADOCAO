@@ -250,7 +250,10 @@ void Timeline::precalculateTiming() {
         totalTime += (double)durationAt(i);   // 时长不存了：后面按块重算用同一个 durationAt() 现算
     }
     if (n > 0) m_tileStartTimes[n - 1] = totalTime;
-    if (!m_tileStartTimes.empty()) m_firstStartTime = m_tileStartTimes[0];
+    // 注意：这是**平移前**的赋值 → 恒为 0（等价于"t<0 的倒计时段"阈值）。
+    // 平移后 startTimeAt(0) 是负的一砖时长；PositionSolver 用 firstStartTime() 区分
+    // "倒计时绕砖 0 转"与"正常沿砖走"，保持 0 是当前行为。
+    m_firstStartTime = 0.0;
 
     double preShiftTotal = totalTime;
     if (n > 1) {

@@ -5,7 +5,7 @@
 // 背景：`render/TileGeometryReference.cpp`（改造前的 `TileGeometry.cpp`，现在只进测试）把每个形状
 // 展开成一份 CPU 顶点汤、每个形状一份 VBO/EBO/一次 draw。这里改成：
 //
-//   * **静态 canonical 顶点表**：175 个槽位 = 6 个砖 part × 2 层（描边/填充）+ 3 个图标 part × 17。
+//   * **静态 canonical 顶点表**：193 个槽位 = 7 个砖 part × 2 层（描边/填充）+ 3 个图标 part × 17。
 //     所有形状共用这一份（连索引表都共用），靠"每个 part 在每个模式下是否活动"来开关；
 //     不活动的 part 整块塌成一个点 → 三角形零面积 → 不产生片元。
 //   * **形状表**：每个形状只存 6×2 条 8 float 的 part 记录（参数），VS 按 part 公式展开。
@@ -21,7 +21,7 @@
 //   BIG(ang>=120°)    → BIGQ  + CAPS
 //   ZERO(ang==0，U 型) → CIRCLE + EXT4
 //   MIDSPIN(angleData=999) → PENT
-// 三角形数：每层 32+4+2+4+2+3 = 47 → 砖 94 + 图标 3×16 = 142 个三角形（426 个索引）。
+// 三角形数：每层 32+4+2+4+2+3+4(Gems) = 51 → 砖 102 + 图标 3×16 = 150…实算 158 个三角形（474 索引）。
 
 #include "TileGeometry.hpp"   // TILE_WIDTH / TILE_LENGTH / OUTLINE / fmodWrap / lerp
 #include "core/level/LevelData.hpp"

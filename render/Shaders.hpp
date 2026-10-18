@@ -242,7 +242,7 @@ constexpr const char* kTileCpuVertSrc = R"(#version 330 core
 // 输入（与 tile.vert 一致）：
 //   * aRecipe：静态配方表，每个 canonical 槽位一项 (part, layer*64+slot, k0, k1)；
 //   * aInstOffset / aShape / aIconBits：每实例（相机相对偏移 / 形状号 / 图标位）；
-//   * uSlotTex：每形状 `kSlots`(175) 个 texel 的 CPU 展开表 —— texel i = 槽位 i 的 (x, y)，
+//   * uSlotTex：每形状 `kSlots`(193) 个 texel 的 CPU 展开表 —— texel i = 槽位 i 的 (x, y)，
 //     行宽 kTexW（= `TileShape::kTexW`，写成常量省一个 uniform）。槽位号 = gl_VertexID
 //     （索引表里的值就是 canonical 槽位号，aRecipe 也按它排列）。
 

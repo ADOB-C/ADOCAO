@@ -15,8 +15,8 @@
 // 轨道渲染：**1 实例 = 1 砖**，几何在 VS 里按"形状表"展开（见 render/TileShape.hpp 与
 // assets/shaders/tile.vert）。2026-10 之前是"每个形状一份 CPU 顶点汤 + 每形状一次 draw"。
 //
-// 一个实例画完整块砖 + 它的事件图标：canonical 顶点表 175 槽（砖 124 + 图标 51）、
-// 142 个三角形共用一份索引表，所以整条轨道**一次 draw** 画完（形状数不再决定 draw 次数：
+// 一个实例画完整块砖 + 它的事件图标：canonical 顶点表 193 槽（砖 142 + 图标 51）、
+// 158 个三角形（474 索引）共用一份索引表，所以整条轨道**一次 draw** 画完（形状数不再决定 draw 次数：
 // 之前 MYC 294 次、Singularity 8192 次、ADR 型全角度谱面会到十万次量级）。
 //
 // 常驻（每砖）≈ 14 B：形状号 4 + 世界坐标 8 + 图标位 1 + 可见位 1（TrackVis 才分配）；
@@ -29,7 +29,7 @@
 // 由先后决定。改成**按可见窗口归一化 Z** 之后（见 `tileZForIndex` 的说明）窗口内步长
 // ≈0.018 ≫ 深度分辨率 1.19e-5，并列基本消失。实测：像素门槛 51/51 逐字节不变，另在
 // 三种 Won't You + TNR + primer-final 上做了 16 帧 A/B（含"整张一帧"6,841 万块）
-// **全部逐字节相同**（`scripts/order-ab.sh`，钩子 `ADOCAO_DRAW_ORDER=grouped` 可回旧序）。
+// **全部逐字节相同**（要重做这个 A/B 就临时改提交顺序；旧钩子已随数组删除）。
 // 残留的理论情形：极端广角 + 屏幕上真的重合但颜色/图标不同的砖（那 16 帧没造出来）；
 // 但那时胜负也已是**确定**的（低层号在上），不再是 `unordered_map` 的迭代序。
 //
@@ -128,7 +128,7 @@ public:
 private:
     void destroy();
     void buildStaticGL();
-    void buildSlotTable();          // CPU 回退：每形状 175 个槽位坐标 → RG32F 纹理
+    void buildSlotTable();          // CPU 回退：每形状 193 个槽位坐标 → RG32F 纹理
     void destroyStaticGL();
     void ensureDrawList(double vl, double vr, double vb, double vt, double camX, double camY) const;
     void uploadIfNeeded() const;

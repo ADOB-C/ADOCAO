@@ -159,7 +159,7 @@
   配方常量是相位 π/8 的单位八边形），`buildShape(..., gems=true)` 用**两圈**记录
   （描边半径 `width+OUTLINE`、填充半径 `width−OUTLINE`）——Re_ADOJAS 的 `createGemsMesh`
   中间那圈黑八边形与两侧同色、视觉不可分，所以不需要第三圈；端盖顶点它也**不引用**。
-  `P_GEM` 让 canonical 槽位从 175 → **193**（砖 142 + 图标 51），索引表 426 → 474，
+  `P_GEM` 让 canonical 槽位从 175 → **193**（砖 142 + 图标 51），索引表 426 → **474**，
   形状记录 25 → 29 texel；`tile.vert` 的 `fetchRec` 里 `layer * 6` 同步改成 `layer * 7`，
   `tile_cpu.vert` 的槽位/层边界常量也同步。几何逐位对拍（`geom_probe`，197 万坐标）**0 失败**。
 * 逐砖 alpha（8 位 hex 的 AA）。

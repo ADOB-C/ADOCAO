@@ -179,17 +179,9 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     if (cfg.msaaSamples > 0) glEnable(GL_MULTISAMPLE);
     LOG_D("OpenGL %s | GLSL %s", glGetString(GL_VERSION), glGetString(GL_SHADING_LANGUAGE_VERSION));
 
-    // Detect GPU: only NVIDIA has reliable GL context sharing across threads.
-    // Intel & AMD iGPUs often fail to share VAO/VBO between contexts → sync build.
     const char* vendor = (const char*)glGetString(GL_VENDOR);
     const char* renderer = (const char*)glGetString(GL_RENDERER);
     LOG_D("GPU vendor=%s renderer=%s", vendor ? vendor : "?", renderer ? renderer : "?");
-    // 异步建网格默认**关闭**（同步建）：它只在 NVIDIA 上开过，收益仅是"建网格时加载窗口
-    // 还能动"，但共享上下文里建 VAO 的坑（2026-10-18 整帧黑屏）说明这条路的收益/风险
-    // 不划算。`ADOCAO_ASYNC_BUILD=1` 可显式打开（保留给以后排查/实验）。
-    bool useAsyncBuild = false;
-    if (const char* e = std::getenv("ADOCAO_ASYNC_BUILD")) useAsyncBuild = std::atoi(e) != 0;
-    LOG_D("Async build: %s", useAsyncBuild ? "ON" : "OFF (sync)");
 
     // Show window immediately so user sees it while heavy init runs
     glClearColor(0.12f, 0.12f, 0.14f, 1.0f);
@@ -221,27 +213,9 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     }
     rebuildCameraTimeline();
 
-    // Mesh build: async on a shared GL context (NVIDIA), sync otherwise
-    if (useAsyncBuild) {
-        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-        glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
-        glfwWindowHint(GLFW_SAMPLES, 0);
-        m_sharedWindow = glfwCreateWindow(1, 1, "buildctx", nullptr, m_window);
-        if (m_sharedWindow) {
-            LOG_D("Spawning background mesh build thread");
-            if (!m_scene->beginAsyncBuild(*m_level, m_sharedWindow)) {
-                LOG_W("Async build failed to start, falling back to sync build");
-                glfwDestroyWindow(m_sharedWindow);
-                m_sharedWindow = nullptr;
-            }
-        } else {
-            LOG_W("Shared context creation failed, falling back to sync build");
-        }
-    }
-    if (!m_sharedWindow) {
-        // Sync: build on main thread (window already visible)
-        m_scene->buildSync(*m_level);
-    }
+    // Mesh build: 同步（主线程、主上下文）。异步/共享上下文那条路已删除：
+    // VAO 是上下文私有的，跨上下文建出来的 VAO 主上下文看不到（整帧黑屏）。
+    m_scene->buildSync(*m_level);
 
     // Hitsound attach
     if (m_hitsoundMgr->isSynthesized()) {
@@ -561,17 +535,6 @@ void GameWindow::toggleFullscreen() {
 // "给场景一帧 + 相机 snap + 抓像素"。所以同一组参数两次跑必须 byte-identical —— 这是
 // `--capture` 存在的唯一理由（给"GPU 实例滑窗"这类改动当像素级验收）。
 void GameWindow::captureAndExit() {
-    // 1) 等网格建好（macOS 同步建；Windows/Linux 可能是共享上下文异步建）
-    for (int i = 0; i < 120000 && !m_scene->meshReady(); i++) {
-        glfwPollEvents();
-        if (m_sharedWindow && m_scene->pollAsyncBuild()) {
-            glfwDestroyWindow(m_sharedWindow);
-            m_sharedWindow = nullptr;
-            glfwMakeContextCurrent(m_window);
-            m_scene->rebindAsyncVAO();
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
     if (!m_scene->meshReady()) { LOG_W("capture: 网格没建好，放弃"); return; }
 
     // 2) 摆到目标时刻：timeInLevel = elapsed/1000 - preRoll，elapsed = (audioPos + audioStartOffset)*1000
@@ -939,18 +902,6 @@ void GameWindow::run() {
         glfwPollEvents();
         handleInput();
 
-        // Check async build completion (NVIDIA/AMD only)
-        if (!m_scene->meshReady() && m_sharedWindow) {
-            if (m_scene->pollAsyncBuild()) {
-                glfwDestroyWindow(m_sharedWindow);
-                m_sharedWindow = nullptr;
-                // VAO 是上下文私有的：共享上下文里建的 VAO 主上下文看不到 → 重建
-                glfwMakeContextCurrent(m_window);
-                m_scene->rebindAsyncVAO();
-                LOG_D("Async mesh build complete");
-            }
-        }
-
         // Frame pacing
         double now = glfwGetTime();
         double elapsed = now - m_lastFrameTime;
@@ -966,7 +917,7 @@ void GameWindow::run() {
         if (deltaMs > 500.0f) deltaMs = 0.0f;
         else if (deltaMs > 100.0f) deltaMs = 100.0f;
 
-        if (m_scene->meshReady()) {
+        {
             // Time the real work (update+render, excluding the vsync wait) so
             // the scene can auto-tune the trail sample rate.
             profile::frameBegin();
@@ -999,14 +950,6 @@ void GameWindow::run() {
                     ivWork.clear(); ivFrame.clear(); ivDrawn.clear();
                 }
             }
-        } else {
-            // Still building async: show background color, keep responsive
-            int fbW, fbH;
-            glfwGetFramebufferSize(m_window, &fbW, &fbH);
-            glViewport(0, 0, fbW, fbH);
-            glClearColor(m_bgR, m_bgG, m_bgB, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT);
-            glfwSwapBuffers(m_window);
         }
     }
     if (profile::enabled()) {

@@ -36,22 +36,12 @@ public:
     // tile mesh. A GL context must be current. Returns false on shader failure.
     bool init(const LauncherConfig& cfg, const adofai::LevelData& level);
 
-    // Build tile mesh + planet GPU buffers synchronously (mesh not built yet).
-    // After this (and after any async build) the caller must release the
-    // LevelData mesh temporaries (angleData / tileBPMs / ...).
+    // Build tile mesh + planet GPU buffers synchronously (main thread/context).
+    // After this the caller must release the LevelData mesh temporaries
+    // (angleData / tileBPMs / ...).
     void buildSync(const adofai::LevelData& level);
 
-    // Start the mesh + planet GPU build on a background thread sharing the GL
-    // context via sharedWindow (context must be current on this thread).
-    // Returns false when no background build could be started — fall back to
-    // buildSync() in that case. Poll with pollAsyncBuild().
     void setViewportHeightPx(int h);
-    bool beginAsyncBuild(const adofai::LevelData& level, GLFWwindow* sharedWindow);
-
-    // Returns true once when the background build just finished; false
-    // afterwards (and when no async build is running).
-    bool pollAsyncBuild();
-    void rebindAsyncVAO();            // 异步构建完成后，在主上下文重建 VAO
 
     bool meshReady() const { return m_meshReady; }
     int drawnInstances() const;   // 开发/诊断：上一次 draw 画了多少个实例
@@ -90,7 +80,7 @@ private:
     std::unique_ptr<adofai::Planet> m_bluePlanet;
 
     // Build-time config snapshots (config object outlives the scene, but the
-    // async build thread must not touch it).
+
     std::string m_fillColor = "FFFFFF";
     std::string m_strokeColor = "000000";
     float m_fillRGB[3] = {1, 1, 1}, m_strokeRGB[3] = {0, 0, 0};
@@ -115,7 +105,6 @@ private:
     int m_lastHiddenEnd = -1;
     bool m_sgVisibleLatch = false;
 
-    adofai::Scheduler::Handle m_buildHandle;   // ④：后台网格构建的句柄（析构时 cancel+wait）
     bool m_meshReady = false;
     int m_viewportHpx = 720;
 };

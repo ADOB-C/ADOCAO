@@ -34,7 +34,6 @@ public:
 
 private:
     GLFWwindow* m_window = nullptr;
-    GLFWwindow* m_sharedWindow = nullptr;
 
     // Scene (shaders / tile mesh / planets / trails) + camera navigation
     std::unique_ptr<LevelScene> m_scene;

@@ -17,10 +17,10 @@
 与 `submit(Lane, fn(tok)) → Handle{ready/wait/cancel/valid/clear}` ✓。已迁：
 * `app/LevelLoader` 的**音频解码**（原 `std::async` ✗）→ `submit(Background)`；任务体只碰调用方持有的
   `result` → 生命周期安全 ✓；
-* `app/LevelScene` 的**网格构建**（原 `std::async` + 共享 GL 上下文）→ `submit(Background)`；
-  **析构时 `cancel()` + `wait()`** —— 等价于原来 `future` 析构的 join 语义 ✓，但任务能在**块边界提前退出**
-  （`TileMesh::build(..., const std::function<bool()>* shouldCancel)`，每 64K 砖查一次 ✓）。
-  注意它默认走同步路径（`Async build: OFF (sync)`），异步路径是开关打开时才走的 ✓。
+* `app/LevelScene` 的网格构建曾是 `std::async` + **共享 GL 上下文** → `submit(Background)`；
+  2026-10-18 **整段删除**：VAO 是上下文私有的，共享上下文里建的 VAO 主上下文看不到
+  （NVIDIA 上整帧黑屏），而收益只是"建网格时加载窗口还能动" → 现在**一律同步**
+  （`buildSync()`，主线程/主上下文）。`TileMesh::build` 的 `shouldCancel` 钩子保留（无调用方）。
 **加载窗与向导预载也已迁（2026-10-16 同轮）**：`LoadingWindow` 的两处 loader 线程与
 `wizard/PageWelcome` 的预载线程 → `submit(Lane::Background)`，`joinable()/join()` →
 `valid()/wait()/clear()`（**语义等价** ✓）。两处刻意**不取消**：loader/preload 的结果一定会被用，
@@ -37,7 +37,7 @@
 | 3 | `core/level/LevelData.cpp:670` | **每次调用新建 `ThreadPool pool(n-1)`** | action 分块解析 | 每次加载都 spawn 一批线程 ✗ |
 | 4 | `app/MapExport.cpp:287`、`core/map/PngBand.cpp:60` | 各自 `std::vector<std::thread>` | 出图瓦片/PNG 分带 | 又一套；与 #2/#3 同时跑就**过订阅** ✗ |
 | 5 | `audio/HitsoundManager.cpp:363` | 自己的 `std::thread` 块调度 | hitsound 混音 | **故意独立**（注释写明：`adocao_audio` 不该依赖 `core/util/ThreadPool`，否则单独编这个文件的 harness 会缺源码）→ 模型必须尊重这条 |
-| 6 | `app/LevelLoader.cpp:66`、`app/LevelScene.cpp:151` | `std::async` | 音频解码；网格构建 | #6 的网格构建跑在**共享 GL 上下文**的线程上（GL 并非"只能主线程"） |
+| 6 | `app/LevelLoader.cpp:66` | `scheduler submit(Background)` | 音频解码 | 网格构建已改回**同步**（共享上下文 VAO 黑屏，2026-10-18 删除） |
 | 7 | `app/LoadingWindow.cpp:27,117`、`app/wizard/PageWelcome.cpp:109` | 裸 `std::thread` | 加载窗/预载 | 生命周期散落（`WizardState::preloadThread` 成员） |
 
 ## 2. 问题清单（按危害排序）
@@ -138,7 +138,7 @@ public:
 | 实例属性构建（`m_listAttr`） | Frame | 与剔除同任务 | 现在就是每任务写自己的段 ✓ |
 | 拖尾/行星更新 | （串行） | — | O(拖尾长度)，量级小，不该并行 |
 | 上传 + 绘制 + ImGui | 主线程 | — | GL 上下文所有者（不变式 3） |
-| 网格构建 `TileMesh::build` | Background（共享 GL 上下文） | 按块 | 已有 `std::async` ✓ → 迁到调度器，可取消 |
+| 网格构建 `TileMesh::build` | **主线程（同步）** | — | 共享上下文 VAO 不共享 → 异步路径已删（2026-10-18） |
 | 谱面解析（`angleData`/actions） | Background | 分块（现有 `findActionSplits` ✓） | 去掉**每次新建池**；换 `Scheduler` |
 | 位置/时间/图标计算 | Background | 按块 | 加载期 O(n) 的大头 |
 | 剔除索引建表（粗+细） | Background | 按块 | O(n)，天然并行 |

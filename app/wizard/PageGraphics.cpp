@@ -20,6 +20,14 @@ void drawGraphicsPage(State& st, const Chrome& ch) {
     formLabel(ch, "Fullscreen");   // 布尔字段：标签在左列、框在控件列
     ImGui::Checkbox("##fullscreen", &st.fullscreen);
 
+#ifdef _WIN32
+    // 独占全屏是 Win32 的概念（acquireMonitor）；别的平台没有对应物，所以不画。
+    // 呈现路径更短（少一次全帧 blt，见 docs/cli.md"全屏与录屏"），代价是 WGC/OBS 抓不到 ——
+    // 默认不勾。它也决定 Alt+Enter 用哪种模式，所以不跟 Fullscreen 复选框联动置灰。
+    formLabel(ch, "Exclusive mode");
+    ImGui::Checkbox("##exclusive", &st.exclusive);
+#endif
+
     formLabel(ch, "MSAA");         // Off/2x/4x/8x
     ImGui::SetNextItemWidth(formCtrlW(ch));
     ImGui::Combo("##msaa", &st.msaaIdx, kMsaaNames.data(), (int)kMsaaNames.size());

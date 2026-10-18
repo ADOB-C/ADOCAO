@@ -83,6 +83,7 @@ ADOCAO_VSYNC=1 ./build/adocao "谱面"
 | **默认：无边框窗口全屏** | `GLFW_DECORATED=false`，铺满显示器，**不** acquireMonitor | DWM 合成；GL 窗口每帧 blt 一份到重定向表面 | **能抓** | 秒切 |
 | **`--exclusive`（Windows）** | `glfwSetWindowMonitor(monitor)` → `acquireMonitor()`：`ChangeDisplaySettingsEx(CDS_FULLSCREEN)` + `WS_POPUP` + `HWND_TOPMOST` | 可翻页，少一次全帧拷贝 → **帧数通常更高**（分辨率越高、越偏 GPU/呈现瓶颈，差距越大） | **抓不到**（不在 DWM 合成链上） | 会切出去 |
 
+* 向导 **Graphics 页**有同样的开关（`Exclusive mode`，只在 Windows 上显示），和 `--exclusive` 等价。
 * `--exclusive` **默认关**。要录屏/给 AdoFrame 测就别开；纯粹自己跑、追帧数时再开。
   它只在 Windows 上有意义 —— macOS/Linux 的 `glfwSetWindowMonitor` 不是独占（Cocoa 去标题栏 +
   抬 level 盖住菜单栏，X11/Wayland 走 EWMH），所以那边给了这个开关会打一行 `LOG_W` 并忽略。

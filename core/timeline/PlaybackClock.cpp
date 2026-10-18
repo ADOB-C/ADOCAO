@@ -96,7 +96,7 @@ void PlaybackClock::updateFrame() {
 
     PositionSolver::positionAt(*m_timeline, t, m_frame.redPosition, m_frame.bluePosition);
 
-    if (!m_reportedEnd && n >= 2 && m_currentTileIndex >= n - 1) {
+    if (!m_reportedEnd && n >= 2 && m_currentTileIndex >= n - 2) {
         m_reportedEnd = true;
         LOG_D("Planet reached end: tileTime=%.3fs", t);
     }

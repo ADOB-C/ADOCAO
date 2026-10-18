@@ -41,7 +41,11 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
     }
 
     if (tileIdx >= n - 1) {
-        int lastIdx = n - 1;
+        // tileCount 含末尾合成砖（index n-1）；真实最后一格是 n-2。
+        // 旧代码把结尾环绕中心放在合成砖（最后一格的**终点角**）上，导致结尾整体偏一格、
+        // 最后一格看起来"没画出来"（2026-10-18 用户实测：任何谱结尾都偏）。
+        int lastIdx = n - 2;
+        if (lastIdx < 0) lastIdx = 0;
         const auto& pivotPos = L.tilePositionAt(lastIdx);
         double startAngle = 0.0;
         if (lastIdx > 0) {
@@ -94,7 +98,11 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
         return;
     }
     if (tileIdx >= n - 1) {
-        int lastIdx = n - 1;
+        // tileCount 含末尾合成砖（index n-1）；真实最后一格是 n-2。
+        // 旧代码把结尾环绕中心放在合成砖（最后一格的**终点角**）上，导致结尾整体偏一格、
+        // 最后一格看起来"没画出来"（2026-10-18 用户实测：任何谱结尾都偏）。
+        int lastIdx = n - 2;
+        if (lastIdx < 0) lastIdx = 0;
         const auto& pivotPos = L.tilePositionAt(lastIdx);
         double startAngle = 0.0;
         if (lastIdx > 0) {

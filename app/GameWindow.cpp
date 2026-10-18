@@ -450,7 +450,7 @@ void GameWindow::update(float deltaMs) {
     if (playing && m_level->tileCount() > 0) {
         int tileIdx = m_playback->currentTileIndex();
         if (tileIdx < 0) tileIdx = 0;
-        if (tileIdx >= (int)m_level->tileCount()) tileIdx = (int)m_level->tileCount() - 1;
+        if (tileIdx >= (int)m_level->tileCount() - 1) tileIdx = (int)m_level->tileCount() - 2;
         const auto p = m_level->tilePositionAt(tileIdx);
         const auto& bpms = m_timeline->tileBPMs();
         const float bpm = (tileIdx >= 0 && (size_t)tileIdx < bpms.size()) ? bpms[(size_t)tileIdx] : 100.0f;
@@ -603,7 +603,8 @@ void GameWindow::captureAndExit() {
 
     int tileIdx = m_playback->currentTileIndex();
     if (tileIdx < 0) tileIdx = 0;
-    if (tileIdx >= (int)m_level->tileCount()) tileIdx = (int)m_level->tileCount() - 1;
+    // 结尾停在**真实最后一格**（tileCount 含末尾合成砖，减 2 才是最后一格）
+    if (tileIdx >= (int)m_level->tileCount() - 1) tileIdx = (int)m_level->tileCount() - 2;
     if (m_cfg->captureCamera && m_level->tileCount() > 0) {
         // 与播放时同一条相机路径：settings + 到目标时刻为止的全部运镜事件。
         const auto p = m_level->tilePositionAt(tileIdx);

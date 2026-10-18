@@ -30,11 +30,15 @@ segment,…    每个阶段（cull/upload/draw/trailSample/applyFrame…）的�
 frame,…      整帧 p50/p95/max
 ```
 
-* 文件位置：`ADOCAO_PROFILE_FILE=<path>`，默认 `ADOCAO.prof`（相对 = 当前目录）。
+* 文件位置：默认写在 **`ADOCAO.log` 同一个目录**（`Logger::path()` 的父目录 —— 也就是
+  exe 旁，macOS `.app` / 系统日志目录那套回退规则一样）；`ADOCAO_PROFILE_FILE=<path>` 可整体改
+  （相对 = 当前目录）。日志里的 `profiler: 写入 …` 打的是**绝对路径**。
+  *为什么改*：原来默认是"当前工作目录"，用户从 `.bat`/快捷方式启动时文件落在别处，
+  看起来就是"profiler 什么也没留下"（2026-10 真报过）。
 * 采样间隔：`ADOCAO_PROFILE_INTERVAL_MS`（默认 10000，最小 100）——只影响行频率，
   逐帧采样与 `end`/`segment` 行不变。
 * `ADOCAO.log` 保持原样（启动/加载/错误 + 同样的 soak 行）；`ADOCAO_LOG_FILE` 仍然可以
-  整体改日志路径，但 profiler 不再依赖它。
+  整体改日志路径 —— 给了它，profiler 也跟着落到那个目录。
 * **转 CSV**：`python scripts/prof_to_csv.py ADOCAO.prof`（tidy，全列）或 `--split`
   （按 `kind` 拆成 `interval/segment/frame/end` 四个 CSV，各自只留非空列）；`--summary`
   打印摘要（interval 中位/最差帧、segment 按 p50 排序）。纯标准库，Windows 上用

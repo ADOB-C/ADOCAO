@@ -46,7 +46,6 @@ struct ColumnDiagnostics {
     uint64_t n = 0;             // 采样后参与统计的值数
     uint64_t nTotal = 0;        // 原始值数（> n 说明是前缀采样）
     uint64_t sentinels = 0;     // 哨兵个数（angular 列才有）
-    uint64_t sentinelRuns = 0;  // 哨兵是否连成片（>0 且远小于个数 → 连续 midspin 段）
 
     uint64_t distinct = 0;      // 值集基数（double 按**位模式**，与编码器一致）
     uint64_t runs = 0;          // 相邻相等的段数（游程数；runs << n → Rle 有戏）
@@ -63,7 +62,6 @@ struct ColumnDiagnostics {
     int gridExp2 = -1;          // 全体 v·2^e ∈ ℤ 的最小 e（>20 视作"不是粗网格"）
     int gridExp10 = -1;         // 全体 v·10^e ∈ k/10^e（**精确**判定，不是容差）
     double gridScale = 0.0;     // 可用的精确整数域 scale（0 = 没有 → 残差只能在浮点域看）
-    bool allIntegers = false;   // 值域上全是整数（floor 那类）
 
     // **整数域**的二阶差分（§8.2 ①：残差只在整数域里算）—— 这一对才是 WrapDelta 的真实收益。
     // 浮点域的 Δ² 会被量化噪声主导（4 位小数的谱：真曲率 1e-7 被 ±1e-4 的舍入噪声淹没），

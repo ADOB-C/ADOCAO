@@ -57,7 +57,6 @@ struct Sample {
     std::vector<uint64_t> raw;    // 未掩码的位模式（用于 d1Raw/wrapRateRaw 的对照）
     uint64_t nTotal = 0;
     uint64_t sentinels = 0;
-    uint64_t sentinelRuns = 0;
 };
 
 // 前缀采样 + 哨兵掩码。**不跨步抽样**：相邻对（环绕率、差分基数）全靠相邻。
@@ -67,16 +66,10 @@ Sample takeSample(const std::vector<double>& v, const ColumnSpec& spec, const Di
     const uint64_t take = std::min<uint64_t>(s.nTotal, opt.maxSample);
     s.raw.reserve((size_t)take);
     s.v.reserve((size_t)take);
-    bool inRun = false;
     for (uint64_t i = 0; i < take; ++i) {
         s.raw.push_back(bitsOf(v[(size_t)i]));
         const bool sent = spec.angular && v[(size_t)i] == spec.sentinel;
-        if (sent) {
-            ++s.sentinels;
-            if (!inRun) { ++s.sentinelRuns; inRun = true; }
-            continue;
-        }
-        inRun = false;
+        if (sent) { ++s.sentinels; continue; }
         s.v.push_back(v[(size_t)i]);
     }
     return s;
@@ -246,7 +239,6 @@ void diagnoseDoubles(const std::vector<double>& v, const ColumnSpec& spec,
     const Sample s = takeSample(v, spec, opt);
     out.n = (uint64_t)s.v.size();
     out.sentinels = s.sentinels;
-    out.sentinelRuns = s.sentinelRuns;
     if (out.n == 0) { out.verdict = "Const"; out.note = "整列都是哨兵/空列"; return; }
 
     // 值集基数 / 游程
@@ -314,9 +306,8 @@ void diagnoseDoubles(const std::vector<double>& v, const ColumnSpec& spec,
     }
 
     // 定点网格 / 整数
-    out.allIntegers = true;
     for (double x : s.v)
-        if (std::floor(x) != x) { out.allIntegers = false; break; }
+        if (std::floor(x) != x) { break; }
     out.gridExp2 = gridPowerOfTwo(s.v);
     out.gridExp10 = gridPowerOfTen(s.v);
 
@@ -531,7 +522,6 @@ void diagnoseInts(const std::vector<int64_t>& v, const DiagOptions& opt, ColumnD
     out.d1Wrapped = out.d1Raw;
     out.d2Wrapped = out.d2Raw;
 
-    out.allIntegers = true;
     {
         std::vector<double> asDouble;
         const size_t probe = std::min<size_t>((size_t)take, 4096);

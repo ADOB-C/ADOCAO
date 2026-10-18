@@ -461,7 +461,9 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
         }
     }
     if (const Sec* colSec = findSec(secs, SectionId::Colour)) {
-        constexpr size_t kRec = 32;   // floor(4) + 5 个池下标(10) + anim/pulseLen/glow/duration(16) + ease/flags(2)
+        // v3 = 32 B（floor + 5 池下标 + 4 float + ease/flags）
+        // v4 = 50 B（再追加 startOff/endOff/startRel/endRel/gapLength/angleOffset）
+        const size_t kRec = (version >= 4) ? 50 : 32;
         if (colSec->size % kRec != 0) { err = "colour 段长度不是记录整数倍"; return false; }
         const size_t cnt = colSec->size / kRec;
         out.colorEvents.clear();
@@ -486,6 +488,14 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
             std::memcpy(&e.duration, q + 26, 4);
             e.ease = q[30];
             e.flags = q[31];
+            if (version >= 4) {
+                e.startOff = (int32_t)rdU32(q + 32);
+                e.endOff = (int32_t)rdU32(q + 36);
+                e.startRel = (int8_t)q[40];
+                e.endRel = (int8_t)q[41];
+                e.gapLength = (int32_t)rdU32(q + 42);
+                std::memcpy(&e.angleOffset, q + 46, 4);
+            }
             e.cfg.startFloor = e.floor;
             e.cfg.startTime = 0.0;
             e.order = (uint32_t)i;

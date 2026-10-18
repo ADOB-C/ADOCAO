@@ -468,7 +468,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
     }
     if (!level.colorEvents.empty()) {
         Section s; s.id = (uint8_t)SectionId::Colour; s.elements = level.colorEvents.size();
-        s.blob.reserve(level.colorEvents.size() * 32);
+        s.blob.reserve(level.colorEvents.size() * 50);
         for (size_t i = 0; i < level.colorEvents.size(); ++i) {
             const LevelData::ColorEvent& e = level.colorEvents[i];
             putU32(s.blob, (uint32_t)e.floor);
@@ -483,6 +483,13 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
             putF32(s.blob, e.duration);
             putU8(s.blob, e.ease);
             putU8(s.blob, e.flags);
+            // v4 追加：RecolorTrack 的范围/触发（ColorTrack 事件这些字段为 0）
+            putU32(s.blob, (uint32_t)e.startOff);
+            putU32(s.blob, (uint32_t)e.endOff);
+            putU8(s.blob, (uint8_t)e.startRel);
+            putU8(s.blob, (uint8_t)e.endRel);
+            putU32(s.blob, (uint32_t)e.gapLength);
+            putF32(s.blob, e.angleOffset);
         }
         secs.push_back(std::move(s));
     }

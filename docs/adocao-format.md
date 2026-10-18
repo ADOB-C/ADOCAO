@@ -182,9 +182,17 @@ floor(i32) | repetitions(f32) | interval(f32) | gapLength(f32) | flags(u8) | tag
 docs/camera.md §2.3。两段都**只在非空时写**；旧文件没有它们 → 读侧得到空 vector（正确结果：
 这张谱没有运镜）。
 
-### 3.6 Colour（段 id 11，2026-10-17）
+### 3.6 Colour（段 id 11，2026-10-17 / v4 扩到 50 B）
 
-`ColorTrack` 与运镜同理：一条事件一个富结构，**不塞进 16 B 的 `FastAction`**。记录 32 B：
+`ColorTrack`/`RecolorTrack` 与运镜同理：一条事件一个富结构，**不塞进 16 B 的 `FastAction`**。
+
+* **v3 记录 32 B**（只有 ColorTrack 字段）；
+* **v4 记录 50 B**：在 32 B 之后追加
+  `startOff(u32) | endOff(u32) | startRel(i8) | endRel(i8) | gapLength(u32) | angleOffset(f32)`
+  （RecolorTrack 的范围/触发；ColorTrack 事件这些字段为 0）。读侧按文件版本选 32/50，
+  v2/v3 仍可读。
+
+32 B 部分：
 
 `floor(i32) | colorType(u16 池) | color(u16 池) | secondary(u16 池) | pulse(u16 池) | style(u16 池) |
  animDuration(f32) | pulseLength(f32) | glowIntensity(f32) | duration(f32) | ease(u8) | flags(u8)`

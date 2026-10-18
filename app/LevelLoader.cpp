@@ -105,6 +105,9 @@ void runLevelLoading(const LauncherConfig& cfg, LoadingProgress& progress, LoadR
     result.cameraTimeline->build(*result.level, result.timeline->tileStartTimes(),
                                  result.timeline->tileBPMs());
 
+    // RecolorTrack 的运行时索引（范围 + 触发时间）：必须在丢起始时间数组之前建。
+    result.level->buildRecolorIndex(*result.timeline);
+
     // PlaybackClock is created after final Timeline settings are known.
     result.playback = std::make_shared<PlaybackClock>();
     result.playback->attachTimeline(result.timeline.get());

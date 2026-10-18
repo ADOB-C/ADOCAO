@@ -1,0 +1,17 @@
+{
+  "angleData": [0, 90, 180, 270, 0, 90, 180, 270, 0, 90, 180, 270],
+  "settings": {"bpm": 120, "trackColor": "debb7b", "trackStyle": "Standard"},
+  "actions": [
+    {"floor": 2, "eventType": "ColorTrack", "trackColor": "112233", "trackStyle": "Neon"},
+    {"floor": 4, "eventType": "RecolorTrack",
+     "startTile": [-3, "ThisTile"], "endTile": [5, "ThisTile"],
+     "trackColor": "AABBCC", "trackColorType": "Glow", "secondaryTrackColor": "DDEEFF",
+     "trackStyle": "Minimal", "duration": 2, "ease": "OutQuad", "angleOffset": 90,
+     "gapLength": 0},
+    {"floor": 6, "eventType": "RecolorTrack",
+     "startTile": 0, "endTile": [2, "End"],
+     "trackColor": "010203", "duration": 0, "gapLength": 1},
+    {"floor": 8, "eventType": "RecolorTrack",
+     "startTile": "Start+1", "endTile": "End", "trackColor": "111111", "active": false}
+  ]
+}

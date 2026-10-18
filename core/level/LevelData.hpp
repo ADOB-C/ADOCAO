@@ -148,6 +148,7 @@ struct LevelData {
         kColorInactive     = 1 << 1,   // active:false / "Disabled"
         kColorEditorOnly   = 1 << 2,
         kColorHasGlow      = 1 << 3,   // 写了 trackGlowIntensity（否则用 settings）
+        kColorIsRecolor    = 1 << 4,   // RecolorTrack（范围 + 触发时间；ColorTrack 是"从此往后"）
     };
     struct ColorEvent {
         TileColorConfig cfg;           // 已把事件缺省值填好（startFloor = floor, startTime = 0）
@@ -156,7 +157,29 @@ struct LevelData {
         float    duration = 0.0f;      // TweenColor 时长（秒；0 = 瞬切）
         uint8_t  ease = 0;
         uint8_t  flags = 0;            // ColorFlags
+        // ── RecolorTrack（kColorIsRecolor）────────────────────────────
+        // startTile/endTile 原样保存：`rel = -1` = 绝对层号；0 ThisTile / 1 Start / 2 End。
+        // 解析成绝对范围在 `buildRecolorIndex()`（那时才知道总层数）。
+        int32_t  startOff = 0, endOff = 0;
+        int8_t   startRel = -1, endRel = -1;
+        int32_t  gapLength = 0;
+        float    angleOffset = 0.0f;   // 触发时间 = startTime(floor) + angleOffset/180 * 一拍
     };
+
+    // ── RecolorTrack 的运行时索引（buildRecolorIndex() 之后有效）──────────
+    // 每 4096 层一个块，块内是该块"可能命中"的事件下标（按 trigger 排序）。
+    // 查询 = 块表里取最后一条 trigger<=t 且范围覆盖该层的事件 —— O(块内事件数)。
+    struct RecolorTrigger {
+        int32_t lo = 0, hi = 0, gap = 0;
+        double  trigger = 0.0;    // 秒
+        double  beat = 0.0;       // 该事件 floor 的一拍（秒）
+        float   duration = 0.0f;  // 拍
+        uint8_t ease = 0;
+        uint32_t order = 0;
+        TileColorConfig cfg;
+    };
+    void buildRecolorIndex(const Timeline& timeline);
+    bool hasRecolorIndex() const { return m_recolorReady; }
 
     Settings settings;
     std::vector<double> angleData;
@@ -164,7 +187,7 @@ struct LevelData {
     std::vector<Tile>  tiles;
     std::vector<CameraEvent> cameraEvents;   // MoveCamera（未展开 RepeatEvents）
     std::vector<RepeatEvent> repeatEvents;   // RepeatEvents（只服务运镜展开；其他事件暂不消费）
-    std::vector<ColorEvent> colorEvents;     // ColorTrack（未展开；按 floor 查最后一条）
+    std::vector<ColorEvent> colorEvents;     // ColorTrack / RecolorTrack（未展开；按 floor 查）
 
     // floor 处生效的颜色事件：
     //   * f 正好是某条 `justThisTile` 事件的层 → 该层**最后一条** justThisTile（覆盖持久段）；
@@ -179,6 +202,10 @@ struct LevelData {
     // 事件在 `startTimeAt(floor)` 被"跨过"时开始渐变，`start+dur` 后到位；`t < start` 显示上一段目标色。
     // nullptr = 不插值（纯静态色，测试/一次性查询用）。
     TileColors tileColorsAt(int64_t floor, double timeSec, float amplitude = 0.0f,
+                            const Timeline* timeline = nullptr) const;
+
+    // 基础色（settings + ColorTrack；不含 RecolorTrack）—— tileColorsAt 的第一步。
+    TileColors baseColorsAt(int64_t floor, double timeSec, float amplitude = 0.0f,
                             const Timeline* timeline = nullptr) const;
 
     // 某层处生效的**持久段**（忽略 justThisTile / inactive / editorOnly）；没有 → nullptr。
@@ -196,7 +223,7 @@ struct LevelData {
         uint16_t strId = 0;                 // 0 = 空串；索引进 actionStrTable
         // MoveCamera / RepeatEvents **不留在 actions 里**（keep=false）：它们走 cameraEvents /
         // repeatEvents 两个富结构。这两个枚举值只用于"解析时认出它"。
-        enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, MoveCamera, RepeatEvents, ColorTrack, Other } type = Other;
+        enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, MoveCamera, RepeatEvents, ColorTrack, RecolorTrack, Other } type = Other;
         bool flag = false;
         float val1 = 0, val2 = 0;
     };
@@ -217,6 +244,11 @@ struct LevelData {
     // ⚠️ **不能**只写 `tiles.size()`：丢过密集数组之后它是 0，而全运行期（mesh 装配、capture、
     // jump、最近砖搜索）都拿它当"谱面砖数"。窗口化时由 provider 记着那个数。
     int64_t tileCount() const;
+
+    // RecolorTrack 的运行时索引（buildRecolorIndex 填）
+    std::vector<RecolorTrigger> m_recolorTriggers;
+    std::vector<std::vector<uint32_t>> m_recolorBlocks;
+    bool m_recolorReady = false;
     // 可选 `wc`：并行剔除时传**本线程自己的克隆**（见 `FloorWindowCache::clone()`）；
     // 不传 = 用共享缓存（单线程路径，语义与以前逐位相同）。
     std::array<double, 2> tilePositionAt(int64_t i, FloorWindowCache* wc = nullptr) const;

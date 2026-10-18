@@ -41,6 +41,8 @@
 
 namespace adofai {
 
+namespace { constexpr size_t kRecolorBlock = 4096; constexpr size_t kRecolorMaxEntries = 4u << 20; }
+
 // 快路径回退到旧路径时"在哪个阶段放弃"。以前这里是**静默**的：MYC 这种大谱一直在跑旧路径
 // （实测 4.6 s / ~4.4 GB，快路径是 ~0.7 s / ~1.6 GB），却没有任何测试或日志能看出来 ——
 // 与当年"窗口路径静默回退让测试全绿"是同一类坑。ADOCAO_FAST_REQUIRE=1 现在会把阶段名带出来。
@@ -347,6 +349,7 @@ inline LevelData::FastAction::Type eventTypeOf(KeyRef k) {
     if (keyIs(k, "MoveCamera"))    return T::MoveCamera;     // → cameraEvents（富结构）
     if (keyIs(k, "RepeatEvents"))  return T::RepeatEvents;   // → repeatEvents（富结构）
     if (keyIs(k, "ColorTrack"))    return T::ColorTrack;     // → colorEvents（富结构）
+    if (keyIs(k, "RecolorTrack"))  return T::RecolorTrack;   // → colorEvents（范围 + 触发时间）
     return T::Other;
 }
 
@@ -391,6 +394,10 @@ struct ActionFields {
     bool hasTrackAnimDuration = false; float trackAnimDuration = 2.0f;
     bool hasTrackPulseLength = false;  float trackPulseLength = 10.0f;
     bool hasTrackGlow = false;         float trackGlow = 100.0f;
+    // ── RecolorTrack：范围 ────────────────────────────────────────────
+    bool hasStartTile = false, hasEndTile = false, hasGapLength = false;
+    int32_t startOff = 0, endOff = 0;
+    int8_t  startRel = -1, endRel = -1;   // -1 绝对 / 0 ThisTile / 1 Start / 2 End
 };
 
 
@@ -516,6 +523,56 @@ inline void parseRelativeToValue(const char* v, const char* e, ActionFields& f) 
     }
 }
 
+// RecolorTrack 的 startTile/endTile：
+//   数字 = **绝对层号**；`[offset, relativeTo]`（relativeTo: "ThisTile"|"Start"|"End"|0|1|2）；
+//   也容忍字符串 "Start+10" / "ThisTile-5" / "End" / "10"。解析不了就保持"没写"。
+inline void parseTileRef(const char* v, const char* e, int32_t& off, int8_t& rel, bool& has) {
+    auto relOf = [](const char* p, const char* q) -> int8_t {
+        if (q - p == 8 && std::memcmp(p, "ThisTile", 8) == 0) return 0;
+        if (q - p == 5 && std::memcmp(p, "Start", 5) == 0) return 1;
+        if (q - p == 3 && std::memcmp(p, "End", 3) == 0) return 2;
+        double d; if (parseNumber(p, q, d)) return (d == 1.0) ? 1 : (d == 2.0) ? 2 : 0;
+        return 0;
+    };
+    if (v < e && *v == '[') {
+        const char* p = skipWs(v + 1, e);
+        double num;
+        if (p >= e || !parseNumber(p, e, num)) return;
+        p = skipWs(p, e);
+        if (p < e && *p == ',') p = skipWs(p + 1, e);
+        int8_t r = 0;
+        if (p < e && *p == '"') {
+            const char* q = p + 1;
+            while (q < e && *q != '"') ++q;
+            r = relOf(p + 1, q);
+        } else if (p < e) {
+            const char* q = skipValue(p, e);
+            r = relOf(p, q ? q : e);
+        }
+        off = (int32_t)num; rel = -1;  // 数组里的 offset 是"相对"的，base 由 rel 决定
+        if (r >= 0) rel = r;
+        has = true;
+    } else if (v < e && *v == '"') {
+        const char* p = v + 1; const char* q = p;
+        while (q < e && *q != '"') ++q;
+        int8_t r = -1; const char* numStart = p;
+        if (q - p >= 5 && std::memcmp(p, "Start", 5) == 0) { r = 1; numStart = p + 5; }
+        else if (q - p >= 8 && std::memcmp(p, "ThisTile", 8) == 0) { r = 0; numStart = p + 8; }
+        else if (q - p >= 3 && std::memcmp(p, "End", 3) == 0) { r = 2; numStart = p + 3; }
+        double n2 = 0.0;
+        if (numStart < q) {
+            const char* s2 = skipWs(numStart, q);
+            bool neg = false;
+            if (s2 < q && (*s2 == '+' || *s2 == '-')) { neg = (*s2 == '-'); ++s2; }
+            if (s2 < q && parseNumber(s2, q, n2) && neg) n2 = -n2;
+        }
+        off = (int32_t)n2; rel = r; has = true;
+    } else {
+        double num;
+        if (v < e && parseNumber(v, e, num)) { off = (int32_t)num; rel = -1; has = true; }
+    }
+}
+
 // p 指向 action 对象的 '{' 之后（调用方已经跳过 '{'）
 // rich=false 是热路径：一个相机字段都不解析（9M action 的成本必须保持原样）；
 // rich=true 只在认出事 MoveCamera / RepeatEvents 之后对**同一个对象**再跑一遍。
@@ -550,7 +607,9 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
             }
             break;
         case 'e':
-            if (keyIs(key, "eventType")) {
+            if (keyIs(key, "endTile")) {
+                parseTileRef(v, vEnd, f.endOff, f.endRel, f.hasEndTile);
+            } else if (keyIs(key, "eventType")) {
                 if (*v != '"') return false;
                 for (const char* q = v; q < vEnd; ++q)                 // 转义 / 裸 CR：交回旧路径
                     if (*q == '\\' || *q == '\r') return false;
@@ -565,7 +624,9 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
             }
             break;
         case 's':
-            if (keyIs(key, "secondaryTrackColor")) {
+            if (keyIs(key, "startTile")) {
+                parseTileRef(v, vEnd, f.startOff, f.startRel, f.hasStartTile);
+            } else if (keyIs(key, "secondaryTrackColor")) {
                 std::string tmp;
                 if (!stringValue(v, vEnd, tmp)) return false;
                 f.secondaryTrackColor = std::move(tmp); f.hasSecondaryTrackColor = true;
@@ -698,8 +759,8 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
             }
             break;
         case 'g':
-            if (rich && keyIs(key, "gapLength")) {
-                double gl; if (parseNumber(v, vEnd, gl)) f.gapLength = gl;
+            if (keyIs(key, "gapLength")) {
+                double gl; if (parseNumber(v, vEnd, gl)) { f.gapLength = (int32_t)gl; f.hasGapLength = true; }
             }
             break;
         case 'j':
@@ -760,7 +821,7 @@ inline bool buildAction(const ActionFields& f, LevelData::FastAction& a, bool& k
     // 缺 floor 或缺 eventType、以及未知 eventType 的 action 旧路径直接丢弃
     keep = f.hasFloor && f.hasEvent && f.type != T::Other &&
            f.type != T::MoveCamera && f.type != T::RepeatEvents &&
-           f.type != T::ColorTrack;   // 后三者进富结构
+           f.type != T::ColorTrack && f.type != T::RecolorTrack;   // 后四者进富结构
     return true;
 }
 
@@ -811,7 +872,7 @@ inline void decodeSpecialEvent(const ActionFields& f, CameraSink& sink) {
         rp.flags = flags;
         if (f.tagPtr && f.tagEnd > f.tagPtr) rp.tag.assign(f.tagPtr, (size_t)(f.tagEnd - f.tagPtr));
         sink.repeats.push_back(std::move(rp));
-    } else if (f.type == T::ColorTrack) {
+    } else if (f.type == T::ColorTrack || f.type == T::RecolorTrack) {
         C::ColorEvent ev;
         ev.floor = f.floor;
         // Re_ADOJAS `createShiftType(event)`：事件没写的字段用硬编码默认值（不是 settings）。
@@ -832,6 +893,13 @@ inline void decodeSpecialEvent(const ActionFields& f, CameraSink& sink) {
         if (f.inactive)                flags |= C::kColorInactive;
         if (f.editorOnly)              flags |= C::kColorEditorOnly;
         if (f.hasTrackGlow)            flags |= C::kColorHasGlow;
+        if (f.type == T::RecolorTrack) {
+            flags |= C::kColorIsRecolor;
+            ev.startOff = f.startOff; ev.startRel = f.startRel;
+            ev.endOff = f.endOff;     ev.endRel = f.endRel;
+            ev.gapLength = f.hasGapLength ? (int32_t)f.gapLength : 0;
+            ev.angleOffset = (float)f.angleOffset;
+        }
         ev.flags = flags;
         sink.colors.push_back(std::move(ev));
     }
@@ -860,7 +928,8 @@ inline bool parseActionRegion(const char* b, const char* end,
         if (keep) out.push_back(std::move(a));
         else if (f.type == LevelData::FastAction::MoveCamera ||
                  f.type == LevelData::FastAction::RepeatEvents ||
-                 f.type == LevelData::FastAction::ColorTrack) {
+                 f.type == LevelData::FastAction::ColorTrack ||
+                 f.type == LevelData::FastAction::RecolorTrack) {
             // 罕见事件：对同一个对象再解析一遍富字段（热路径零成本，这里最多几百次）
             ActionFields rich;
             if (parseActionObject(p + 1, objEnd, rich, /*rich=*/true)) decodeSpecialEvent(rich, sink);
@@ -938,7 +1007,8 @@ inline size_t parseActionRangeInto(const char* b, const char* end,
             dst[n++] = std::move(a);
         } else if (f.type == LevelData::FastAction::MoveCamera ||
                    f.type == LevelData::FastAction::RepeatEvents ||
-                   f.type == LevelData::FastAction::ColorTrack) {
+                   f.type == LevelData::FastAction::ColorTrack ||
+                   f.type == LevelData::FastAction::RecolorTrack) {
             ActionFields rich;
             if (parseActionObject(p + 1, objEnd, rich, /*rich=*/true)) decodeSpecialEvent(rich, sink);
         }
@@ -1143,7 +1213,8 @@ struct WindowParser {
             if (keep) actions.push_back(std::move(a));
             else if (f.type == LevelData::FastAction::MoveCamera ||
                      f.type == LevelData::FastAction::RepeatEvents ||
-                     f.type == LevelData::FastAction::ColorTrack) {
+                     f.type == LevelData::FastAction::ColorTrack ||
+                     f.type == LevelData::FastAction::RecolorTrack) {
                 ActionFields rich;
                 if (parseActionObject(p + 1, objEnd, rich, /*rich=*/true))
                     decodeSpecialEvent(rich, cameraSink);
@@ -1442,17 +1513,122 @@ const LevelData::ColorEvent* LevelData::colorEventAt(int64_t floor) const {
     // 持久段：floor<=f 的最后一条（从 upper_bound 往前找第一条非 inactive 的持久事件）。
     for (auto it = ub; it != colorEvents.begin();) {
         --it;
-        if (it->flags & (kColorInactive | kColorEditorOnly)) continue;
+        if (it->flags & (kColorInactive | kColorEditorOnly | kColorIsRecolor)) continue;
         if (it->flags & kColorJustThisTile) continue;
         return &*it;
     }
     return nullptr;
 }
 
+void LevelData::buildRecolorIndex(const Timeline& timeline) {
+    m_recolorTriggers.clear();
+    m_recolorBlocks.clear();
+    m_recolorReady = true;
+    const int64_t n = tileCount();
+    if (n <= 0) return;
+    auto resolve = [&](const ColorEvent& ev, int32_t off, int8_t rel) -> int64_t {
+        if (rel < 0) return (int64_t)off;                      // 绝对层号
+        const int64_t base = (rel == 1) ? 0 : (rel == 2 ? n - 1 : ev.floor);
+        return base + (int64_t)off;
+    };
+    for (const ColorEvent& ev : colorEvents) {
+        if (!(ev.flags & kColorIsRecolor)) continue;
+        if (ev.flags & (kColorInactive | kColorEditorOnly)) continue;
+        int64_t a = resolve(ev, ev.startOff, ev.startRel);
+        int64_t b = resolve(ev, ev.endOff, ev.endRel);
+        if (a > b) std::swap(a, b);
+        a = std::clamp<int64_t>(a, 0, n - 1);
+        b = std::clamp<int64_t>(b, 0, n - 1);
+        RecolorTrigger rt;
+        rt.lo = (int32_t)a;
+        rt.hi = (int32_t)b;
+        rt.gap = std::max<int32_t>(0, ev.gapLength);
+        rt.beat = (double)timeline.durationAt(ev.floor);
+        rt.trigger = (double)timeline.startTimeAt(ev.floor) +
+                     ((double)ev.angleOffset / 180.0) * rt.beat;
+        rt.duration = ev.duration;
+        rt.ease = ev.ease;
+        rt.order = ev.order;
+        rt.cfg = ev.cfg;
+        if (!(ev.flags & kColorHasGlow)) rt.cfg.glowIntensity = settings.trackGlowIntensity;
+        rt.cfg.startFloor = ev.floor;   // pulse/parity 的基准层
+        m_recolorTriggers.push_back(std::move(rt));
+    }
+    if (m_recolorTriggers.empty()) return;
+    const size_t blocks = (size_t)((n + kRecolorBlock - 1) / kRecolorBlock);
+    m_recolorBlocks.resize(blocks);
+    size_t total = 0;
+    bool capped = false;
+    for (size_t i = 0; i < m_recolorTriggers.size() && !capped; ++i) {
+        const RecolorTrigger& e = m_recolorTriggers[i];
+        const int64_t step = (int64_t)e.gap + 1;
+        for (int64_t f = e.lo; f <= e.hi; f += step) {
+            auto& v = m_recolorBlocks[(size_t)f / kRecolorBlock];
+            if (v.empty() || v.back() != (uint32_t)i) v.push_back((uint32_t)i);
+            if (++total > kRecolorMaxEntries) {
+                LOG_W("RecolorTrack: 索引条目超过上限 %zu，后续事件被截断（范围/事件数异常）",
+                      (size_t)kRecolorMaxEntries);
+                capped = true;
+                break;
+            }
+        }
+    }
+    for (auto& v : m_recolorBlocks) {
+        std::sort(v.begin(), v.end(), [&](uint32_t x, uint32_t y) {
+            const RecolorTrigger& a = m_recolorTriggers[x];
+            const RecolorTrigger& b = m_recolorTriggers[y];
+            if (a.trigger != b.trigger) return a.trigger < b.trigger;
+            return a.order < b.order;
+        });
+    }
+    LOG_D("RecolorTrack: %zu 条事件，块表 %zu 块 / %zu 条目", m_recolorTriggers.size(),
+          m_recolorBlocks.size(), total);
+}
+
+TileColors LevelData::tileColorsAt(int64_t floor, double timeSec, float amplitude,
+                                   const Timeline* timeline) const {
+    const TileColors base = baseColorsAt(floor, timeSec, amplitude, timeline);
+    if (!m_recolorReady || m_recolorBlocks.empty() || floor < 0) return base;
+    const size_t blk = (size_t)floor / kRecolorBlock;
+    if (blk >= m_recolorBlocks.size()) return base;
+    const auto& list = m_recolorBlocks[blk];
+    if (list.empty()) return base;
+    const RecolorTrigger* last = nullptr;
+    const RecolorTrigger* prev = nullptr;
+    for (uint32_t idx : list) {
+        const RecolorTrigger& e = m_recolorTriggers[idx];
+        if (e.lo > floor || e.hi < floor) continue;
+        if (e.gap > 0 && ((floor - e.lo) % ((int64_t)e.gap + 1)) != 0) continue;
+        if (e.trigger > timeSec + 1e-9) break;   // 列表按 trigger 升序
+        prev = last;
+        last = &e;
+    }
+    if (!last) return base;
+    const TileColors target = computeTileColors(last->cfg, timeSec, (int)floor, amplitude);
+    if (last->duration <= 0.0f) return target;
+    if (last->cfg.colorType != "Single" && last->cfg.colorType != "Stripes") return target;
+    const double dur = (double)last->duration * last->beat;
+    if (dur <= 0.0 || timeSec >= last->trigger + dur) return target;
+    const TileColors from = prev ? computeTileColors(prev->cfg, last->trigger, (int)floor, amplitude)
+                                 : base;
+    const double q = easeApply((Ease)last->ease, (timeSec - last->trigger) / dur);
+    auto mixCh = [&](std::uint8_t a, std::uint8_t b) {
+        return (std::uint8_t)std::clamp<long>(
+            std::lround((double)a + ((double)b - (double)a) * q), 0, 255);
+    };
+    TileColors out;
+    for (int c = 0; c < 3; c++) {
+        out.fill[c] = mixCh(from.fill[c], target.fill[c]);
+        out.stroke[c] = mixCh(from.stroke[c], target.stroke[c]);
+    }
+    out.opacity = target.opacity;
+    return out;
+}
+
 const LevelData::ColorEvent* LevelData::persistentColorAtOrBefore(int64_t floor) const {
     for (auto it = colorEvents.rbegin(); it != colorEvents.rend(); ++it) {
         if (it->floor > floor) continue;
-        if (it->flags & (kColorInactive | kColorEditorOnly)) continue;
+        if (it->flags & (kColorInactive | kColorEditorOnly | kColorIsRecolor)) continue;
         if (it->flags & kColorJustThisTile) continue;
         return &*it;
     }
@@ -1462,14 +1638,14 @@ const LevelData::ColorEvent* LevelData::persistentColorAtOrBefore(int64_t floor)
 const LevelData::ColorEvent* LevelData::persistentColorBefore(int64_t floor) const {
     for (auto it = colorEvents.rbegin(); it != colorEvents.rend(); ++it) {
         if (it->floor >= floor) continue;
-        if (it->flags & (kColorInactive | kColorEditorOnly)) continue;
+        if (it->flags & (kColorInactive | kColorEditorOnly | kColorIsRecolor)) continue;
         if (it->flags & kColorJustThisTile) continue;
         return &*it;
     }
     return nullptr;
 }
 
-TileColors LevelData::tileColorsAt(int64_t floor, double timeSec, float amplitude,
+TileColors LevelData::baseColorsAt(int64_t floor, double timeSec, float amplitude,
                                    const Timeline* timeline) const {
     const ColorEvent* e = colorEventAt(floor);
     TileColorConfig cfg = baseColorConfig();
@@ -1925,7 +2101,43 @@ void jsonReadRepeatEvent(const rapidjson::Value& a, std::vector<LevelData::Repea
     out.push_back(std::move(rp));
 }
 
-void jsonReadColorEvent(const rapidjson::Value& a, std::vector<LevelData::ColorEvent>& out) {
+void jsonTileRef(const rapidjson::Value& v, int32_t& off, int8_t& rel) {
+    auto relOf = [](const rapidjson::Value& r) -> int8_t {
+        if (r.IsString()) {
+            std::string s = r.GetString();
+            if (s == "Start") return 1;
+            if (s == "End") return 2;
+            if (s == "ThisTile") return 0;
+        } else if (r.IsNumber()) {
+            const double d = r.GetDouble();
+            return (d == 1.0) ? 1 : (d == 2.0) ? 2 : 0;
+        }
+        return 0;
+    };
+    if (v.IsArray() && v.Size() >= 1 && v[0].IsNumber()) {
+        off = (int32_t)v[0].GetDouble();
+        rel = (v.Size() >= 2) ? relOf(v[1]) : 0;
+    } else if (v.IsNumber()) {
+        off = (int32_t)v.GetDouble(); rel = -1;
+    } else if (v.IsString()) {
+        std::string s = v.GetString();
+        int8_t r = -1; size_t p = 0;
+        if (s.rfind("Start", 0) == 0) { r = 1; p = 5; }
+        else if (s.rfind("ThisTile", 0) == 0) { r = 0; p = 8; }
+        else if (s.rfind("End", 0) == 0) { r = 2; p = 3; }
+        double n2 = 0.0;
+        if (p < s.size()) {
+            bool neg = false; size_t q = p;
+            if (s[q] == '+' || s[q] == '-') { neg = (s[q] == '-'); ++q; }
+            try { n2 = std::stod(s.substr(q)); } catch (...) { n2 = 0.0; }
+            if (neg) n2 = -n2;
+        }
+        off = (int32_t)n2; rel = r;
+    }
+}
+
+void jsonReadColorEvent(const rapidjson::Value& a, std::vector<LevelData::ColorEvent>& out,
+                        bool recolor = false) {
     using C = LevelData;
     C::ColorEvent ev;
     ev.floor = a["floor"].GetInt();
@@ -1969,6 +2181,15 @@ void jsonReadColorEvent(const rapidjson::Value& a, std::vector<LevelData::ColorE
     }
     if (a.HasMember("editorOnly") && a["editorOnly"].IsBool() && a["editorOnly"].GetBool())
         ev.flags |= C::kColorEditorOnly;
+    if (recolor) {
+        ev.flags |= C::kColorIsRecolor;
+        if (a.HasMember("startTile")) jsonTileRef(a["startTile"], ev.startOff, ev.startRel);
+        if (a.HasMember("endTile")) jsonTileRef(a["endTile"], ev.endOff, ev.endRel);
+        ev.gapLength = (a.HasMember("gapLength") && a["gapLength"].IsNumber())
+                           ? (int32_t)a["gapLength"].GetDouble() : 0;
+        ev.angleOffset = (a.HasMember("angleOffset") && a["angleOffset"].IsNumber())
+                             ? a["angleOffset"].GetFloat() : 0.0f;
+    }
     out.push_back(std::move(ev));
 }
 
@@ -2047,6 +2268,7 @@ bool LevelData::parseLegacy(const std::string& jsonStr, ProgressCb onProgress, b
             else if (et == "MoveCamera") { jsonReadCameraEvent(a, cameraEvents); continue; }
             else if (et == "RepeatEvents") { jsonReadRepeatEvent(a, repeatEvents); continue; }
             else if (et == "ColorTrack") { jsonReadColorEvent(a, colorEvents); continue; }
+            else if (et == "RecolorTrack") { jsonReadColorEvent(a, colorEvents, true); continue; }
             else continue;
             if (act.type == FastAction::SetSpeed) {
                 if (a.HasMember("speedType") && std::string(a["speedType"].GetString()) == "Multiplier") {

@@ -151,6 +151,9 @@ Digest digest(const LevelData& lv, bool ok) {
         cl.str(e.cfg.pulse); cl.str(e.cfg.style);
         cl.f32(e.cfg.animDuration); cl.f32(e.cfg.pulseLength); cl.f32(e.cfg.glowIntensity);
         cl.i32(e.cfg.startFloor); cl.bytes(&e.cfg.startTime, sizeof(double));
+        cl.i32(e.startOff); cl.i32(e.endOff);
+        cl.bytes(&e.startRel, 1); cl.bytes(&e.endRel, 1);
+        cl.i32(e.gapLength); cl.f32(e.angleOffset);
     }
     H rv; for (auto& r : lv.repeatEvents) {
         rv.i32(r.floor); rv.f32(r.repetitions); rv.f32(r.interval); rv.f32(r.gapLength);

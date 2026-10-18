@@ -172,6 +172,42 @@ int main() {
         }
     }
 
+    // RecolorTrack：范围 + 触发时间 + 可选的渐入
+    {
+        const char* json = R"({"angleData":[0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90],
+            "settings":{"bpm":120,"trackColor":"FF0000","trackColorType":"Single","trackStyle":"Standard"},
+            "actions":[
+              {"floor":4,"eventType":"RecolorTrack","startTile":[-3,"ThisTile"],"endTile":[5,"ThisTile"],
+               "trackColor":"0000FF","duration":2,"ease":"Linear"},
+              {"floor":20,"eventType":"RecolorTrack","startTile":[0,"ThisTile"],"endTile":[10,"ThisTile"],
+               "trackColor":"00FF00","duration":0,"gapLength":1}]})";
+        LevelData lv;
+        Timeline tl;
+        if (!lv.loadFromBuffer(json, std::strlen(json))) { std::printf("FAIL recolor: load\n"); fail++; }
+        else {
+            tl.build(lv, false);
+            lv.buildRecolorIndex(tl);
+            const double trig = tl.startTimeAt(4);
+            const double beat = tl.durationAt(4);
+            const double dur = 2.0 * beat;
+            auto col = [&](int f, double t) {
+                const TileColors c = lv.tileColorsAt(f, t, 0.0f, &tl);
+                return hex3(c.fill);
+            };
+            if (col(2, trig - 0.05) != "ff0000") { std::printf("FAIL recolor before: %s\n", col(2, trig - 0.05).c_str()); fail++; }
+            if (col(2, trig + dur * 0.5) != "800080") { std::printf("FAIL recolor mid: %s\n", col(2, trig + 0.05).c_str()); fail++; }
+            if (col(2, trig + dur + 0.05) != "0000ff") { std::printf("FAIL recolor after: %s\n", col(2, trig + dur + 0.05).c_str()); fail++; }
+            if (col(10, trig + dur + 0.05) != "ff0000") { std::printf("FAIL recolor range: %s\n", col(10, trig + dur + 0.05).c_str()); fail++; }
+            // gap=1：只有偶数层被染色
+            const double trig2 = tl.startTimeAt(20);
+            if (col(20, trig2 + 0.05) != "00ff00" || col(21, trig2 + 0.05) != "ff0000" || col(22, trig2 + 0.05) != "00ff00") {
+                std::printf("FAIL recolor gap: %s/%s/%s\n", col(20, trig2 + 0.05).c_str(),
+                            col(21, trig2 + 0.05).c_str(), col(22, trig2 + 0.05).c_str());
+                fail++;
+            }
+        }
+    }
+
     if (fail) {
         std::printf("%d 项失败（%d 例金标）\n", fail, n);
         return 1;

@@ -37,6 +37,22 @@
 * **默认可视化 = 谱面颜色**（settings + ColorTrack），`--fill/--stroke` 仍可整体覆盖（CLI 显式给才生效）。
   像素门槛 54 个状态因此按新行为**重存**（原基线的描边是启动器默认 0.5×，现在是 chart 的 0.7×）。
 
+**RecolorTrack（2026-10-17 已落地）**：新版 ADOFAI 的换色事件（`RecolorTrack`，与旧的
+`ColorTrack` 并存）。它**不是**"从 floor 起持续"的段，而是"**触发时改一段**"：
+
+* 字段：`startTile`/`endTile`（`[offset, relativeTo]`，relativeTo = ThisTile/Start/End；
+  也接受绝对数字/字符串）、`gapLength`、`duration`（**拍**）、`ease`、`angleOffset`；
+* 触发时间 = `startTimeAt(floor) + angleOffset/180 × 一拍`（Re_ADOJAS `calcRecolorTriggerTime`）；
+* 生效范围 = `[min(start,end) .. max(start,end)]`，步长 `gapLength+1`（隔层），**触发后覆盖**
+  范围内的砖（包括玩家**前方**的砖 —— 这就是"波次变色"的来源）；
+* 与 `ColorTrack` 的优先级：先算 ColorTrack/settings 的基础色，再叠加**触发时间 ≤ t 的最后一条**
+  命中事件；同刻按文件顺序；
+* 渐入：`duration > 0` 且 Single/Stripes 时，从"触发前该层显示色"（上一个命中事件的目标 /
+  基础色）插值 `duration × 该事件层的一拍` 秒，Kill(complete) 语义同 TweenColor；
+* 索引：每 **4096 层**一块，块内是该块可能命中的事件下标（按 trigger 排序）；查询
+  O(块内事件数)。条目上限 **4M**（超了 `LOG_W` 截断）；`buildRecolorIndex()` 在 `LevelLoader`
+  里、丢起始时间数组之前调用。
+
 **style 几何（2026-10-17 已落地）**：`buildShape()` 收 `styleWidth/styleLength`（Basic/Neon/NeonLight
 半宽 +0.025、半长 +0.02；Minimal 半长 −0.03），形状键 `GeoKey`/`packShapeKey` 带上 style（3 bit），
 所以同一角度在不同 style 下是不同形状；`deriveRange` 的查表也带 style。The Moon 的 1296 条 Neon /

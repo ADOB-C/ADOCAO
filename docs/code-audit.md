@@ -101,7 +101,7 @@
 |---|---|---|
 | `AdocaoColumns` 的 7 个列级 codec | 已有 `tests/adocao_columns_test` 逐项断言取舍：Const / Dict / DeltaVarint / DeltaRleVarint / BitPack / Rle / Raw 都有输入能选中，且逐位往返 | 全部可达 |
 | `Codec::JsonPassthrough`(5) | 全仓无 encoder/decoder 分支 | **删枚举与 codecName case**，id 5 保留为空洞并写进格式文档 |
-| `SectionXz`(17) | writer 只写 SectionZstd；reader 有兼容分支 | 标注"仅读侧兼容"，删 codecName 里不可达的 case |
+| `SectionXz`(17) | writer 只写 SectionZstd；reader 有兼容分支 | 标注"仅读侧兼容"；`codecName` 里保留 `SectionZstd`/`SectionXz` 两个名字（列级走不到，但枚举是同一个，列全才让 `-Wswitch` 守住"新增列编码必须取名字"） |
 | `CkFlags::kCkRadius` / `radiusScale` / `kCkSentinelRun` | checkpoint 重算不写半径，`sentinelRun` 由字段直接读、flag 位无读者 | **格式预留位**：写盘 96 B 记录不变，保留并在注释/文档里注明预留（不删除，否则破坏格式字节） |
 
 结论：列级编码器的每个分支都有真实输入；剩下的"看起来没人用"的只有格式预留位，

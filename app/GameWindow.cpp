@@ -81,7 +81,7 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     m_hitsoundMgr = &result.hitsounds;
     m_audioEngine = &result.audio;
     m_targetAspect = (float)cfg.resolutionW / (float)cfg.resolutionH;
-    LOG_D("GameWindow::init: %lld tiles, fullscreen=%d exclusive=%d", (long long)m_level->tileCount(), cfg.fullscreen, cfg.exclusiveFullscreen);
+    LOG_D("GameWindow::init: %lld tiles, fullscreen=%d", (long long)m_level->tileCount(), cfg.fullscreen);
 
     // Create window
     m_isFullscreen = cfg.fullscreen;
@@ -108,17 +108,13 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     int fsH = mode ? screenH : winH;
     m_windowedW = winW;
     m_windowedH = winH;
-
-    // 全屏必须钉在显示器的**当前模式**上，而不是让 GLFW 自己挑：
-    // `_glfwChooseVideoMode()` 在 refreshRate == GLFW_DONT_CARE 时按
-    // `UINT_MAX - refreshRate` 排序 —— 也就是**同分辨率里刷新率最高**的那个。桌面
-    // 跑 60Hz、面板支持 144Hz 时，进全屏会顺手把桌面切成 144Hz，而那是一次
-    // `ChangeDisplaySettingsEx`（win32_monitor.c: _glfwSetVideoModeWin32）。显示模式一换，
-    // 所有抓屏工具的源当场失效 —— 用户报的"切全屏后录像丢源 / 在录屏软件里找不到这个窗口"
-    // 就是这个。显式给出当前刷新率后，GLFW 比较"当前模式 == 目标模式"相等就直接 return，
-    // 一次都不切（同函数里 `_glfwCompareVideoModes(&current, best) == 0` 那一行）。
-    if (cfg.fullscreen) {
-        glfwWindowHint(GLFW_REFRESH_RATE, mode ? mode->refreshRate : GLFW_DONT_CARE);
+    // 窗口模式的落点先算好：全屏启动时 Alt+Enter 退回窗口也要落回屏幕中间，
+    // 不能是 (0,0)（默认值）。
+    if (primary) {
+        int wx, wy, ww, wh;
+        glfwGetMonitorWorkarea(primary, &wx, &wy, &ww, &wh);
+        m_windowedX = wx + (ww - winW) / 2;
+        m_windowedY = wy + (wh - winH) / 2;
     }
 
     if (cfg.msaaSamples > 0) glfwWindowHint(GLFW_SAMPLES, cfg.msaaSamples);
@@ -143,24 +139,33 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
         GLFWwindow* w = nullptr;
         if (cfg.fullscreen) {
-            if (cfg.exclusiveFullscreen) {
-                glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
-                w = glfwCreateWindow(fsW, fsH, "ADOCAO", primary, nullptr);
-            } else {
-                glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
-                w = glfwCreateWindow(fsW, fsH, "ADOCAO", nullptr, nullptr);
-                if (w) glfwSetWindowPos(w, 0, 0);
+#ifdef _WIN32
+            // Windows 的全屏 = **无边框窗口**，不用 glfwSetWindowMonitor(monitor)。
+            // 后者在 Win32 上走 acquireMonitor()：ChangeDisplaySettingsEx(CDS_FULLSCREEN)
+            // + WS_POPUP + HWND_TOPMOST，即"独占全屏"。独占全屏不在 DWM 合成链上 ——
+            // WGC（AdoFrame / OBS 的窗口捕获）抓不到它，录屏软件列表里也找不到，
+            // 用户只能退回"屏幕采集"。无边框窗口是普通顶层窗口，DWM 照常合成，
+            // WGC / DXGI 复制都能抓，这就是"能录制的全屏"。
+            // （不设 GLFW_FLOATING：置顶窗口在 Alt+Tab 后会一直盖住别人；任务栏由
+            //  shell 的"前台窗口铺满显示器"判定隐藏，mpv/VLC 都是这么做的。）
+            glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+            w = glfwCreateWindow(fsW, fsH, "ADOCAO", nullptr, nullptr);
+            if (w) {
+                int mx = 0, my = 0;
+                if (primary) glfwGetMonitorPos(primary, &mx, &my);
+                glfwSetWindowPos(w, mx, my);
             }
+#else
+            // macOS/Linux 本来就不是"独占"：Cocoa 只是去标题栏 + 把 level 抬到
+            // NSMainMenuWindowLevel+1（盖住菜单栏），X11/Wayland 走 EWMH fullscreen，
+            // 合成器全程在链上，抓屏没问题 —— 保持 glfwSetWindowMonitor 这条路。
+            glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
+            w = glfwCreateWindow(fsW, fsH, "ADOCAO", primary, nullptr);
+#endif
         } else {
             glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
             w = glfwCreateWindow(winW, winH, "ADOCAO", nullptr, nullptr);
-            if (w && primary) {
-                int wx, wy, ww, wh;
-                glfwGetMonitorWorkarea(primary, &wx, &wy, &ww, &wh);
-                glfwSetWindowPos(w, wx + (ww - winW) / 2, wy + (wh - winH) / 2);
-                m_windowedX = wx + (ww - winW) / 2;
-                m_windowedY = wy + (wh - winH) / 2;
-            }
+            if (w && primary) glfwSetWindowPos(w, m_windowedX, m_windowedY);
         }
         return w;
     };
@@ -192,8 +197,13 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
           vsync ? "vsync on，帧率上限 = 显示器刷新率"
                 : "vsync off，不锁帧；默认 320 fps 节流（ADOCAO_UNCAPPED=1 关闭）");
     if (cfg.fullscreen && mode) {
-        LOG_I("fullscreen: %dx%d @ %d Hz（显示器当前模式，全程不切换显示模式）",
-              mode->width, mode->height, mode->refreshRate);
+        LOG_I("fullscreen: %dx%d @ %d Hz（%s）", mode->width, mode->height, mode->refreshRate,
+#ifdef _WIN32
+              "无边框窗口，DWM 合成 → WGC/OBS 可抓"
+#else
+              "原生全屏，合成器在链上 → 可抓"
+#endif
+        );
     }
     if (!loadGLCore()) { LOG_E("Failed to load OpenGL functions"); glfwDestroyWindow(m_window); return false; }
     if (cfg.msaaSamples > 0) glEnable(GL_MULTISAMPLE);
@@ -514,6 +524,35 @@ void GameWindow::render() {
 }
 
 void GameWindow::toggleFullscreen() {
+#ifdef _WIN32
+    // 跟 createWindow 里同一条口径：Windows 的全屏 = 无边框窗口（DWM 合成，WGC 能抓），
+    // 不是 acquireMonitor 的独占全屏。
+    if (m_isFullscreen) {
+        glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_TRUE);
+        glfwSetWindowSize(m_window, m_windowedW, m_windowedH);
+        glfwSetWindowPos(m_window, m_windowedX, m_windowedY);
+        m_isFullscreen = false;
+    } else {
+        glfwGetWindowPos(m_window, &m_windowedX, &m_windowedY);
+        glfwGetWindowSize(m_window, &m_windowedW, &m_windowedH);
+
+        GLFWmonitor* primary = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode = primary ? glfwGetVideoMode(primary) : nullptr;
+        if (!mode) return;
+
+        int mx = 0, my = 0;
+        glfwGetMonitorPos(primary, &mx, &my);
+        float csx = 1.0f, csy = 1.0f;
+        glfwGetMonitorContentScale(primary, &csx, &csy);
+        int fsW = (int)(mode->width / (csx > 0.0f ? csx : 1.0f));
+        int fsH = (int)(mode->height / (csy > 0.0f ? csy : 1.0f));
+
+        glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_FALSE);
+        glfwSetWindowSize(m_window, fsW, fsH);
+        glfwSetWindowPos(m_window, mx, my);
+        m_isFullscreen = true;
+    }
+#else
     if (m_isFullscreen) {
         // Go windowed
         glfwSetWindowMonitor(m_window, nullptr,
@@ -537,6 +576,7 @@ void GameWindow::toggleFullscreen() {
         glfwSetWindowMonitor(m_window, primary, 0, 0, fsW, fsH, mode->refreshRate);
         m_isFullscreen = true;
     }
+#endif
 }
 
 // （原来这里是 `releaseMeshTemporaries()`：网格建完就清 `tileHasTwirl/tileHasSetSpeed`

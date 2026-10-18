@@ -25,7 +25,6 @@ struct LauncherConfig {
     // 诊断/自动化用（CLI `--start-at`）。
     float  startAt = 0.0f;
     int    msaaSamples = 0;        // MSAA samples (0=off, 2, 4, 8)
-    bool   exclusiveFullscreen = true; // exclusive fullscreen (vs borderless windowed)
     int  resolutionW = 1920;
     int  resolutionH = 1080;
     bool fullscreen = false;

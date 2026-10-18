@@ -19,7 +19,7 @@ adocao stitch <dir> <out.png>           [--scale N] [--threads N]
 播放选项（不带子命令时）：
   --level <file> --music <file> --width N --height N --fullscreen
   --fill HEX --stroke HEX --bg HEX --no-auto-stroke --no-hitsound --no-trail
-  --force-hitsound [TYPE] --auto-play --msaa N --no-exclusive
+  --force-hitsound [TYPE] --auto-play --msaa N
   --cull-block N    剔除粗块粒度（层/块，默认 4096；0 = 关闭索引走全扫）。只影响剔除成本与
                     索引内存，**不改画面**（8 种粒度实测 PNG 逐字节相同）—— 见 docs/rendering.md
   --trail-duration SEC | --trail-tiles N
@@ -42,8 +42,8 @@ adocao stitch <dir> <out.png>           [--scale N] [--threads N]
 `--debug`/`--capture*` 与环境变量钩子）。`scripts/check-cli-help.sh` 机械校验"main.cpp 解析的每个
 `--flag` 都出现在 printHelp 里"，防止帮助漂移。未知的 `--flag` 现在**直接报错退出（码 2）**而不是像以前
 那样静默忽略（打错字会悄悄开 GUI）；单横线参数（macOS 的 `-psn_...`）与单独的 `--` 仍然忽略。
-已删掉纯 no-op 的 `--exclusive`（`LauncherConfig::exclusiveFullscreen` 默认就是 true，只有 `--no-exclusive`
-有意义），把 `--export` 并入 `export` 子命令，`--stitch-scale` 先是改名 `--map-stitch-scale`、
+已删掉纯 no-op 的 `--exclusive`，2026-10-18 又把 `--no-exclusive` 一起删了 —— 全屏只剩**一种**语义
+（无边框窗口，见下节"全屏与录屏"），没有"独占/无边框"二选一了。把 `--export` 并入 `export` 子命令，`--stitch-scale` 先是改名 `--map-stitch-scale`、
 现在随子命令简化成 `stitch --scale`。
 
 Trail sampling — two independent axes, both optional and **off by default** (wizard
@@ -75,18 +75,25 @@ ADOCAO_VSYNC=1 ./build/adocao "谱面"
 
 ### 全屏与录屏（`--fullscreen` / Alt+Enter）
 
-全屏**永远用显示器当前的分辨率和刷新率，全程不切换显示模式**。这不是顺手，是抓屏工具的硬要求：
-GLFW 在 `GLFW_REFRESH_RATE` 为 `GLFW_DONT_CARE` 时会挑"同分辨率里刷新率最高"的模式
-（`_glfwChooseVideoMode()` 按 `UINT_MAX - refreshRate` 排序），60Hz 桌面的 144Hz 面板一进全屏就被
-切成 144Hz；那次 `ChangeDisplaySettingsEx` 会让 OBS 的窗口捕获**丢源**、录屏软件的窗口列表里
-**找不到这个窗口**（用户 2026-10 报的原话）。现在创建时给的是 `glfwGetVideoMode()` 读到的当前
-刷新率，`_glfwSetVideoModeWin32()` 比较"当前 == 目标"相等就直接返回，一次都不切。
-推论：`--width/--height` 只对**窗口模式**有意义（全屏忽略它们，始终铺满显示器）。
+全屏只有一种语义：**能被抓屏工具看到的那种全屏**。
+
+* **Windows**：无边框窗口（`GLFW_DECORATED=false`，铺满显示器），**不走** `glfwSetWindowMonitor`
+  的独占全屏。Win32 那条路是 `acquireMonitor()`：`ChangeDisplaySettingsEx(CDS_FULLSCREEN)` +
+  `WS_POPUP` + `HWND_TOPMOST` —— 它不在 DWM 合成链上，WGC（OBS 窗口捕获 / AdoFrame）抓不到，
+  录屏软件列表里甚至找不到这个窗口（用户 2026-10 报的"ADOCAO 是唯一一个没有全屏录制的播放器"）。
+  无边框窗口就是普通顶层窗口，DWM 照常合成，WGC / DXGI 复制 / PresentMon 全都能用。
+* **macOS / Linux**：`glfwSetWindowMonitor` 本来就不是独占 —— Cocoa 只是去标题栏、把窗口 level 抬到
+  `NSMainMenuWindowLevel+1`（盖住菜单栏），X11/Wayland 走 EWMH/Wayland fullscreen，合成器全程在链上。
+  所以这两边保持原路（也顺带说明：**不存在"独占还是无边框"的开关**，`--no-exclusive` 已删）。
+
+推论：`--width/--height` 只对**窗口模式**有意义（全屏始终铺满显示器、用显示器当前模式，
+不做显示模式切换）。
 
 想量真实帧率，先确认日志里的 `swap interval:` 一行：`0` 才是无 vsync（默认），`1` 是
 `ADOCAO_VSYNC=1` 打开的、上限就是显示器刷新率。另外注意 **WGC / DXGI 复制类抓屏只能看见
 合成器每周期提交的那一帧**（≈ 显示器刷新率），它们报的 fps 不能用来证明 app 的实际渲染帧率
-—— 那个要看 `ADOCAO_PROFILE=1` 的 `frame` 分位数（或 PresentMon 这类 hook `Present` 的工具）。
+—— 那个要看 `ADOCAO_PROFILE=1` 的 `frame` 分位数，或 PresentMon（AdoFrame 的 `SourceLabel`
+要是 PresentMon，不是 WGC）。
 
 ### 抓帧与关卡相机（`--capture` / `--capture-camera`）
 

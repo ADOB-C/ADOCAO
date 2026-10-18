@@ -6,55 +6,11 @@
 #include <string>
 #include <vector>
 
-#ifdef __APPLE__
-#include <mach-o/dyld.h>
-#include <climits>
-#include <cstdlib>
-#elif defined(__linux__)
-#include <unistd.h>
-#include <climits>
-#elif defined(_WIN32)
-#include <windows.h>
-#endif
+#include "PlatformPaths.hpp"
 
 namespace {
 
-// 可执行文件所在目录（平台代码留在 app：core 禁平台头）。macOS 上会先 realpath，
-// 否则通过符号链接启动（/Applications/ADOCAO.app → repo/build/ADOCAO.app）时
-// 下面每个搜索根都会指到真实 bundle 之外。
-std::string executableDirectory() {
-#ifdef __APPLE__
-    uint32_t size = 0;
-    _NSGetExecutablePath(nullptr, &size);
-    std::vector<char> buf(size > 0 ? size : 1);
-    if (_NSGetExecutablePath(buf.data(), &size) != 0) return {};
-    std::string dir(buf.data());
-    auto pos = dir.find_last_of('/');
-    if (pos != std::string::npos) dir = dir.substr(0, pos);
-    char resolved[PATH_MAX];
-    if (realpath(dir.c_str(), resolved)) dir = resolved;
-    return dir;
-#elif defined(__linux__)
-    char buf[PATH_MAX];
-    ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-    if (len <= 0) return {};
-    buf[len] = '\0';
-    std::string dir(buf);
-    auto pos = dir.find_last_of('/');
-    if (pos != std::string::npos) dir = dir.substr(0, pos);
-    return dir;
-#elif defined(_WIN32)
-    char buf[MAX_PATH];
-    DWORD n = GetModuleFileNameA(nullptr, buf, MAX_PATH);
-    if (n == 0 || n >= MAX_PATH) return {};
-    std::string p(buf, n);
-    auto pos = p.find_last_of("\\/");
-    return pos == std::string::npos ? std::string{} : p.substr(0, pos);
-#else
-    return {};
-#endif
-}
-
+// 搜索根顺序；可执行文件目录由 PlatformPaths 统一实现。
 }  // namespace
 
 void configureAssetPaths() {

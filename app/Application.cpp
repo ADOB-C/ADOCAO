@@ -1,4 +1,5 @@
 #include "Application.hpp"
+#include "PlatformPaths.hpp"
 #include "LauncherWindow.hpp"
 #include "LoadingWindow.hpp"
 #include "FileMap.hpp"
@@ -15,17 +16,6 @@
 #include <filesystem>
 #include <string>
 #include <vector>
-
-#ifdef __APPLE__
-#include <mach-o/dyld.h>
-#include <limits.h>
-#include <stdlib.h>
-#endif
-
-#ifdef __linux__
-#include <unistd.h>
-#include <limits.h>
-#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -96,39 +86,6 @@ static bool canAppendLog(const std::string& path) {
     return true;
 }
 
-// Directory of the running executable (symlinks resolved on macOS).
-static std::string executableDir() {
-#ifdef _WIN32
-    char buf[MAX_PATH];
-    DWORD n = GetModuleFileNameA(nullptr, buf, MAX_PATH);
-    if (n == 0 || n >= MAX_PATH) return {};
-    std::string p(buf, n);
-    const auto pos = p.find_last_of("\\/");
-    return pos == std::string::npos ? std::string{} : p.substr(0, pos);
-#elif defined(__APPLE__)
-    uint32_t size = 0;
-    _NSGetExecutablePath(nullptr, &size);
-    std::vector<char> buf(size > 0 ? size : 1);
-    if (_NSGetExecutablePath(buf.data(), &size) != 0) return {};
-    std::string dir(buf.data());
-    auto pos = dir.find_last_of('/');
-    if (pos != std::string::npos) dir = dir.substr(0, pos);
-    char resolved[PATH_MAX];
-    if (realpath(dir.c_str(), resolved)) dir = resolved;
-    return dir;
-#elif defined(__linux__)
-    char buf[PATH_MAX];
-    const ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-    if (n <= 0) return {};
-    buf[n] = '\0';
-    std::string dir(buf);
-    const auto pos = dir.find_last_of('/');
-    return pos == std::string::npos ? std::string{} : dir.substr(0, pos);
-#else
-    return {};
-#endif
-}
-
 // Where ADOCAO.log goes: next to the executable first. That is one predictable
 // location regardless of which directory you launched from — a CWD-relative log
 // used to litter whatever directory you happened to be in, $HOME included.
@@ -149,7 +106,7 @@ static const std::string& logPath() {
                 return p.string();
             }
         }
-        const std::string exeDir = executableDir();
+        const std::string exeDir = executableDirectory();
         if (!exeDir.empty() && exeDir.find("/Contents/MacOS") == std::string::npos) {
             const std::string p = exeDir + "/ADOCAO.log";
             if (canAppendLog(p)) return p;
@@ -233,6 +190,63 @@ static void initGlfwHints() {
 #endif
 }
 
+// 导出/加载/进游戏三段（launcher 与 CLI 两个入口共用；此前是逐行重复的两份）。
+static int runLevelToGame(LauncherConfig cfg) {
+    if (cfg.exportHitsounds) {
+        LevelData lvl;
+        FileMap map;
+        if (!map.open(cfg.levelPath) ||
+            !lvl.loadFromBuffer(map.data(), map.size(), nullptr, true)) {
+            LOG_E("Failed to load level for export");
+            glfwTerminate();
+            return 1;
+        }
+        Timeline timeline;
+        timeline.build(lvl, true);
+        HitsoundManager hm;
+        hm.setOutputSampleRate(AUDIO_SAMPLE_RATE);   // 导出固定 48k（与设备无关，保证可复现）
+        hm.init();
+        bool rawOk = false;
+        if (isRawPcmType(cfg.forceHitsoundType)) {
+            std::vector<float> pcm; double rate = 0.0;
+            if (timeline.buildRawPcm(pcm, rate)) rawOk = hm.preSynthesizeRawPcm(pcm, rate);
+        }
+        if (!rawOk && !hm.preSynthesize(timeline.getHitsoundTimestampGroups(), timeline.totalDuration())) {
+            LOG_E("Export: pre-synthesis failed");
+            glfwTerminate();
+            return 1;
+        }
+        const std::string outPath = hitsoundWavPath(cfg.levelPath, cfg.exportDir);
+        hm.writeWav(outPath);
+        LOG_I("Exported hitsounds to %s", outPath.c_str());
+        glfwTerminate();
+        return 0;
+    }
+
+    LoadResult loadResult;
+    if (cfg.preloadedLevel && cfg.preloadedTimeline) {
+        // 已预载 → 直接加载，**不弹加载窗**（用户："加载就别显示出来"）
+        LoadingProgress silent;
+        runLevelLoading(cfg, silent, loadResult);
+    } else {
+        showLoadingWindow([&](LoadingProgress& progress) {
+            runLevelLoading(cfg, progress, loadResult);
+        }, /*cliOnly=*/!cfg.capturePath.empty());
+    }
+
+    if (!loadResult.level) {
+        LOG_E("Failed to load level");
+        glfwTerminate();
+        return 1;
+    }
+
+    LOG_I("Level loaded: %zu tiles, BPM=%.1f", loadResult.level->tiles.size(), loadResult.level->settings.bpm);
+    showGameWindow(cfg, loadResult);
+    LOG_I("Game window closed, exiting.");
+    glfwTerminate();
+    return 0;
+}
+
 int runApplication(bool debugConsole) {
     earlyLog("[ADOCAO] main() entered");
 
@@ -270,65 +284,7 @@ int runApplication(bool debugConsole) {
           cfg.levelPath.c_str(), cfg.musicPath.c_str(),
           cfg.resolutionW, cfg.resolutionH, cfg.fullscreen);
 
-    // Export hitsounds to WAV and exit (no game window)
-    if (cfg.exportHitsounds) {
-        LevelData lvl;
-        FileMap map;
-        if (!map.open(cfg.levelPath) ||
-            !lvl.loadFromBuffer(map.data(), map.size(), nullptr, true)) {
-            LOG_E("Failed to load level for export");
-            glfwTerminate();
-            return 1;
-        }
-        Timeline timeline;
-        timeline.build(lvl, true);
-        HitsoundManager hm;
-        hm.setOutputSampleRate(AUDIO_SAMPLE_RATE);   // 导出固定 48k（与设备无关，保证可复现）
-        hm.init();
-        bool rawOk = false;
-        if (isRawPcmType(cfg.forceHitsoundType)) {
-            std::vector<float> pcm; double rate = 0.0;
-            if (timeline.buildRawPcm(pcm, rate)) rawOk = hm.preSynthesizeRawPcm(pcm, rate);
-        }
-        if (!rawOk && !hm.preSynthesize(timeline.getHitsoundTimestampGroups(), timeline.totalDuration())) {
-            LOG_E("Export: pre-synthesis failed");
-            glfwTerminate();
-            return 1;
-        }
-        // Output: <exportDir>/<levelname>_hitsounds.wav (default: level dir)
-        std::string outPath = hitsoundWavPath(cfg.levelPath, cfg.exportDir);
-        hm.writeWav(outPath);
-        LOG_I("Exported hitsounds to %s", outPath.c_str());
-        glfwTerminate();
-        return 0;
-    }
-
-    // Stage 2: Loading
-    LoadResult loadResult;
-    if (cfg.preloadedLevel && cfg.preloadedTimeline) {
-        // 已预载 → 直接加载，**不弹加载窗**（用户："加载就别显示出来"）
-        LoadingProgress silent;
-        runLevelLoading(cfg, silent, loadResult);
-    } else {
-        showLoadingWindow([&](LoadingProgress& progress) {
-            runLevelLoading(cfg, progress, loadResult);
-        }, /*cliOnly=*/!cfg.capturePath.empty());
-    }
-
-    if (!loadResult.level) {
-        LOG_E("Failed to load level");
-        glfwTerminate();
-        return 1;
-    }
-
-    LOG_I("Level loaded: %zu tiles, BPM=%.1f", loadResult.level->tiles.size(), loadResult.level->settings.bpm);
-
-    // Stage 3: Game
-    showGameWindow(cfg, loadResult);
-
-    LOG_I("Game window closed, exiting.");
-    glfwTerminate();
-    return 0;
+    return runLevelToGame(std::move(cfg));
 }
 
 int runApplicationFromCLI(const LauncherConfig& cfg, bool debugConsole) {
@@ -363,69 +319,5 @@ int runApplicationFromCLI(const LauncherConfig& cfg, bool debugConsole) {
           config.levelPath.c_str(), config.musicPath.c_str(),
           config.resolutionW, config.resolutionH, config.fullscreen);
 
-    if (config.exportHitsounds) {
-        // 导出的是 hitsound **混音**：没有音乐就无从合成（以前这里直接往下走 →
-        // 空音乐路径被喂给解码器 → **段错误**，而且因为日志只写文件，终端上什么都看不到）。
-        if (config.musicPath.empty()) {
-            std::fprintf(stderr,
-                         "adocao export 需要 --music <音频文件>：导出的是 hitsound 混音，没有音乐无从合成。\n");
-            LOG_E("Export: music path is empty (need --music)");
-            glfwTerminate();
-            return 2;
-        }
-        LevelData lvl;
-        FileMap map;
-        if (!map.open(config.levelPath) ||
-            !lvl.loadFromBuffer(map.data(), map.size(), nullptr, true)) {
-            LOG_E("Failed to load level for export");
-            glfwTerminate();
-            return 1;
-        }
-        Timeline timeline;
-        timeline.build(lvl, true);
-        HitsoundManager hm;
-        hm.setOutputSampleRate(AUDIO_SAMPLE_RATE);   // 导出固定 48k（与设备无关，保证可复现）
-        hm.init();
-        bool rawOk2 = false;
-        if (isRawPcmType(config.forceHitsoundType)) {
-            std::vector<float> pcm; double rate = 0.0;
-            if (timeline.buildRawPcm(pcm, rate)) rawOk2 = hm.preSynthesizeRawPcm(pcm, rate);
-        }
-        auto groups = timeline.getHitsoundTimestampGroups();
-        if (!rawOk2 && !hm.preSynthesize(groups, timeline.totalDuration())) {
-            LOG_E("Export: pre-synthesis failed");
-            glfwTerminate();
-            return 1;
-        }
-        std::string outPath = hitsoundWavPath(config.levelPath, config.exportDir);
-        hm.writeWav(outPath);
-        LOG_I("Exported hitsounds to %s", outPath.c_str());
-        glfwTerminate();
-        return 0;
-    }
-
-    LoadResult loadResult;
-    if (config.preloadedLevel && config.preloadedTimeline) {
-        // 已预载 → 直接加载，**不弹加载窗**（用户："加载就别显示出来"）
-        LoadingProgress silent;
-        runLevelLoading(config, silent, loadResult);
-    } else {
-        showLoadingWindow([&](LoadingProgress& progress) {
-            runLevelLoading(config, progress, loadResult);
-        }, /*cliOnly=*/!config.capturePath.empty());
-    }
-
-    if (!loadResult.level) {
-        LOG_E("Failed to load level");
-        glfwTerminate();
-        return 1;
-    }
-
-    LOG_I("Level loaded: %zu tiles, BPM=%.1f", loadResult.level->tiles.size(), loadResult.level->settings.bpm);
-
-    showGameWindow(config, loadResult);
-
-    LOG_I("Game window closed, exiting.");
-    glfwTerminate();
-    return 0;
+    return runLevelToGame(std::move(config));
 }

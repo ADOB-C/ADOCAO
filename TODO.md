@@ -763,7 +763,9 @@ off 那两个采样值相等=被钳住，on 是正常插值，差值正好是**�
 - [x] style 几何差异（2026-10-17）：`buildShape(styleWidth/styleLength)` + 形状键带 style
       （Basic/Neon/NeonLight 放大、Minimal 半长 −0.03）。
 - [x] Volume（2026-10-17）：AudioEngine 的 50 Hz RMS 包络 + `amplitudeAt` → 逐帧颜色。
+- [x] Gems 宝石网格（2026-10-17）：新增砖 part `P_GEM`（八边形，两圈记录），canonical 槽位
+      175 → 193、索引 426 → 474、形状记录 25 → 29 texel；`geom_probe` 逐位 0 失败。
 - [ ] 砖色渲染剩余：① Neon/NeonLight/Basic/Minimal 的 **2×128 渐变条**（要给顶点补
-      "距外缘归一化 v"，在 `TileShape::expand` 侧算，别动几何位精确）；② Gems 宝石网格；
-      ③ 逐砖 alpha；④ TweenColor 插值；⑤ 抓帧状态补 6 种 trackStyle + 3 种 pulse 的对照图；
-      ⑥ 向导 Colors 页文案（现在只影响高亮/`--fill`）。
+      "距外缘归一化 v"，在 `TileShape::expand` 侧算，别动几何位精确）；② 逐砖 alpha；
+      ③ TweenColor 插值；④ 抓帧状态补 6 种 trackStyle + 3 种 pulse 的对照图；
+      ⑤ 向导 Colors 页文案（现在只影响高亮/`--fill`）。

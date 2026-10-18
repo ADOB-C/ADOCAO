@@ -33,7 +33,7 @@ static void buildTablesOnce() {
     // 砖：每层的 part 槽位。圆的环用 `createCircle` 里同一批单位圆常量
     // （`a = 2πi/res`，`std::cos/std::sin` 的 float 结果；槽 0 是圆心，常量不用）。
     for (int layer = 0; layer < kLayers; layer++) {
-        for (int part = P_CIRCLE; part <= P_PENT; part++) {
+        for (int part = P_CIRCLE; part <= P_GEM; part++) {
             int base = partBase(layer, part);
             int n = partSlotCount(part);
             for (int i = 0; i < n; i++) {
@@ -45,6 +45,11 @@ static void buildTablesOnce() {
                 r.k0 = r.k1 = 0.0f;
                 if (part == P_CIRCLE && i > 0) {
                     float a = (2.0f * 3.14159265f * (float)(i - 1)) / 32.0f;
+                    r.k0 = std::cos(a);
+                    r.k1 = std::sin(a);
+                } else if (part == P_GEM && i > 0) {
+                    // 八边形、相位 π/8（上下左右都是平边，与官方 Gem 一致）
+                    float a = 3.14159265f / 8.0f + (3.14159265f / 4.0f) * (float)(i - 1);
                     r.k0 = std::cos(a);
                     r.k1 = std::sin(a);
                 }
@@ -92,6 +97,10 @@ static void buildTablesOnce() {
         tri((uint16_t)p, (uint16_t)(p + 1), (uint16_t)(p + 2));
         tri((uint16_t)(p + 2), (uint16_t)(p + 3), (uint16_t)p);
         tri((uint16_t)(p + 4), (uint16_t)(p + 5), (uint16_t)(p + 6));
+        // Gems：八边形扇形（圆心 + 8 个顶点）→ 8 个三角形/层
+        int g = (uint16_t)partBase(layer, P_GEM);
+        for (int i = 1; i < 8; i++) tri((uint16_t)g, (uint16_t)(g + i), (uint16_t)(g + i + 1));
+        tri((uint16_t)g, (uint16_t)(g + 8), (uint16_t)(g + 1));
     }
     for (int part = P_ICON_TWIRL; part <= P_ICON_SSDN; part++) {
         int c = (uint16_t)iconBase(part);
@@ -110,6 +119,7 @@ bool partActive(int mode, int part) {
         case 1: return part == P_BIGQ || part == P_CAPS;                        // BIG
         case 2: return part == P_CIRCLE || part == P_EXT4;                      // ZERO
         case 3: return part == P_PENT;                                          // MIDSPIN
+        case 4: return part == P_GEM;                                           // GEMS
     }
     return false;
 }
@@ -130,9 +140,21 @@ static void setRec(PartRecord& r, float a0 = 0, float a1 = 0, float a2 = 0, floa
 }
 static PartRecord& rec(Shape& s, int part, int layer) { return s.rec[part * kLayers + layer]; }
 
-Shape buildShape(float sa, float ea, bool mid, float styleWidth, float styleLength) {
+Shape buildShape(float sa, float ea, bool mid, float styleWidth, float styleLength, bool gems) {
     constexpr float PI = 3.14159265f;
     Shape s;
+    if (gems) {
+        // createGemsMesh：八边形宝石，**不随角度旋转**；外环到内盘 = 一层描边 + 一层填充。
+        // 中间那圈"第二个黑八边形"与两侧同色（描边色），视觉上不可分，所以只用两圈。
+        s.mode = 4;
+        const float ro = styleWidth + OUTLINE;   // 外环半径
+        const float ri = styleWidth - OUTLINE;   // 内盘半径
+        setRec(rec(s, P_GEM, 0), 0.0f, 0.0f, ro);
+        setRec(rec(s, P_GEM, 1), 0.0f, 0.0f, ri);
+        for (int part = P_CIRCLE; part <= P_PENT; part++) {
+            setRec(rec(s, part, 0)); setRec(rec(s, part, 1));
+        }
+    } else {
     // 参考实现：m11 = cos(sa*PI/180), m12 = sin(...), m21 = cos(ea*PI/180), m22 = sin(...)
     float m11 = std::cos(sa * PI / 180.0f), m12 = std::sin(sa * PI / 180.0f);
     float m21 = std::cos(ea * PI / 180.0f), m22 = std::sin(ea * PI / 180.0f);
@@ -233,13 +255,14 @@ Shape buildShape(float sa, float ea, bool mid, float styleWidth, float styleLeng
         }
     }
 
+    }
     // 局部包围盒：与今天的 `TileMesh::build` 同一算法（float 顶点 → double 逐点 min/max），
     // 只统计活动 part 的槽位（= 参考实现真正吐出来的那些顶点）。剔除结果因此逐位不变。
     Expanded ex;
     expand(s, ex);
     double mnX = 1e99, mnY = 1e99, mxX = -1e99, mxY = -1e99;
     for (int layer = 0; layer < kLayers; layer++) {
-        for (int part = P_CIRCLE; part <= P_PENT; part++) {
+        for (int part = P_CIRCLE; part <= P_GEM; part++) {
             if (!partActive(s.mode, part)) continue;
             int base = partBase(layer, part);
             int n = partSlotCount(part);
@@ -271,14 +294,14 @@ void expand(const Shape& s, Expanded& out) {
         out.pos[(size_t)i * 3 + 0] = kCollapsed[0];
         out.pos[(size_t)i * 3 + 1] = kCollapsed[1];
         out.pos[(size_t)i * 3 + 2] = kCollapsed[2];
-        // 类型按层给：0..61 描边、62..123 填充、图标恒为 1。不活动的槽位也照给 ——
+        // 类型按层给：0..70 描边、71..141 填充、图标恒为 1。不活动的槽位也照给 ——
         // 它们零面积不产生片元，但"描边整段排在填充前"这条不变量要保持结构上成立。
         out.type[i] = (i >= kTileSlots) ? 1.0f : ((i < kTileSlotsPerLayer) ? 0.0f : 1.0f);
     }
     const Recipe* rc = recipeTable();
     for (int layer = 0; layer < kLayers; layer++) {
         float type = (float)layer;   // 0 = 描边，1 = 填充（参考实现的 pushType 取值）
-        for (int part = P_CIRCLE; part <= P_PENT; part++) {
+        for (int part = P_CIRCLE; part <= P_GEM; part++) {
             if (!partActive(s.mode, part)) continue;
             const PartRecord& r = s.rec[part * kLayers + layer];
             int base = partBase(layer, part);
@@ -286,7 +309,7 @@ void expand(const Shape& s, Expanded& out) {
             float cx = r.p[0], cy = r.p[1], r0 = r.p[2];
             for (int i = 0; i < n; i++) {
                 float x = 0.0f, y = 0.0f;
-                if (part == P_CIRCLE) {
+                if (part == P_CIRCLE || part == P_GEM) {
                     if (i == 0) { x = cx; y = cy; }
                     else {
                         // createCircle：`cos(a)*radius + cx` → 单条 fmadd
@@ -384,7 +407,7 @@ int packShapeTable(const Shape* shapes, int count, std::vector<float>& out) {
     size_t rows = (texels + kTexW - 1) / kTexW;
     out.assign(rows * kTexW * 4, 0.0f);
     for (int s = 0; s < count; s++) {
-        for (int part = P_CIRCLE; part <= P_PENT; part++) {
+        for (int part = P_CIRCLE; part <= P_GEM; part++) {
             for (int layer = 0; layer < kLayers; layer++) {
                 const PartRecord& r = shapes[s].rec[part * kLayers + layer];
                 size_t base = ((size_t)s * kTexelsPerShape +
@@ -395,7 +418,7 @@ int packShapeTable(const Shape* shapes, int count, std::vector<float>& out) {
         }
         // 标志 texel：活动位掩码 + mode（VS 用它决定展开还是塌陷；与 partActive() 同源）
         float mask = 0.0f;
-        for (int part = P_CIRCLE; part <= P_PENT; part++)
+        for (int part = P_CIRCLE; part <= P_GEM; part++)
             if (partActive(shapes[s].mode, part)) mask += (float)(1 << part);
         size_t fb = ((size_t)s * kTexelsPerShape + kFlagTexel) * 4;
         out[fb] = mask;

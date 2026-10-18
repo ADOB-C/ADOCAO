@@ -50,7 +50,13 @@
 **还没做**：
 * Neon/NeonLight/Basic/Minimal 的 **2×128 渐变条**（需要给每个顶点补一个"距外缘归一化"的 v，
   在 `TileShape::expand` 侧算；现在是硬边 ring，颜色对、过渡不对）。
-* **Gems 的宝石网格**（现在用 Standard 几何 + Gems 颜色）。
+* ~~Gems 的宝石网格~~ —— 2026-10-17 已落地：新增砖 part `P_GEM`（槽 0=圆心、1..8=八边形顶点，
+  配方常量是相位 π/8 的单位八边形），`buildShape(..., gems=true)` 用**两圈**记录
+  （描边半径 `width+OUTLINE`、填充半径 `width−OUTLINE`）——Re_ADOJAS 的 `createGemsMesh`
+  中间那圈黑八边形与两侧同色、视觉不可分，所以不需要第三圈；端盖顶点它也**不引用**。
+  `P_GEM` 让 canonical 槽位从 175 → **193**（砖 142 + 图标 51），索引表 426 → 474，
+  形状记录 25 → 29 texel；`tile.vert` 的 `fetchRec` 里 `layer * 6` 同步改成 `layer * 7`，
+  `tile_cpu.vert` 的槽位/层边界常量也同步。几何逐位对拍（`geom_probe`，197 万坐标）**0 失败**。
 * 逐砖 alpha（8 位 hex 的 AA）。
 * TweenColor（`duration`/`ease` 已解析进 `ColorEvent`，插值未接）。
 * 向导 Colors 页现在只影响高亮/`--fill` 覆盖（谱面颜色优先），UI 文案要跟着改。

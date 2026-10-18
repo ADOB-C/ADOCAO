@@ -255,7 +255,8 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
         std::vector<int>& tileIndices = kv.second;
         const uint32_t shapeIdx = (uint32_t)m_shapes.size();
         m_shapes.push_back(TileShape::buildShape(key.sa / 100.0f, key.ea / 100.0f, key.mid,
-                                                 styleWidthOf(key.style), styleLengthOf(key.style)));
+                                                 styleWidthOf(key.style), styleLengthOf(key.style),
+                                                 key.style == 4));   // 4 = Gems
         m_shapeIndex[packShapeKey(key.sa / 100.0f, key.ea / 100.0f, key.mid, key.style)] = shapeIdx;
     }
     // 绘制顺序 = **按砖号（= 层号）升序**（2026-10-15 起）：所以不再需要 `m_drawOrder` 那支

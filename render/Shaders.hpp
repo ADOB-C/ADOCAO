@@ -73,11 +73,11 @@ const vec3  kSSDownColor= vec3(0.0, 0.0, 1.0);
 float rp(float a, float b) { return fma(a, b, 0.0); }
 
 // 活动位掩码的 6 个 bit（与 TileShape::partActive 的 P_CIRCLE..P_PENT 对应）
-const float maskbits[6] = float[6](1.0, 2.0, 4.0, 8.0, 16.0, 32.0);
+const float maskbits[7] = float[7](1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0);
 
 // 取 (形状, code) 那条记录的 8 个 float（code = layer*6 + part；一个形状 25 个 texel）
 void fetchRec(float shape, float code, out vec4 A, out vec4 B) {
-    int t = int(shape) * 25 + int(code) * 2;
+    int t = int(shape) * 29 + int(code) * 2;
     ivec2 c0 = ivec2(t % kTexW, t / kTexW);
     int t1 = t + 1;
     ivec2 c1 = ivec2(t1 % kTexW, t1 / kTexW);
@@ -98,28 +98,28 @@ void main() {
     vec3  color = mix(mix(uStrokeColor, uFillColor, layer),
                       mix(aStrokeColor, aFillColor, layer), uUseInstColor);
 
-    if (part > 5.5) {
+    if (part > 6.5) {
         // ---- 图标（颜色/ Z 只由 part + 是否同时有 twirl 决定）----
         bool tw = mod(aIconBits, 2.0) >= 1.0;
         bool up = mod(floor(aIconBits / 2.0), 2.0) >= 1.0;
         bool dn = floor(aIconBits / 4.0) >= 1.0;
-        bool on = (part < 6.5) ? tw : ((part < 7.5) ? up : dn);
+        bool on = (part < 7.5) ? tw : ((part < 8.5) ? up : dn);
         if (on) {
             // 与 TileMesh::buildIcons 同式：twirl 用 kIconZBase，SetSpeed 用
             // kIconZBase + (有 twirl ? kIconZExtra : kIconZBase*0.5)；实例偏移的 z 里是砖的 Z，
             // 所以最终 z = 砖 Z + 这里的 zo（两个变量的相加，逐位等于参考的 tz + zo）。
-            float zo = (part < 6.5) ? kIconZBase
+            float zo = (part < 7.5) ? kIconZBase
                                     : (kIconZBase + (tw ? kIconZExtra : kIconZBase * 0.5));
             pos = vec3(k0, k1, zo);
             type = 1.0;
-            color = (part < 6.5) ? kTwirlColor : ((part < 7.5) ? kSSUpColor : kSSDownColor);
+            color = (part < 7.5) ? kTwirlColor : ((part < 8.5) ? kSSUpColor : kSSDownColor);
         }
     } else {
         vec4 A, B;
-        fetchRec(aShape, layer * 6.0 + part, A, B);
+        fetchRec(aShape, layer * 7.0 + part, A, B);
         // 活动位掩码（形状表每个形状的最后一个 texel；bit i = part i 活动）。与 CPU 的
         // TileShape::partActive() 同源 —— 这里写成查表而不是 mode 的 switch，是为了不引入分支。
-        int t = int(aShape) * 25 + 24;
+        int t = int(aShape) * 29 + 28;
         float mask = texelFetch(uShapeTex, ivec2(t % kTexW, t / kTexW), 0).x;
         float bit = maskbits[int(part + 0.5)];
         if (mod(floor(mask / bit), 2.0) >= 0.5) {
@@ -164,7 +164,7 @@ void main() {
                 else if (s == 1) pos = vec3(fma(-w, m2, fma(l, m1, mx)), fma(w, m1, fma(l, m2, my)), 0.0);
                 else if (s == 2) pos = vec3(fma(-w, m2, mx), fma(w, m1, my), 0.0);
                 else             pos = vec3(fma(w, m2, mx), fma(-w, m1, my), 0.0);
-            } else {
+            } else if (part < 5.5) {
                 // PENT：中旋五边形。结构与 EXT4 **不同**（同长相的算式，编译器在不同上下文里
                 // 选了不同的一步融合）—— 两项式 = fma(l,m1, rp(w,m2)) + mx，单项式 = rp(w,m) + mx。
                 float mx = A.x, my = A.y, m1 = A.z, m2 = A.w, w = B.x, l = B.y;
@@ -175,6 +175,10 @@ void main() {
                 else if (s == 4) pos = vec3(-(rp(w, m1)) + mx, -(rp(w, m2)) + my, 0.0);
                 else if (s == 5) pos = vec3(rp(w, m2) + mx, -(rp(w, m1)) + my, 0.0);
                 else             pos = vec3(-(rp(w, m2)) + mx, rp(w, m1) + my, 0.0);
+            } else {
+                // GEM：八边形宝石（与 CIRCLE 同式，配方常量是 8 边形单位顶点）
+                if (s == 0) { pos = vec3(A.x, A.y, 0.0); }
+                else        { pos = vec3(fma(k0, A.z, A.x), fma(k1, A.z, A.y), 0.0); }
             }
         }
     }
@@ -235,8 +239,8 @@ layout(location = 3) in float aIconBits;    // 每实例：bit0 twirl / bit1 ssU
 
 uniform sampler2D uSlotTex;
 const int kTexW = 1024;         // TileShape::kTexW
-const int kSlots = 175;         // TileShape::kTotalSlots（6 part × 2 层 + 3 图标 part × 17）
-const int kTileSlots = 124;     // 前 124 个是砖（描边 62 + 填充 62），之后是图标
+const int kSlots = 193;         // TileShape::kTotalSlots（7 part × 2 层 + 3 图标 part × 17）
+const int kTileSlots = 142;     // 前 142 个是砖（描边 71 + 填充 71），之后是图标
 
 uniform mat4  uVP;
 uniform vec3  uFillColor;
@@ -271,22 +275,22 @@ void main() {
     // （与 TileShape::expand() 写出的 out.type 一致）
     int   v     = int(gl_VertexID);
     vec3  pos   = vec3(0.0);                  // 塌陷点
-    float type  = (v < 62) ? 0.0 : 1.0;
+    float type  = (v < 71) ? 0.0 : 1.0;
     vec3  color = mix(mix(uStrokeColor, uFillColor, type),
                       mix(aStrokeColor, aFillColor, type), uUseInstColor);
 
-    if (part > 5.5) {
+    if (part > 6.5) {
         // ---- 图标：算式与 tile.vert 相同（不含 fma，3.3 直接能算）----
         bool tw = mod(aIconBits, 2.0) >= 1.0;
         bool up = mod(floor(aIconBits / 2.0), 2.0) >= 1.0;
         bool dn = floor(aIconBits / 4.0) >= 1.0;
-        bool on = (part < 6.5) ? tw : ((part < 7.5) ? up : dn);
+        bool on = (part < 7.5) ? tw : ((part < 8.5) ? up : dn);
         if (on) {
-            float zo = (part < 6.5) ? kIconZBase
+            float zo = (part < 7.5) ? kIconZBase
                                     : (kIconZBase + (tw ? kIconZExtra : kIconZBase * 0.5));
             pos = vec3(k0, k1, zo);
             type = 1.0;
-            color = (part < 6.5) ? kTwirlColor : ((part < 7.5) ? kSSUpColor : kSSDownColor);
+            color = (part < 7.5) ? kTwirlColor : ((part < 8.5) ? kSSUpColor : kSSDownColor);
         }
     } else if (v < kTileSlots) {
         // ---- 砖：CPU 展开表 ----

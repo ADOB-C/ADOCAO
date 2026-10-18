@@ -25,8 +25,8 @@ layout(location = 3) in float aIconBits;    // 每实例：bit0 twirl / bit1 ssU
 
 uniform sampler2D uSlotTex;
 const int kTexW = 1024;         // TileShape::kTexW
-const int kSlots = 175;         // TileShape::kTotalSlots（6 part × 2 层 + 3 图标 part × 17）
-const int kTileSlots = 124;     // 前 124 个是砖（描边 62 + 填充 62），之后是图标
+const int kSlots = 193;         // TileShape::kTotalSlots（7 part × 2 层 + 3 图标 part × 17）
+const int kTileSlots = 142;     // 前 142 个是砖（描边 71 + 填充 71），之后是图标
 
 uniform mat4  uVP;
 uniform vec3  uFillColor;
@@ -61,22 +61,22 @@ void main() {
     // （与 TileShape::expand() 写出的 out.type 一致）
     int   v     = int(gl_VertexID);
     vec3  pos   = vec3(0.0);                  // 塌陷点
-    float type  = (v < 62) ? 0.0 : 1.0;
+    float type  = (v < 71) ? 0.0 : 1.0;
     vec3  color = mix(mix(uStrokeColor, uFillColor, type),
                       mix(aStrokeColor, aFillColor, type), uUseInstColor);
 
-    if (part > 5.5) {
+    if (part > 6.5) {
         // ---- 图标：算式与 tile.vert 相同（不含 fma，3.3 直接能算）----
         bool tw = mod(aIconBits, 2.0) >= 1.0;
         bool up = mod(floor(aIconBits / 2.0), 2.0) >= 1.0;
         bool dn = floor(aIconBits / 4.0) >= 1.0;
-        bool on = (part < 6.5) ? tw : ((part < 7.5) ? up : dn);
+        bool on = (part < 7.5) ? tw : ((part < 8.5) ? up : dn);
         if (on) {
-            float zo = (part < 6.5) ? kIconZBase
+            float zo = (part < 7.5) ? kIconZBase
                                     : (kIconZBase + (tw ? kIconZExtra : kIconZBase * 0.5));
             pos = vec3(k0, k1, zo);
             type = 1.0;
-            color = (part < 6.5) ? kTwirlColor : ((part < 7.5) ? kSSUpColor : kSSDownColor);
+            color = (part < 7.5) ? kTwirlColor : ((part < 8.5) ? kSSUpColor : kSSDownColor);
         }
     } else if (v < kTileSlots) {
         // ---- 砖：CPU 展开表 ----

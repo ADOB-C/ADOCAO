@@ -20,36 +20,9 @@ Planet::~Planet() {
     delete trail;
 }
 
-Planet::Planet(Planet&& o) noexcept
-    : position(o.position), color(o.color), radius(o.radius), trail(o.trail),
-      m_vao(o.m_vao), m_vbo(o.m_vbo), m_ebo(o.m_ebo), m_indexCount(o.m_indexCount) {
-    o.trail = nullptr;
-    o.m_vao = o.m_vbo = o.m_ebo = 0;
-    o.m_indexCount = 0;
-}
-
-Planet& Planet::operator=(Planet&& o) noexcept {
-    if (this != &o) {
-        destroyGPU();
-        delete trail;
-        position = o.position; color = o.color; radius = o.radius;
-        trail = o.trail; m_vao = o.m_vao; m_vbo = o.m_vbo; m_ebo = o.m_ebo;
-        m_indexCount = o.m_indexCount;
-        o.trail = nullptr;
-        o.m_vao = o.m_vbo = o.m_ebo = 0;
-        o.m_indexCount = 0;
-    }
-    return *this;
-}
-
 void Planet::setTrailPoints(const double* xy, int count, int maxExpected) {
     if (trail)
         trail->setPoints(xy, count, maxExpected);
-}
-
-void Planet::clearTrail() {
-    if (trail)
-        trail->clear();
 }
 
 void Planet::destroyGPU() {
@@ -114,7 +87,6 @@ bool Planet::buildGPU() {
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned), indices.data(), GL_STATIC_DRAW);
 
     glBindVertexArray(0);
-    return true;
 }
 
 void Planet::draw(Shader& shader, const Camera& camera, double camX, double camY) const {

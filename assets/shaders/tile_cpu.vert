@@ -45,8 +45,6 @@ out vec3  vColor;
 out float vOpacity;
 
 // 图标（与 TileMesh.cpp 的 IR/IS/三种颜色一致；z 与砖共面，谁盖谁由索引表顺序决定）
-const float kIconZBase  = 0.0;
-const float kIconZExtra = 0.0;
 const vec3  kTwirlColor = vec3(0.502, 0.0, 0.502);
 const vec3  kSSUpColor  = vec3(1.0, 0.0, 0.0);
 const vec3  kSSDownColor= vec3(0.0, 0.0, 1.0);
@@ -76,9 +74,7 @@ void main() {
         bool dn = floor(aIconBits / 4.0) >= 1.0;
         bool on = (part < 7.5) ? tw : ((part < 8.5) ? up : dn);
         if (on) {
-            float zo = (part < 7.5) ? kIconZBase
-                                    : (kIconZBase + (tw ? kIconZExtra : kIconZBase * 0.5));
-            pos = vec3(k0, k1, zo);
+            pos = vec3(k0, k1, 0.0);   // 图标与砖共面
             type = 1.0;
             color = (part < 7.5) ? kTwirlColor : ((part < 8.5) ? kSSUpColor : kSSDownColor);
         }

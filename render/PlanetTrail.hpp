@@ -17,8 +17,6 @@ public:
 
     PlanetTrail(const PlanetTrail&) = delete;
     PlanetTrail& operator=(const PlanetTrail&) = delete;
-    PlanetTrail(PlanetTrail&&) noexcept;
-    PlanetTrail& operator=(PlanetTrail&&) noexcept;
 
     void setPoints(const double* xy, int count, int maxExpected);
     void draw(Shader& shader, const Camera& camera, double camX, double camY);
@@ -27,7 +25,6 @@ public:
 private:
     struct Point { glm::dvec2 pos; float time; };
     std::vector<Point> m_points;
-    int m_head = 0;
     int m_count = 0;
 
     std::vector<float> m_verts;
@@ -41,18 +38,15 @@ private:
 
     mutable GLuint m_vao = 0, m_vbo = 0, m_ebo = 0;
     mutable int m_gpuMaxPoints = 0;  // GL buffers sized for this many ring points
-    mutable unsigned m_vertexCount = 0, m_indexCount = 0;
-    mutable bool m_dirty = false;
+    mutable unsigned m_indexCount = 0;
 
-    Point& ringAt(int i) { return m_points[(m_head + i) % m_maxPoints]; }
-    const Point& ringAt(int i) const { return m_points[(m_head + i) % m_maxPoints]; }
+    Point& ringAt(int i) { return m_points[i]; }
 
     static glm::dvec2 catmullRom(const glm::dvec2& p0, const glm::dvec2& p1,
                                 const glm::dvec2& p2, const glm::dvec2& p3, float t);
     static glm::dvec2 catmullRomTangent(const glm::dvec2& p0, const glm::dvec2& p1,
                                        const glm::dvec2& p2, const glm::dvec2& p3, float t);
 
-    void rebuildGeometry();
     void ensureGPUResources() const;
 };
 

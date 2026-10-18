@@ -84,40 +84,6 @@ inline void pushAttr(std::vector<float>& v, float ox, float oy, float oz, uint32
 
 TileMesh::~TileMesh() { destroy(); }
 
-TileMesh::TileMesh(TileMesh&& o) noexcept
-    : m_vao(o.m_vao), m_recipeVbo(o.m_recipeVbo), m_ebo(o.m_ebo), m_instVbo(o.m_instVbo),
-      m_shapeTex(o.m_shapeTex), m_slotTex(o.m_slotTex), m_slotRows(o.m_slotRows),
-      m_cpuGeometry(o.m_cpuGeometry), m_instCapacity(o.m_instCapacity), m_shapeRows(o.m_shapeRows),
-      m_shapes(std::move(o.m_shapes)), m_level(o.m_level),
-      m_chunkX(std::move(o.m_chunkX)), m_chunkY(std::move(o.m_chunkY)),
-      m_cullIndex(std::move(o.m_cullIndex)), m_cullHalf(o.m_cullHalf),
-      m_visible(std::move(o.m_visible)), m_nTiles(o.m_nTiles) {
-    std::memcpy(m_fill, o.m_fill, sizeof m_fill);
-    std::memcpy(m_stroke, o.m_stroke, sizeof m_stroke);
-    o.m_vao = o.m_recipeVbo = o.m_ebo = o.m_instVbo = o.m_shapeTex = 0;
-    o.m_slotTex = 0;
-    o.m_nTiles = 0;
-}
-
-TileMesh& TileMesh::operator=(TileMesh&& o) noexcept {
-    if (this != &o) {
-        destroy();
-        m_vao = o.m_vao; m_recipeVbo = o.m_recipeVbo; m_ebo = o.m_ebo;
-        m_instVbo = o.m_instVbo; m_shapeTex = o.m_shapeTex;
-        m_instCapacity = o.m_instCapacity; m_shapeRows = o.m_shapeRows;
-        m_shapes = std::move(o.m_shapes);
-        m_level = o.m_level;
-        m_chunkX = std::move(o.m_chunkX); m_chunkY = std::move(o.m_chunkY);
-        m_visible = std::move(o.m_visible);
-        m_cullIndex = std::move(o.m_cullIndex); m_cullHalf = o.m_cullHalf; m_nTiles = o.m_nTiles;
-        std::memcpy(m_fill, o.m_fill, sizeof m_fill);
-        std::memcpy(m_stroke, o.m_stroke, sizeof m_stroke);
-        o.m_vao = o.m_recipeVbo = o.m_ebo = o.m_instVbo = o.m_shapeTex = 0;
-        o.m_nTiles = 0;
-    }
-    return *this;
-}
-
 void TileMesh::destroyStaticGL() {
     if (m_instVbo) glDeleteBuffers(1, &m_instVbo);
     if (m_ebo) glDeleteBuffers(1, &m_ebo);
@@ -235,7 +201,6 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
 
     m_shapes.reserve(shapeGroups.size());
     m_level = &level;
-    m_windowChecked = false;
 
     // 每块一个 double 原点（取块内第一块砖的位置）—— 块内偏移用 float 才不丢精度（见 .hpp）
     const size_t chunkSize = (size_t)1 << kPosChunkShift;
@@ -273,7 +238,6 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
         half = std::max(half, std::abs(sh.localMinY));
         half = std::max(half, std::abs(sh.localMaxY));
     }
-    m_cullHalf = half;
     // 粒度：设置值（`--cull-block` / wizard Graphics 页）→ env 钩子覆盖 → 合法范围钳制。
     // 0 或负数 = 关闭索引（走全扫）。
     int wantFloors = m_cullFloors;
@@ -610,7 +574,6 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
     if (lodStride != m_lodStride) {
         LOG_I("lod: 每单位 %.3f px → 抽稀步长 %zu（此前 %zu）", pxPerUnit, lodStride, m_lodStride);
         m_listValid = false;                               // 步长一变，列表作废
-        m_lodStride = lodStride;
     }
     m_lodStride = lodStride;
     const double tolX = (viewR - viewL) / 1024.0, tolY = (viewT - viewB) / 1024.0;
@@ -632,19 +595,13 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
             // 见类注释；像素门槛 51/51 + 巨谱 16 帧 A/B 已验证）。
             std::vector<std::pair<size_t, size_t>> ranges;   // [begin, end)
             size_t candidates = 0;
-            size_t hitBlocks = 0;
-            int64_t lastBlk = -1;
             m_cullIndex.forEachHitBlock(vl, vr, vb, vt, [&](uint32_t f, uint32_t c) {
                 ranges.emplace_back((size_t)f, (size_t)f + (size_t)c);
                 candidates += c;
-                const int64_t blk = (int64_t)((size_t)f / m_cullIndex.floorsPerBlock());
-                if (blk != lastBlk) { lastBlk = blk; ++hitBlocks; }
             });
             // ⑦ 闸①：候选太多**降级**为"只画离相机最近的块"（累计候选 ≤ 预算）。
             // 不能直接不画 —— 那会整帧黑屏（只剩行星/拖尾），实测被用户一眼看出来 ✗。
-            const bool limitOff = std::getenv("ADOCAO_CULL_LIMIT") &&
-                                  std::atoi(std::getenv("ADOCAO_CULL_LIMIT")) == 0;
-            if (!limitOff && candidates > kMaxCullCandidates * m_lodStride) {
+            if (!limitOffCache() && candidates > kMaxCullCandidates * m_lodStride) {
                 limitWarn("cull-candidates", candidates);
                 const size_t before = candidates;
                 // 按层号顺序边剔边收，**可见数够 kMaxInstances 就停** —— 工作量由输出封顶。
@@ -669,7 +626,6 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
                 LOG_W("cull-limit: 降级为就近细块 —— 候选 %zu → %zu 块 / 可见 %zu（预算 %zu）",
                       before, ranges.size(), m_listTiles.size(), kMaxInstances);
                 ranges.clear();          // 让下面的并行段变成空操作（列表已经填好了）
-                candidates = 0;
             }
 
             // 把命中块按"约 CHUNK 块砖"切成并行任务（保持块序）
@@ -768,7 +724,7 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
         // 两段式 LOD：第一遍按当前步长剔完，若**真实可见数**超预算 → 用
         // `ceil(可见/预算)` 重剔一遍（确定性、无历史依赖；第二遍只测 可见/步长 ≈ 预算 块砖，
         // 所以很便宜）。这比"截断列表"好：截断丢掉的是整片区域，抽稀是均匀采样 ✓。
-        if (m_listTiles.size() > kMaxInstances && !limitOffCache() && m_lodStride == lodStride) {
+        if (m_listTiles.size() > kMaxInstances && !limitOffCache()) {
             const size_t visible1 = m_listTiles.size();
             const size_t need = (visible1 + kMaxInstances - 1) / kMaxInstances;
             if (need > m_lodStride) {

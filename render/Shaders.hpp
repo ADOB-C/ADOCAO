@@ -66,8 +66,6 @@ uniform vec2 uProbeSize;   // (W, H)：像素画布尺寸
 // （677 万层时 1.3e-6），抬高 0.002 等于让图标穿透前面约 1500 块砖（5564 层的谱也穿透 1 块多）。
 // 现在与砖**完全共面**：谁盖谁由绘制序决定（索引表：描边 → 填充 → twirl → ssUp → ssDn）——
 // 和砖自己的描边/填服用的是同一套机制（GL_LEQUAL，同深度靠后来者赢）。
-const float kIconZBase  = 0.0;
-const float kIconZExtra = 0.0;
 const vec3  kTwirlColor = vec3(0.502, 0.0, 0.502);
 const vec3  kSSUpColor  = vec3(1.0, 0.0, 0.0);
 const vec3  kSSDownColor= vec3(0.0, 0.0, 1.0);
@@ -109,12 +107,7 @@ void main() {
         bool dn = floor(aIconBits / 4.0) >= 1.0;
         bool on = (part < 7.5) ? tw : ((part < 8.5) ? up : dn);
         if (on) {
-            // 与 TileMesh::buildIcons 同式：twirl 用 kIconZBase，SetSpeed 用
-            // kIconZBase + (有 twirl ? kIconZExtra : kIconZBase*0.5)；实例偏移的 z 里是砖的 Z，
-            // 所以最终 z = 砖 Z + 这里的 zo（两个变量的相加，逐位等于参考的 tz + zo）。
-            float zo = (part < 7.5) ? kIconZBase
-                                    : (kIconZBase + (tw ? kIconZExtra : kIconZBase * 0.5));
-            pos = vec3(k0, k1, zo);
+            pos = vec3(k0, k1, 0.0);   // 图标与砖共面（谁盖谁由绘制序决定）
             type = 1.0;
             color = (part < 7.5) ? kTwirlColor : ((part < 8.5) ? kSSUpColor : kSSDownColor);
         }
@@ -280,8 +273,6 @@ out vec3  vColor;
 out float vOpacity;
 
 // 图标（与 TileMesh.cpp 的 IR/IS/三种颜色一致；z 与砖共面，谁盖谁由索引表顺序决定）
-const float kIconZBase  = 0.0;
-const float kIconZExtra = 0.0;
 const vec3  kTwirlColor = vec3(0.502, 0.0, 0.502);
 const vec3  kSSUpColor  = vec3(1.0, 0.0, 0.0);
 const vec3  kSSDownColor= vec3(0.0, 0.0, 1.0);
@@ -311,9 +302,7 @@ void main() {
         bool dn = floor(aIconBits / 4.0) >= 1.0;
         bool on = (part < 7.5) ? tw : ((part < 8.5) ? up : dn);
         if (on) {
-            float zo = (part < 7.5) ? kIconZBase
-                                    : (kIconZBase + (tw ? kIconZExtra : kIconZBase * 0.5));
-            pos = vec3(k0, k1, zo);
+            pos = vec3(k0, k1, 0.0);   // 图标与砖共面
             type = 1.0;
             color = (part < 7.5) ? kTwirlColor : ((part < 8.5) ? kSSUpColor : kSSDownColor);
         }

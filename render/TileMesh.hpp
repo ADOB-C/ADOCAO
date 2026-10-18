@@ -46,8 +46,6 @@ public:
     ~TileMesh();
     TileMesh(const TileMesh&) = delete;
     TileMesh& operator=(const TileMesh&) = delete;
-    TileMesh(TileMesh&&) noexcept;
-    TileMesh& operator=(TileMesh&&) noexcept;
 
     void build(const LevelData& level, const std::string& fillColorHex = "FFFFFF",
                const std::string& strokeColorHex = "000000");
@@ -71,8 +69,8 @@ public:
     void draw(double viewL, double viewR, double viewB, double viewT, double camX, double camY,
               InstanceColorFn colorFn = nullptr, void* colorCtx = nullptr,
               InstanceXformFn xformFn = nullptr, void* xformCtx = nullptr) const;
-    // MoveTrack 的剔除外扩：最大位移 + 最大缩放（保守包含被移动/放大的砖）。
-    void setMovePad(float pad, float maxScale) { m_movePad = pad; m_moveMaxScale = maxScale; }
+    // MoveTrack 的剔除外扩（最大位移 + 缩放已由 LevelData 折进 pad）。
+    void setMovePad(float pad) { m_movePad = pad; }
     // 关卡时间：颜色/变换是时间驱动的（ColorTrack/RecolorTrack/MoveTrack），
     // 相机静止时绘制列表不重建，必须在这里告诉 TileMesh"时间变了"。
     void setTime(double t) { m_time = t; }
@@ -117,8 +115,6 @@ public:
     // `wc`（可选）= 调用线程自己的 provider 窗口克隆（并行剔除用；nullptr = 共享缓存）
     void deriveRange(const LevelData& level, int64_t i0, int64_t i1, DerivedRange& out,
                      FloorWindowCache* wc = nullptr) const;
-    const std::unordered_map<uint64_t, uint32_t>& shapeIndex() const { return m_shapeIndex; }
-    int  cullBlockFloors() const { return m_cullFloors; }
     void updateVisibleRange(int startTile, int endTile, bool visible);
     bool empty() const;
 
@@ -128,7 +124,6 @@ public:
 
     // 验收/诊断用：上次 draw 实际画了多少个实例、形状数
     int lastDrawnInstances() const { return m_lastDrawn; }
-    size_t shapeCount() const { return m_shapes.size(); }
 
 private:
     void destroy();
@@ -177,7 +172,6 @@ private:
     void limitWarn(const char* what, size_t n) const;
     static bool limitOffCache();
     mutable double m_limitWarnAt = 0.0;
-    mutable bool m_windowChecked = false;   // 逐砖直比只做一次
 
     // ③ 切片 4：四支每砖数组**不再常驻**（13 B/砖，MYC 84 MB）—— 剔除时按 4096 窗口物化。
     // 砖位置：**块相对 float**。绝对世界坐标是 double，直接窄化成 float 会在超大谱上塌掉 ——
@@ -192,7 +186,6 @@ private:
     // ④ 粗块 AABB 索引（每 4096 层一块，0.0098 B/砖）。n 小于阈值时留空 → 走原来的全扫，
     // 小谱行为与改造前**逐字相同**。查询按块升序 → 输出与全扫逐元素相同（`cull_index` 用例）。
     CullIndex m_cullIndex;
-    double m_cullHalf = 0.0;
     int m_cullFloors = (int)CullIndex::kBlockFloors;   // 见 setCullBlockFloors                  // 建表用的保守半边长（= 所有形状 localBBox 的最大外扩）
     // （图标位随窗口派生：bit0 twirl / bit1 ssUp / bit2 ssDown）
     // TrackVis 的逐砖可见位：**位图**（原 1 B/砖 = MYC 6.8 MB → 0.85 MB）。lazy：只有 TrackVis 需要。
@@ -210,7 +203,6 @@ private:
     mutable InstanceXformFn m_xformFn = nullptr;
     mutable void* m_xformCtx = nullptr;
     float m_movePad = 0.0f;      // 剔除外扩（MoveTrack）
-    float m_moveMaxScale = 1.0f;
     mutable std::vector<float> m_instData;    // 上传用交错缓冲：11 float/实例（5 + 6）
     mutable InstanceColorFn m_colorFn = nullptr;
     mutable void* m_colorCtx = nullptr;

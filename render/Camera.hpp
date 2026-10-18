@@ -26,8 +26,6 @@ public:
     void setRotation(float degrees);
 
     glm::mat4 viewProj() const;
-    glm::mat4 proj()    const { return m_proj; }
-    glm::mat4 view()    const { return m_view; }
 
     float zoom() const { return m_zoom; }
     float rotation() const { return m_rotationDeg; }

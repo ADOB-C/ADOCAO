@@ -50,11 +50,17 @@ public:
 
     // Sample [startTime, endTime]. The head is bound to the planet position the
     // caller passes in, so the trail can never lead the planet along the track.
+    //
+    // `clampTime`：采样时刻的上限（默认无穷）。关卡结束后时间还在走（结尾的 Flash /
+    // MoveCamera 要放），但球停在最后一格 —— 传 endTime 后，窗口滑过末尾时刻就不再
+    // 采样（拖尾随窗口滑出而**缩短、消失**），而不是拿末尾之外的外推位置画出一条
+    // 乱带子（2026-10-18 用户看到的结尾彩色方块/环就是这个）。
     static void sampleTrailRange(const Timeline& timeline, double startTime, double endTime,
                                  float sampleRate,
                                  const glm::dvec2& redHead, const glm::dvec2& blueHead,
                                  std::vector<glm::dvec2>& redOut,
-                                 std::vector<glm::dvec2>& blueOut);
+                                 std::vector<glm::dvec2>& blueOut,
+                                 double clampTime = 1e300);
 
     // Convenience: window ending at endTime with the given duration.
     static void sampleTrail(const Timeline& timeline, double endTime,

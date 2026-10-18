@@ -208,7 +208,7 @@ PositionSolver::TrailWindow PositionSolver::trailWindow(const Timeline& timeline
     return w;
 }
 
-void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime, double t, float sampleRate, const glm::dvec2& redHead, const glm::dvec2& blueHead, std::vector<glm::dvec2>& redOut, std::vector<glm::dvec2>& blueOut) {
+void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime, double t, float sampleRate, const glm::dvec2& redHead, const glm::dvec2& blueHead, std::vector<glm::dvec2>& redOut, std::vector<glm::dvec2>& blueOut, double clampTime) {
     if (sampleRate <= 0.0f || t <= startTime) return;
 
     const int maxSamples = (int)std::ceil((t - startTime) * sampleRate) + 1;
@@ -225,6 +225,7 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
     for (int i = 0; i < maxSamples; i++) {
         double tt = startTime + dt * (double)i;
         if (tt > t) break;
+        if (tt > clampTime) break;   // 关卡结束后不再外推（拖尾随窗口滑出而缩短/消失）
         while (tileIdx + 1 < tsz && tt >= timeline.startTimeAt(tileIdx + 1))
             tileIdx++;
         if (i < 3 && env::flag("ADOCAO_TRAIL_INPUTS")) {

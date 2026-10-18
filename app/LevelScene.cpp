@@ -277,23 +277,23 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
     sc.rateMax        = m_trailRateMax;
 
     // 关卡结束后时间还在走（结尾的 Flash/MoveCamera 要放），但**球停在最后一格**：
-    // 拖尾必须按"停在最后一格"的时间采样，否则 sampleTrailRange 会在谱面末尾之外
-    // 继续外推位置，拖尾被拉成一条飞出屏幕/绕成结的带子（2026-10-18 用户看到的
-    // 结尾那团红蓝"吃豆人"就是它）。
+    // 拖尾按 frame.timeInLevel 采样（窗口随时间滑走），但采样时刻**夹到末尾** ——
+    // 窗口滑出末尾后不再有点 → 拖尾缩短、消失。若不夹，PositionSolver 会在末尾之外
+    // 继续外推位置，拖尾被拉成飞出屏幕/绕成结的带子（2026-10-18 用户看到的
+    // 结尾彩色方块/环就是它）。
     const double tEnd = timeline.tileCount() > 0
                       ? timeline.startTimeAt(timeline.tileCount() - 1) : frame.timeInLevel;
-    const double tTrail = std::min(frame.timeInLevel, tEnd);
     PositionSolver::TrailWindow win;
     {
         profile::Scoped _s("trailWindow");
-        win = PositionSolver::trailWindow(timeline, tTrail, sc);
+        win = PositionSolver::trailWindow(timeline, frame.timeInLevel, sc);
     }
     std::vector<glm::dvec2> redPts, bluePts;
     {
         profile::Scoped _s("trailSample");
-        PositionSolver::sampleTrailRange(timeline, win.startTime, tTrail, win.sampleRate,
+        PositionSolver::sampleTrailRange(timeline, win.startTime, frame.timeInLevel, win.sampleRate,
                                          frame.redPosition, frame.bluePosition,
-                                         redPts, bluePts);
+                                         redPts, bluePts, tEnd);
     }
 
     // 【诊断，env 门控】拖尾点哈希：A/B "按块物化 provider" 是否改变了拖尾
@@ -319,7 +319,7 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
     if (redPts.empty() || bluePts.empty()) return;
 
     const int maxPoints =
-        (int)std::ceil((tTrail - win.startTime) * win.sampleRate) + 1;
+        (int)std::ceil((frame.timeInLevel - win.startTime) * win.sampleRate) + 1;
     std::vector<double> redXY(redPts.size() * 2), blueXY(bluePts.size() * 2);
     for (size_t i = 0; i < redPts.size(); i++) {
         redXY[i*2] = redPts[i].x;

@@ -180,6 +180,23 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(tinyfiledialogs)
 
+# tinyfiledialogs 的 detectPresence() 不检查 popen() 失败：进程/线程槽位耗尽时
+# popen 返回 NULL（EAGAIN），紧接着 fgets(..., NULL) 直接 SIGSEGV（2026-10-18 真踩过：
+# 机器 load 37 时点"浏览"必崩，崩溃栈 flockfile ← fgets ← detectPresence）。
+# 这里在 configure 阶段补一行防御（幂等）：popen 失败就当成"这个对话框程序不存在"。
+if(EXISTS "${tinyfiledialogs_SOURCE_DIR}/tinyfiledialogs.c")
+    file(READ "${tinyfiledialogs_SOURCE_DIR}/tinyfiledialogs.c" _tfd_src)
+    string(FIND "${_tfd_src}" "if ( lIn == NULL ) { return 0 ; }" _tfd_done)
+    if(_tfd_done EQUAL -1)
+        string(REPLACE
+            "lIn = popen ( lTestedString , \"r\" ) ;"
+            "lIn = popen ( lTestedString , \"r\" ) ;\n    if ( lIn == NULL ) { return 0 ; }"
+            _tfd_src "${_tfd_src}")
+        file(WRITE "${tinyfiledialogs_SOURCE_DIR}/tinyfiledialogs.c" "${_tfd_src}")
+        message(STATUS "tinyfiledialogs: 已补 popen(NULL) 防御")
+    endif()
+endif()
+
 # xz / zstd containers: levels made by ../Song.adofai (audio-as-chart) are stored as
 # .adofai.xz or .adofai.zst, so ADOCAO decodes both. Built from source like the other
 # deps — the Windows portable build machine has no system liblzma/libzstd.

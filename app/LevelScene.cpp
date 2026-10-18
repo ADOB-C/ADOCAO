@@ -465,6 +465,9 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     // 砖块 pass 开混合：alpha=1 时结果不变；alpha<1（颜色 hex 的 AA / MoveTrack opacity）才透。
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);          // 同一 tile 内同 z 的 part：后者被丢弃，避免自重叠双叠
+    glDepthMask(GL_TRUE);
     m_tileShader->use();
     m_tileShader->setMat4("uVP", glm::value_ptr(camera.viewProj()));
     m_tileShader->setVec3("uFillColor", m_fillRGB[0], m_fillRGB[1], m_fillRGB[2]);

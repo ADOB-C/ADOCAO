@@ -88,6 +88,9 @@ void main() {
     }
 
     vColor = color;
+    // stroke 层（z 更小=更近）压过 fill；同层同 z 的 part 由 GL_LESS 丢弃后画的那个。
+    pos.z -= (1.0 - layer) * 2e-4;
+    if (part >= 6.0) pos.z -= 2e-4;   // 图标（P_ICON_*）最近，盖在 fill/stroke 之上
     if (aXform.x == 0.0 && aXform.y == 1.0 && aXform.z == 1.0) {
         pos = vec3(pos.xy + aMove, pos.z);
     } else {

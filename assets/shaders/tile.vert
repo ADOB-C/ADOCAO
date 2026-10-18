@@ -181,6 +181,10 @@ void main() {
     vColor = color;
 
 #ifndef GEOM_PROBE
+    // stroke 层（z 更小=更近）压过 fill；同层同 z 的 part 由 GL_LESS 丢弃后画的那个，
+    // 避免半透明砖内部 part 自重叠被混合两次（2026-10-18：单砖内部暗阶梯）。
+    pos.z -= (1.0 - layer) * 2e-4;
+    if (part >= 6.0) pos.z -= 2e-4;   // 图标（P_ICON_*）最近，盖在 fill/stroke 之上
     {
         vec2 xp = vec2(pos.x * aXform.y, pos.y * aXform.z);
         float xc = cos(aXform.x), xs = sin(aXform.x);

@@ -24,6 +24,7 @@
 #include <cerrno>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <thread>
 #include <vector>
 
@@ -108,6 +109,18 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     m_windowedW = winW;
     m_windowedH = winH;
 
+    // 全屏必须钉在显示器的**当前模式**上，而不是让 GLFW 自己挑：
+    // `_glfwChooseVideoMode()` 在 refreshRate == GLFW_DONT_CARE 时按
+    // `UINT_MAX - refreshRate` 排序 —— 也就是**同分辨率里刷新率最高**的那个。桌面
+    // 跑 60Hz、面板支持 144Hz 时，进全屏会顺手把桌面切成 144Hz，而那是一次
+    // `ChangeDisplaySettingsEx`（win32_monitor.c: _glfwSetVideoModeWin32）。显示模式一换，
+    // 所有抓屏工具的源当场失效 —— 用户报的"切全屏后录像丢源 / 在录屏软件里找不到这个窗口"
+    // 就是这个。显式给出当前刷新率后，GLFW 比较"当前模式 == 目标模式"相等就直接 return，
+    // 一次都不切（同函数里 `_glfwCompareVideoModes(&current, best) == 0` 那一行）。
+    if (cfg.fullscreen) {
+        glfwWindowHint(GLFW_REFRESH_RATE, mode ? mode->refreshRate : GLFW_DONT_CARE);
+    }
+
     if (cfg.msaaSamples > 0) glfwWindowHint(GLFW_SAMPLES, cfg.msaaSamples);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     // 抓帧（--capture）是开发/验收用的脚本化运行：**别弹窗、别抢焦点**。
@@ -172,6 +185,16 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
         return e && std::atoi(e) != 0;
     }();
     glfwSwapInterval(vsync ? 1 : 0);
+    // 用户拿"只有 59.4 fps"来问的时候，第一件事是看这行：vsync 是唯一会**真的**把
+    // app 锁在刷新率上的开关（默认关）。抓屏工具自己的刷新率上限是另一回事
+    // （WGC/DXGI 复制只看得见合成器每周期提交的那一帧），别混为一谈。
+    LOG_I("swap interval: %d — %s", vsync ? 1 : 0,
+          vsync ? "vsync on，帧率上限 = 显示器刷新率"
+                : "vsync off，不锁帧；默认 320 fps 节流（ADOCAO_UNCAPPED=1 关闭）");
+    if (cfg.fullscreen && mode) {
+        LOG_I("fullscreen: %dx%d @ %d Hz（显示器当前模式，全程不切换显示模式）",
+              mode->width, mode->height, mode->refreshRate);
+    }
     if (!loadGLCore()) { LOG_E("Failed to load OpenGL functions"); glfwDestroyWindow(m_window); return false; }
     if (cfg.msaaSamples > 0) glEnable(GL_MULTISAMPLE);
     LOG_D("OpenGL %s | GLSL %s", glGetString(GL_VERSION), glGetString(GL_SHADING_LANGUAGE_VERSION));
@@ -511,7 +534,7 @@ void GameWindow::toggleFullscreen() {
         int fsW = (int)(mode->width / (csx > 0.0f ? csx : 1.0f));
         int fsH = (int)(mode->height / (csy > 0.0f ? csy : 1.0f));
 
-        glfwSetWindowMonitor(m_window, primary, 0, 0, fsW, fsH, GLFW_DONT_CARE);
+        glfwSetWindowMonitor(m_window, primary, 0, 0, fsW, fsH, mode->refreshRate);
         m_isFullscreen = true;
     }
 }
@@ -733,10 +756,23 @@ struct ProfFile {
     void ensureOpen() {
         if (f || headerDone) return;
         headerDone = true;
-        const char* env = std::getenv("ADOCAO_PROFILE_FILE");
-        const std::string path = (env && *env) ? env : std::string("ADOCAO.prof");
-        f = std::fopen(path.c_str(), "a");
-        if (!f) { LOG_W("profiler: 打不开 %s（%s）", path.c_str(), std::strerror(errno)); return; }
+        // 默认跟 ADOCAO.log 放同一个目录（exe 旁，或 macOS .app / 系统日志目录那套回退），
+        // 而不是"当前工作目录"：用户报过"profiler 什么也没留下" —— 文件其实落在了他
+        // 启动 .bat 时的 CWD 里，跟 exe/日志不在一处。日志里也打**绝对路径**，别再靠猜。
+        std::filesystem::path path;
+        if (const char* env = std::getenv("ADOCAO_PROFILE_FILE")) {
+            if (*env) path = env;   // 相对 = 当前工作目录（显式给出就按给的算）
+        }
+        if (path.empty()) {
+            const std::filesystem::path log(Logger::instance().path());
+            path = (log.has_parent_path() ? log.parent_path() : std::filesystem::path("."))
+                 / "ADOCAO.prof";
+        }
+        std::error_code ec;
+        const auto absPath = std::filesystem::absolute(path, ec);
+        const std::string shown = (ec ? path : absPath).string();
+        f = std::fopen(shown.c_str(), "a");
+        if (!f) { LOG_W("profiler: 打不开 %s（%s）", shown.c_str(), std::strerror(errno)); return; }
         runId = (long long)std::time(nullptr);
         std::fprintf(f, "# ADOCAO profiler v1 (CSV; 每行立即 flush)\n");
         std::fprintf(f,
@@ -744,7 +780,7 @@ struct ProfFile {
             "frame_p50_ms,frame_p95_ms,frame_max_ms,over_16_7,over_pct,drawn_med,drawn_max,"
             "rss_mb,segment,seg_p50_ms,seg_min_ms,seg_max_ms,note\n");
         std::fflush(f);
-        LOG_I("profiler: 写入 %s（run=%lld，CSV，每行 flush）", path.c_str(), runId);
+        LOG_I("profiler: 写入 %s（run=%lld，CSV，每行 flush）", shown.c_str(), runId);
     }
     void row(const char* fmt, ...) {
         ensureOpen();

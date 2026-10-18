@@ -73,6 +73,21 @@ ADOCAO_VSYNC=1 ./build/adocao "谱面"
 
 或改用 **Display Capture**。确定性抓帧（`--capture`）始终走单帧渲染，不受此影响。
 
+### 全屏与录屏（`--fullscreen` / Alt+Enter）
+
+全屏**永远用显示器当前的分辨率和刷新率，全程不切换显示模式**。这不是顺手，是抓屏工具的硬要求：
+GLFW 在 `GLFW_REFRESH_RATE` 为 `GLFW_DONT_CARE` 时会挑"同分辨率里刷新率最高"的模式
+（`_glfwChooseVideoMode()` 按 `UINT_MAX - refreshRate` 排序），60Hz 桌面的 144Hz 面板一进全屏就被
+切成 144Hz；那次 `ChangeDisplaySettingsEx` 会让 OBS 的窗口捕获**丢源**、录屏软件的窗口列表里
+**找不到这个窗口**（用户 2026-10 报的原话）。现在创建时给的是 `glfwGetVideoMode()` 读到的当前
+刷新率，`_glfwSetVideoModeWin32()` 比较"当前 == 目标"相等就直接返回，一次都不切。
+推论：`--width/--height` 只对**窗口模式**有意义（全屏忽略它们，始终铺满显示器）。
+
+想量真实帧率，先确认日志里的 `swap interval:` 一行：`0` 才是无 vsync（默认），`1` 是
+`ADOCAO_VSYNC=1` 打开的、上限就是显示器刷新率。另外注意 **WGC / DXGI 复制类抓屏只能看见
+合成器每周期提交的那一帧**（≈ 显示器刷新率），它们报的 fps 不能用来证明 app 的实际渲染帧率
+—— 那个要看 `ADOCAO_PROFILE=1` 的 `frame` 分位数（或 PresentMon 这类 hook `Present` 的工具）。
+
 ### 抓帧与关卡相机（`--capture` / `--capture-camera`）
 
 `--capture <out.png>` 是**确定性抓帧**（不走 wall clock / 音频 / 帧时间反馈），

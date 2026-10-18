@@ -77,13 +77,50 @@ void writerCommitBytes(uint8_t out[20]) {
 #endif
 }
 
+// 段级 zstd 的**决策缓存**：决策阶段（plain 是否比 packed 小）与组装阶段用的是同一份
+// blob —— 之前会各压一次 zstd-19（小谱走 plain 是常态，Actions 段直接双倍 CPU）。
+// 缓存按 (data,size) 命中；thread_local + packLevel 开头 reset，避免跨调用/跨线程。
+namespace {
+struct ZEntry {
+    const uint8_t* data = nullptr;
+    size_t size = 0;
+    bool smaller = false;          // zstd 确实更小 → z 有效
+    std::vector<uint8_t> z;
+};
+struct ZCache {
+    std::vector<ZEntry> v;
+    void reset() { v.clear(); }
+    const ZEntry* find(const std::vector<uint8_t>& b) const {
+        for (const ZEntry& e : v)
+            if (e.data == b.data() && e.size == b.size()) return &e;
+        return nullptr;
+    }
+    size_t storedBytes(const std::vector<uint8_t>& b) {
+        if (b.size() < 256) return b.size();
+        if (const ZEntry* e = find(b)) return e->smaller ? e->z.size() : b.size();
+        ZEntry e;
+        e.data = b.data(); e.size = b.size();
+        e.z.resize(ZSTD_compressBound(b.size()));
+        const size_t got = ZSTD_compress(e.z.data(), e.z.size(), b.data(), b.size(), 19);
+        if (!ZSTD_isError(got) && got < b.size()) { e.z.resize(got); e.smaller = true; }
+        else e.z.clear();
+        v.push_back(std::move(e));
+        return v.back().smaller ? v.back().z.size() : b.size();
+    }
+    // true = 决策已覆盖该 blob（out 非空表示用压缩结果，空表示明确存原样）
+    bool take(const std::vector<uint8_t>& b, std::vector<uint8_t>& out) const {
+        const ZEntry* e = find(b);
+        if (!e) return false;
+        if (e->smaller) out = e->z;
+        return true;
+    }
+};
+thread_local ZCache g_zcache;
+}  // namespace
+
 // 段级压缩后的实际存储字节（与下面的段级 zstd 决策同一口径）
 size_t sectionStoredBytes(const std::vector<uint8_t>& blob) {
-    if (blob.size() < 256) return blob.size();
-    std::vector<uint8_t> z(ZSTD_compressBound(blob.size()));
-    const size_t got = ZSTD_compress(z.data(), z.size(), blob.data(), blob.size(), 19);
-    if (ZSTD_isError(got) || got >= blob.size()) return blob.size();
-    return got;
+    return g_zcache.storedBytes(blob);
 }
 
 // 报告里的布局名（"为什么这列大/小"必须一眼看得出来）
@@ -159,6 +196,8 @@ void writeSettings(const LevelData::Settings& s, Pool& pool, std::vector<uint8_t
 
 bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& err,
                PackResult* result, const PackOptions& opts) {
+    g_zcache.reset();   // 每次打包独立的决策缓存（同 blob 只压一次）
+
     out.clear();
     err.clear();
     PackResult rep;
@@ -556,11 +595,16 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         const std::vector<uint8_t>& blob = secs[i].blob;
         stored[i] = blob;
         if (!secs[i].preStored && blob.size() >= 256) {
-            std::vector<uint8_t> z(ZSTD_compressBound(blob.size()));
-            const size_t got = ZSTD_compress(z.data(), z.size(), blob.data(), blob.size(), 19);
-            if (!ZSTD_isError(got) && got < blob.size()) {
-                z.resize(got);
-                stored[i] = std::move(z);
+            std::vector<uint8_t> z;
+            if (g_zcache.take(blob, z)) {
+                if (!z.empty()) stored[i] = std::move(z);   // 决策阶段已压过 → 直接复用
+            } else {
+                z.resize(ZSTD_compressBound(blob.size()));
+                const size_t got = ZSTD_compress(z.data(), z.size(), blob.data(), blob.size(), 19);
+                if (!ZSTD_isError(got) && got < blob.size()) {
+                    z.resize(got);
+                    stored[i] = std::move(z);
+                }
             }
         }
     }

@@ -19,6 +19,7 @@
 | 5 | `b83e5f6` | Windows `AssetSetup` 的 exe 目录、`LoadingProgress::stage`、向导 `musicAutoTried` 死块、`Tile::angle`（无读者） |
 | 6 | `bb5b1fe` | `Logger::setDebugConsole`、`Easing` 恒真判断、`Scheduler::configure/Config/m_mainParticipates`、`CameraTimeline::clear`、`CameraDirector::cursor`、`HitsoundManager::setHitsoundType/reset/isEnabled` |
 | 7 | `97e735d` | `--width/--height` 校验、image 帮助去重、`m_firstStartTime` 注释与实现对齐、槽位/三角形/texel 注释修正 |
+| 10 | 本轮 | `AdocaoWriter` 段级 zstd 决策/组装共用缓存（此前同一 blob 压两遍）、`LevelMap`/`PngStream` 死选项、清理后告警归零 |
 | 8 | 本轮 | `PlatformPaths` 统一 `executableDirectory()`（Windows 版补 `GetModuleFileNameA`）、`Application` 两段逐行重复的导出/加载/进游戏合并为 `runLevelToGame()` |
 
 ## 修掉的真 bug（不是风格问题）
@@ -52,7 +53,8 @@
 
 ## 已知仍待处理
 
-- `archive/AdocaoWriter` 的 plain 候选被 zstd-19 压两遍（性能，不是死代码；需让决策带回结果并用 roundtrip 断言逐字节不变）。
+- ~~`AdocaoWriter` 的 plain 候选被 zstd-19 压两遍~~：已用 thread_local 决策缓存让同一 blob 只压一次；
+  `angles360` 打包输出与改动前**逐字节相同**。
 - `core/map/LevelMap` 死字段（`timeFrom/timeTo/drawBlue/markers`）与 `PngStream` 整条 1-bit 索引色死路；
   `--thickness` 的 `halfW<=64` 是唯一仍静默限制用户输入的点（要么报错要么写进文档）。
 - `docs/` 里还有若干"实测 X 种粒度逐字节相同"一类历史结论，需要按细块后的实现重测再改。

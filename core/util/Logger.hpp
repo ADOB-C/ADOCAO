@@ -13,7 +13,6 @@ public:
     static Logger& instance();
 
     void init(const std::string& logPath, bool debugConsole = false);
-    void setDebugConsole(bool on) { m_debugConsole = on; }
 
     void log(LogLevel level, const char* fmt, ...);
 

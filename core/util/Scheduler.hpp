@@ -32,14 +32,8 @@ constexpr int kLaneCount = 2;
 
 class Scheduler {
 public:
-    struct Config {
-        unsigned workers = 0;          // 0 = clamp(hw-1, 1, 8)
-        bool mainParticipates = true;  // 调用线程是否也干活（默认 true）
-    };
-
     static Scheduler& instance();
 
-    void configure(const Config& c);
     unsigned workers() const { return (unsigned)m_workers.size(); }
     // 全局串行（`ADOCAO_JOBS=1`）—— 测试/对照用，进程级只读一次
     static bool serialForced();
@@ -75,28 +69,23 @@ public:
         }
         m_cv.notify_all();
         // 调用线程也干活（不变式：不干活就可能让 worker 等着、自己空转）
-        if (m_mainParticipates) {
-            std::function<void()> task;
-            while (done->load(std::memory_order_acquire) < chunks) {
-                {
-                    std::lock_guard<std::mutex> lk(m_mutex);
-                    if (!popTask(task)) { task = nullptr; }
-                }
-                if (task) {
-                    InParallelGuard g;
-                    task();
-                    m_doneCv.notify_all();
-                } else {
-                    std::unique_lock<std::mutex> lk(m_mutex);
-                    m_doneCv.wait_for(lk, std::chrono::microseconds(200), [&] {
-                        return done->load(std::memory_order_acquire) >= chunks;
-                    });
-                }
+        std::function<void()> task;
+        while (done->load(std::memory_order_acquire) < chunks) {
+            {
+                std::lock_guard<std::mutex> lk(m_mutex);
+                if (!popTask(task)) { task = nullptr; }
             }
-            return;
+            if (task) {
+                InParallelGuard g;
+                task();
+                m_doneCv.notify_all();
+            } else {
+                std::unique_lock<std::mutex> lk(m_mutex);
+                m_doneCv.wait_for(lk, std::chrono::microseconds(200), [&] {
+                    return done->load(std::memory_order_acquire) >= chunks;
+                });
+            }
         }
-        std::unique_lock<std::mutex> lk(m_mutex);
-        m_doneCv.wait(lk, [&] { return done->load(std::memory_order_acquire) >= chunks; });
     }
 
     // 取消令牌：任务在**块边界**自查（协作式）。不可抢占 —— 文档 §3.4 的"取消"那格。
@@ -121,7 +110,6 @@ public:
         void clear() { m_done.reset(); m_tok = CancelToken(); }
         bool ready() const { return !m_done || m_done->load(std::memory_order_acquire); }
         void cancel() const { m_tok.cancel(); }
-        bool cancelled() const { return m_tok.cancelled(); }
     private:
         std::shared_ptr<std::atomic<bool>> m_done;
         CancelToken m_tok;
@@ -152,7 +140,6 @@ private:
     std::condition_variable m_cv;
     std::condition_variable m_doneCv;
     std::atomic<bool> m_stop{false};
-    bool m_mainParticipates = true;
 };
 
 }  // namespace adofai

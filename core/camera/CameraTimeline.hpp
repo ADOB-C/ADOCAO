@@ -27,13 +27,12 @@ class CameraTimeline {
 public:
     // 构建失败只有一种情况：level 没有相机事件（空时间线是合法结果，不是错误）。
     // tileStartTimes / tileBPMs 来自 Timeline（含末尾 extra 砖，与 Re_ADOJAS 一致）。
+    bool empty() const { return m_keys.empty(); }
     void build(const LevelData& level,
                const std::vector<double>& tileStartTimes,
                const std::vector<float>& tileBPMs);
 
     const std::vector<CameraKey>& keys() const { return m_keys; }
-    bool empty() const { return m_keys.empty(); }
-    void clear() { m_keys.clear(); }
 
     // 诊断计数（测试/日志用）：被过滤掉的事件数（inactive / editorOnly）与展开出的条目数。
     size_t droppedInactive() const { return m_droppedInactive; }

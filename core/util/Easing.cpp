@@ -49,7 +49,7 @@ Ease easeFromName(std::string_view name) {
 
 const char* easeName(Ease e) {
     const int i = (int)e;
-    return (i >= 0 && i < kEaseCount) ? kNames[i] : "";
+    return (i < kEaseCount) ? kNames[i] : "";   // Ease 底层是 uint8_t，i 不可能为负
 }
 
 double easeApply(Ease e, double t) {

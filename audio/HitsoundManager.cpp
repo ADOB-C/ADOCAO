@@ -112,6 +112,10 @@ static std::string defaultHitsoundDir() {
 HitsoundManager::HitsoundManager() = default;
 HitsoundManager::~HitsoundManager() { m_buffer.clear(); }
 
+void HitsoundManager::setEnabled(bool enabled) {
+    m_enabled = enabled;
+}
+
 void HitsoundManager::init(const std::string& assetsDir) {
     m_assetsDir = withTrailingSlash(assetsDir.empty() ? defaultHitsoundDir() : assetsDir);
     LOG_D("HitsoundManager: assets dir = \"%s\"", m_assetsDir.c_str());
@@ -122,17 +126,6 @@ std::string HitsoundManager::hitsoundPath(const std::string& type) const {
     return fn ? (m_assetsDir + fn) : std::string();
 }
 
-void HitsoundManager::setHitsoundType(const std::string& type) {
-    if (m_hitsoundType == type) return;
-    m_hitsoundType = type;
-    m_synthesized = false;
-}
-
-
-void HitsoundManager::setEnabled(bool enabled) {
-    m_enabled = enabled;
-    if (!enabled) stop();
-}
 
 
 bool HitsoundManager::readWav(const std::string& filepath,
@@ -435,11 +428,6 @@ bool HitsoundManager::preSynthesizeRawPcm(const std::vector<float>& samples, dou
     m_lastMixedHits = 0;
     m_synthesized = true;
     return true;
-}
-
-void HitsoundManager::reset() {
-    m_readCursor = 0;
-    m_playing = true;
 }
 
 void HitsoundManager::resetAt(float audioPosSec) {

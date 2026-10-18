@@ -24,10 +24,8 @@ public:
 
     // hitsounds 的相对目录（产品设一次，例如 "assets/hitsounds"）。不设 = 相对当前目录。
     static void setDefaultHitsoundSubdir(const std::string& subdir);
-
-    void setHitsoundType(const std::string& type);
     void setEnabled(bool enabled);
-    bool isEnabled() const { return m_enabled; }
+
 
 
 
@@ -56,7 +54,6 @@ public:
     size_t* cursor() { return &m_readCursor; }
     bool* playing() { return &m_playing; }
 
-    void reset();
     void resetAt(float audioPosSec);  // seek cursor to position
     void stop();
     bool isSynthesized() const { return m_synthesized; }

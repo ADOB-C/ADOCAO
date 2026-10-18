@@ -42,7 +42,6 @@ public:
     double rotation() const { return m_camAngle; }          // 度
     double zoom() const { return m_zoomSize * 100.0; }      // ADOFAI 口径（100 = 默认）
     bool followMode() const { return m_followMode; }
-    size_t cursor() const { return m_cursor; }
 
 private:
     struct Vec { double x = 0.0, y = 0.0; };

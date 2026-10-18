@@ -1,5 +1,6 @@
 #include "core/camera/CameraDirector.hpp"
 #include "core/util/Logger.hpp"
+#include "core/util/Env.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -82,7 +83,7 @@ void CameraDirector::resetState() {
 }
 
 void CameraDirector::seek(double t, double planetX, double planetY, int64_t tileIndex, double pitch) {
-    if (std::getenv("ADOCAO_CAM_DEBUG")) {
+    if (env::flag("ADOCAO_CAM_DEBUG")) {
         LOG_I("cam-seek: t=%.3f in=(%.2f,%.2f) tile=%lld keys=%zu", t, planetX, planetY,
               (long long)tileIndex, m_keys ? m_keys->size() : 0);
     }
@@ -291,7 +292,7 @@ void CameraDirector::startEffect(const CameraKey& k, double planetX, double plan
         const double targetRot = rotationUsed ? (double)ev.rotation : 0.0;
         startTween(m_rotationTween, m_camAngle, m_camAngle, targetRot + rotationOffset, duration, ease, now);
     }
-    if (rotationUsed && std::getenv("ADOCAO_CAM_DEBUG"))
+    if (rotationUsed && env::flag("ADOCAO_CAM_DEBUG"))
         LOG_I("cam-rot: t=%.4f floor=%d target=%.2f from=%.2f dur=%.4f relOff=%.2f",
               now, (int)ev.floor, (double)ev.rotation, m_camAngle, duration, rotationOffset);
     if (zoomUsed) {

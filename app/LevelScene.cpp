@@ -16,6 +16,7 @@
 #include "core/timeline/PlaybackClock.hpp"   // PlaybackFrame
 #include "core/timeline/PositionSolver.hpp"
 #include "core/util/Logger.hpp"
+#include "core/util/Env.hpp"
 #include "core/util/Scheduler.hpp"
 #include "core/util/Profile.hpp"
 #include <glm/glm.hpp>
@@ -79,10 +80,8 @@ bool LevelScene::compileShaders() {
             && compileShader(*m_highlightShader, vp.c_str(), fpHighlight.c_str(), vsInline,
                              Shaders::kHighlightFragSrc);
     };
-    const bool forceCpu = [] {
-        const char* e = std::getenv("ADOCAO_CPU_GEOMETRY");   // 验收/救急开关
-        return e && std::atoi(e) != 0;
-    }();
+    // 验收/救急开关：强制 CPU 几何回退
+    const bool forceCpu = env::flag("ADOCAO_CPU_GEOMETRY");
     if (forceCpu) {
         LOG_I("砖块几何：**强制 CPU 回退**（ADOCAO_CPU_GEOMETRY）");
         if (!compileTile("assets/shaders/tile_cpu.vert", Shaders::kTileCpuVertSrc)) {
@@ -291,7 +290,7 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
     }
 
     // 【诊断，env 门控】拖尾点哈希：A/B "按块物化 provider" 是否改变了拖尾
-    if (std::getenv("ADOCAO_TRAIL_DUMP")) {
+    if (env::flag("ADOCAO_TRAIL_DUMP")) {
         auto fnv = [](const void* p, size_t bytes) {
             const uint8_t* q = (const uint8_t*)p;
             uint64_t h = 1469598103934665603ull;
@@ -392,7 +391,7 @@ void trackXformAt(void* ctx, uint32_t tile, float out[8]) {
 void trackColorAt(void* ctx, uint32_t tile, uint8_t fill[3], uint8_t stroke[3], float* alpha) {
     const auto* c = static_cast<const TrackColorCtx*>(ctx);
     const TileColors col = c->level->tileColorsAt((int64_t)tile, c->time, c->amplitude, c->timeline);
-    if (std::getenv("ADOCAO_COLOR_DEBUG") && tile < 4)
+    if (env::flag("ADOCAO_COLOR_DEBUG") && tile < 4)
         LOG_I("color-debug: tile=%u t=%.3f fill=%02x%02x%02x stroke=%02x%02x%02x", tile, c->time,
               col.fill[0], col.fill[1], col.fill[2], col.stroke[0], col.stroke[1], col.stroke[2]);
     fill[0] = col.fill[0]; fill[1] = col.fill[1]; fill[2] = col.fill[2];

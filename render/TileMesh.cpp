@@ -2,6 +2,7 @@
 #include "glad/gl_core.hpp"
 #include "render/CullSIMD.hpp"
 #include "core/util/Logger.hpp"
+#include "core/util/Env.hpp"
 #include "core/util/Profile.hpp"
 #include "core/util/Scheduler.hpp"
 #include <algorithm>
@@ -289,7 +290,7 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     LOG_D("TileMesh::build: draws=1 (tiles+icons 同一次), shapes=%zu, tiles=%d", m_shapes.size(), n);
 
     // 【诊断，env 门控】网格数据哈希：用来 A/B "按块物化 provider" 是否改变了装配结果
-    if (std::getenv("ADOCAO_MESH_DUMP")) {
+    if (env::flag("ADOCAO_MESH_DUMP")) {
         auto fnv = [](const void* p, size_t bytes) {
             const uint8_t* q = (const uint8_t*)p;
             uint64_t h = 1469598103934665603ull;
@@ -798,7 +799,7 @@ void TileMesh::fillInstanceAnim() const {
             m_listXform[k * 8 + 3] *= alpha;   // 颜色 alpha × MoveTrack opacity
         }
     }
-    if (std::getenv("ADOCAO_ANIM_DEBUG") && (m_colorFn || m_xformFn))
+    if (env::flag("ADOCAO_ANIM_DEBUG") && (m_colorFn || m_xformFn))
         LOG_I("anim-debug: t=%.3f n=%zu", m_time, count);
 }
 
@@ -826,7 +827,7 @@ void TileMesh::uploadIfNeeded() const {
     }
     glBindBuffer(GL_ARRAY_BUFFER, m_instVbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(count * 19 * sizeof(float)), m_instData.data());
-    if (std::getenv("ADOCAO_COLOR_DEBUG") && count > 0)
+    if (env::flag("ADOCAO_COLOR_DEBUG") && count > 0)
         LOG_I("inst-debug: n=%zu colors0=%.3f,%.3f,%.3f,%.3f,%.3f,%.3f inst0=%.2f,%.2f,%.2f,%.0f,%.0f,%.3f,%.3f,%.3f",
               count, m_listColors[0], m_listColors[1], m_listColors[2], m_listColors[3],
               m_listColors[4], m_listColors[5], m_instData[0], m_instData[1], m_instData[2],

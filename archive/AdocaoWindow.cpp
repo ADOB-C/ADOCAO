@@ -9,6 +9,7 @@
 #include "archive/AdocaoBlocked.hpp"
 #include "archive/AdocaoColumns.hpp"   // legacy 段的裸列解码（窗口化的退回路径）
 #include "core/util/Logger.hpp"
+#include "core/util/Env.hpp"
 
 namespace adofai {
 namespace adocao {
@@ -286,7 +287,7 @@ bool FloorWindowSource::readBlock(uint64_t block, FloorBlock& out, std::string& 
     std::vector<int64_t> floors;
     std::vector<uint32_t> types, flags, strs, v1, v2;
     auto need = [&](int i) -> const ActionColumn& { return m_cols[i]; };
-    const bool dbg = std::getenv("ADOCAO_WINDOW_DBG") != nullptr;
+    const bool dbg = env::flag("ADOCAO_WINDOW_DBG");
     auto diag = [&](int col, uint64_t f, uint64_t t, bool ok) {
         if (!dbg || ok) return;
         const ActionColumn& c = m_cols[col];

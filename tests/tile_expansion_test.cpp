@@ -23,6 +23,7 @@
 #include <cstdarg>
 #include <cstdint>
 #include <cstdlib>
+#include "core/util/Env.hpp"
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -247,7 +248,7 @@ void addChartKeys(const std::string& path) {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (const char* e = std::getenv("ADOCAO_TILE_EXACT")) g_requireExact = (std::atoi(e) != 0);
+    g_requireExact = env::flag("ADOCAO_TILE_EXACT");
     std::printf("== 形状集 ==\n");
     for (int i = 1; i < argc; i++) addChartKeys(argv[i]);
     // 0.01° 网格抽样（含半格边界：x.xx5 是 round 的取舍点）

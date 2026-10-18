@@ -8,6 +8,7 @@
 #include <chrono>
 #include "core/util/CountLimits.hpp"
 #include "core/util/Logger.hpp"
+#include "core/util/Env.hpp"
 
 
 namespace adofai {
@@ -226,7 +227,7 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
         if (tt > t) break;
         while (tileIdx + 1 < tsz && tt >= timeline.startTimeAt(tileIdx + 1))
             tileIdx++;
-        if (i < 3 && std::getenv("ADOCAO_TRAIL_INPUTS")) {
+        if (i < 3 && env::flag("ADOCAO_TRAIL_INPUTS")) {
             const LevelData& L = *timeline.level();
             const auto p = L.tilePositionAt(tileIdx);
             LOG_I("trail-in[%d] idx=%d tt=%.17g st=%.17g pos=%.17g,%.17g sa=%.17g ta=%.17g dir=%.17g",

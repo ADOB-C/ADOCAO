@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include "core/util/Logger.hpp"
+#include "core/util/Env.hpp"
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <algorithm>
@@ -192,8 +193,7 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     // 录屏/对比时建议 ADOCAO_VSYNC=1：无 vsync 的 GL 窗口在 macOS + OBS 窗口捕获下
     // 会抓到“两帧合成”的撕裂帧（表现为轨道重影/黑帧）。
     const bool vsync = [] {
-        const char* e = std::getenv("ADOCAO_VSYNC");
-        return e && std::atoi(e) != 0;
+        return env::flag("ADOCAO_VSYNC");
     }();
     glfwSwapInterval(vsync ? 1 : 0);
     // 用户拿"只有 59.4 fps"来问的时候，第一件事是看这行：vsync 是唯一会**真的**把
@@ -463,7 +463,7 @@ void GameWindow::update(float deltaMs) {
         if (tileIdx < 0) tileIdx = 0;
         if (tileIdx >= (int)m_level->tileCount() - 1) tileIdx = (int)m_level->tileCount() - 2;
         const auto p = m_level->tilePositionAt(tileIdx);
-        if (std::getenv("ADOCAO_CAM_DEBUG")) {
+        if (env::flag("ADOCAO_CAM_DEBUG")) {
             LOG_I("capture-pos: tileIdx=%d p=(%.2f,%.2f) windowed=%d", tileIdx,
                   (double)p[0], (double)p[1], (int)m_level->tilesWindowed());
         }
@@ -653,14 +653,14 @@ void GameWindow::captureAndExit() {
     if (m_cfg->captureCamera && m_level->tileCount() > 0) {
         // 与播放时同一条相机路径：settings + 到目标时刻为止的全部运镜事件。
         const auto p = m_level->tilePositionAt(tileIdx);
-        if (std::getenv("ADOCAO_CAM_DEBUG")) {
+        if (env::flag("ADOCAO_CAM_DEBUG")) {
             LOG_I("capture-pos: tileIdx=%d p=(%.2f,%.2f) windowed=%d", tileIdx,
                   (double)p[0], (double)p[1], (int)m_level->tilesWindowed());
         }
         const double pitch = std::max(0.1, (double)m_level->settings.pitch / 100.0);
         m_cameraDirector.seek(m_playback->timeInLevel(), p[0], p[1], tileIdx, pitch);
         m_camCtrl.snapTo(m_cameraDirector.x(), m_cameraDirector.y());
-        if (std::getenv("ADOCAO_CAM_DEBUG")) {
+        if (env::flag("ADOCAO_CAM_DEBUG")) {
             LOG_I("capture-cam: target=(%.2f,%.2f) zoom=%.2f", m_camera.targetX(), m_camera.targetY(), (double)m_camera.zoom());
         }
         m_camera.setRotation((float)m_cameraDirector.rotation());
@@ -952,7 +952,7 @@ void GameWindow::run() {
     // 诊断：`ADOCAO_UNCAPPED=1` 关掉 320fps 的帧率上限（profiler 要量机器真实上限）。
     // 不设 = 行为完全不变。按首个字符判断（与 ADOCAO_PROFILE 同口径）：
     // `ADOCAO_UNCAPPED=0` 必须是**关**，不能因为"设了"就开 —— 老写法是 getenv() 非空即开。
-    if (const char* e = std::getenv("ADOCAO_UNCAPPED"); e && e[0] != '\0' && e[0] != '0') {
+    if (env::flag("ADOCAO_UNCAPPED")) {
         targetFrameTime = 0.0;
         LOG_I("帧率上限已关闭（ADOCAO_UNCAPPED=1）");
     }

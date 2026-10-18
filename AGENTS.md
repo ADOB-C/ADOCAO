@@ -237,6 +237,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `docs/ui-design.md` | 改向导/启动器版面时读：栅格常数（右边缘一律 496）、三档字号、组件清单、禁止项 |
 | `docs/parallelism.md` | **要并行什么、怎么并行**：调度器模型（车道/parallelFor/取消）、四条不变式、逐站点归类、迁移顺序 —— 动任何并行前先读 |
 | `docs/profiling.md` | **要量什么、用什么量**：分段计时（`ADOCAO_PROFILE=1`）、整帧/常驻口径、`sample`/`vmmap`/`xctrace` 配方、已知盲区 |
+| `docs/env.md` | **加/改环境变量时先读**：`ADOCAO_*` 总表（40 个）、布尔一律走 `env::flag()`（`0/false/no/off` = 关）、新增必须登记（`scripts/check-env-docs.sh` 在 CI 里对账） |
 | `docs/audio.md` | 动音频、hitsound 混音、导出 WAV、audio-as-chart |
 | `docs/image-export.md` | 动 `adocao image`（真无头出图）、瓦片与拼接 |
 | `docs/cli.md` | 加/改命令行开关、拖尾采样参数 |

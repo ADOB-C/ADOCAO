@@ -31,6 +31,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include "core/util/Env.hpp"
 #include <cstring>
 #include <string>
 #include <utility>
@@ -40,10 +41,7 @@ namespace adofai {
 namespace profile {
 
 inline bool enabled() {
-    static const bool on = [] {
-        const char* e = std::getenv("ADOCAO_PROFILE");
-        return e && e[0] != '\0' && e[0] != '0';
-    }();
+    static const bool on = env::flag("ADOCAO_PROFILE");
     return on;
 }
 

@@ -4,6 +4,7 @@
 #include "JsonCleaner.hpp"
 #include "ByteSource.hpp"   // 容器识别 + 解压后端接口（实现见 archive/）
 #include "core/util/Logger.hpp"
+#include "core/util/Env.hpp"
 #include "core/util/Scheduler.hpp"
 #include <fstream>
 #include <cstdio>
@@ -1186,7 +1187,7 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
     // 目标偏移可能落在同一个对象上（小文件），findActionSplits 会把它们合并成更少的段
 
 
-    const bool dbg = std::getenv("ADOCAO_PARSE_DBG") != nullptr;
+    const bool dbg = env::flag("ADOCAO_PARSE_DBG");
     auto now = [] { return std::chrono::steady_clock::now(); };
     auto msSince = [](auto a) {
         return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - a).count();
@@ -1501,7 +1502,7 @@ struct WindowParser {
 
     // 跑完整个流。1 = 完成；0 = 结构上搞不定（退回整份解压）；-1 = 解压失败
     int run(WindowSource& stream) {
-        const bool dbg = std::getenv("ADOCAO_WINDOW_DBG") != nullptr;
+        const bool dbg = env::flag("ADOCAO_WINDOW_DBG");
         if (!stream.next()) {
             if (dbg) std::fprintf(stderr, "[win] 首块就失败 failed=%d err=%s\n", (int)stream.failed(), stream.error().c_str());
             return stream.failed() ? -1 : 0;
@@ -2179,14 +2180,14 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
     if (archive != LevelArchiveKind::Plain) {
         // 优先走窗口流水线：不把整份解压结果摊进内存（10 GB 文本那份匿名内存会被系统
         // 压缩/换页，实测吞吐掉到 1/11）。任何搞不定的情况都退回下面的整份解压。
-        const bool forceWhole = std::getenv("ADOCAO_WHOLE_DECOMPRESS") != nullptr;   // 每次读：测试会在同一进程里切换
+        const bool forceWhole = env::flag("ADOCAO_WHOLE_DECOMPRESS");   // 每次读：测试会在同一进程里切换
         // 压缩输入默认走窗口流水线：逐位一致（fixture 用 4 KB 半窗、1.18 / 1.40 GB 真实谱用
         // 96 KB / 1 MB / 8 MB 半窗都核对过 13 个节的 hash），而且比整份解压省掉"整份文本"
         // 的分配与二次扫描。搞不定的情况一律放弃并落到下面的整份解压，所以默认开启无风险。
         // ADOCAO_WINDOW_KB 调半窗大小；ADOCAO_WHOLE_DECOMPRESS=1 强制退回整份解压。
         // 测试用：要求必须走通窗口路径（不许静默回退），否则直接失败 —— 用来证明用例
         // 真的覆盖了这条路径，而不是每次都在偷偷走整份解压。
-        const bool requireWindow = std::getenv("ADOCAO_WINDOW_REQUIRE") != nullptr;
+        const bool requireWindow = env::flag("ADOCAO_WINDOW_REQUIRE");
         if (!forceWhole) {
             // 半窗默认 4 MB：实测比 96 MB 更快（TNR 1928 vs 2062 ms——小窗口更贴缓存），
             // 峰值内存也只剩 2x8 MB。单个 JSON 值大于半窗时窗口路径会放弃并回退整份解压。
@@ -2295,14 +2296,14 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
 
     // ADOCAO_FORCE_DOM_PARSE=1 强制走旧路径（对拍用，见 tests/level_parse_test.cpp）。
     // 每次加载都读一遍环境变量，测试才能在同一个进程里对拍两条路径。
-    const bool forceLegacy = (std::getenv("ADOCAO_FORCE_DOM_PARSE") != nullptr);
+    const bool forceLegacy = env::flag("ADOCAO_FORCE_DOM_PARSE");
 
     try {
         if (!forceLegacy) {
             if (tryFastParse(data, len, onProgress)) return finishLoad(onProgress, exportOnly);
             // 测试用：要求快路径必须能吃下这个文件（不许静默回退到 DOM），用来界定
             // "窗口路径也必须能吃下"的范围。
-            if (std::getenv("ADOCAO_FAST_REQUIRE") != nullptr) {
+            if (env::flag("ADOCAO_FAST_REQUIRE")) {
                 LOG_E("fast parse declined the buffer (test hook ADOCAO_FAST_REQUIRE); stage=%s", g_fastStage);
                 std::fprintf(stderr, "[ADOCAO] fast parse declined at stage: %s off=%lld\n", g_fastStage,
                              (g_failPos && g_bufBase) ? (long long)(g_failPos - g_bufBase) : -1LL);

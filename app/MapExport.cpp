@@ -4,6 +4,7 @@
 #include "core/timeline/Timeline.hpp"
 #include "core/map/LevelMap.hpp"
 #include "core/util/Logger.hpp"
+#include "core/util/Env.hpp"
 #include "core/util/Scheduler.hpp"
 #include "core/util/Progress.hpp"
 
@@ -424,7 +425,7 @@ int stitchLevelMapTiles(const std::string& dir, const std::string& outPng, int s
     if (scale == 1) {
         if (const char* s = std::getenv("ADOCAO_STITCH_Y0"))   y0 = std::atoll(s);
         if (const char* s = std::getenv("ADOCAO_STITCH_ROWS")) rows = std::atoll(s);
-        if (const char* s = std::getenv("ADOCAO_STITCH_SEQ"))  forceSeq = std::atoi(s) != 0;
+        forceSeq = env::flag("ADOCAO_STITCH_SEQ");
         y0 = std::max(0LL, std::min(y0, H));
         rows = std::max(0LL, std::min(rows, H - y0));
     }

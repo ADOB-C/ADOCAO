@@ -16,6 +16,8 @@
 
 ## 1. 分段计时（`ADOCAO_PROFILE=1`，默认关）
 
+> 全部 `ADOCAO_*` 环境变量（含本节这几个）的**唯一总表**在 [`docs/env.md`](env.md)。
+
 **Profiler 的专用文件（2026-10-17）**：开 `ADOCAO_PROFILE=1` 后，除了日志里的 `soak` 行，
 还会写一份 **`ADOCAO.prof`（CSV，每行立即 flush，运行中就能读）**：
 

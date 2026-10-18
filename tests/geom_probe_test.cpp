@@ -23,6 +23,7 @@
 #include <cstdarg>
 #include <cstdint>
 #include <cstdlib>
+#include "core/util/Env.hpp"
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -104,7 +105,7 @@ GLuint compile(GLenum type, const std::string& src) {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (const char* e = std::getenv("ADOCAO_TILE_EXACT")) g_requireExact = (std::atoi(e) != 0);
+    g_requireExact = env::flag("ADOCAO_TILE_EXACT");
     // 形状集：命令行给的谱面 + 0.01° 抽样（与 L1 同源，保证两边比的是同一批形状）
     std::vector<Shape> shapes;
     std::vector<std::pair<std::pair<float, float>, bool>> keys;

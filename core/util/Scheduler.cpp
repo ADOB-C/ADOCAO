@@ -4,6 +4,7 @@
 #include <cstdlib>
 
 #include "core/util/Logger.hpp"
+#include "core/util/Env.hpp"
 
 namespace adofai {
 
@@ -18,8 +19,7 @@ Scheduler::InParallelGuard::~InParallelGuard() { --t_inParallel; }
 
 bool Scheduler::serialForced() {
     static const bool forced = [] {
-        const char* e = std::getenv("ADOCAO_JOBS");
-        const bool f = e && std::atoi(e) == 1;
+        const bool f = env::flag("ADOCAO_JOBS");
         if (f) LOG_I("scheduler: ADOCAO_JOBS=1 → 全部并行就地串行（A/B 对照用）");
         return f;
     }();

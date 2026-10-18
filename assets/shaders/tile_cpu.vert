@@ -75,7 +75,7 @@ void main() {
     }
 
     vColor = color;
-    vIconLocal = pos.xy - (aPivot + aMove);
+    vIconLocal = pos.xy;   // 砖的局部原点就是砖心（形状以砖心为原点）
     vIconBits  = aIconBits;
     // stroke 层（z 更小=更近）压过 fill；同层同 z 的 part 由 GL_LESS 丢弃后画的那个。
     pos.z -= (1.0 - type) * 2e-4;

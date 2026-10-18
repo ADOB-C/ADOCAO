@@ -157,7 +157,7 @@ void main() {
 
     vColor = color;
     // 图标位置：砖心（aPivot）在变换后落在 aPivot + aMove
-    vIconLocal = pos.xy - (aPivot + aMove);
+    vIconLocal = pos.xy;   // 砖的局部原点就是砖心（形状以砖心为原点）
     vIconBits  = aIconBits;
 
 #ifndef GEOM_PROBE

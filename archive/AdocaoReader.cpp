@@ -461,7 +461,7 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
         }
     }
     if (const Sec* mvSec = findSec(secs, SectionId::MoveTrack)) {
-        constexpr size_t kRec = 52;
+        const size_t kRec = (version >= 5) ? 54 : 52;   // v5 追加 eventTag(u16)
         if (mvSec->size % kRec != 0) { err = "movetrack 段长度不是记录整数倍"; return false; }
         const size_t cnt = mvSec->size / kRec;
         out.moveTrackEvents.clear();
@@ -485,6 +485,11 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
             std::memcpy(&e.scaleX, q + 40, 4);
             std::memcpy(&e.scaleY, q + 44, 4);
             std::memcpy(&e.opacity, q + 48, 4);
+            if (version >= 5) {
+                const uint16_t ti = (uint16_t)(q[52] | (q[53] << 8));
+                if (ti >= out.actionStrTable.size()) { err = "movetrack 段 tag 下标越界"; return false; }
+                if (ti != 0) e.tag = out.actionStrTable[ti];
+            }
             out.moveTrackEvents.push_back(e);
         }
     }

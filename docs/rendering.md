@@ -102,8 +102,13 @@
   逐位不变。
   identity（rot=0/scale=1/alpha=1/move=0）逐位不变（`geom_probe` 197 万坐标 0 失败，走 GEOM_PROBE
   分支时不做变换）。
-* 未做：MoveTrack 的 `RepeatEvents` 展开（现在只按事件本身的范围）；行星仍沿原路径（不跟随
-  MoveTrack 位移，与原版一致）；`eventTag` 只存不消费。
+* **`RepeatEvents` 展开（2026-10-17 已落地）**：`eventTag`（空格分隔的多个 tag）与同 floor 的
+  `RepeatEvents.tag` 匹配 → 按 Re_ADOJAS 规则展开：Beat 模式（`repeatType != Floor`）保持 epFloor、
+  角度偏移 `+= interval*rep*180`；Floor 模式 `executeOnCurrentFloor` 把 epFloor 移到目标层，
+  否则用几何拍差 `(entryBeat(target)-entryBeat(base))*180`；范围/触发/pitch 都按 **epFloor** 算。
+  **同 floor 的事件必须按文件顺序**（`order`）：2025 的 floor 2309 有 `scale/opacity 0` 与
+  `opacity 250` 两条，顺序反了砖就消失——这就是“MoveTrack 抄不对”的真因。
+* 未做：行星仍沿原路径（不跟随 MoveTrack 位移，与原版一致）。
 
 **Flash（2026-10-17 已落地）**：全屏闪屏，按 `plane` 分两层：
 

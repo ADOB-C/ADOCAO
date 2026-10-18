@@ -174,6 +174,7 @@ struct LevelData {
     struct MoveTrackEvent {
         int32_t floor = 0;
         float   angleOffset = 0.0f;
+        std::string tag;            // eventTag（空格分隔；RepeatEvents 展开用）
         int32_t startOff = 0, endOff = 0;
         int8_t  startRel = -1, endRel = -1;
         int32_t gap = 0;

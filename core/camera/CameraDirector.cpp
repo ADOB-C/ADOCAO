@@ -1,4 +1,5 @@
 #include "core/camera/CameraDirector.hpp"
+#include "core/util/Logger.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -292,6 +293,9 @@ void CameraDirector::startEffect(const CameraKey& k, double planetX, double plan
         const double targetRot = rotationUsed ? (double)ev.rotation : 0.0;
         startTween(m_rotationTween, m_camAngle, m_camAngle, targetRot + rotationOffset, duration, ease, now);
     }
+    if (rotationUsed && std::getenv("ADOCAO_CAM_DEBUG"))
+        LOG_I("cam-rot: t=%.4f floor=%d target=%.2f from=%.2f dur=%.4f relOff=%.2f",
+              now, (int)ev.floor, (double)ev.rotation, m_camAngle, duration, rotationOffset);
     if (zoomUsed) {
         startTween(m_zoomTween, m_zoomSize, m_zoomSize, (double)ev.zoom / 100.0, duration, ease, now);
     }

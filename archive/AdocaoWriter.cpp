@@ -175,6 +175,9 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
     std::vector<uint16_t> camTagIdx(level.cameraEvents.size());
     for (size_t i = 0; i < level.cameraEvents.size(); ++i)
         camTagIdx[i] = pool.add(level.cameraEvents[i].tag);
+    std::vector<uint16_t> mvTagIdx(level.moveTrackEvents.size());
+    for (size_t i = 0; i < level.moveTrackEvents.size(); ++i)
+        mvTagIdx[i] = pool.add(level.moveTrackEvents[i].tag);
     std::vector<uint16_t> repTagIdx(level.repeatEvents.size());
     for (size_t i = 0; i < level.repeatEvents.size(); ++i)
         repTagIdx[i] = pool.add(level.repeatEvents[i].tag);
@@ -513,8 +516,9 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
     }
     if (!level.moveTrackEvents.empty()) {
         Section s; s.id = (uint8_t)SectionId::MoveTrack; s.elements = level.moveTrackEvents.size();
-        s.blob.reserve(level.moveTrackEvents.size() * 52);
-        for (const LevelData::MoveTrackEvent& e : level.moveTrackEvents) {
+        s.blob.reserve(level.moveTrackEvents.size() * 54);
+        for (size_t mi = 0; mi < level.moveTrackEvents.size(); ++mi) {
+            const LevelData::MoveTrackEvent& e = level.moveTrackEvents[mi];
             putU32(s.blob, (uint32_t)e.floor);
             putF32(s.blob, e.angleOffset);
             putF32(s.blob, e.durBeats);
@@ -529,6 +533,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
             putF32(s.blob, e.rotDeg);
             putF32(s.blob, e.scaleX); putF32(s.blob, e.scaleY);
             putF32(s.blob, e.opacity);
+            putU16(s.blob, mvTagIdx[mi]);
         }
         secs.push_back(std::move(s));
     }

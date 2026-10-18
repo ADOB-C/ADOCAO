@@ -629,7 +629,9 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
             }
             break;
         case 'e':
-            if (keyIs(key, "endColor")) {
+            if (rich && keyIs(key, "eventTag")) {
+                if (*v == '"') { f.tagPtr = v + 1; f.tagEnd = vEnd - 1; }
+            } else if (keyIs(key, "endColor")) {
                 std::string tmp;
                 if (!stringValue(v, vEnd, tmp)) return false;
                 f.endColor = std::move(tmp); f.hasEndColor = true;
@@ -1011,6 +1013,7 @@ inline void decodeSpecialEvent(const ActionFields& f, CameraSink& sink) {
         C::MoveTrackEvent ev;
         ev.floor = f.floor;
         ev.angleOffset = (float)f.angleOffset;
+        if (f.tagPtr && f.tagEnd > f.tagPtr) ev.tag.assign(f.tagPtr, (size_t)(f.tagEnd - f.tagPtr));
         ev.startOff = f.startOff; ev.startRel = f.startRel;
         ev.endOff = f.endOff;     ev.endRel = f.endRel;
         ev.gap = f.hasGapLength ? (int32_t)f.gapLength : 0;
@@ -1812,6 +1815,9 @@ LevelData::FlashState LevelData::flashStateAt(uint8_t plane, double timeSec) con
 }
 
 void LevelData::buildMoveTrackIndex(const Timeline& timeline) {
+    // 同 floor 的事件必须保持**文件顺序**（Re_ADOJAS 按 event.id ?? 文件序）：
+    // 例如 2025 floor 2309 的 `scale/opacity 0` 与 `opacity 250` 两条，顺序反了砖就消失。
+    for (size_t i = 0; i < moveTrackEvents.size(); i++) moveTrackEvents[i].order = (uint32_t)i;
     m_moveIndex.clear();
     m_moveBlocks.clear();
     m_moveReady = true;
@@ -1820,29 +1826,116 @@ void LevelData::buildMoveTrackIndex(const Timeline& timeline) {
     const int64_t n = tileCount();
     if (n <= 0) return;
     const double pitch = std::max(0.1, (double)settings.pitch / 100.0);
+    // ── RepeatEvents 展开（与 Re_ADOJAS 的 TimelineManager 同一套规则）──────────
+    // tag 是空格分隔的多个 tag；RepeatEvents 与 action 必须**同 floor** 才生效；
+    // Beat 模式（interval > 0）：epFloor 不变、角度偏移 += interval*rep*180；
+    // Floor 模式：executeOnCurrentFloor → epFloor 移到目标层；否则 epFloor 不变、
+    // 偏移用"几何拍差"（entryBeat(target)-entryBeat(base)）*180。
+    std::unordered_map<int32_t, std::vector<const RepeatEvent*>> repeatByFloor;
+    for (const RepeatEvent& r : repeatEvents) repeatByFloor[r.floor].push_back(&r);
+    auto tagMatches = [](const std::string& a, const std::string& b) {
+        size_t i = 0;
+        while (i < a.size()) {
+            while (i < a.size() && a[i] == ' ') ++i;
+            size_t j = i;
+            while (j < a.size() && a[j] != ' ') ++j;
+            if (j > i) {
+                const std::string_view w(a.data() + i, j - i);
+                size_t p = 0;
+                while (p < b.size()) {
+                    while (p < b.size() && b[p] == ' ') ++p;
+                    size_t q = p;
+                    while (q < b.size() && b[q] != ' ') ++q;
+                    if (q > p && std::string_view(b.data() + p, q - p) == w) return true;
+                    p = q;
+                }
+            }
+            i = j;
+        }
+        return false;
+    };
+    auto findRepeat = [&](const MoveTrackEvent& ev) -> const RepeatEvent* {
+        auto it = repeatByFloor.find(ev.floor);
+        if (it == repeatByFloor.end() || ev.tag.empty()) return nullptr;
+        for (const RepeatEvent* r : it->second)
+            if (tagMatches(r->tag, ev.tag)) return r;
+        return nullptr;
+    };
+    // entryBeat 只在 Floor 模式且不 executeOnCurrentFloor 时用；O(n) 单趟。
+    std::vector<double> entryBeat;
+    auto entryBeatOf = [&](int64_t i) -> double {
+        if (entryBeat.empty()) {
+            entryBeat.assign((size_t)n, 0.0);
+            if (n > 1) {
+                entryBeat[0] = -1.0;
+                double beats = 0.0;
+                for (int64_t j = 1; j + 1 < n; j++) {
+                    entryBeat[(size_t)j] = beats;
+                    const double t0 = timeline.startTimeAt(j);
+                    const double t1 = timeline.startTimeAt(j + 1);
+                    const double beat = (double)timeline.durationAt(j);
+                    beats += (t1 - t0) / (beat > 0.0 ? beat : 1.0);
+                }
+            }
+        }
+        return (i >= 0 && (size_t)i < entryBeat.size()) ? entryBeat[(size_t)i] : 0.0;
+    };
+    struct ExpandedKey { int32_t floor; float ao; };
+    std::vector<ExpandedKey> expanded;
+    auto emitExpanded = [&](int32_t epFloor, float ao) {
+        expanded.push_back({epFloor, ao});
+    };
+    size_t expansionCap = 500000;
     for (const MoveTrackEvent& src : moveTrackEvents) {
         if (src.flags & (kMoveInactive | kMoveEditorOnly)) continue;
         if ((src.flags & 0x1F) == 0) continue;      // 没有可动属性
-        MoveTrackEvent ev = src;
-        auto floorOf = [&](int32_t off, int8_t rel, int32_t host) -> int64_t {
-            if (rel < 0) return (int64_t)off;
-            const int64_t b = (rel == 1) ? 0 : (rel == 2 ? n - 1 : host);
-            return b + (int64_t)off;
-        };
-        int64_t a = floorOf(ev.startOff, ev.startRel, ev.floor);
-        int64_t b = floorOf(ev.endOff, ev.endRel, ev.floor);
-        if (a > b) std::swap(a, b);
-        ev.lo = (int32_t)std::clamp<int64_t>(a, 0, n - 1);
-        ev.hi = (int32_t)std::clamp<int64_t>(b, 0, n - 1);
-        const double beat = (double)timeline.durationAt(ev.floor);
-        ev.trigger = (double)timeline.startTimeAt(ev.floor) +
-                     ((double)ev.angleOffset / 180.0) * beat;
-        ev.durSec = (double)std::max(0.0f, ev.durBeats) * beat / pitch;
-        m_moveIndex.push_back(ev);
-        const float sc = std::max(std::abs(ev.scaleX), std::abs(ev.scaleY));
-        if (sc > m_moveMaxScale) m_moveMaxScale = sc;
-        const float pad = std::hypot(src.offX, src.offY) + (sc > 1.0f ? (sc - 1.0f) * 0.75f : 0.0f);
-        if (pad > m_movePad) m_movePad = pad;
+        const RepeatEvent* rep = findRepeat(src);
+        expanded.clear();
+        if (!rep) {
+            emitExpanded(src.floor, src.angleOffset);
+        } else {
+            const bool isBeat = (rep->flags & 1) != 0;   // repeatType（Floor 模式的 interval 无意义）
+            const int reps = (int)rep->repetitions;
+            const int gap = std::max(1, (int)rep->gapLength);
+            const bool execCur = (rep->flags & 2) != 0;
+            for (int r = 0; r <= reps; r++) {
+                int32_t target = isBeat ? src.floor : src.floor + r * gap;
+                if (target >= (int32_t)n) break;
+                if (isBeat) {
+                    emitExpanded(src.floor, src.angleOffset + rep->interval * (float)r * 180.0f);
+                } else if (execCur) {
+                    emitExpanded(target, src.angleOffset);
+                } else {
+                    emitExpanded(src.floor, src.angleOffset +
+                        (float)((entryBeatOf(target) - entryBeatOf(src.floor)) * 180.0));
+                }
+                if (expanded.size() > expansionCap) { LOG_W("MoveTrack: 重复展开超过上限"); break; }
+            }
+        }
+        for (const ExpandedKey& ek : expanded) {
+            MoveTrackEvent ev = src;
+            ev.floor = ek.floor;
+            ev.angleOffset = ek.ao;
+            auto floorOf = [&](int32_t off, int8_t rel, int32_t host) -> int64_t {
+                if (rel < 0) return (int64_t)off;
+                const int64_t b = (rel == 1) ? 0 : (rel == 2 ? n - 1 : host);
+                return b + (int64_t)off;
+            };
+            int64_t a = floorOf(ev.startOff, ev.startRel, ev.floor);
+            int64_t b = floorOf(ev.endOff, ev.endRel, ev.floor);
+            if (a > b) std::swap(a, b);
+            ev.lo = (int32_t)std::clamp<int64_t>(a, 0, n - 1);
+            ev.hi = (int32_t)std::clamp<int64_t>(b, 0, n - 1);
+            const double beat = (double)timeline.durationAt(ev.floor);
+            ev.trigger = (double)timeline.startTimeAt(ev.floor) +
+                         ((double)ev.angleOffset / 180.0) * beat;
+            ev.durSec = (double)std::max(0.0f, ev.durBeats) * beat / pitch;
+            m_moveIndex.push_back(ev);
+            const float sc = std::max(std::abs(ev.scaleX), std::abs(ev.scaleY));
+            if (sc > m_moveMaxScale) m_moveMaxScale = sc;
+            const float pad = std::hypot(src.offX, src.offY) + (sc > 1.0f ? (sc - 1.0f) * 0.75f : 0.0f);
+            if (pad > m_movePad) m_movePad = pad;
+        }
     }
     if (m_moveIndex.empty()) return;
     const size_t blocks = (size_t)((n + kRecolorBlock - 1) / kRecolorBlock);
@@ -2455,6 +2548,7 @@ void jsonReadMoveTrackEvent(const rapidjson::Value& a, std::vector<LevelData::Mo
     ev.gap = (a.HasMember("gapLength") && a["gapLength"].IsNumber()) ? (int32_t)a["gapLength"].GetDouble() : 0;
     ev.durBeats = (a.HasMember("duration") && a["duration"].IsNumber()) ? a["duration"].GetFloat() : 1.0f;
     ev.angleOffset = (a.HasMember("angleOffset") && a["angleOffset"].IsNumber()) ? a["angleOffset"].GetFloat() : 0.0f;
+    if (a.HasMember("eventTag") && a["eventTag"].IsString()) ev.tag = a["eventTag"].GetString();
     if (a.HasMember("ease") && a["ease"].IsString()) ev.ease = (uint8_t)easeFromName(a["ease"].GetString());
     uint8_t flags = 0;
     if (a.HasMember("positionOffset") && a["positionOffset"].IsArray()) {

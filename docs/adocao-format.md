@@ -182,13 +182,13 @@ floor(i32) | repetitions(f32) | interval(f32) | gapLength(f32) | flags(u8) | tag
 docs/camera.md §2.3。两段都**只在非空时写**；旧文件没有它们 → 读侧得到空 vector（正确结果：
 这张谱没有运镜）。
 
-### 3.8 MoveTrack（段 id 13，v4）
+### 3.8 MoveTrack（段 id 13，v5 起 54 B）
 
-`MoveTrack` 事件，记录 **52 B**：
+`MoveTrack` 事件，**v5 记录 54 B**（v4 为 52 B，无 `eventTag`）：
 
 `floor(i32) | angleOffset(f32) | durBeats(f32) | gap(i32) | startOff(i32) | endOff(i32) |
  startRel(i8) | endRel(i8) | ease(u8) | flags(u8) |
- offX(f32) | offY(f32) | rotDeg(f32) | scaleX(f32) | scaleY(f32) | opacity(f32)`
+ offX(f32) | offY(f32) | rotDeg(f32) | scaleX(f32) | scaleY(f32) | opacity(f32) | eventTag(u16 池下标)`
 
 - `flags`：bit0 offX / bit1 offY / bit2 rot / bit3 scale / bit4 opacity / bit5 inactive / bit6 editorOnly。
 - `scaleX/Y`、`opacity` 已归一（%/100）；`startRel/endRel`：-1 绝对 / 0 ThisTile / 1 Start / 2 End。

@@ -168,6 +168,7 @@ Digest digest(const LevelData& lv, bool ok) {
         mv.bytes(&e.ease, 1); mv.bytes(&e.flags, 1);
         mv.f32(e.offX); mv.f32(e.offY); mv.f32(e.rotDeg);
         mv.f32(e.scaleX); mv.f32(e.scaleY); mv.f32(e.opacity);
+        mv.str(e.tag);
     }
     H rv; for (auto& r : lv.repeatEvents) {
         rv.i32(r.floor); rv.f32(r.repetitions); rv.f32(r.interval); rv.f32(r.gapLength);

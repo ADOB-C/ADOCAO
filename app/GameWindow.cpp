@@ -199,9 +199,10 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     // 用户拿"只有 59.4 fps"来问的时候，第一件事是看这行：vsync 是唯一会**真的**把
     // app 锁在刷新率上的开关（默认关）。抓屏工具自己的刷新率上限是另一回事
     // （WGC/DXGI 复制只看得见合成器每周期提交的那一帧），别混为一谈。
+    // 只报 vsync 状态；帧率上限由 run() 里的 ADOCAO_UNCAPPED 决定，在那边报
+    // （这里还没解析它，写"默认 320 fps 节流"会在 UNCAPPED 打开时自相矛盾 —— 真踩过）。
     LOG_I("swap interval: %d — %s", vsync ? 1 : 0,
-          vsync ? "vsync on，帧率上限 = 显示器刷新率"
-                : "vsync off，不锁帧；默认 320 fps 节流（ADOCAO_UNCAPPED=1 关闭）");
+          vsync ? "vsync on，帧率上限 = 显示器刷新率" : "vsync off，不锁帧");
     if (cfg.fullscreen && mode) {
         LOG_I("fullscreen: %dx%d @ %d Hz（%s）", mode->width, mode->height, mode->refreshRate,
 #ifdef _WIN32
@@ -955,6 +956,8 @@ void GameWindow::run() {
     if (env::flag("ADOCAO_UNCAPPED")) {
         targetFrameTime = 0.0;
         LOG_I("帧率上限已关闭（ADOCAO_UNCAPPED=1）");
+    } else {
+        LOG_I("帧率上限：320 fps（ADOCAO_UNCAPPED=1 关闭节流）");
     }
     // 诊断钩子：跑到 N 毫秒后**正常退出**（好让 `profile::reportSteady()` 打分段报告）。
     // 只给 `ADOCAO_PROFILE=1` 的全流程剖面用；不设 = 行为完全不变。

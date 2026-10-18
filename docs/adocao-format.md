@@ -182,6 +182,17 @@ floor(i32) | repetitions(f32) | interval(f32) | gapLength(f32) | flags(u8) | tag
 docs/camera.md §2.3。两段都**只在非空时写**；旧文件没有它们 → 读侧得到空 vector（正确结果：
 这张谱没有运镜）。
 
+### 3.7 Flash（段 id 12，v4）
+
+`Flash` 事件，记录 **32 B**：
+
+`floor(i32) | duration(f32) | angleOffset(f32) | plane(u8) | style(u8) | ease(u8) | pad(u8) |
+ startColor(RGBA, 4B) | endColor(RGBA, 4B) | startOpacity(f32) | endOpacity(f32)`
+
+- `plane`：0 = Foreground / 1 = Background；`style`：0 = Flash / 1 = Kill / 2 = StayBlack。
+- `startOpacity/endOpacity` 已归一成 0..1。颜色只存 RGB（alpha 由 opacity 决定）。
+- 触发时间不存（由 `floor` + `angleOffset` + timeline 在加载时算）。
+
 ### 3.6 Colour（段 id 11，2026-10-17 / v4 扩到 50 B）
 
 `ColorTrack`/`RecolorTrack` 与运镜同理：一条事件一个富结构，**不塞进 16 B 的 `FastAction`**。

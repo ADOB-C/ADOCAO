@@ -493,6 +493,24 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         }
         secs.push_back(std::move(s));
     }
+    if (!level.flashEvents.empty()) {
+        Section s; s.id = (uint8_t)SectionId::Flash; s.elements = level.flashEvents.size();
+        s.blob.reserve(level.flashEvents.size() * 32);
+        for (const LevelData::FlashEvent& e : level.flashEvents) {
+            putU32(s.blob, (uint32_t)e.floor);
+            putF32(s.blob, e.duration);
+            putF32(s.blob, e.angleOffset);
+            putU8(s.blob, e.plane);
+            putU8(s.blob, e.style);
+            putU8(s.blob, e.ease);
+            putU8(s.blob, 0);
+            putU8(s.blob, e.startColor[0]); putU8(s.blob, e.startColor[1]); putU8(s.blob, e.startColor[2]); putU8(s.blob, 255);
+            putU8(s.blob, e.endColor[0]);   putU8(s.blob, e.endColor[1]);   putU8(s.blob, e.endColor[2]);   putU8(s.blob, 255);
+            putF32(s.blob, e.startOpacity);
+            putF32(s.blob, e.endOpacity);
+        }
+        secs.push_back(std::move(s));
+    }
     if (!level.pathData.empty()) {
         Section s; s.id = (uint8_t)SectionId::PathData;
         putU64(s.blob, level.pathData.size());

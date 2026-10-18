@@ -79,6 +79,8 @@ private:
     adofai::Shader* m_planetShader = nullptr;
     adofai::Shader* m_trailShader = nullptr;
     adofai::Shader* m_highlightShader = nullptr;
+    adofai::Shader* m_flashShader = nullptr;   // Flash 全屏叠层
+    unsigned int m_flashVao = 0;               // 空 VAO（全屏三角形，无 VBO）
 
     adofai::TileMesh* m_tileMesh = nullptr;
     const adofai::LevelData* m_level = nullptr;   // 砖色（ColorTrack）查询用；生命周期由调用方保证

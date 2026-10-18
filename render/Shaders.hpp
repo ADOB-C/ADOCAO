@@ -339,6 +339,22 @@ void main() {
 
 // Highlight shader：与砖**共用**同一个 VS（几何只有一份实现），只有 FS 不同。
 // 砖有两支 VS（4.10 的 fma 版 / 3.3 的查表版），高亮跟着砖走，用同一支 —— 见 LevelScene 的选择。
+
+// Flash：全屏三角形 + uniform 颜色（见 assets/shaders/flash.*）
+constexpr const char* kFlashVertSrc = R"(#version 330 core
+// 全屏三角形（无 VBO）：gl_VertexID 0/1/2 → (-1,-1) (3,-1) (-1,3)
+void main() {
+    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)) * 2.0 - 1.0;
+    gl_Position = vec4(p, 0.0, 1.0);
+}
+)";
+constexpr const char* kFlashFragSrc = R"(#version 330 core
+// Flash 叠层：直接输出 uniform 颜色 × alpha，混合由调用方设置。
+uniform vec3  uColor;
+uniform float uAlpha;
+out vec4 fragColor;
+void main() { fragColor = vec4(uColor, uAlpha); }
+)";
 constexpr const char* kHighlightVertSrc = kTileVertSrc;
 
 constexpr const char* kHighlightFragSrc = R"(#version 330 core

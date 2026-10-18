@@ -53,6 +53,22 @@
   O(块内事件数)。条目上限 **4M**（超了 `LOG_W` 截断）；`buildRecolorIndex()` 在 `LevelLoader`
   里、丢起始时间数组之前调用。
 
+**Flash（2026-10-17 已落地）**：全屏闪屏，按 `plane` 分两层：
+
+* **Background**：在砖之前画（砖会盖住它，视觉上"只染背景"）；
+* **Foreground**：在所有内容之后画（屏幕空间最上层）；
+* 事件字段：`duration`（秒）、`plane`、`startColor`/`endColor`、`startOpacity`/`endOpacity`
+  （0..100 → 0..1）、`ease`、`angleOffset`、`flashStyle`（Flash/Kill/StayBlack）；兼容旧格式
+  `color`/`colorTo`/`opacity`/`flashStyle`。
+* 语义（对齐 Re_ADOJAS `FlashEffect`）：触发时把该 plane 设成 start 再按 ease 补到 end；
+  **duration<=0 或补完后停在 end 值**（`endOpacity>0` 就一直保持），直到下一次 Flash/Kill；
+  `Kill` 立即清空，`StayBlack` 立即全黑 100%；每个 plane 只有一条活动过渡（后触发的覆盖前一条）。
+* 触发时间 = `startTimeAt(floor) + angleOffset/180 × 一拍`，在 `LevelLoader` 里
+  `buildFlashIndex()` 预计算并排序；每帧 `flashStateAt(plane, t)` 二分取最后一条 ≤t 的事件。
+* 全屏是一个 `gl_VertexID` 三角形（无 VBO）+ `flash.vert/flash.frag`；混合
+  `SRC_ALPHA/ONE_MINUS_SRC_ALPHA`，`glDepthMask(false)` 不写深度。
+* 未做：`legacyFlash`（v13 及更早谱面 FG/BG 共用一块材质）的兼容分支；`Reverse` 旧样式。
+
 **style 几何（2026-10-17 已落地）**：`buildShape()` 收 `styleWidth/styleLength`（Basic/Neon/NeonLight
 半宽 +0.025、半长 +0.02；Minimal 半长 −0.03），形状键 `GeoKey`/`packShapeKey` 带上 style（3 bit），
 所以同一角度在不同 style 下是不同形状；`deriveRange` 的查表也带 style。The Moon 的 1296 条 Neon /

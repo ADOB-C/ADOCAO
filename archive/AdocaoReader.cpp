@@ -460,6 +460,26 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
             out.repeatEvents.push_back(std::move(r));
         }
     }
+    if (const Sec* flSec = findSec(secs, SectionId::Flash)) {
+        constexpr size_t kRec = 32;
+        if (flSec->size % kRec != 0) { err = "flash 段长度不是记录整数倍"; return false; }
+        const size_t cnt = flSec->size / kRec;
+        out.flashEvents.clear();
+        out.flashEvents.reserve(cnt);
+        for (size_t i = 0; i < cnt; ++i) {
+            const uint8_t* q = flSec->p + i * kRec;
+            LevelData::FlashEvent e;
+            e.floor = (int32_t)rdU32(q);
+            std::memcpy(&e.duration, q + 4, 4);
+            std::memcpy(&e.angleOffset, q + 8, 4);
+            e.plane = q[12]; e.style = q[13]; e.ease = q[14];
+            e.startColor[0] = q[16]; e.startColor[1] = q[17]; e.startColor[2] = q[18];
+            e.endColor[0] = q[20];   e.endColor[1] = q[21];   e.endColor[2] = q[22];
+            std::memcpy(&e.startOpacity, q + 24, 4);
+            std::memcpy(&e.endOpacity, q + 28, 4);
+            out.flashEvents.push_back(e);
+        }
+    }
     if (const Sec* colSec = findSec(secs, SectionId::Colour)) {
         // v3 = 32 B（floor + 5 池下标 + 4 float + ease/flags）
         // v4 = 50 B（再追加 startOff/endOff/startRel/endRel/gapLength/angleOffset）

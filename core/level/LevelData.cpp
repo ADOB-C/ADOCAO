@@ -261,7 +261,8 @@ struct Regions {
 struct CameraSink {
     std::vector<LevelData::CameraEvent> cameras;
     std::vector<LevelData::RepeatEvent> repeats;
-    std::vector<LevelData::ColorEvent> colors;   // ColorTrack（与相机同一个 rich 通道）
+    std::vector<LevelData::ColorEvent> colors;   // ColorTrack / RecolorTrack
+    std::vector<LevelData::FlashEvent> flashes;  // Flash
 };
 
 // 前置声明：actions 在根扫描过程中就地解析（见 scanRootMembers）。
@@ -350,6 +351,7 @@ inline LevelData::FastAction::Type eventTypeOf(KeyRef k) {
     if (keyIs(k, "RepeatEvents"))  return T::RepeatEvents;   // → repeatEvents（富结构）
     if (keyIs(k, "ColorTrack"))    return T::ColorTrack;     // → colorEvents（富结构）
     if (keyIs(k, "RecolorTrack"))  return T::RecolorTrack;   // → colorEvents（范围 + 触发时间）
+    if (keyIs(k, "Flash"))         return T::Flash;          // → flashEvents（全屏闪屏）
     return T::Other;
 }
 
@@ -395,6 +397,15 @@ struct ActionFields {
     bool hasTrackPulseLength = false;  float trackPulseLength = 10.0f;
     bool hasTrackGlow = false;         float trackGlow = 100.0f;
     // ── RecolorTrack：范围 ────────────────────────────────────────────
+    // ── Flash ────────────────────────────────────────────────────────
+    bool hasFlashPlane = false;  std::string flashPlane;
+    bool hasStartColor = false;  std::string startColor;
+    bool hasEndColor = false;    std::string endColor;
+    bool hasStartOpacity = false, hasEndOpacity = false, hasLegacyOpacity = false;
+    float startOpacity = 100.0f, endOpacity = 0.0f, legacyOpacity = 100.0f;
+    bool hasFlashStyle = false;  std::string flashStyle;
+    bool hasLegacyColor = false, hasLegacyColorTo = false;
+    std::string legacyColor, legacyColorTo;
     bool hasStartTile = false, hasEndTile = false, hasGapLength = false;
     int32_t startOff = 0, endOff = 0;
     int8_t  startRel = -1, endRel = -1;   // -1 绝对 / 0 ThisTile / 1 Start / 2 End
@@ -598,7 +609,11 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
         double d;
         switch (*key.p) {
         case 'f':
-            if (keyIs(key, "floor")) {
+            if (keyIs(key, "flashStyle")) {
+                std::string tmp;
+                if (!stringValue(v, vEnd, tmp)) return false;
+                f.flashStyle = std::move(tmp); f.hasFlashStyle = true;
+            } else if (keyIs(key, "floor")) {
                 if (!parseInt(v, vEnd, f.floor)) return false;
                 f.hasFloor = true;
             } else if (rich && keyIs(key, "floorCount")) {
@@ -607,7 +622,14 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
             }
             break;
         case 'e':
-            if (keyIs(key, "endTile")) {
+            if (keyIs(key, "endColor")) {
+                std::string tmp;
+                if (!stringValue(v, vEnd, tmp)) return false;
+                f.endColor = std::move(tmp); f.hasEndColor = true;
+            } else if (keyIs(key, "endOpacity")) {
+                double d2; if (!parseNumber(v, vEnd, d2)) return false;
+                f.endOpacity = (float)d2; f.hasEndOpacity = true;
+            } else if (keyIs(key, "endTile")) {
                 parseTileRef(v, vEnd, f.endOff, f.endRel, f.hasEndTile);
             } else if (keyIs(key, "eventType")) {
                 if (*v != '"') return false;
@@ -624,7 +646,14 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
             }
             break;
         case 's':
-            if (keyIs(key, "startTile")) {
+            if (keyIs(key, "startColor")) {
+                std::string tmp;
+                if (!stringValue(v, vEnd, tmp)) return false;
+                f.startColor = std::move(tmp); f.hasStartColor = true;
+            } else if (keyIs(key, "startOpacity")) {
+                double d2; if (!parseNumber(v, vEnd, d2)) return false;
+                f.startOpacity = (float)d2; f.hasStartOpacity = true;
+            } else if (keyIs(key, "startTile")) {
                 parseTileRef(v, vEnd, f.startOff, f.startRel, f.hasStartTile);
             } else if (keyIs(key, "secondaryTrackColor")) {
                 std::string tmp;
@@ -705,7 +734,11 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
             }
             break;
         case 'p':
-            if (keyIs(key, "positionOffset")) {
+            if (keyIs(key, "plane")) {
+                std::string tmp;
+                if (!stringValue(v, vEnd, tmp)) return false;
+                f.flashPlane = std::move(tmp); f.hasFlashPlane = true;
+            } else if (keyIs(key, "positionOffset")) {
                 if (*v == '[') {                 // 非数组时旧路径直接忽略
                     const char* q = skipWs(v + 1, vEnd);
                     double x, y;
@@ -781,6 +814,23 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
                 }
             }
             break;
+        case 'c':
+            if (keyIs(key, "color")) {
+                std::string tmp;
+                if (!stringValue(v, vEnd, tmp)) return false;
+                f.legacyColor = std::move(tmp); f.hasLegacyColor = true;
+            } else if (keyIs(key, "colorTo")) {
+                std::string tmp;
+                if (!stringValue(v, vEnd, tmp)) return false;
+                f.legacyColorTo = std::move(tmp); f.hasLegacyColorTo = true;
+            }
+            break;
+        case 'o':
+            if (keyIs(key, "opacity")) {
+                double d2; if (!parseNumber(v, vEnd, d2)) return false;
+                f.legacyOpacity = (float)d2; f.hasLegacyOpacity = true;
+            }
+            break;
         default:
             break;
         }
@@ -821,7 +871,8 @@ inline bool buildAction(const ActionFields& f, LevelData::FastAction& a, bool& k
     // 缺 floor 或缺 eventType、以及未知 eventType 的 action 旧路径直接丢弃
     keep = f.hasFloor && f.hasEvent && f.type != T::Other &&
            f.type != T::MoveCamera && f.type != T::RepeatEvents &&
-           f.type != T::ColorTrack && f.type != T::RecolorTrack;   // 后四者进富结构
+           f.type != T::ColorTrack && f.type != T::RecolorTrack &&
+           f.type != T::Flash;   // 后五者进富结构
     return true;
 }
 
@@ -902,6 +953,23 @@ inline void decodeSpecialEvent(const ActionFields& f, CameraSink& sink) {
         }
         ev.flags = flags;
         sink.colors.push_back(std::move(ev));
+    } else if (f.type == T::Flash) {
+        C::FlashEvent ev;
+        ev.floor = f.floor;
+        ev.duration = f.hasDuration ? f.duration : 1.0f;
+        ev.angleOffset = (float)f.angleOffset;
+        ev.startOpacity = f.hasStartOpacity ? f.startOpacity / 100.0f
+                        : (f.hasLegacyOpacity ? f.legacyOpacity / 100.0f : 1.0f);
+        ev.endOpacity = f.hasEndOpacity ? f.endOpacity / 100.0f : 0.0f;
+        std::string sc = f.hasStartColor ? f.startColor : (f.hasLegacyColor ? f.legacyColor : std::string("ffffff"));
+        std::string ec = f.hasEndColor ? f.endColor : (f.hasLegacyColorTo ? f.legacyColorTo : sc);
+        Rgb8 c1 = parseColorHex(sc), c2 = parseColorHex(ec);
+        ev.startColor[0]=c1.r; ev.startColor[1]=c1.g; ev.startColor[2]=c1.b;
+        ev.endColor[0]=c2.r; ev.endColor[1]=c2.g; ev.endColor[2]=c2.b;
+        ev.plane = (f.hasFlashPlane && f.flashPlane == "Background") ? 1 : 0;
+        ev.style = f.hasFlashStyle ? (f.flashStyle == "Kill" ? 1 : (f.flashStyle == "StayBlack" ? 2 : 0)) : 0;
+        ev.ease = (uint8_t)f.easeId;
+        sink.flashes.push_back(ev);
     }
 }
 
@@ -929,7 +997,8 @@ inline bool parseActionRegion(const char* b, const char* end,
         else if (f.type == LevelData::FastAction::MoveCamera ||
                  f.type == LevelData::FastAction::RepeatEvents ||
                  f.type == LevelData::FastAction::ColorTrack ||
-                 f.type == LevelData::FastAction::RecolorTrack) {
+                 f.type == LevelData::FastAction::RecolorTrack ||
+                 f.type == LevelData::FastAction::Flash) {
             // 罕见事件：对同一个对象再解析一遍富字段（热路径零成本，这里最多几百次）
             ActionFields rich;
             if (parseActionObject(p + 1, objEnd, rich, /*rich=*/true)) decodeSpecialEvent(rich, sink);
@@ -1008,7 +1077,8 @@ inline size_t parseActionRangeInto(const char* b, const char* end,
         } else if (f.type == LevelData::FastAction::MoveCamera ||
                    f.type == LevelData::FastAction::RepeatEvents ||
                    f.type == LevelData::FastAction::ColorTrack ||
-                   f.type == LevelData::FastAction::RecolorTrack) {
+                   f.type == LevelData::FastAction::RecolorTrack ||
+                   f.type == LevelData::FastAction::Flash) {
             ActionFields rich;
             if (parseActionObject(p + 1, objEnd, rich, /*rich=*/true)) decodeSpecialEvent(rich, sink);
         }
@@ -1084,6 +1154,7 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
     const size_t camBase = sink.cameras.size();
     const size_t repBase = sink.repeats.size();
     const size_t colBase = sink.colors.size();
+    const size_t flBase = sink.flashes.size();
     std::vector<CameraSink> pieceSinks(n);
     auto tParse = now();
     std::vector<size_t> kept(n, 0);
@@ -1107,7 +1178,7 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
                           scanMs, parseMs, n, poolThreads, (int)failed.load());
     if (failed.load()) {
         out.resize(base);
-        sink.cameras.resize(camBase); sink.repeats.resize(repBase); sink.colors.resize(colBase);
+        sink.cameras.resize(camBase); sink.repeats.resize(repBase); sink.colors.resize(colBase); sink.flashes.resize(flBase);
         return parseActionRegion(b, fileEnd, out, sink, outEnd);   // 只有切分不可信时才会走到
     }
     // 相机/重复事件按**段序**合并 —— 段是按文件顺序切的，所以结果就是文件顺序。
@@ -1122,6 +1193,9 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
         sink.colors.insert(sink.colors.end(),
                            std::make_move_iterator(ps.colors.begin()),
                            std::make_move_iterator(ps.colors.end()));
+        sink.flashes.insert(sink.flashes.end(),
+                            std::make_move_iterator(ps.flashes.begin()),
+                            std::make_move_iterator(ps.flashes.end()));
     }
 
     // 压实：每段末尾的空槽（被丢弃的 action）移走。没有丢弃时位移为 0，直接零拷贝。
@@ -1214,7 +1288,8 @@ struct WindowParser {
             else if (f.type == LevelData::FastAction::MoveCamera ||
                      f.type == LevelData::FastAction::RepeatEvents ||
                      f.type == LevelData::FastAction::ColorTrack ||
-                     f.type == LevelData::FastAction::RecolorTrack) {
+                     f.type == LevelData::FastAction::RecolorTrack ||
+                     f.type == LevelData::FastAction::Flash) {
                 ActionFields rich;
                 if (parseActionObject(p + 1, objEnd, rich, /*rich=*/true))
                     decodeSpecialEvent(rich, cameraSink);
@@ -1625,6 +1700,50 @@ TileColors LevelData::tileColorsAt(int64_t floor, double timeSec, float amplitud
     return out;
 }
 
+void LevelData::buildFlashIndex(const Timeline& timeline) {
+    for (FlashEvent& e : flashEvents) {
+        const double beat = (double)timeline.durationAt(e.floor);
+        e.trigger = (double)timeline.startTimeAt(e.floor) +
+                    ((double)e.angleOffset / 180.0) * beat;
+    }
+    std::stable_sort(flashEvents.begin(), flashEvents.end(),
+                     [](const FlashEvent& a, const FlashEvent& b) { return a.trigger < b.trigger; });
+    LOG_D("Flash: %zu 条事件", flashEvents.size());
+}
+
+LevelData::FlashState LevelData::flashStateAt(uint8_t plane, double timeSec) const {
+    FlashState st;
+    if (flashEvents.empty()) return st;
+    auto it = std::upper_bound(flashEvents.begin(), flashEvents.end(), timeSec,
+                               [](double v, const FlashEvent& e) { return v < e.trigger; });
+    for (auto i = it; i != flashEvents.begin();) {
+        --i;
+        if (i->plane != plane) continue;
+        if (i->style == 1) return st;                       // Kill：立即清空
+        st.active = true;
+        if (i->style == 2) {                                // StayBlack
+            st.color[0] = st.color[1] = st.color[2] = 0;
+            st.alpha = 1.0f;
+            return st;
+        }
+        if (i->duration <= 0.0f) {                          // 零时长：停在终值
+            st.color[0] = i->endColor[0]; st.color[1] = i->endColor[1]; st.color[2] = i->endColor[2];
+            st.alpha = i->endOpacity;
+            return st;
+        }
+        const double p = std::clamp((timeSec - i->trigger) / (double)i->duration, 0.0, 1.0);
+        const double q = easeApply((Ease)i->ease, p);
+        for (int c = 0; c < 3; c++) {
+            st.color[c] = (uint8_t)std::clamp<long>(std::lround(
+                (double)i->startColor[c] + ((double)i->endColor[c] - (double)i->startColor[c]) * q), 0, 255);
+        }
+        st.alpha = (float)((double)i->startOpacity +
+                           ((double)i->endOpacity - (double)i->startOpacity) * q);
+        return st;
+    }
+    return st;
+}
+
 const LevelData::ColorEvent* LevelData::persistentColorAtOrBefore(int64_t floor) const {
     for (auto it = colorEvents.rbegin(); it != colorEvents.rend(); ++it) {
         if (it->floor > floor) continue;
@@ -1838,6 +1957,10 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
                         else colorEvents.insert(colorEvents.end(),
                                                 std::make_move_iterator(wp.cameraSink.colors.begin()),
                                                 std::make_move_iterator(wp.cameraSink.colors.end()));
+                        if (flashEvents.empty()) flashEvents = std::move(wp.cameraSink.flashes);
+                        else flashEvents.insert(flashEvents.end(),
+                                                std::make_move_iterator(wp.cameraSink.flashes.begin()),
+                                                std::make_move_iterator(wp.cameraSink.flashes.end()));
                         return finishLoad(onProgress, exportOnly);
                     }
                 }
@@ -2001,6 +2124,9 @@ bool LevelData::tryFastParse(const char* data, size_t len, ProgressCb onProgress
     if (colorEvents.empty()) colorEvents = std::move(newCamera.colors);
     else colorEvents.insert(colorEvents.end(), std::make_move_iterator(newCamera.colors.begin()),
                             std::make_move_iterator(newCamera.colors.end()));
+    if (flashEvents.empty()) flashEvents = std::move(newCamera.flashes);
+    else flashEvents.insert(flashEvents.end(), std::make_move_iterator(newCamera.flashes.begin()),
+                            std::make_move_iterator(newCamera.flashes.end()));
     if (repeatEvents.empty()) repeatEvents = std::move(newCamera.repeats);
     else repeatEvents.insert(repeatEvents.end(), std::make_move_iterator(newCamera.repeats.begin()),
                              std::make_move_iterator(newCamera.repeats.end()));
@@ -2136,6 +2262,32 @@ void jsonTileRef(const rapidjson::Value& v, int32_t& off, int8_t& rel) {
     }
 }
 
+void jsonReadFlashEvent(const rapidjson::Value& a, std::vector<LevelData::FlashEvent>& out) {
+    using C = LevelData;
+    C::FlashEvent ev;
+    ev.floor = a["floor"].GetInt();
+    ev.duration = (a.HasMember("duration") && a["duration"].IsNumber()) ? a["duration"].GetFloat() : 1.0f;
+    ev.angleOffset = (a.HasMember("angleOffset") && a["angleOffset"].IsNumber()) ? a["angleOffset"].GetFloat() : 0.0f;
+    ev.startOpacity = (a.HasMember("startOpacity") && a["startOpacity"].IsNumber())
+                          ? a["startOpacity"].GetFloat() / 100.0f
+                          : ((a.HasMember("opacity") && a["opacity"].IsNumber()) ? a["opacity"].GetFloat() / 100.0f : 1.0f);
+    ev.endOpacity = (a.HasMember("endOpacity") && a["endOpacity"].IsNumber())
+                        ? a["endOpacity"].GetFloat() / 100.0f : 0.0f;
+    auto str = [&](const char* k) -> std::string {
+        return (a.HasMember(k) && a[k].IsString()) ? std::string(a[k].GetString()) : std::string();
+    };
+    std::string sc = str("startColor"); if (sc.empty()) sc = str("color"); if (sc.empty()) sc = "ffffff";
+    std::string ec = str("endColor"); if (ec.empty()) ec = str("colorTo"); if (ec.empty()) ec = sc;
+    const Rgb8 c1 = parseColorHex(sc), c2 = parseColorHex(ec);
+    ev.startColor[0]=c1.r; ev.startColor[1]=c1.g; ev.startColor[2]=c1.b;
+    ev.endColor[0]=c2.r; ev.endColor[1]=c2.g; ev.endColor[2]=c2.b;
+    ev.plane = (str("plane") == "Background") ? 1 : 0;
+    const std::string fs = str("flashStyle");
+    ev.style = (fs == "Kill") ? 1 : ((fs == "StayBlack") ? 2 : 0);
+    if (a.HasMember("ease") && a["ease"].IsString()) ev.ease = (uint8_t)easeFromName(a["ease"].GetString());
+    out.push_back(ev);
+}
+
 void jsonReadColorEvent(const rapidjson::Value& a, std::vector<LevelData::ColorEvent>& out,
                         bool recolor = false) {
     using C = LevelData;
@@ -2269,6 +2421,7 @@ bool LevelData::parseLegacy(const std::string& jsonStr, ProgressCb onProgress, b
             else if (et == "RepeatEvents") { jsonReadRepeatEvent(a, repeatEvents); continue; }
             else if (et == "ColorTrack") { jsonReadColorEvent(a, colorEvents); continue; }
             else if (et == "RecolorTrack") { jsonReadColorEvent(a, colorEvents, true); continue; }
+            else if (et == "Flash") { jsonReadFlashEvent(a, flashEvents); continue; }
             else continue;
             if (act.type == FastAction::SetSpeed) {
                 if (a.HasMember("speedType") && std::string(a["speedType"].GetString()) == "Multiplier") {

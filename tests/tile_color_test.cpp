@@ -208,6 +208,41 @@ int main() {
         }
     }
 
+    // Flash：触发/补间/零时长保持/Kill/StayBlack
+    {
+        const char* json = R"({"angleData":[0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90],
+            "settings":{"bpm":120},
+            "actions":[
+              {"floor":0,"eventType":"Flash","duration":0,"plane":"Foreground",
+               "startColor":"000000","endColor":"000000","startOpacity":100,"endOpacity":100},
+              {"floor":2,"eventType":"Flash","duration":2,"plane":"Background",
+               "startColor":"ffffff","endColor":"112233","startOpacity":5,"endOpacity":60,
+               "ease":"OutQuad","angleOffset":90},
+              {"floor":8,"eventType":"Flash","duration":0,"plane":"Foreground","flashStyle":"Kill"},
+              {"floor":9,"eventType":"Flash","duration":0,"plane":"Background","flashStyle":"StayBlack"}]})";
+        LevelData lv; Timeline tl;
+        if (!lv.loadFromBuffer(json, std::strlen(json))) { std::printf("FAIL flash: load\n"); fail++; }
+        else {
+            tl.build(lv, false);
+            lv.buildFlashIndex(tl);
+            const double trig2 = tl.startTimeAt(2) + (90.0 / 180.0) * tl.durationAt(2);
+            auto fg = [&](double t) { return lv.flashStateAt(0, t); };
+            auto bg = [&](double t) { return lv.flashStateAt(1, t); };
+            if (fg((double)tl.startTimeAt(0) + 0.1).active != true) { std::printf("FAIL flash fg active\n"); fail++; }
+            if (bg(trig2 - 0.05).active) { std::printf("FAIL flash bg before\n"); fail++; }
+            const auto mid = bg(trig2 + 1.0);
+            if (!mid.active || mid.color[0] < 76 || mid.color[0] > 78 ||
+                mid.color[1] < 88 || mid.color[1] > 90 || mid.color[2] < 101 || mid.color[2] > 103 ||
+                mid.alpha < 0.46f || mid.alpha > 0.47f) {
+                std::printf("FAIL flash mid: %d,%d,%d a=%.3f\n", mid.color[0], mid.color[1], mid.color[2], (double)mid.alpha);
+                fail++;
+            }
+            if (fg((double)tl.startTimeAt(8) + 0.1).active) { std::printf("FAIL flash kill\n"); fail++; }
+            const auto sb = bg((double)tl.startTimeAt(9) + 0.1);
+            if (!sb.active || sb.alpha != 1.0f || sb.color[0] != 0) { std::printf("FAIL flash stayblack\n"); fail++; }
+        }
+    }
+
     if (fail) {
         std::printf("%d 项失败（%d 例金标）\n", fail, n);
         return 1;

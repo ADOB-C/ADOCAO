@@ -20,7 +20,9 @@ checks = [("kTileVertSrc", "assets/shaders/tile.vert"),
           ("kPlanetVertSrc", "assets/shaders/planet.vert"),
           ("kPlanetFragSrc", "assets/shaders/planet.frag"),
           ("kTrailVertSrc", "assets/shaders/trail.vert"),
-          ("kTrailFragSrc", "assets/shaders/trail.frag")]
+          ("kTrailFragSrc", "assets/shaders/trail.frag"),
+          ("kFlashVertSrc", "assets/shaders/flash.vert"),
+          ("kFlashFragSrc", "assets/shaders/flash.frag")]
 bad = 0
 for name, path in checks:
     a, b = grab(name), file(path)

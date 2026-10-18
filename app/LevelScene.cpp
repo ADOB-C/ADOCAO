@@ -59,6 +59,7 @@ LevelScene::~LevelScene() {
     // Requires a current GL context (destructed before the window is destroyed).
     delete m_tileMesh;
     delete m_tileShader;
+    delete m_flashShader;
     delete m_planetShader;
     delete m_trailShader;
     delete m_highlightShader;
@@ -115,6 +116,19 @@ bool LevelScene::compileShaders() {
         LOG_E("Shader compilation failed");
         return false;
     }
+    // Flash 叠层
+    m_flashShader = new Shader();
+    {
+        const std::string vp = resolveAsset("assets/shaders/flash.vert");
+        const std::string fp = resolveAsset("assets/shaders/flash.frag");
+        if (!m_flashShader->compileFile(vp.c_str(), fp.c_str())) {
+            LOG_W("Shader file loading failed, using inline fallback (flash)");
+            if (!m_flashShader->compile(Shaders::kFlashVertSrc, Shaders::kFlashFragSrc)) {
+                LOG_E("Shader compilation failed (flash)");
+                return false;
+            }
+        }
+    }
     return true;
 }
 
@@ -152,6 +166,9 @@ bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level) {
     m_trailShader = new Shader();
     m_highlightShader = new Shader();
     if (!compileShaders()) return false;
+    {   // Flash：全屏三角形（无 VBO），一个空 VAO 就够
+        glGenVertexArrays(1, &m_flashVao);
+    }
 
     // Track
     m_tileMesh = new TileMesh();
@@ -401,6 +418,26 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     // Track appear/disappear animation
     { profile::Scoped _s("vis"); updateTileVisibility(timeline, timeInLevel, playing); }
 
+    auto drawFlashPass = [&](uint8_t plane) {
+        if (!m_level || !m_flashShader || m_flashVao == 0) return;
+        const LevelData::FlashState st = m_level->flashStateAt(plane, timeInLevel);
+        if (!st.active || st.alpha <= 0.001f) return;
+        glDisable(GL_DEPTH_TEST);
+        glDepthMask(GL_FALSE);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        m_flashShader->use();
+        m_flashShader->setVec3("uColor", st.color[0] / 255.0f, st.color[1] / 255.0f, st.color[2] / 255.0f);
+        m_flashShader->setFloat("uAlpha", st.alpha);
+        glBindVertexArray(m_flashVao);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glBindVertexArray(0);
+        glDisable(GL_BLEND);
+        glDepthMask(GL_TRUE);
+        glEnable(GL_DEPTH_TEST);
+    };
+    drawFlashPass(1);   // Background：在砖之前（砖会盖住它）
+
     m_tileMesh->setViewportHeightPx(m_viewportHpx);
     double vl, vr, vb, vt;      // 世界坐标 → double（见 docs/rendering.md 坐标约定）
     camera.frustumBounds(vl, vr, vb, vt);
@@ -451,4 +488,6 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
         m_tileMesh->drawHighlightedTile(highlightTile, camera.targetX(), camera.targetY());
         glEnable(GL_DEPTH_TEST);
     }
+
+    drawFlashPass(0);   // Foreground：最上层
 }

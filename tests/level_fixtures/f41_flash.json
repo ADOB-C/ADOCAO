@@ -1,0 +1,18 @@
+{
+  "angleData": [0, 90, 180, 270, 0, 90, 180, 270, 0, 90, 180, 270],
+  "settings": {"bpm": 120, "trackColor": "debb7b"},
+  "actions": [
+    {"floor": 0, "eventType": "Flash", "duration": 0, "plane": "Foreground",
+     "startColor": "000000ff", "endColor": "000000ff",
+     "startOpacity": 100, "endOpacity": 100, "ease": "Linear", "angleOffset": 0},
+    {"floor": 2, "eventType": "Flash", "duration": 2, "plane": "Background",
+     "startColor": "#ffffff", "endColor": "112233", "startOpacity": 5, "endOpacity": 60,
+     "ease": "OutQuad", "angleOffset": 90},
+    {"floor": 6, "eventType": "Flash", "duration": 1, "plane": "Foreground",
+     "color": "ff0000", "colorTo": "00ff00", "opacity": 50, "flashStyle": "Flash"},
+    {"floor": 8, "eventType": "Flash", "duration": 0, "plane": "Foreground",
+     "flashStyle": "Kill"},
+    {"floor": 9, "eventType": "Flash", "duration": 0, "plane": "Background",
+     "flashStyle": "StayBlack"}
+  ]
+}

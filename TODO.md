@@ -778,3 +778,10 @@ off 那两个采样值相等=被钳住，on 是正常插值，差值正好是**�
 - [ ] **2e9：ColorTrack 的段级缓存**（§3.5）：每段预解析 fill/stroke/opacity/style；绘制列表
       按段指针批量（O(可见+段数)，目标 ≤2 ms @26.2 万可见）；`ColorEvent` 预存 startTime/beatSeconds；
       事件数上限/按块索引（逐层 justThisTile 时 2³¹ → 320 GB）。
+
+- [ ] **MoveTrack**（2026-10-17 已按 Re_ADOJAS `buildTileMoveTrack` 摸清语义，未实现）：
+      每个砖一条"属性关键帧"（positionX/Y、rotation、scaleX/Y、opacity）；事件 `duration` 单位是
+      **拍**（× secPerBeat / pitch），`positionOffset` 是**相对基础位置**、`rotationOffset` 是
+      **绝对角度**（覆盖砖自身旋转）、`scale`/`opacity` 是绝对值（%/100）；每条新事件对同属性做
+      Kill(complete:true) 再补间；末值保持。渲染需要：实例加 (rot, scaleX/Y, alpha, moveOffset)
+      + 顶点旋转/缩放、剔除按最大位移外扩、按块事件表（同 RecolorTrack）。1972/151 条量级。

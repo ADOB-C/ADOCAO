@@ -166,6 +166,31 @@ struct LevelData {
         float    angleOffset = 0.0f;   // 触发时间 = startTime(floor) + angleOffset/180 * 一拍
     };
 
+    // ── Flash（全屏闪屏）──────────────────────────────────────────────
+    // 语义见 Re_ADOJAS `FlashEffect`：每条事件把某个 plane 从 start 补到 end；
+    // duration<=0 或补完后**保持**终值，直到下一次 Flash/Kill。
+    struct FlashEvent {
+        int32_t floor = 0;
+        float duration = 0.0f;      // 秒（Re_ADOJAS 直接用 event.duration 秒）
+        float angleOffset = 0.0f;   // 触发偏移（度）→ trigger = startTime(floor) + angleOffset/180*拍
+        float startOpacity = 1.0f;  // 0..1（事件里的 0..100 已归一）
+        float endOpacity = 1.0f;
+        uint8_t startColor[3] = {255, 255, 255};
+        uint8_t endColor[3] = {255, 255, 255};
+        uint8_t plane = 0;          // 0 Foreground / 1 Background
+        uint8_t style = 0;          // 0 Flash / 1 Kill / 2 StayBlack
+        uint8_t ease = 0;
+        double trigger = 0.0;       // buildFlashIndex 填
+    };
+    struct FlashState {
+        bool active = false;
+        uint8_t color[3] = {0, 0, 0};
+        float alpha = 0.0f;
+    };
+    void buildFlashIndex(const Timeline& timeline);
+    // plane: 0 FG / 1 BG；t = 关卡时间（秒）。无事件 → inactive。
+    FlashState flashStateAt(uint8_t plane, double timeSec) const;
+
     // ── RecolorTrack 的运行时索引（buildRecolorIndex() 之后有效）──────────
     // 每 4096 层一个块，块内是该块"可能命中"的事件下标（按 trigger 排序）。
     // 查询 = 块表里取最后一条 trigger<=t 且范围覆盖该层的事件 —— O(块内事件数)。
@@ -188,6 +213,7 @@ struct LevelData {
     std::vector<CameraEvent> cameraEvents;   // MoveCamera（未展开 RepeatEvents）
     std::vector<RepeatEvent> repeatEvents;   // RepeatEvents（只服务运镜展开；其他事件暂不消费）
     std::vector<ColorEvent> colorEvents;     // ColorTrack / RecolorTrack（未展开；按 floor 查）
+    std::vector<FlashEvent> flashEvents;     // Flash（buildFlashIndex 后按 trigger 排序）
 
     // floor 处生效的颜色事件：
     //   * f 正好是某条 `justThisTile` 事件的层 → 该层**最后一条** justThisTile（覆盖持久段）；
@@ -223,7 +249,7 @@ struct LevelData {
         uint16_t strId = 0;                 // 0 = 空串；索引进 actionStrTable
         // MoveCamera / RepeatEvents **不留在 actions 里**（keep=false）：它们走 cameraEvents /
         // repeatEvents 两个富结构。这两个枚举值只用于"解析时认出它"。
-        enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, MoveCamera, RepeatEvents, ColorTrack, RecolorTrack, Other } type = Other;
+        enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, MoveCamera, RepeatEvents, ColorTrack, RecolorTrack, Flash, Other } type = Other;
         bool flag = false;
         float val1 = 0, val2 = 0;
     };

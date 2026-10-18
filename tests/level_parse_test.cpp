@@ -66,10 +66,10 @@ struct H {
 struct Digest {
     uint64_t angle = 0, actions = 0, tiles = 0, settings = 0, bpm = 0, twirl = 0, setspeed = 0;
     uint64_t bookmarks = 0, hitsounds = 0, hsVolumes = 0, posOffsets = 0, atStates = 0, path = 0;
-    uint64_t cameras = 0, repeats = 0, colors = 0;
+    uint64_t cameras = 0, repeats = 0, colors = 0, flashes = 0;
     size_t angleCount = 0, actionCount = 0, tileCount = 0, bookmarkCount = 0, hitsoundCount = 0;
     size_t hsVolumeCount = 0, posOffsetCount = 0, atStateCount = 0, pathLen = 0;
-    size_t cameraCount = 0, repeatCount = 0, colorCount = 0;
+    size_t cameraCount = 0, repeatCount = 0, colorCount = 0, flashCount = 0;
     bool ok = false;
 };
 
@@ -155,6 +155,12 @@ Digest digest(const LevelData& lv, bool ok) {
         cl.bytes(&e.startRel, 1); cl.bytes(&e.endRel, 1);
         cl.i32(e.gapLength); cl.f32(e.angleOffset);
     }
+    H fl; for (auto& e : lv.flashEvents) {
+        fl.i32(e.floor); fl.f32(e.duration); fl.f32(e.angleOffset);
+        fl.bytes(&e.startOpacity, 4); fl.bytes(&e.endOpacity, 4);
+        fl.bytes(e.startColor, 3); fl.bytes(e.endColor, 3);
+        fl.bytes(&e.plane, 1); fl.bytes(&e.style, 1); fl.bytes(&e.ease, 1);
+    }
     H rv; for (auto& r : lv.repeatEvents) {
         rv.i32(r.floor); rv.f32(r.repetitions); rv.f32(r.interval); rv.f32(r.gapLength);
         rv.bytes(&r.flags, 1); rv.str(r.tag);
@@ -173,6 +179,7 @@ Digest digest(const LevelData& lv, bool ok) {
     d.cameras = cv();   d.cameraCount = lv.cameraEvents.size();
     d.repeats = rv();   d.repeatCount = lv.repeatEvents.size();
     d.colors = cl();    d.colorCount = lv.colorEvents.size();
+    d.flashes = fl();   d.flashCount = lv.flashEvents.size();
     return d;
 }
 
@@ -195,6 +202,7 @@ const Section kSections[] = {
     {"cameraEvents",        &Digest::cameras,    &Digest::cameraCount},
     {"repeatEvents",        &Digest::repeats,    &Digest::repeatCount},
     {"colorEvents",         &Digest::colors,     &Digest::colorCount},
+    {"flashEvents",         &Digest::flashes,    &Digest::flashCount},
 };
 
 // 返回不同的节名（空 = 完全一致）

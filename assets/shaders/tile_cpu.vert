@@ -38,6 +38,7 @@ layout(location = 5) in vec3 aStrokeColor;
 // MoveTrack：rot(弧度) / scaleX / scaleY / alpha | moveXY（所有砖默认 identity）
 layout(location = 6) in vec4 aXform;
 layout(location = 7) in vec2 aMove;
+layout(location = 8) in vec2 aPivot;   // 砖心相对砖起点（旋转/缩放枢轴）
 uniform float uUseInstColor;
 
 out vec3  vColor;
@@ -87,10 +88,15 @@ void main() {
     }
 
     vColor = color;
-    vec2 xp = vec2(pos.x * aXform.y, pos.y * aXform.z);
-    float xc = cos(aXform.x), xs = sin(aXform.x);
-    xp = vec2(xp.x * xc - xp.y * xs, xp.x * xs + xp.y * xc);
-    pos = vec3(xp + aMove, pos.z);
+    if (aXform.x == 0.0 && aXform.y == 1.0 && aXform.z == 1.0) {
+        pos = vec3(pos.xy + aMove, pos.z);
+    } else {
+        vec2 q = pos.xy - aPivot;
+        q *= vec2(aXform.y, aXform.z);
+        float xc = cos(aXform.x), xs = sin(aXform.x);
+        q = vec2(q.x * xc - q.y * xs, q.x * xs + q.y * xc);
+        pos = vec3(q + aPivot + aMove, pos.z);
+    }
     vOpacity = uOpacity * aXform.w;
     gl_Position = uVP * vec4(pos + aInstOffset, 1.0);
 }

@@ -405,11 +405,15 @@ struct TrackColorCtx {
     float amplitude;   // Volume 类型用（音乐 RMS）
 };
 struct TrackXformCtx { const LevelData* level; double time; };
-void trackXformAt(void* ctx, uint32_t tile, float out[6]) {
+void trackXformAt(void* ctx, uint32_t tile, float out[8]) {
     const auto* c = static_cast<const TrackXformCtx*>(ctx);
     const LevelData::MoveTransform tr = c->level->moveTransformAt((int64_t)tile, c->time);
     out[0] = tr.rotDelta; out[1] = tr.scaleX; out[2] = tr.scaleY;
     out[3] = tr.alpha;    out[4] = tr.moveX;  out[5] = tr.moveY;
+    // 砖心相对砖起点的偏移（Re_ADOJAS 的几何以砖心为原点：旋转/缩放绕砖心）
+    const double dir = (double)c->level->tileDirectionAt((int64_t)tile) * 3.14159265358979323846 / 180.0;
+    out[6] = (float)(0.5 * std::cos(dir));
+    out[7] = (float)(0.5 * std::sin(dir));
 }
 void trackColorAt(void* ctx, uint32_t tile, uint8_t fill[3], uint8_t stroke[3], float* alpha) {
     const auto* c = static_cast<const TrackColorCtx*>(ctx);

@@ -67,9 +67,10 @@ public:
     // 逐实例颜色：fill/stroke 为 RGB，alpha = 颜色自带的不透明度（8 位 hex 的 AA/255）。
     using InstanceColorFn = void (*)(void* ctx, uint32_t tile, uint8_t fill[3], uint8_t stroke[3],
                                      float* alpha);
-    // 逐实例变换（MoveTrack）：out = rot(弧度), scaleX, scaleY, alpha, moveX, moveY。
-    // fn=nullptr → 全部 identity（rot 0 / scale 1 / alpha 1 / move 0）。
-    using InstanceXformFn = void (*)(void* ctx, uint32_t tile, float out[6]);
+    // 逐实例变换（MoveTrack）：out = rot(弧度), scaleX, scaleY, alpha, moveX, moveY, pivotX, pivotY。
+    // pivot = 砖心相对砖起点的偏移（Re_ADOJAS 的几何以砖心为原点：旋转/缩放绕砖心）。
+    // fn=nullptr → 全部 identity（rot 0 / scale 1 / alpha 1 / move 0 / pivot 0）。
+    using InstanceXformFn = void (*)(void* ctx, uint32_t tile, float out[8]);
     void draw(double viewL, double viewR, double viewB, double viewT, double camX, double camY,
               InstanceColorFn colorFn = nullptr, void* colorCtx = nullptr,
               InstanceXformFn xformFn = nullptr, void* xformCtx = nullptr) const;
@@ -207,7 +208,7 @@ private:
     mutable std::vector<uint32_t> m_listTiles;
     mutable std::vector<float> m_listAttr;    // 5 float/实例：offX offY offZ shape iconBits
     mutable std::vector<float> m_listColors;  // 6 float/实例：fill rgb + stroke rgb（0..1）
-    mutable std::vector<float> m_listXform;   // 6 float/实例：rot, scaleX, scaleY, alpha, moveX, moveY
+    mutable std::vector<float> m_listXform;   // 8 float/实例：rot, sX, sY, alpha, moveX, moveY, pivotX, pivotY
     mutable InstanceXformFn m_xformFn = nullptr;
     mutable void* m_xformCtx = nullptr;
     float m_movePad = 0.0f;      // 剔除外扩（MoveTrack）

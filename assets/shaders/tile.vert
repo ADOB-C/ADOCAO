@@ -39,6 +39,7 @@ layout(location = 5) in vec3 aStrokeColor;
 // MoveTrack：rot(弧度) / scaleX / scaleY / alpha | moveXY（所有砖默认 identity）
 layout(location = 6) in vec4 aXform;
 layout(location = 7) in vec2 aMove;
+layout(location = 8) in vec2 aPivot;   // 砖心相对砖起点（旋转/缩放枢轴）
 uniform float uUseInstColor;
 
 out vec3  vColor;
@@ -180,10 +181,12 @@ void main() {
     vColor = color;
 
 #ifndef GEOM_PROBE
-    vec2 xp = vec2(pos.x * aXform.y, pos.y * aXform.z);
-    float xc = cos(aXform.x), xs = sin(aXform.x);
-    xp = vec2(fma(xp.x, xc, -(xp.y * xs)), fma(xp.x, xs, xp.y * xc));
-    pos = vec3(xp + aMove, pos.z);
+    {
+        vec2 xp = vec2(pos.x * aXform.y, pos.y * aXform.z);
+        float xc = cos(aXform.x), xs = sin(aXform.x);
+        xp = vec2(fma(xp.x, xc, -(xp.y * xs)), fma(xp.x, xs, xp.y * xc));
+        pos = vec3(xp + aMove, pos.z);
+    }
 #endif
     vOpacity = uOpacity * aXform.w;
 

@@ -64,7 +64,7 @@
 * 逐砖 ≈ **200 ns**（颜色 ~180 ns + 变换 ~5 ns）；60 fps 预算里占 **0.5–1.6%**。
 * **26.2 万可见**（LOD 上限）外推 **~50 ms** —— 只在"整张一帧"的极端视距出现（那档本来就在 85.7 ms 剔除上限附近）。
 * 没有 ColorTrack/RecolorTrack/MoveTrack 的谱 `setAnimNeeded(false)` → **0**；暂停（时间不变）→ **0**。
-* 实例 11→17 float（44→68 B）：26.2 万上限 11.5→17.8 MB（+6.3 MB）；上传字节 +55%，p50 3–6 µs。
+* 实例 11→19 float（44→76 B）：26.2 万上限 11.5→19.9 MB（+8.4 MB）；上传字节 +55%，p50 3–6 µs。
 * 若要压"整张一帧"：下一步是**按段批量**算颜色（列表升序，每段一次；pulse/Volume 才逐砖），
   预期 ~5 ns/砖、26.2 万约 1–2 ms。profiler 段：`anim` / `animColor` / `animXform`。
 
@@ -96,7 +96,10 @@
   `movePad()` = max(|positionOffset| + (maxScale−1)×0.75)，`ensureDrawList` 的视锥外扩加上它，
   保证被移走/放大的砖不会漏剔除；
 * 渲染：实例从 11 → **17 float**（+ `rot, scaleX, scaleY, alpha, moveX, moveY`）。顶点 shader 先
-  `pos *= scale`、再绕原点旋转、再 `+ aMove + aInstOffset`；`vOpacity *= alpha`。
+  **绕砖心**缩放/旋转（Re_ADOJAS 的几何以砖心为原点：`CaculatePoints` 的 `len` 是半长、
+  点跨 ±(len+outline)；我们是"砖起点 + pivot"，pivot = 0.5×(cos dir, sin dir)），
+  再 `+ aMove + aInstOffset`；`vOpacity *= alpha`。纯位移（rot=0, scale=1）走单独分支，
+  逐位不变。
   identity（rot=0/scale=1/alpha=1/move=0）逐位不变（`geom_probe` 197 万坐标 0 失败，走 GEOM_PROBE
   分支时不做变换）。
 * 未做：MoveTrack 的 `RepeatEvents` 展开（现在只按事件本身的范围）；行星仍沿原路径（不跟随

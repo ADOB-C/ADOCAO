@@ -425,9 +425,9 @@ void TileMesh::buildStaticGL() {
     glBindBuffer(GL_ARRAY_BUFFER, m_instVbo);
     size_t cap = (size_t)std::min(m_nTiles, 65536);
     if (cap == 0) cap = 1;
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(cap * 17 * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(cap * 19 * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
     m_instCapacity = cap;
-    const GLsizei stride = 17 * sizeof(float);
+    const GLsizei stride = 19 * sizeof(float);
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void*)0);
     glVertexAttribDivisor(1, 1);
@@ -451,6 +451,9 @@ void TileMesh::buildStaticGL() {
     glEnableVertexAttribArray(7);
     glVertexAttribPointer(7, 2, GL_FLOAT, GL_FALSE, stride, (void*)(15 * sizeof(float)));
     glVertexAttribDivisor(7, 1);
+    glEnableVertexAttribArray(8);
+    glVertexAttribPointer(8, 2, GL_FLOAT, GL_FALSE, stride, (void*)(17 * sizeof(float)));
+    glVertexAttribDivisor(8, 1);
     glBindVertexArray(0);
     LOG_D("TileMesh::buildStaticGL: shapeTex %dx%d, %d 槽位, %d 索引", TileShape::kTexW, m_shapeRows,
           TileShape::kTotalSlots, TileShape::kIndexCount);
@@ -814,19 +817,19 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
 
 void TileMesh::fillInstanceAnim() const {
     const size_t count = m_listTiles.size();
-    m_listXform.assign(count * 6, 0.0f);
+    m_listXform.assign(count * 8, 0.0f);
     m_listColors.assign(count * 6, 0.0f);
     for (size_t k = 0; k < count; k++) {
-        float* x = &m_listXform[k * 6];
+        float* x = &m_listXform[k * 8];
         x[1] = x[2] = x[3] = 1.0f;   // scaleX/Y = 1, alpha = 1
     }
     if (m_xformFn) {
         profile::Scoped _x("animXform");
         for (size_t k = 0; k < count; k++) {
-            float out[6] = {0, 1, 1, 1, 0, 0};
+            float out[8] = {0, 1, 1, 1, 0, 0, 0, 0};
             m_xformFn(m_xformCtx, m_listTiles[k], out);
-            float* x = &m_listXform[k * 6];
-            for (int i = 0; i < 6; i++) x[i] = out[i];
+            float* x = &m_listXform[k * 8];
+            for (int i = 0; i < 8; i++) x[i] = out[i];
         }
     }
     if (m_colorFn) {
@@ -838,7 +841,7 @@ void TileMesh::fillInstanceAnim() const {
             float* c = &m_listColors[k * 6];
             c[0] = fill[0] / 255.0f; c[1] = fill[1] / 255.0f; c[2] = fill[2] / 255.0f;
             c[3] = stroke[0] / 255.0f; c[4] = stroke[1] / 255.0f; c[5] = stroke[2] / 255.0f;
-            m_listXform[k * 6 + 3] *= alpha;   // 颜色 alpha × MoveTrack opacity
+            m_listXform[k * 8 + 3] *= alpha;   // 颜色 alpha × MoveTrack opacity
         }
     }
     if (std::getenv("ADOCAO_ANIM_DEBUG") && (m_colorFn || m_xformFn))
@@ -853,22 +856,22 @@ void TileMesh::uploadIfNeeded() const {
     if (count > m_instCapacity) {   // 可见数由屏幕决定，容量按需增长
         size_t cap = std::max(count, m_instCapacity * 2);
         glBindBuffer(GL_ARRAY_BUFFER, m_instVbo);
-        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(cap * 17 * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(cap * 19 * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
         m_instCapacity = cap;
     }
     // 交错：5 float 几何/形状 + 6 float 颜色（颜色数组与可见列表同序）
-    m_instData.resize(count * 17);
+    m_instData.resize(count * 19);
     for (size_t k = 0; k < count; k++) {
-        float* d = &m_instData[k * 17];
+        float* d = &m_instData[k * 19];
         const float* g = &m_listAttr[k * 5];
         for (int i = 0; i < 5; i++) d[i] = g[i];
         const float* c = &m_listColors[k * 6];
         for (int i = 0; i < 6; i++) d[5 + i] = c[i];
-        const float* x = &m_listXform[k * 6];
-        for (int i = 0; i < 6; i++) d[11 + i] = x[i];
+        const float* x = &m_listXform[k * 8];
+        for (int i = 0; i < 8; i++) d[11 + i] = x[i];
     }
     glBindBuffer(GL_ARRAY_BUFFER, m_instVbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(count * 17 * sizeof(float)), m_instData.data());
+    glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(count * 19 * sizeof(float)), m_instData.data());
     if (std::getenv("ADOCAO_COLOR_DEBUG") && count > 0)
         LOG_I("inst-debug: n=%zu colors0=%.3f,%.3f,%.3f,%.3f,%.3f,%.3f inst0=%.2f,%.2f,%.2f,%.0f,%.0f,%.3f,%.3f,%.3f",
               count, m_listColors[0], m_listColors[1], m_listColors[2], m_listColors[3],
@@ -917,8 +920,8 @@ void TileMesh::drawHighlightedTile(int ti, double cX, double cY) const {
     const size_t base = (size_t)d->first, k = (size_t)ti - base;
     const double wx = m_chunkX[(size_t)ti >> kPosChunkShift] + (double)d->posX[k];
     const double wy = m_chunkY[(size_t)ti >> kPosChunkShift] + (double)d->posY[k];
-    float attr[17] = {0};
-    attr[12] = attr[13] = attr[14] = 1.0f;   // scaleX/Y, alpha（rot/move 保持 0）
+    float attr[19] = {0};
+    attr[12] = attr[13] = attr[14] = 1.0f;   // scaleX/Y, alpha（rot/move/pivot 保持 0）
     attr[0] = (float)(wx - cX);
     attr[1] = (float)(wy - cY);
     attr[2] = tileZForIndex(ti, m_nTiles);
@@ -928,7 +931,7 @@ void TileMesh::drawHighlightedTile(int ti, double cX, double cY) const {
     glBindVertexArray(m_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_instVbo);
     if (m_instCapacity < 1) {
-        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(17 * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(19 * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
         m_instCapacity = 1;
     }
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(attr), attr);

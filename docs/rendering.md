@@ -174,10 +174,11 @@
 
 做法（零几何改写、零额外采样）：
 
-* 砖 pass 显式 `glEnable(GL_DEPTH_TEST)` + `glDepthFunc(GL_LESS)`（全局原来是 `LEQUAL`）；
-* 顶点着色器把**描边层 z 拉近 2e-4**（`pos.z -= (1-layer)*2e-4`，`layer=0` 描边 / `1` 填充），
-  同层同 z 的 part 由 `GL_LESS` **丢弃后画的那个**（同色，视觉等价于并集），不再双叠；
-* 宝石/图标（part ≥ 6）再近 2e-4，保证不被 fill 覆盖；
+* 砖 pass 显式 `glEnable(GL_DEPTH_TEST)` + `glDepthFunc(GL_LEQUAL)`：同深度时**后画的赢**；
+* 顶点着色器把**描边层 z 拉近 2e-4**（`pos.z -= (1-layer)*2e-4`，`layer=0` 描边 / `1` 填充）；
+* **图标与 fill 共面**（`layer=1`，z=0），靠索引表把图标排在最后 + `GL_LEQUAL` 压过 fill；
+  **不许**给图标加固定 z 偏移 —— 几百万砖同屏时可见窗口的 z 间距只有 1e-7 量级，
+  任何常量都会穿透前后几百上千块砖（`0.002` 时代实测穿透约 1500 块，2026-10-18 用户再次强调）；
 * 几何探针（`GEOM_PROBE`）路径**不加**这两个偏移，逐位基准不变。
 
 代价：不透明砖的描边/填充在**共面边界**上会有 1px 级重排（描边压过填充），54 个像素基线按新行为重存；
@@ -262,7 +263,8 @@ Tiles and icons use depth test ON with per-instance Z values encoding far-to-nea
 - 砖（描边与填充都）: 局部 z = 0，实例偏移的 z = `tileZ(i, n)`（0.0 far → 9.0 near）——
   同砖的两层**共面**，靠 `glDepthFunc(GL_LEQUAL)` + "描边先、填充后"的索引序让填充盖住描边
   （这也是绘制顺序敏感的原因，见上）
-- 图标: 局部 z = 砖 Z + 0.002（twirl）/ +0.002+0.003 或 +0.002+0.001（SetSpeed，看同砖有没有 twirl）
+- 图标: 与 fill **共面**（局部 z = 0），胜负由索引序（图标排在最后）+ `GL_LEQUAL` 决定；
+  不加任何固定 z 偏移（大谱会穿透，见上）
 - Planets: Z = 9.5 (always in front)
 - Trails: depth test OFF, always visible
 - Highlight: depth test OFF, always visible

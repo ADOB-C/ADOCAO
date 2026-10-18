@@ -160,6 +160,7 @@
   （描边半径 `width+OUTLINE`、填充半径 `width−OUTLINE`）——Re_ADOJAS 的 `createGemsMesh`
   中间那圈黑八边形与两侧同色、视觉不可分，所以不需要第三圈；端盖顶点它也**不引用**。
   `P_GEM` 让 canonical 槽位从 175 → **193**（砖 142 + 图标 51），索引表 426 → **474**，
+  （2026-10-18 起图标改在片元里画，槽位/索引只剩砖：**142 / 330** —— 见 §"图标"）
   形状记录 25 → 29 texel；`tile.vert` 的 `fetchRec` 里 `layer * 6` 同步改成 `layer * 7`，
   `tile_cpu.vert` 的槽位/层边界常量也同步。几何逐位对拍（`geom_probe`，197 万坐标）**0 失败**。
 * 逐砖 alpha（8 位 hex 的 AA）。
@@ -176,9 +177,10 @@
 
 * 砖 pass 显式 `glEnable(GL_DEPTH_TEST)` + `glDepthFunc(GL_LEQUAL)`：同深度时**后画的赢**；
 * 顶点着色器把**描边层 z 拉近 2e-4**（`pos.z -= (1-layer)*2e-4`，`layer=0` 描边 / `1` 填充）；
-* **图标与 fill 共面**（`layer=1`，z=0），靠索引表把图标排在最后 + `GL_LEQUAL` 压过 fill；
-  **不许**给图标加固定 z 偏移 —— 几百万砖同屏时可见窗口的 z 间距只有 1e-7 量级，
-  任何常量都会穿透前后几百上千块砖（`0.002` 时代实测穿透约 1500 块，2026-10-18 用户再次强调）；
+* **图标不是几何**：它画在砖的**片元着色器**里（`tile.frag`，与 Re_ADOJAS `instanced.frag` 同一条路），
+  所以既没有独立 part、也没有 z、也不受绘制序影响；`glDepthFunc(GL_LESS)` 保持原样
+  （同一 tile 内同层 part 自重叠只在 LESS 下不会双叠 —— 换成 LEQUAL 会让半透明砖出现暗阶梯，
+  2026-10-18 用户实测）；
 * 几何探针（`GEOM_PROBE`）路径**不加**这两个偏移，逐位基准不变。
 
 代价：不透明砖的描边/填充在**共面边界**上会有 1px 级重排（描边压过填充），54 个像素基线按新行为重存；
@@ -263,20 +265,21 @@ Tiles and icons use depth test ON with per-instance Z values encoding far-to-nea
 - 砖（描边与填充都）: 局部 z = 0，实例偏移的 z = `tileZ(i, n)`（0.0 far → 9.0 near）——
   同砖的两层**共面**，靠 `glDepthFunc(GL_LEQUAL)` + "描边先、填充后"的索引序让填充盖住描边
   （这也是绘制顺序敏感的原因，见上）
-- 图标: 与 fill **共面**（局部 z = 0），胜负由索引序（图标排在最后）+ `GL_LEQUAL` 决定；
-  不加任何固定 z 偏移（大谱会穿透，见上）
+- 图标: **没有独立几何**。画在砖的片元里（`tile.frag` 用砖心局部坐标 + `aIconBits`），
+  与砖同一个片元/同一次 draw，天然跟着砖的 z 与 alpha —— 不需要 z 偏移或深度技巧
 - Planets: Z = 9.5 (always in front)
 - Trails: depth test OFF, always visible
 - Highlight: depth test OFF, always visible
 
 ### 每实例属性（2026-10 起：**1 实例 = 1 砖**）
 - **静态配方表**（VBO，175 项）：每个 canonical 槽位 `(part, layer*64+slot, k0, k1)` ——
-  砖 6 个 part × 2 层（描边/填充）+ 图标 3 个 part × 17 槽；索引表 142 个三角形，**所有形状共用一份**。
+  砖 6 个 part × 2 层（描边/填充）共 142 槽；索引表 110 个三角形（330 索引），**所有形状共用一份**。
+  图标（twirl / ssUp / ssDn）不是 part：`aIconBits` 进 FS，由 `tile.frag` 在砖心画圆。
 - **形状表**（RGBA32F 纹理 + `texelFetch`）：每个形状 12 条 8-float 记录 + 1 条活动位掩码。
   记录内容 = `render/TileShape.cpp::buildShape()` 存下来的参数（cos/sin/pow 的结果都在这里）。
 - **每实例（每帧上传、只含可见）**：`[offX, offY, offZ, shape, iconBits]` — 5 floats。
 - 颜色/不透明度走 **uniform**（改造前是逐实例 `[fill*3, stroke*3, opacity]` 7 floats，28 B/实例）。
-- `aType` 仍然在拼色：VS 里 `mix(uStroke, uFill, layer)`（图标 part 直接用各自的常量色）。
+- `aType` 仍然在拼色：VS 里 `mix(uStroke, uFill, layer)`；图标的三种颜色在 FS 里按 `bits` 选。
 
 ### 可见性 / 剔除缓存
 
@@ -402,7 +405,8 @@ bit1 ssUp / bit2 ssDown，判据 = 改造前 `buildIcons()` 的 `tileBPMs[i]/til
 阈值），Z 由 VS 按 part 算：twirl `砖Z+0.002`、SetSpeed `砖Z+0.002+(有twirl?0.003:0.001)`。
 - **独立图标实例集已删除**（改造前 MYC 有 616 万个图标实例，外加 CSR 索引 / 独立可见位 /
   独立颜色 VBO）。现在图标 part 在不亮的砖上塌成一个点 → 零面积 → 不产生片元。
-- **和砖在同一次 draw 里**（索引表顺序：砖描边 → 砖填充 → 三个图标 part），整条轨道 **1 次 draw**。
+- **和砖在同一次 draw 里**，整条轨道 **1 次 draw**；图标不进索引表，而是在 `tile.frag` 里
+  按砖心局部坐标画（所以它天然在砖的片元上，不会擦掉拖尾、也不吃深度顺序）。
   这里有一个**故意的行为修复**：改造前是"砖 → 拖尾 → 行星 → 图标"，图标画在拖尾**之后** ——
   图标不透明、拖尾是半透明混合，于是图标会把拖尾擦掉一块（The Moon t=1s 实测 97 个像素的 alpha
   从 255 变 154~194）。那是 bug（用户 2026-10 指出），所以图标必须**在拖尾之前**画：

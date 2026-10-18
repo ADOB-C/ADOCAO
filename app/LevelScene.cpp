@@ -438,7 +438,7 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LEQUAL);        // 同深度后画的赢：图标与 fill 共面，靠索引表顺序压过 fill
+    glDepthFunc(GL_LESS);          // 同一 tile 内同 z 的 part：后者被丢弃，避免自透明双叠
     glDepthMask(GL_TRUE);
     m_tileShader->use();
     m_tileShader->setMat4("uVP", glm::value_ptr(camera.viewProj()));

@@ -43,6 +43,8 @@ uniform float uUseInstColor;
 
 out vec3  vColor;
 out float vOpacity;
+out vec2  vIconLocal;   // 砖心局部坐标（图标在 FS 里画）
+out float vIconBits;
 
 // 图标（与 TileMesh.cpp 的 IR/IS/三种颜色一致；z 与砖共面，谁盖谁由索引表顺序决定）
 const vec3  kTwirlColor = vec3(0.502, 0.0, 0.502);
@@ -67,24 +69,14 @@ void main() {
     vec3  color = mix(mix(uStrokeColor, uFillColor, type),
                       mix(aStrokeColor, aFillColor, type), uUseInstColor);
 
-    if (part > 6.5) {
-        // ---- 图标：算式与 tile.vert 相同（不含 fma，3.3 直接能算）----
-        bool tw = mod(aIconBits, 2.0) >= 1.0;
-        bool up = mod(floor(aIconBits / 2.0), 2.0) >= 1.0;
-        bool dn = floor(aIconBits / 4.0) >= 1.0;
-        bool on = (part < 7.5) ? tw : ((part < 8.5) ? up : dn);
-        if (on) {
-            pos = vec3(k0, k1, 0.0);   // 图标与砖共面
-            type = 1.0;
-            layer = 1.0;   // 与 fill 共面（z=0）
-            color = (part < 7.5) ? kTwirlColor : ((part < 8.5) ? kSSUpColor : kSSDownColor);
-        }
-    } else if (v < kTileSlots) {
+    {
         // ---- 砖：CPU 展开表 ----
         pos = vec3(slotPos(aShape, v), 0.0);
     }
 
     vColor = color;
+    vIconLocal = pos.xy - (aPivot + aMove);
+    vIconBits  = aIconBits;
     // stroke 层（z 更小=更近）压过 fill；同层同 z 的 part 由 GL_LESS 丢弃后画的那个。
     pos.z -= (1.0 - type) * 2e-4;
     // 图标与 fill **共面**（z=0）：不靠 z 偏移，靠第二趟 draw + GL_LEQUAL 压过 fill。

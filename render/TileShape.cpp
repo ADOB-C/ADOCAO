@@ -57,23 +57,6 @@ static void buildTablesOnce() {
             }
         }
     }
-    // 图标：3 个 part，每个 17 槽（圆心 + 16 环），常量直接是圆上的局部坐标
-    // （就是 `createCircle(0,0,IR,1.0,sc,IS)` 吐出来的那批 float）。
-    for (int part = P_ICON_TWIRL; part <= P_ICON_SSDN; part++) {
-        int base = iconBase(part);
-        for (int i = 0; i < kIconSlots; i++) {
-            Recipe r;
-            r.part = (float)part;
-            r.slot = (float)i;
-            if (i == 0) { r.k0 = 0.0f; r.k1 = 0.0f; }
-            else {
-                float a = (2.0f * 3.14159265f * (float)(i - 1)) / (float)kIconSegments;
-                r.k0 = std::cos(a) * kIconRadius;
-                r.k1 = std::sin(a) * kIconRadius;
-            }
-            g_recipes[(size_t)(base + i)] = r;
-        }
-    }
     // 索引：按 part 顺序，镜像参考实现的三角形列表（层的顺序 = 描边再填充；
     // 同层内 part 的先后不影响像素——同色且同深度，LEQUAL 谁赢都是同一个颜色）。
     auto tri = [](uint16_t a, uint16_t b, uint16_t c) {
@@ -101,12 +84,6 @@ static void buildTablesOnce() {
         int g = (uint16_t)partBase(layer, P_GEM);
         for (int i = 1; i < 8; i++) tri((uint16_t)g, (uint16_t)(g + i), (uint16_t)(g + i + 1));
         tri((uint16_t)g, (uint16_t)(g + 8), (uint16_t)(g + 1));
-    }
-    for (int part = P_ICON_TWIRL; part <= P_ICON_SSDN; part++) {
-        int c = (uint16_t)iconBase(part);
-        for (int i = 1; i < kIconSegments; i++)
-            tri((uint16_t)c, (uint16_t)(c + i), (uint16_t)(c + i + 1));
-        tri((uint16_t)c, (uint16_t)(c + kIconSegments), (uint16_t)(c + 1));
     }
 }
 
@@ -386,16 +363,6 @@ void expand(const Shape& s, Expanded& out) {
                 out.pos[(size_t)(base + i) * 3 + 2] = 0.0f;
                 out.type[base + i] = type;
             }
-        }
-    }
-    // 图标：常量已在配方里（局部坐标），type 恒为 1（填充）；颜色由 part 决定
-    for (int part = P_ICON_TWIRL; part <= P_ICON_SSDN; part++) {
-        int base = iconBase(part);
-        for (int i = 0; i < kIconSlots; i++) {
-            out.pos[(size_t)(base + i) * 3 + 0] = rc[base + i].k0;
-            out.pos[(size_t)(base + i) * 3 + 1] = rc[base + i].k1;
-            out.pos[(size_t)(base + i) * 3 + 2] = 0.0f;
-            out.type[base + i] = 1.0f;
         }
     }
 }

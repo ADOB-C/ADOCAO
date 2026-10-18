@@ -53,6 +53,8 @@ uniform float uUseInstColor;
 
 out vec3  vColor;
 out float vOpacity;
+out vec2  vIconLocal;   // 砖心局部坐标（图标在 FS 里画）
+out float vIconBits;
 
 #ifdef GEOM_PROBE
 // 逐位对拍模式：把 (局部坐标, type) 写到像素上。见 tests/geom_probe_test.cpp ——
@@ -61,15 +63,8 @@ out vec4 vProbe;
 uniform vec2 uProbeSize;   // (W, H)：像素画布尺寸
 #endif
 
-// 图标（与 TileMesh.cpp 的 IR/IS/三种颜色一致）
-// z 偏移曾经是 0.002 / 0.003，那是**错的**：砖与砖的间距只有 kMaxTileZ/(n-1)
-// （677 万层时 1.3e-6），抬高 0.002 等于让图标穿透前面约 1500 块砖（5564 层的谱也穿透 1 块多）。
-// 现在与砖**完全共面**：谁盖谁由绘制序决定（索引表：描边 → 填充 → twirl → ssUp → ssDn）——
-// 和砖自己的描边/填服用的是同一套机制（GL_LEQUAL，同深度靠后来者赢）。
-const vec3  kTwirlColor = vec3(0.502, 0.0, 0.502);
-const vec3  kSSUpColor  = vec3(1.0, 0.0, 0.0);
-const vec3  kSSDownColor= vec3(0.0, 0.0, 1.0);
-
+// 图标：**不再有独立几何** —— 与 Re_ADOJAS 一样画在砖的**片元**里（tile.frag），
+// 所以这里只把"砖心局部坐标 + iconBits"传给 FS。没有 z、没有额外 part、没有额外 draw。
 // 单独舍入的乘积：`fma(a,b,0)` 就是正确舍入的 a*b（与参考实现里单独一条 fmul 同值），
 // 而裸的 `a*b` 会被编译器（合法地）融合进旁边那次加法，差 1 ULP。
 float rp(float a, float b) { return fma(a, b, 0.0); }
@@ -100,19 +95,7 @@ void main() {
     vec3  color = mix(mix(uStrokeColor, uFillColor, layer),
                       mix(aStrokeColor, aFillColor, layer), uUseInstColor);
 
-    if (part > 6.5) {
-        // ---- 图标（颜色/ Z 只由 part + 是否同时有 twirl 决定）----
-        bool tw = mod(aIconBits, 2.0) >= 1.0;
-        bool up = mod(floor(aIconBits / 2.0), 2.0) >= 1.0;
-        bool dn = floor(aIconBits / 4.0) >= 1.0;
-        bool on = (part < 7.5) ? tw : ((part < 8.5) ? up : dn);
-        if (on) {
-            pos = vec3(k0, k1, 0.0);   // 图标与砖共面（谁盖谁由绘制序决定）
-            type = 1.0;
-            layer = 1.0;   // 与 fill 共面（z=0）
-            color = (part < 7.5) ? kTwirlColor : ((part < 8.5) ? kSSUpColor : kSSDownColor);
-        }
-    } else {
+    {
         vec4 A, B;
         fetchRec(aShape, layer * 7.0 + part, A, B);
         // 活动位掩码（形状表每个形状的最后一个 texel；bit i = part i 活动）。与 CPU 的
@@ -182,6 +165,9 @@ void main() {
     }
 
     vColor = color;
+    // 图标位置：砖心（aPivot）在变换后落在 aPivot + aMove
+    vIconLocal = pos.xy - (aPivot + aMove);
+    vIconBits  = aIconBits;
 
 #ifndef GEOM_PROBE
     // stroke 层（z 更小=更近）压过 fill；同层同 z 的 part 由 GL_LESS 丢弃后画的那个，
@@ -216,11 +202,28 @@ void main() {
 )";
 
 constexpr const char* kTileFragSrc = R"(#version 330 core
-in vec3 vColor;
+in vec3  vColor;
 in float vOpacity;
+in vec2  vIconLocal;   // 砖心局部坐标（单位：砖）
+in float vIconBits;    // bit0 twirl / bit1 ssUp / bit2 ssDn
 out vec4 fragColor;
+
+// 图标画在砖的**片元**里（Re_ADOJAS instanced.frag 的同一条路）：
+// 同一个片元、同一个 draw，没有独立几何、没有 z、透明度天然跟砖走。
+const vec3 kTwirlColor = vec3(0.502, 0.0, 0.502);
+const vec3 kSSUpColor  = vec3(1.0, 0.0, 0.0);
+const vec3 kSSDownColor= vec3(0.0, 0.0, 1.0);
+const float kIconRadius = 0.11;
+
 void main() {
-    fragColor = vec4(vColor, vOpacity);
+    vec3 color = vColor;
+    int bits = int(vIconBits + 0.5);
+    if (bits != 0 && length(vIconLocal) <= kIconRadius) {
+        if      ((bits & 1) != 0) color = kTwirlColor;
+        else if ((bits & 2) != 0) color = kSSUpColor;
+        else                      color = kSSDownColor;
+    }
+    fragColor = vec4(color, vOpacity);
 }
 )";
 
@@ -273,6 +276,8 @@ uniform float uUseInstColor;
 
 out vec3  vColor;
 out float vOpacity;
+out vec2  vIconLocal;   // 砖心局部坐标（图标在 FS 里画）
+out float vIconBits;
 
 // 图标（与 TileMesh.cpp 的 IR/IS/三种颜色一致；z 与砖共面，谁盖谁由索引表顺序决定）
 const vec3  kTwirlColor = vec3(0.502, 0.0, 0.502);
@@ -297,24 +302,14 @@ void main() {
     vec3  color = mix(mix(uStrokeColor, uFillColor, type),
                       mix(aStrokeColor, aFillColor, type), uUseInstColor);
 
-    if (part > 6.5) {
-        // ---- 图标：算式与 tile.vert 相同（不含 fma，3.3 直接能算）----
-        bool tw = mod(aIconBits, 2.0) >= 1.0;
-        bool up = mod(floor(aIconBits / 2.0), 2.0) >= 1.0;
-        bool dn = floor(aIconBits / 4.0) >= 1.0;
-        bool on = (part < 7.5) ? tw : ((part < 8.5) ? up : dn);
-        if (on) {
-            pos = vec3(k0, k1, 0.0);   // 图标与砖共面
-            type = 1.0;
-            layer = 1.0;   // 与 fill 共面（z=0）
-            color = (part < 7.5) ? kTwirlColor : ((part < 8.5) ? kSSUpColor : kSSDownColor);
-        }
-    } else if (v < kTileSlots) {
+    {
         // ---- 砖：CPU 展开表 ----
         pos = vec3(slotPos(aShape, v), 0.0);
     }
 
     vColor = color;
+    vIconLocal = pos.xy - (aPivot + aMove);
+    vIconBits  = aIconBits;
     // stroke 层（z 更小=更近）压过 fill；同层同 z 的 part 由 GL_LESS 丢弃后画的那个。
     pos.z -= (1.0 - type) * 2e-4;
     // 图标与 fill **共面**（z=0）：不靠 z 偏移，靠第二趟 draw + GL_LEQUAL 压过 fill。

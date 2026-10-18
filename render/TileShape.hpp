@@ -44,30 +44,24 @@ enum Part {
     P_EXT4   = 4,   // U 型（ang==0）的方块（ZERO 用）
     P_PENT   = 5,   // 中旋五边形（MIDSPIN 用）
     P_GEM    = 6,   // Gems：八边形宝石（外环描边 + 内盘填充；槽 0=圆心、1..8=八边形顶点）
-    P_ICON_TWIRL = 7,
-    P_ICON_SSUP  = 8,
-    P_ICON_SSDN  = 9,
     P_COUNT
 };
 constexpr int kTileParts = 7;                    // P_CIRCLE..P_GEM
 constexpr int kLayers = 2;                       // 0 = 描边(stroke)，1 = 填充(fill)
 constexpr int kTileSlotsPerLayer = 33 + 6 + 4 + 8 + 4 + 7 + 9;   // 71
 constexpr int kTileSlots = kTileSlotsPerLayer * kLayers;         // 142
-constexpr int kIconSlots = 17;                               // 圆心 + 16 环
-constexpr int kTotalSlots = kTileSlots + 3 * kIconSlots;     // 193
+// 图标不再是几何：改由 tile.frag 在**砖的片元**里画（与 Re_ADOJAS 的 instanced.frag 一致）。
+// 所以槽位/索引表里只有砖（142 / 330），没有"图标 part"。
+constexpr int kTotalSlots = kTileSlots;                       // 142
 constexpr int kTileTris = (47 + 8) * kLayers;                // 110（描边 + 填充；8 = 宝石八边形）
-constexpr int kIconTris = 3 * 16;                            // 48（三个图标 part）
-constexpr int kIndexCount = (kTileTris + kIconTris) * 3;     // 474
-constexpr int kTileIndexCount = kTileTris * 3;               // 330：图标 pass 的起始偏移
+constexpr int kIndexCount = kTileTris * 3;                    // 330
+constexpr int kTileIndexCount = kIndexCount;
 constexpr int kTexelsPerShape = kTileParts * kLayers * 2 + 1;   // 14 条记录 × 2 texel + 1 条标志 = 29
 // 最后那个 texel = (活动位掩码, mode, 0, 0)：`p[7]` 放不下标志 —— WEDGE 的记录 8 个 float
 // 全用满（s1/c1 在 p[6]/p[7]），所以标志单独给一个 texel。掩码的 bit i = P_CIRCLE+i 是否活动。
 constexpr int kFlagTexel = kTexelsPerShape - 1;
 
-// 图标（`TileMesh.cpp` 的 IR / IS / 三种颜色）
-constexpr float kIconRadius = 0.11f;
-constexpr int   kIconSegments = 16;
-// 图标**不再抬高**：与砖共面，谁盖谁由索引表顺序决定（见 assets/shaders/tile.vert 的注释）。
+// 图标的半径（片元着色器里用，见 assets/shaders/tile.frag）。不再是几何 part。
 // （原来这里有两个常量 0.002/0.003，但全仓库无人使用 —— 真正的 z 在 tile.vert 里算。）
 constexpr float kTwirlColor[3] = {0.502f, 0.0f, 0.502f};
 constexpr float kSSUpColor[3]  = {1.0f, 0.0f, 0.0f};
@@ -115,7 +109,6 @@ inline int partBase(int layer, int part) {
     }
     return b;
 }
-inline int iconBase(int part) { return kTileSlots + (part - P_ICON_TWIRL) * kIconSlots; }
 
 // 砖 i 的形状键（与 `TileMesh.cpp` 里那段逐字相同；放在这里让渲染与测试共用一份公式）。
 // `wc`（可选）= 调用线程自己的 provider 窗口克隆。**并行调用必须传**：不传就会去动共享缓存

@@ -19,7 +19,7 @@ adocao stitch <dir> <out.png>           [--scale N] [--threads N]
 播放选项（不带子命令时）：
   --level <file> --music <file> --width N --height N --fullscreen
   --fill HEX --stroke HEX --bg HEX --no-auto-stroke --no-hitsound --no-trail
-  --force-hitsound [TYPE] --auto-play --msaa N --no-exclusive
+  --force-hitsound [TYPE] --auto-play --msaa N --windowed/--borderless/--exclusive
   --cull-block N    剔除粗块粒度（层/块，默认 4096；0 = 关闭索引走全扫）。只影响剔除成本与
                     索引内存，**不改画面**（8 种粒度实测 PNG 逐字节相同）—— 见 docs/rendering.md
   --trail-duration SEC | --trail-tiles N

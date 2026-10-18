@@ -249,8 +249,9 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
 
     // Camera + background
     {
-        // 谱面的 backgroundColor 才是权威；cfg.backgroundColor 只作兜底。
-        std::string hex = m_level->settings.backgroundColor;
+        // 优先级：显式 `--bg` > 谱面的 settings.backgroundColor > cfg 默认。
+        // （谱面优先是为了 neon_alpha 这类"谱面自带底色"的用例；但 CLI 显式给了就 CLI 赢。）
+        std::string hex = cfg.bgExplicit ? cfg.backgroundColor : m_level->settings.backgroundColor;
         if (hex.empty()) hex = cfg.backgroundColor;
         if (hex.length()>=6) { unsigned r,g,b; sscanf(hex.c_str(),"%02x%02x%02x",&r,&g,&b);
             m_bgR=r/255.0f; m_bgG=g/255.0f; m_bgB=b/255.0f; }

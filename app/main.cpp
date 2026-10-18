@@ -255,7 +255,7 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--borderless") == 0)           { cli.fullscreen = true;  cli.windowMode = 1; }
             else if (std::strcmp(a, "--fill") == 0      && i+1<argc) { cli.trackFillColor = argv[++i]; cli.trackColorOverride = true; }
             else if (std::strcmp(a, "--stroke") == 0    && i+1<argc) { cli.trackStrokeColor = argv[++i]; cli.trackColorOverride = true; }
-            else if (std::strcmp(a, "--bg") == 0        && i+1<argc) cli.backgroundColor = argv[++i];
+            else if (std::strcmp(a, "--bg") == 0        && i+1<argc) { cli.backgroundColor = argv[++i]; cli.bgExplicit = true; }
             else if (std::strcmp(a, "--no-auto-stroke") == 0)        cli.autoStroke = false;
             else if (std::strcmp(a, "--no-hitsound") == 0)           cli.enableHitsounds = false;
             else if (std::strcmp(a, "--force-hitsound") == 0) {

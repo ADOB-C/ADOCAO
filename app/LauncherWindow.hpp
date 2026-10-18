@@ -17,6 +17,8 @@ struct LauncherConfig {
     std::string trackFillColor   = "DEBB7B";  // 6-char hex
     std::string trackStrokeColor = "6F5D3D";  // 6-char hex (DEBB7B * 0.5)
     std::string backgroundColor  = "000000";  // 6-char hex
+    // `--bg` 显式给了背景色 → 它压过谱面的 settings.backgroundColor（否则谱面优先）。
+    bool        bgExplicit = false;
     bool   autoStroke   = true;
     bool   enableHitsounds = true;
     std::string forceHitsoundType;  // force "None" hitsound to this type (empty = disabled)

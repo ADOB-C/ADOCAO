@@ -63,7 +63,10 @@
   `angles360` 打包输出与改动前**逐字节相同**。
 - ~~`LevelMap` 死字段 / `PngStream` 1-bit 死路~~：已删（`6a72419`）；`--thickness` 超界现在会 `LOG_W`。
 - `Camera` 的 `z<1`/`z>1e5` 夹取已删（`79cfd2e`）；`--cull-block` 被 env 覆盖现在 `LOG_W`。
-- 剩余：`CameraTimeline/Director` 其余零调用访问器、`core/map` 里 `timeColorAt` 的
-  恒不触发 clamp（公共 inline，保留并注释）、`AdocaoWindow` 的 `(void)settings`（契约形参），
-  以及 `docs/` 里"X 种粒度逐字节相同"这类**历史结论**（细块修复后需重测再改）。
+- `core/map` 的 `timeColorAt` clamp 仍保留（公共 inline + 输入契约；两个调用点当前不会触发，
+  注释已说明）；`AdocaoWindow` 的 `(void)settings` 是 core hook 的契约形参。
+- 扫描结论：`-Wunused*` 归零；"头文件 accessor 零调用"扫描为 0；"成员字段出现次数 ≤2"仅剩
+  真正被 memcpy 使用的数组（`TileMesh::m_fill/m_stroke`）与测试里的字符串护栏。
+- 仍可按模块做更深的语义审计（例如 `AdocaoColumns` 的编码器分支、`AdocaoWindow` 的窗口重算
+  分支是否有不可达组合），但机械可查的死代码已经清完。
 - `docs/` 里还有若干"实测 X 种粒度逐字节相同"一类历史结论，需要按细块后的实现重测再改。

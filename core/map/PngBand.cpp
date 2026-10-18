@@ -75,7 +75,7 @@ bool writePngParallel(const std::string& path, uint32_t width, uint32_t height,
         std::fflush(f);          // 头部立刻落盘：外部能马上看到文件"开始了"（~53 字节）
     }
 
-    struct Band { std::vector<uint8_t> z; uint32_t s1 = 1, s2 = 0; size_t rawBytes = 0; bool done = false; };
+    struct Band { std::vector<uint8_t> z; uint32_t s1, s2; size_t rawBytes = 0; bool done = false; };
     std::vector<Band> bands((size_t)NB);
     std::mutex m; std::condition_variable cv;
     long long nextBand = 0; size_t pending = 0;

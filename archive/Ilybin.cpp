@@ -158,8 +158,6 @@ bool decodeIlybin(const uint8_t* data, size_t length, IlybinLevel& out, std::str
     if (!secData.count(kSecTwirl)) { reason = "缺少 twirl 段"; return false; }
 
     out = IlybinLevel{};
-    out.tileMode = tileMode;
-    out.tileCount = tileCount;
     out.settingsJson.assign((const char*)secData[kSecSettings], secLen[kSecSettings]);
     if (!decodeFloatSection(secData[kSecDirection], secLen[kSecDirection], tileCount, out.direction, reason))
         return false;

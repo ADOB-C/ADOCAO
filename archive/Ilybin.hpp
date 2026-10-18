@@ -26,7 +26,6 @@ namespace archive {
 
 struct IlybinLevel {
     uint8_t  tileMode = 0;        // 0 = 对象模式（f64 源）/ 1 = 紧凑模式（f32 源）
-    uint32_t tileCount = 0;
     std::string settingsJson;     // 顶层 settings 对象，原样文本
     std::vector<double> direction;    // 长度 == tileCount
     std::string actionsJson;      // 空 = 没有这一段（= 没有事件）

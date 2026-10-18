@@ -93,10 +93,9 @@ void Scheduler::workerLoop() {
 Scheduler::Handle Scheduler::submit(Lane lane, std::function<void(CancelToken)> fn) {
     auto done = std::make_shared<std::atomic<bool>>(false);
     CancelToken tok;
-    const CancelToken tokCopy = tok;
-    auto wrapped = [fn = std::move(fn), done, tokCopy]() {
-        if (tokCopy.cancelled()) { done->store(true, std::memory_order_release); return; }
-        fn(tokCopy);
+    auto wrapped = [fn = std::move(fn), done, tok = std::move(tok)]() {
+        if (tok.cancelled()) { done->store(true, std::memory_order_release); return; }
+        fn(tok);
         done->store(true, std::memory_order_release);
     };
     if (serialForced() || inParallel()) {

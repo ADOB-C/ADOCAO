@@ -35,6 +35,10 @@ frame,…      整帧 p50/p95/max
   逐帧采样与 `end`/`segment` 行不变。
 * `ADOCAO.log` 保持原样（启动/加载/错误 + 同样的 soak 行）；`ADOCAO_LOG_FILE` 仍然可以
   整体改日志路径，但 profiler 不再依赖它。
+* **转 CSV**：`python scripts/prof_to_csv.py ADOCAO.prof`（tidy，全列）或 `--split`
+  （按 `kind` 拆成 `interval/segment/frame/end` 四个 CSV，各自只留非空列）；`--summary`
+  打印摘要（interval 中位/最差帧、segment 按 p50 排序）。纯标准库，Windows 上用
+  `py -3` 即可；包里的 `prof2csv.bat` 是它的双击包装（默认对同目录 `ADOCAO.prof` 跑 `--split`）。
 
 **量真实上限先关帧控**：本 app 默认按 320 fps 节流（`targetFrameTime = 1/320`），所以 `frame`
 p50≈3.13 ms 是**故意**的。要量机器真实上限 / 不受节流影响的 `frame`，设 **`ADOCAO_UNCAPPED=1`**

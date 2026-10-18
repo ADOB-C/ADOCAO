@@ -176,7 +176,8 @@ bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level) {
     // 抓帧 = 确定性剔除（LOD 步长只由视口 + 两段式决定，不用上一帧的反馈种子）
     m_tileMesh->setDeterministicCull(!cfg.capturePath.empty());
     m_tileMesh->setCullBlockFloors(cfg.cullBlockFloors);
-    m_tileMesh->setMovePad(level.movePad(), level.moveMaxScale());   // ④ 剔除粗块粒度（0 = 全扫）
+    m_tileMesh->setMovePad(level.movePad(), level.moveMaxScale());
+    m_tileMesh->setAnimNeeded(level.animatesTiles());   // ④ 剔除粗块粒度（0 = 全扫）
 
     // Render-layer planets. The core timeline/clock only produce pure frame
     // data; the scene owns the actual GL drawable Planet objects.
@@ -458,6 +459,7 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     m_tileShader->setVec3("uStrokeColor", m_strokeRGB[0], m_strokeRGB[1], m_strokeRGB[2]);
     m_tileShader->setFloat("uOpacity", 1.0f);
     TrackXformCtx xctx{m_level, timeInLevel};
+    m_tileMesh->setTime(timeInLevel);   // 时间驱动颜色/变换：相机静止时也要重算
     if (m_trackColorOverride || !m_level) {
         m_tileShader->setFloat("uUseInstColor", 0.0f);
         m_tileMesh->draw(vl, vr, vb, vt, camera.targetX(), camera.targetY(),

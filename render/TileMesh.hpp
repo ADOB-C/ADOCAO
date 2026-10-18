@@ -73,6 +73,12 @@ public:
               InstanceXformFn xformFn = nullptr, void* xformCtx = nullptr) const;
     // MoveTrack 的剔除外扩：最大位移 + 最大缩放（保守包含被移动/放大的砖）。
     void setMovePad(float pad, float maxScale) { m_movePad = pad; m_moveMaxScale = maxScale; }
+    // 关卡时间：颜色/变换是时间驱动的（ColorTrack/RecolorTrack/MoveTrack），
+    // 相机静止时绘制列表不重建，必须在这里告诉 TileMesh"时间变了"。
+    void setTime(double t) { m_time = t; }
+    // 关卡里有没有"随时间变"的逐砖视觉（ColorTrack/RecolorTrack/MoveTrack）。
+    // 没有的话时间变化不用重算颜色/变换（省掉整帧的逐砖开销）。
+    void setAnimNeeded(bool v) { m_animNeeded = v; }
     // 视口像素高度（每帧由 app 侧设入；LOD 用它算"每世界单位多少像素"）
     void setViewportHeightPx(int h) const { m_viewportH = h; }
     // 抓帧（确定性）模式：LOD 步长只能由"当前视口 + 两段式"决定，**不许用上一帧的反馈种子**
@@ -130,6 +136,8 @@ private:
     void destroyStaticGL();
     void ensureDrawList(double vl, double vr, double vb, double vt, double camX, double camY) const;
     void uploadIfNeeded() const;
+    // 按 m_time 重算 m_listColors / m_listXform（列表本身不变）。
+    void fillInstanceAnim() const;
     void cullRange(size_t begin, size_t end, double vl, double vr, double vb, double vt,
                    double camX, double camY, std::vector<uint32_t>& outTiles,
                    std::vector<float>& outAttr, size_t stride = 1) const;
@@ -214,6 +222,9 @@ private:
     mutable double m_vl = 0, m_vr = 0, m_vb = 0, m_vt = 0;
     mutable int m_visibleThreshold = 0x7fffffff;
     mutable int m_lastDrawn = 0;
+    bool m_animNeeded = true;
+    double m_time = 0.0;         // 当前关卡时间（由 draw 调用方设置）
+    mutable double m_animTime = 0.0;   // 逐实例颜色/变换是按哪个时间算的
     mutable double m_prevCamX = 0, m_prevCamY = 0;
 };
 

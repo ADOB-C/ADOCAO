@@ -796,29 +796,8 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
         }
         // 逐实例砖色：只对**可见列表**算（每帧几百砖）。颜色与相机无关，只在重建列表时算；
         // 平移分支不动颜色。fn=nullptr → 全 0，shader 走 uniform（高亮/旧行为）。
-        m_listXform.assign(m_listTiles.size() * 6, 0.0f);
-        for (size_t k = 0; k < m_listTiles.size(); k++) {
-            float* x = &m_listXform[k * 6];
-            x[1] = x[2] = x[3] = 1.0f;   // scaleX/Y = 1, alpha = 1
-        }
-        if (m_xformFn) {
-            for (size_t k = 0; k < m_listTiles.size(); k++) {
-                float out[6] = {0, 1, 1, 1, 0, 0};
-                m_xformFn(m_xformCtx, m_listTiles[k], out);
-                float* x = &m_listXform[k * 6];
-                for (int i = 0; i < 6; i++) x[i] = out[i];
-            }
-        }
-        m_listColors.assign(m_listTiles.size() * 6, 0.0f);
-        if (m_colorFn) {
-            for (size_t k = 0; k < m_listTiles.size(); k++) {
-                uint8_t fill[3] = {0, 0, 0}, stroke[3] = {0, 0, 0};
-                m_colorFn(m_colorCtx, m_listTiles[k], fill, stroke);
-                float* c = &m_listColors[k * 6];
-                c[0] = fill[0] / 255.0f; c[1] = fill[1] / 255.0f; c[2] = fill[2] / 255.0f;
-                c[3] = stroke[0] / 255.0f; c[4] = stroke[1] / 255.0f; c[5] = stroke[2] / 255.0f;
-            }
-        }
+        fillInstanceAnim();
+        m_animTime = m_time;
         m_listValid = true;
         m_listUploaded = false;
     } else {
@@ -831,6 +810,37 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
         m_listUploaded = false;
     }
     m_prevCamX = camX; m_prevCamY = camY;
+}
+
+void TileMesh::fillInstanceAnim() const {
+    const size_t count = m_listTiles.size();
+    m_listXform.assign(count * 6, 0.0f);
+    m_listColors.assign(count * 6, 0.0f);
+    for (size_t k = 0; k < count; k++) {
+        float* x = &m_listXform[k * 6];
+        x[1] = x[2] = x[3] = 1.0f;   // scaleX/Y = 1, alpha = 1
+    }
+    if (m_xformFn) {
+        profile::Scoped _x("animXform");
+        for (size_t k = 0; k < count; k++) {
+            float out[6] = {0, 1, 1, 1, 0, 0};
+            m_xformFn(m_xformCtx, m_listTiles[k], out);
+            float* x = &m_listXform[k * 6];
+            for (int i = 0; i < 6; i++) x[i] = out[i];
+        }
+    }
+    if (m_colorFn) {
+        profile::Scoped _c("animColor");
+        for (size_t k = 0; k < count; k++) {
+            uint8_t fill[3] = {0, 0, 0}, stroke[3] = {0, 0, 0};
+            m_colorFn(m_colorCtx, m_listTiles[k], fill, stroke);
+            float* c = &m_listColors[k * 6];
+            c[0] = fill[0] / 255.0f; c[1] = fill[1] / 255.0f; c[2] = fill[2] / 255.0f;
+            c[3] = stroke[0] / 255.0f; c[4] = stroke[1] / 255.0f; c[5] = stroke[2] / 255.0f;
+        }
+    }
+    if (std::getenv("ADOCAO_ANIM_DEBUG") && (m_colorFn || m_xformFn))
+        LOG_I("anim-debug: t=%.3f n=%zu", m_time, count);
 }
 
 // ---- draw ------------------------------------------------------------
@@ -875,6 +885,13 @@ void TileMesh::draw(double viewL, double viewR, double viewB, double viewT,
     m_xformFn = xformFn;
     m_xformCtx = xformCtx;
     { profile::Scoped _s("cull"); ensureDrawList(viewL, viewR, viewB, viewT, camX, camY); }
+    // 相机静止时列表不重建，但颜色/变换是时间驱动的（ColorTrack/MoveTrack）→ 时间变了就重算+重传。
+    if (m_animNeeded && (m_colorFn || m_xformFn) && m_animTime != m_time) {
+        profile::Scoped _anim("anim");
+        fillInstanceAnim();
+        m_animTime = m_time;
+        m_listUploaded = false;
+    }
     const size_t count = m_listTiles.size();
     m_lastDrawn = (int)count;
     if (count == 0) return;

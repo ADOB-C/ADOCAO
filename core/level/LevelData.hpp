@@ -244,6 +244,8 @@ struct LevelData {
         TileColorConfig cfg;
     };
     void buildRecolorIndex(const Timeline& timeline);
+    // 逐砖视觉是否随关卡时间变化（颜色事件/MoveTrack；Flash 不算，它不碰砖实例）。
+    bool animatesTiles() const { return !colorEvents.empty() || !moveTrackEvents.empty(); }
     bool hasRecolorIndex() const { return m_recolorReady; }
 
     Settings settings;

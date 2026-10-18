@@ -452,6 +452,10 @@ void GameWindow::update(float deltaMs) {
         if (tileIdx < 0) tileIdx = 0;
         if (tileIdx >= (int)m_level->tileCount() - 1) tileIdx = (int)m_level->tileCount() - 2;
         const auto p = m_level->tilePositionAt(tileIdx);
+        if (std::getenv("ADOCAO_CAM_DEBUG")) {
+            LOG_I("capture-pos: tileIdx=%d p=(%.2f,%.2f) windowed=%d", tileIdx,
+                  (double)p[0], (double)p[1], (int)m_level->tilesWindowed());
+        }
         const auto& bpms = m_timeline->tileBPMs();
         const float bpm = (tileIdx >= 0 && (size_t)tileIdx < bpms.size()) ? bpms[(size_t)tileIdx] : 100.0f;
         const double pitch = std::max(0.1, (double)m_level->settings.pitch / 100.0);
@@ -608,6 +612,10 @@ void GameWindow::captureAndExit() {
     if (m_cfg->captureCamera && m_level->tileCount() > 0) {
         // 与播放时同一条相机路径：settings + 到目标时刻为止的全部运镜事件。
         const auto p = m_level->tilePositionAt(tileIdx);
+        if (std::getenv("ADOCAO_CAM_DEBUG")) {
+            LOG_I("capture-pos: tileIdx=%d p=(%.2f,%.2f) windowed=%d", tileIdx,
+                  (double)p[0], (double)p[1], (int)m_level->tilesWindowed());
+        }
         const auto& bpms = m_timeline->tileBPMs();
         const float bpm = ((size_t)tileIdx < bpms.size()) ? bpms[(size_t)tileIdx] : 100.0f;
         const double pitch = std::max(0.1, (double)m_level->settings.pitch / 100.0);

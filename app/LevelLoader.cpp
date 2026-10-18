@@ -155,6 +155,10 @@ void runLevelLoading(const LauncherConfig& cfg, LoadingProgress& progress, LoadR
     const bool windowTiles = !fw || fw[0] != '0';
     if (!windowTiles) {
         LOG_I("floor-window: 关闭（ADOCAO_FLOOR_WINDOW=0，A/B 用）→ 保留密集 tiles");
+    } else if (result.level && result.timeline && result.level->hasScaleRadiusEvents()) {
+        // 窗口重算没有 ScaleRadius 的半径偏移 → 丢密集 tiles 会让结尾位置整体漂移
+        // （Won't You：40 条 ScaleRadius，t=206.3 时相机偏了 778 格、整段结尾黑屏）。
+        LOG_I("floor-window: 谱面有 ScaleRadius，保留密集 tiles（窗口重算会丢半径偏移）");
     } else if (result.level && result.timeline) {
         std::string werr;
         if (result.level->buildFloorWindowCache(result.timeline->tileStartTimes(),

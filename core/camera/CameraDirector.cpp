@@ -83,6 +83,10 @@ void CameraDirector::resetState() {
 }
 
 void CameraDirector::seek(double t, double planetX, double planetY, int64_t tileIndex, double pitch) {
+    if (std::getenv("ADOCAO_CAM_DEBUG")) {
+        LOG_I("cam-seek: t=%.3f in=(%.2f,%.2f) tile=%lld keys=%zu", t, planetX, planetY,
+              (long long)tileIndex, m_keys ? m_keys->size() : 0);
+    }
     resetState();
     int64_t idx = -1;
     if (m_keys) {

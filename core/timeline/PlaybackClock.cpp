@@ -95,7 +95,10 @@ void PlaybackClock::updateFrame() {
     if (n >= 2) {
         endTime = m_timeline->startTimeAt(n - 1);
         if (t >= endTime) {
-            m_frame.timeInLevel = endTime;
+            // 只定格**球**，不定格**时间**：结尾的 Flash（2025 是 768 拍白色淡出）
+            // 和 MoveCamera（512 拍推出）都排在最后一层，按时间推进才播得出来。
+            // 时间继续走到音乐结束（syncToAudio 让 t 跟着音频位置），球留在最后一格中心。
+            m_frame.timeInLevel = t;
             m_frame.elapsedMs = m_elapsedTime;
             m_currentTileIndex = n - 2;
             m_frame.tileIndex = m_currentTileIndex;

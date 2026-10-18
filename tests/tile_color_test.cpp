@@ -225,13 +225,17 @@ int main() {
         else {
             tl.build(lv, false);
             lv.buildFlashIndex(tl);
-            const double trig2 = tl.startTimeAt(2) + (90.0 / 180.0) * tl.durationAt(2);
+            // 一拍 = 60/bpm（Re_ADOJAS 的 secPerBeat），**不是** durationAt(2)：
+            // 后者是"这一砖走完要多久"（0° 砖是整整 2 拍），只对 180° 砖碰巧相等；
+            // 而且末尾合成砖的 durationAt() 是 0，会把最后一层的 Flash 塌成瞬时终值。
+            const double secPerBeat = 60.0 / 120.0;
+            const double trig2 = tl.startTimeAt(2) + (90.0 / 180.0) * secPerBeat;
             auto fg = [&](double t) { return lv.flashStateAt(0, t); };
             auto bg = [&](double t) { return lv.flashStateAt(1, t); };
             if (fg((double)tl.startTimeAt(0) + 0.1).active != true) { std::printf("FAIL flash fg active\n"); fail++; }
             if (bg(trig2 - 0.05).active) { std::printf("FAIL flash bg before\n"); fail++; }
             // duration 是**拍**：2 拍 × 该层一拍（bpm 120 → 0.5 s）= 1.0 s
-            const double durSec = 2.0 * tl.durationAt(2);
+            const double durSec = 2.0 * secPerBeat;
             const auto mid = bg(trig2 + durSec * 0.5);
             if (!mid.active || mid.color[0] < 76 || mid.color[0] > 78 ||
                 mid.color[1] < 88 || mid.color[1] > 90 || mid.color[2] < 101 || mid.color[2] > 103 ||

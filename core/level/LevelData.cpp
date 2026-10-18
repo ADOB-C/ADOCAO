@@ -1773,12 +1773,24 @@ void LevelData::buildFlashIndex(const Timeline& timeline) {
     // Flash 的 duration 是**拍**（和 MoveTrack/相机一致），不是秒：
     // 2025 floor 995 的 `000000 1.0→0 dur 32` 在 bpm 12150 下 ≈ 0.16 s（几帧），
     // 官方实测"纯黑但只有几帧"；按秒算会黑 32 秒（2026-10-17 用户实测）。
+    //
+    // 一拍 = **60/bpm**（Re_ADOJAS：TimelineManager 的 secPerBeat、
+    // TileColorManager 的 angleOffset 都这么算）。**别用 durationAt(floor)** ——
+    // 那是"这一砖走完要多久" = 角度/180 × 拍，只对 180° 砖碰巧相等；更糟的是
+    // 末尾合成砖（floor == n-1）的 durationAt() 返回 **0**，于是放在最后一层的
+    // Flash 一拍都算不出来：duration 和 angleOffset 同时塌成 0 →
+    // "512 拍的黑色淡入" 变成**瞬间全黑**（2026-10-18 用户报"最后一段完全黑屏"）。
     const double pitch = std::max(0.1, (double)settings.pitch / 100.0);
+    const auto& bpms = timeline.tileBPMs();
     for (FlashEvent& e : flashEvents) {
-        const double beat = (double)timeline.durationAt(e.floor);
-        e.trigger = (double)timeline.startTimeAt(e.floor) +
-                    ((double)e.angleOffset / 180.0) * beat;
-        e.durSec = (double)e.duration * beat / pitch;
+        // 末尾合成层也按最后一格真实的 bpm 算；越界一律夹到两端。
+        const int64_t last = (int64_t)bpms.size() - 1;
+        const int64_t idx = std::clamp<int64_t>(e.floor, 0, last < 0 ? 0 : last);
+        const double bpm = bpms.empty() ? 100.0 : std::max(1.0f, bpms[(size_t)idx]);
+        const double secPerBeat = 60.0 / bpm;
+        e.trigger = (double)timeline.startTimeAt(idx) +
+                    ((double)e.angleOffset / 180.0) * secPerBeat;
+        e.durSec = (double)e.duration * secPerBeat / pitch;
     }
     std::stable_sort(flashEvents.begin(), flashEvents.end(),
                      [](const FlashEvent& a, const FlashEvent& b) { return a.trigger < b.trigger; });

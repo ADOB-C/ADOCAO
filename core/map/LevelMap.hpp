@@ -17,10 +17,6 @@ struct LevelMapOptions {
     uint32_t fillRgba   = 0xDEBB7BFF;   // 轨道主色（与渲染器默认同一对颜色）
     uint32_t bgRgba     = 0x000000FF;   // 默认不透明黑（想透明就传 alpha=0）
     bool  timeColor = false;            // 按**谱面时间**着色：t=0 为 timeFrom，结束为 timeTo
-    uint32_t timeFrom = 0xFF0000FF;     // 红
-    uint32_t timeTo   = 0xFF00FFFF;     // 品红
-    bool  drawBlue = true;              // 同时画蓝星轨迹
-    bool  markers  = false;             // 起点/终点小圆点（默认关：不做标记）
     float thicknessScale = 0.6f;        // 线宽 = 每 tile 像素数 * 该系数
     float lineWidthPx = 0.0f;           // >0 = 直接用这个线宽（像素），覆盖 thicknessScale。
                                         // 需要它是因为小 scale 下（如 16K：scale≈0.0084）乘出来

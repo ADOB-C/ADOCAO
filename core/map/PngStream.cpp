@@ -24,16 +24,7 @@ const uint8_t kSig[8] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' };
 }  // namespace
 
 bool PngStreamWriter::open(const std::string& path, uint32_t width, uint32_t height) {
-    m_colorType = 6; m_bitDepth = 8; m_rowBytes = (size_t)width * 4;
-    return openCommon(path, width, height);
-}
-
-bool PngStreamWriter::openIndexed1(const std::string& path, uint32_t width, uint32_t height,
-                                   uint8_t r0, uint8_t g0, uint8_t b0,
-                                   uint8_t r1, uint8_t g1, uint8_t b1) {
-    m_colorType = 3; m_bitDepth = 1; m_rowBytes = ((size_t)width + 7) / 8;
-    m_palette[0] = r0; m_palette[1] = g0; m_palette[2] = b0;
-    m_palette[3] = r1; m_palette[4] = g1; m_palette[5] = b1;
+    m_rowBytes = (size_t)width * 4;
     return openCommon(path, width, height);
 }
 
@@ -47,10 +38,9 @@ bool PngStreamWriter::openCommon(const std::string& path, uint32_t width, uint32
     // IHDR：8bit / RGBA / 无压缩选项 / 无隔行
     std::vector<uint8_t> ihdr;
     put32(ihdr, m_w); put32(ihdr, m_h);
-    ihdr.push_back((uint8_t)m_bitDepth); ihdr.push_back((uint8_t)m_colorType);
+    ihdr.push_back(8); ihdr.push_back(6);   // 8-bit RGBA，无压缩选项/无隔行
     ihdr.push_back(0); ihdr.push_back(0); ihdr.push_back(0);
     if (!writeChunk("IHDR", ihdr.data(), ihdr.size())) return false;
-    if (m_colorType == 3 && !writeChunk("PLTE", m_palette, sizeof m_palette)) return false;
 
     // 用 miniz 的 zlib 兼容层做流式 deflate：IDAT 必须是**一条** zlib 流，
     // 所以不能一段一段地各自压缩。
@@ -93,7 +83,6 @@ bool PngStreamWriter::pump(bool finish) {
 }
 
 bool PngStreamWriter::writeRow(const uint8_t* rgbaRow) {
-    if (m_colorType != 6) return false;
     return writePackedRow(rgbaRow);
 }
 

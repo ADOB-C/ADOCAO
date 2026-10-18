@@ -125,8 +125,7 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
     for (int i = i0; i <= i1; ++i) {
         PositionSolver::positionAtTile(tl, tl.startTimeAt(i), i, red, blue);
         const double xs[2] = { red.x, blue.x }, ys[2] = { red.y, blue.y };
-        const int cnt = opts.drawBlue ? 2 : 1;
-        for (int k = 0; k < cnt; ++k) {
+        for (int k = 0; k < 2; ++k) {
             minX = std::min(minX, xs[k]); maxX = std::max(maxX, xs[k]);
             minY = std::min(minY, ys[k]); maxY = std::max(maxY, ys[k]);
         }
@@ -170,9 +169,15 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
         }
     }
     const Rgba fill   = unpack(opts.fillRgba);
-    const double halfW = opts.lineWidthPx > 0.0f
-        ? std::max(0.5, std::min(64.0, (double)opts.lineWidthPx * 0.5))            // 显式指定线宽
-        : std::max(0.5, std::min(6.0, scale * opts.thicknessScale * 0.5));         // 按 scale 推（下限 0.5）
+    const double rawHalfW = opts.lineWidthPx > 0.0f
+        ? (double)opts.lineWidthPx * 0.5
+        : scale * opts.thicknessScale * 0.5;
+    const double loHalfW = 0.5, hiHalfW = (opts.lineWidthPx > 0.0f) ? 64.0 : 6.0;
+    if (rawHalfW < loHalfW || rawHalfW > hiHalfW) {
+        LOG_W("Map: 线宽 %.2f px 超出可绘制范围 [%.1f, %.1f] px → 按边界画（不是静默改参数）",
+              rawHalfW * 2.0, loHalfW * 2.0, hiHalfW * 2.0);
+    }
+    const double halfW = std::max(loHalfW, std::min(hiHalfW, rawHalfW));
 
     // ── 第二遍：逐段画（红蓝各一条，顺序即进度 → 渐变）
     glm::dvec2 prevRed, prevBlue;
@@ -188,7 +193,7 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
             const glm::dvec2 a = toPx(prevRed), b = toPx(red);
             if (opts.hardLine) drawSegmentHard(out, (int)W, (int)H, a.x, a.y, b.x, b.y, c);
             else               drawSegment(out, (int)W, (int)H, a.x, a.y, b.x, b.y, halfW, c);
-            if (opts.drawBlue) {
+            {
                 const glm::dvec2 ab = toPx(prevBlue), bb = toPx(blue);
                 if (opts.hardLine) drawSegmentHard(out, (int)W, (int)H, ab.x, ab.y, bb.x, bb.y, c);
                 else               drawSegment(out, (int)W, (int)H, ab.x, ab.y, bb.x, bb.y, halfW, c);
@@ -197,15 +202,6 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
         prevRed = red; prevBlue = blue; havePrev = true;
     }
 
-    if (opts.markers && !opts.timeColor) {   // 彩虹已用颜色表达时间 → 起止点多余
-        glm::dvec2 r0, b0, r1, b1;
-        PositionSolver::positionAtTile(tl, tl.startTimeAt(i0), i0, r0, b0);
-        PositionSolver::positionAtTile(tl, tl.startTimeAt(i1), i1, r1, b1);
-        const double rad = std::max(3.0, std::min(14.0, scale * 1.5));
-        const glm::dvec2 s0 = toPx(r0), s1 = toPx(r1);
-        drawDisc(out, (int)W, (int)H, s0.x, s0.y, rad, Rgba{0.30f, 0.85f, 0.40f, 1.0f});  // 绿 = 起点
-        drawDisc(out, (int)W, (int)H, s1.x, s1.y, rad, Rgba{0.95f, 0.30f, 0.30f, 1.0f});  // 红 = 终点
-    }
     LOG_I("Map: %dx%d，%d 层，世界范围 %.1f x %.1f，缩放 %.4f px/单位，线宽 %.2f px",
           opts.width, opts.height, n, bw, bh, scale, halfW * 2.0);
     return true;

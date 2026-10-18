@@ -239,11 +239,11 @@ docs/camera.md §2.3。两段都**只在非空时写**；旧文件没有它们 �
 | `DeltaVarint` | 2 | 首值 zigzag varint，其后 zigzag(相邻差) varint | 单调列（`floor`）|
 | `Const` | 3 | 一个值（8 B / 4 B）| 整列同值 |
 | `BitPack` | 4 | 位打包（位宽 = `ceil(log2(max+1))`）| 小枚举/位标志 |
-| `JsonPassthrough` | 5 | 原样文本 | 保留（诊断/未知段）|
+| （5 保留）| 5 | — | 曾计划 `JsonPassthrough`，**未实现**；写侧不产出、读侧遇到即失败 |
 | `Rle` | 6 | 字典 + `u64 runCount` + 每游程 `(varint 下标, varint 长度)` | 长游程（直线型赫兹谱的 angleData、type/flag/val1/val2）|
 | `DeltaRleVarint` | 7 | `u64 runCount` + 每游程 `(varint zigzag(差分), varint 长度)`——游程是对**差分流**取的 | 单调且差分有游程（floor）|
 | `SectionZstd` | 16 | 段内容是一整帧 zstd | **段级压缩，v2 默认**（实测真实文件上比 xz 更小、解码更快、零新依赖）|
-| `SectionXz` | 17 | 段内容是一整帧 xz | 可选高档（体积敏感时）|
+| `SectionXz` | 17 | 段内容是一整帧 xz | **仅读侧兼容**（旧文件）；writer 只写 SectionZstd |
 
 位打包是**低位在前**、1..32 位/值。`Dict` 的下标与 `Raw/Const` 的载荷都按 `count` 读取，
 任何越界/截断都返回 `false`。

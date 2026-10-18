@@ -64,7 +64,7 @@ enum class Codec : uint8_t {
     DeltaVarint   = 2,   // 差分 + zigzag varint（单调列，如 floor）
     Const         = 3,   // 整列同一个值（angleOffset / rotation / opacity 实测各只有 1 个取值）
     BitPack       = 4,   // 小枚举/位标志
-    JsonPassthrough = 5, // 兜底：原样文本（诊断/未知段用）
+    // 5 保留：曾计划 `JsonPassthrough`（原样文本），从未实现；读侧遇到 5 会明确失败。
     // —— 列级（写在 ColumnHeader.codec 里）——
     Rle = 6,            // 字典 + (下标, 游程长度)：抓"长游程"（直线型赫兹谱的 angleData、type/flag/val1/val2）
     DeltaRleVarint = 7, // 差分 + 对差分再取游程：抓"单调且差分恒定"（floor 恒 +1 → 十几字节）

@@ -14,7 +14,7 @@
 // 输入（与 tile.vert 一致）：
 //   * aRecipe：静态配方表，每个 canonical 槽位一项 (part, layer*64+slot, k0, k1)；
 //   * aInstOffset / aShape / aIconBits：每实例（相机相对偏移 / 形状号 / 图标位）；
-//   * uSlotTex：每形状 `kSlots`(193) 个 texel 的 CPU 展开表 —— texel i = 槽位 i 的 (x, y)，
+//   * uSlotTex：每形状 `kSlots`(142) 个 texel 的 CPU 展开表 —— texel i = 槽位 i 的 (x, y)，
 //     行宽 kTexW（= `TileShape::kTexW`，写成常量省一个 uniform）。槽位号 = gl_VertexID
 //     （索引表里的值就是 canonical 槽位号，aRecipe 也按它排列）。
 
@@ -25,8 +25,8 @@ layout(location = 3) in float aIconBits;    // 每实例：bit0 twirl / bit1 ssU
 
 uniform sampler2D uSlotTex;
 const int kTexW = 1024;         // TileShape::kTexW
-const int kSlots = 193;         // TileShape::kTotalSlots（7 part × 2 层 + 3 图标 part × 17）
-const int kTileSlots = 142;     // 前 142 个是砖（描边 71 + 填充 71），之后是图标
+const int kSlots = 142;         // TileShape::kTotalSlots（7 part × 2 层；图标已改在片元里画）
+const int kTileSlots = 142;     // 描边 71 + 填充 71
 
 uniform mat4  uVP;
 uniform vec3  uFillColor;

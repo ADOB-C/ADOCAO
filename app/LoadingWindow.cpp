@@ -172,13 +172,8 @@ void showLoadingWindow(std::function<void(LoadingProgress&)> loader, bool cliOnl
         glfwSwapBuffers(window);
 
         // Close when loader finishes
-        if (pct >= 100.0f && !loaderJob.ready()) {
-            // 进度到 100 但任务还没返回（最后几步）：等一下再退，别丢状态
-            loaderJob.wait();
-            loaderJob.clear();
-            break;
-        }
         if (pct >= 100.0f) {
+            // 进度到 100 但任务可能还没返回（最后几步）：等一下再退，别丢状态
             loaderJob.wait();
             loaderJob.clear();
             break;

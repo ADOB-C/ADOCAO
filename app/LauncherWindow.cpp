@@ -26,8 +26,6 @@ LauncherConfig showLauncher() {
     }
 
     wizard::State st;
-    st.cfg.levelPath.reserve(512);
-    st.cfg.musicPath.reserve(512);
 
     // ---- Main loop ----
     while (!glfwWindowShouldClose(chrome.window) && !st.done) {

@@ -83,7 +83,6 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     LOG_D("GameWindow::init: %lld tiles, fullscreen=%d exclusive=%d", (long long)m_level->tileCount(), cfg.fullscreen, cfg.exclusiveFullscreen);
 
     // Create window
-    m_exclusiveFullscreen = cfg.exclusiveFullscreen;
     m_isFullscreen = cfg.fullscreen;
 
     GLFWmonitor* primary = glfwGetPrimaryMonitor();
@@ -173,8 +172,6 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
         return e && std::atoi(e) != 0;
     }();
     glfwSwapInterval(vsync ? 1 : 0);
-    glGetIntegerv(GL_MAJOR_VERSION, &m_glMajor);
-    glGetIntegerv(GL_MINOR_VERSION, &m_glMinor);
     if (!loadGLCore()) { LOG_E("Failed to load OpenGL functions"); glfwDestroyWindow(m_window); return false; }
     if (cfg.msaaSamples > 0) glEnable(GL_MULTISAMPLE);
     LOG_D("OpenGL %s | GLSL %s", glGetString(GL_VERSION), glGetString(GL_SHADING_LANGUAGE_VERSION));
@@ -467,7 +464,7 @@ void GameWindow::render() {
     int fbW, fbH;
     glfwGetFramebufferSize(m_window, &fbW, &fbH);
     LetterboxedViewport vp = computeLetterbox(fbW, fbH, m_targetAspect);
-    if (m_scene) m_scene->setViewportHeightPx(vp.h);   // LOD：视口像素高度（每世界单位多少像素）
+    m_scene->setViewportHeightPx(vp.h);   // LOD：视口像素高度（每世界单位多少像素）
 
     {
         adofai::profile::Scoped _s("setup");   // 帧头：letterbox + 两次 clear + setAspect
@@ -609,7 +606,10 @@ void GameWindow::captureAndExit() {
     int frames = 1;
     if (const char* e = std::getenv("ADOCAO_CAPTURE_FRAMES")) { frames = std::atoi(e); }
     if (frames < 1) frames = 1;
-    if (frames > 200) frames = 200;
+    if (frames > 200) {
+        LOG_W("capture: ADOCAO_CAPTURE_FRAMES=%d 超过上限 200，按 200 渲染", frames);
+        frames = 200;
+    }
     const auto tRender0 = std::chrono::steady_clock::now();
     profile::frameBegin();
     render();
@@ -642,11 +642,17 @@ void GameWindow::captureAndExit() {
     for (int y = 0; y < fbH; y++)
         std::memcpy(&flip[(size_t)y * rowBytes], &px[(size_t)(fbH - 1 - y) * rowBytes], rowBytes);
 
-    if (stbi_write_png(m_cfg->capturePath.c_str(), fbW, fbH, 4, flip.data(), (int)rowBytes))
+    if (stbi_write_png(m_cfg->capturePath.c_str(), fbW, fbH, 4, flip.data(), (int)rowBytes)) {
         LOG_I("capture: %s %dx%d t=%.4fs zoom=%.1f tile=%d req=%d render_ms=%.3f first_ms=%.2f frames=%d drawn=%d",
               m_cfg->capturePath.c_str(), fbW, fbH, targetTime, m_cfg->captureZoom, tileIdx,
               m_cfg->captureTile, renderMs, firstMs, frames, dragged);
-        if (profile::enabled()) {
+    } else {
+        // 前缀**不能**是 `capture:`：`capture-gate.sh` 用"日志里最后一条 capture: 行"核对
+        // tile/req，一条不是抓帧结果的 capture: 行会把解析带偏（真踩过：写 PNG 失败那次
+        // 让 48 个状态报"抓错砖"）。抓帧块里的辅助日志统一用 capture-selfcheck:/capture-write:。
+        LOG_E("capture-write: 写 PNG 失败 %s", m_cfg->capturePath.c_str());
+    }
+    if (profile::enabled()) {
             // 两条口径：首帧=一次性 GL 开销的单次快照；稳态=第 2..N 帧的 min/中位/max（抗单样本噪声）
             if (frames == 1) {
                 const auto& f = profile::firstFrame();
@@ -666,11 +672,6 @@ void GameWindow::captureAndExit() {
                           secSum, fmed);
             }
         }
-    else
-        // 前缀**不能**是 `capture:`：`capture-gate.sh` 用"日志里最后一条 capture: 行"核对
-        // tile/req，一条不是抓帧结果的 capture: 行会把解析带偏（真踩过：写 PNG 失败那次
-        // 让 48 个状态报"抓错砖"）。抓帧块里的辅助日志统一用 capture-selfcheck:/capture-write:。
-        LOG_E("capture-write: 写 PNG 失败 %s", m_cfg->capturePath.c_str());
 
     // 4) **自检：同一帧再渲染一次，逐字节比** —— 这是"抓帧必须确定性"的机械保证。
     // 为什么这么做：与其去追"哪些量是反馈驱动的"（追不完 —— 帧时间、墙上时钟、音频位置、

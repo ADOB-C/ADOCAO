@@ -23,7 +23,6 @@ public:
     CameraController() = default;
 
     void attach(adofai::Camera& camera) { m_camera = &camera; }
-    adofai::Camera& camera() const { return *m_camera; }
 
     // Move the camera to a world position: sets target, updates the pan base
     // and cancels any in-progress drag offset.
@@ -48,7 +47,6 @@ public:
     // Current cursor position in window pixels.
     double cursorX() const { return m_cursorX; }
     double cursorY() const { return m_cursorY; }
-    bool dragging() const { return m_dragging; }
 
 private:
     adofai::Camera* m_camera = nullptr;

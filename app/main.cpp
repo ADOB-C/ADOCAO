@@ -94,7 +94,7 @@ void printHelp(Mode mode, bool all) {
             "  --time-color        瓦片按谱面时间彩虹着色\n"
             "\n"
             "  瓦片名自带绝对坐标 x%%07lld_y%%07lld_w%%lld_h%%lld.png，拼接时不需要清单。\n"
-            "  衔接：adocao stitch <dir> <out.png> / adocao mono <dir> <out.png>\n");
+            "  衔接：adocao stitch <dir> <out.png>（1-bit 单色请用 adocao image --1px --1bit）\n");
         return;
     case Mode::Stitch:
         std::fprintf(stderr,
@@ -132,7 +132,7 @@ void printHelp(Mode mode, bool all) {
         "  --level <file>  --music <file>  --width N  --height N  --fullscreen\n"
         "  --fill <hex>  --stroke <hex>  --bg <hex>  --no-auto-stroke\n"
         "  --msaa N  --no-exclusive                 抗锯齿 / 无边框全屏（默认独占）\n"
-        "  --no-hitsound  --force-hitsound [TYPE]  --auto-play  --no-trail  --export\n"
+        "  --no-hitsound  --force-hitsound [TYPE]  --auto-play  --no-trail\n"
         "  --start-at SEC            播放从该时刻开始（等价于选砖后按空格；含音乐 seek）\n"
         "  --cull-block N            剔除的粗块粒度（层/块，默认 4096；0 = 关闭索引走全扫）\n"
         "  --trail-duration SEC | --trail-tiles N   拖尾长度（二选一，默认关）\n"
@@ -342,7 +342,8 @@ int main(int argc, char* argv[]) {
 
         continue;
     unknown:
-        if (a[0] == '-' && a[1] == '-' && a[2] != '\0') {   // 单独的 "--" 按约定忽略
+        if (a[0] == '-' && a[1] == '-' && a[2] == '\0') continue;   // 单独的 "--" 按约定忽略
+        if (a[0] == '-' && a[1] == '-' && a[2] != '\0') {
             std::fprintf(stderr, "未知选项: %s（%s 模式）\n", a, mode == Mode::Play ? "播放" : modeName(mode));
             if (!migrationHint(a)) {
                 if (mode == Mode::Play) std::fprintf(stderr, "用 `adocao --help` 看全部开关。\n");

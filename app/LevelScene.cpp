@@ -129,7 +129,20 @@ bool LevelScene::compileShaders() {
 
 bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level) {
     m_fillColor = cfg.trackFillColor;
-    m_strokeColor = cfg.trackStrokeColor;
+    // autoStroke：描边 = 填充 ×0.5（与向导的 deriveStroke 同一规则）。CLI 的 --no-auto-stroke
+    // 才用显式 trackStrokeColor；否则 --fill 会带着推导出的描边，不再是一个无效开关。
+    if (cfg.autoStroke) {
+        unsigned r = 0, g = 0, b = 0;
+        if (std::sscanf(m_fillColor.c_str(), "%02x%02x%02x", &r, &g, &b) == 3) {
+            char buf[8];
+            std::snprintf(buf, sizeof buf, "%02x%02x%02x", r / 2, g / 2, b / 2);
+            m_strokeColor = buf;
+        } else {
+            m_strokeColor = cfg.trackStrokeColor;
+        }
+    } else {
+        m_strokeColor = cfg.trackStrokeColor;
+    }
     TileMesh::hexToColor3(m_fillColor, m_fillRGB);
     TileMesh::hexToColor3(m_strokeColor, m_strokeRGB);
     m_level = &level;
@@ -318,7 +331,6 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
 
 void LevelScene::updateTileVisibility(const Timeline& timeline, double t, bool playing) {
     if (!m_tileVisEnabled) return;
-    if (!timeline.hasTrackVisTimes()) return;      // 这张谱不需要 TrackVis
     // 倒计时（timeInLevel < 0）期间按 t=0 处理：原版在 countdown 里**看得到开头那段轨道**，
     // 而 TrackVis 的 appear 时间是以 0 为基准的，直接拿负时间去比会把砖全藏掉 → 开头黑屏
     // 直到 countdown 结束（2026-10-17 用户实测"快半秒"。）
@@ -399,7 +411,7 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     { profile::Scoped _s("vis"); updateTileVisibility(timeline, timeInLevel, playing); }
 
     auto drawFlashPass = [&](uint8_t plane) {
-        if (!m_level || !m_flashShader || m_flashVao == 0) return;
+        if (!m_flashShader || m_flashVao == 0) return;
         const LevelData::FlashState st = m_level->flashStateAt(plane, timeInLevel);
         if (!st.active || st.alpha <= 0.001f) return;
         glDisable(GL_DEPTH_TEST);
@@ -437,7 +449,7 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     m_tileShader->setFloat("uOpacity", 1.0f);
     TrackXformCtx xctx{m_level, timeInLevel};
     m_tileMesh->setTime(timeInLevel);   // 时间驱动颜色/变换：相机静止时也要重算
-    if (m_trackColorOverride || !m_level) {
+    if (m_trackColorOverride) {
         m_tileShader->setFloat("uUseInstColor", 0.0f);
         m_tileMesh->draw(vl, vr, vb, vt, camera.targetX(), camera.targetY(),
                          nullptr, nullptr, &trackXformAt, &xctx);

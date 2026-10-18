@@ -272,15 +272,6 @@ int runApplication(bool debugConsole) {
 
     // Export hitsounds to WAV and exit (no game window)
     if (cfg.exportHitsounds) {
-        // 导出的是 hitsound **混音**：没有音乐就无从合成（以前这里直接往下走 →
-        // 空音乐路径被喂给解码器 → **段错误**，而且因为日志只写文件，终端上什么都看不到）。
-        if (cfg.musicPath.empty()) {
-            std::fprintf(stderr,
-                         "adocao export 需要 --music <音频文件>：导出的是 hitsound 混音，没有音乐无从合成。\n");
-            LOG_E("Export: music path is empty (need --music)");
-            glfwTerminate();
-            return 2;
-        }
         LevelData lvl;
         FileMap map;
         if (!map.open(cfg.levelPath) ||

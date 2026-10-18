@@ -20,7 +20,10 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdarg>
+#include <cerrno>
 #include <cstring>
+#include <ctime>
 #include <thread>
 #include <vector>
 
@@ -735,6 +738,116 @@ void soakLine(const char* tag, const std::vector<double>& work, const std::vecto
           overBudgetMs, over, 100.0 * (double)over / (double)work.size(), dMed, dMax,
           (double)appmem::currentResidentBytes() / 1048576.0);
 }
+// ---- Profiler 的独立 CSV 文件（ADOCAO.prof） ---------------------------------
+// 与 ADOCAO.log 完全分开：每次采样行**立即写入并 flush**（不攒到关窗口），
+// 这样运行中就能用 tail/csv 转表。列见下面的表头。
+struct ProfFile {
+    FILE* f = nullptr;
+    long long runId = 0;
+    bool headerDone = false;
+
+    void ensureOpen() {
+        if (f || headerDone) return;
+        headerDone = true;
+        const char* env = std::getenv("ADOCAO_PROFILE_FILE");
+        const std::string path = (env && *env) ? env : std::string("ADOCAO.prof");
+        f = std::fopen(path.c_str(), "a");
+        if (!f) { LOG_W("profiler: 打不开 %s（%s）", path.c_str(), std::strerror(errno)); return; }
+        runId = (long long)std::time(nullptr);
+        std::fprintf(f, "# ADOCAO profiler v1 (CSV; 每行立即 flush)\n");
+        std::fprintf(f,
+            "kind,run,t_s,frames,work_p50_ms,work_p95_ms,work_p99_ms,work_max_ms,"
+            "frame_p50_ms,frame_p95_ms,frame_max_ms,over_16_7,over_pct,drawn_med,drawn_max,"
+            "rss_mb,segment,seg_p50_ms,seg_min_ms,seg_max_ms,note\n");
+        std::fflush(f);
+        LOG_I("profiler: 写入 %s（run=%lld，CSV，每行 flush）", path.c_str(), runId);
+    }
+    void row(const char* fmt, ...) {
+        ensureOpen();
+        if (!f) return;
+        va_list ap;
+        va_start(ap, fmt);
+        std::vfprintf(f, fmt, ap);
+        va_end(ap);
+        std::fputc('\n', f);
+        std::fflush(f);   // 关键：每次直接写，不等关窗口
+    }
+    void close() { if (f) { std::fflush(f); std::fclose(f); f = nullptr; } }
+};
+
+// CSV 行构造：21 列（见表头）。空字段用空串。
+inline std::string csvRow(const std::vector<std::string>& cols) {
+    std::string out;
+    for (size_t i = 0; i < cols.size(); i++) {
+        if (i) out += ',';
+        out += cols[i];
+    }
+    return out;
+}
+inline std::string fmt(const char* f, ...) {
+    char buf[256];
+    va_list ap; va_start(ap, f);
+    std::vsnprintf(buf, sizeof buf, f, ap);
+    va_end(ap);
+    return buf;
+}
+
+// 一行 interval/end 统计（CSV 列顺序见表头）。窗口为空时跳过。
+void profStatsRow(ProfFile& pf, const char* kind, long long run, double t, size_t frames,
+                  const std::vector<double>& work, const std::vector<double>& frame,
+                  const std::vector<int>& drawn, double budgetMs) {
+    if (work.empty()) return;
+    size_t over = 0;
+    for (double w : work) if (w > budgetMs) ++over;
+    std::vector<int> d = drawn;
+    std::sort(d.begin(), d.end());
+    std::vector<std::string> c(21);
+    c[0] = kind;
+    c[1] = std::to_string(run);
+    c[2] = fmt("%.3f", t);
+    c[3] = std::to_string(frames);
+    c[4] = fmt("%.3f", pctOf(work, 0.50));
+    c[5] = fmt("%.3f", pctOf(work, 0.95));
+    c[6] = fmt("%.3f", pctOf(work, 0.99));
+    c[7] = fmt("%.3f", pctOf(work, 1.0));
+    c[8] = fmt("%.3f", pctOf(frame, 0.50));
+    c[9] = fmt("%.3f", pctOf(frame, 0.95));
+    c[10] = fmt("%.3f", pctOf(frame, 1.0));
+    c[11] = std::to_string(over);
+    c[12] = fmt("%.2f", 100.0 * (double)over / (double)work.size());
+    c[13] = d.empty() ? "" : std::to_string(d[d.size() / 2]);
+    c[14] = d.empty() ? "" : std::to_string(d.back());
+    c[15] = fmt("%.0f", (double)appmem::currentResidentBytes() / 1048576.0);
+    pf.row("%s", csvRow(c).c_str());
+}
+
+// 退出时把每个段（cull/upload/draw/trailSample…）的稳态分位数写成独立行，便于透视表。
+void profSegmentRows(ProfFile& pf, long long run, double t) {
+    for (const auto& sec : profile::sections()) {
+        if (sec.samples.empty()) continue;
+        std::vector<double> v = sec.samples;
+        std::sort(v.begin(), v.end());
+        std::vector<std::string> c(21);
+        c[0] = "segment"; c[1] = std::to_string(run); c[2] = fmt("%.3f", t);
+        c[16] = sec.name;
+        c[17] = fmt("%.3f", pctOf(v, 0.50));
+        c[18] = fmt("%.3f", v.front());
+        c[19] = fmt("%.3f", v.back());
+        pf.row("%s", csvRow(c).c_str());
+    }
+    if (!profile::frameSamples().empty()) {
+        std::vector<double> v = profile::frameSamples();
+        std::sort(v.begin(), v.end());
+        std::vector<std::string> c(21);
+        c[0] = "frame"; c[1] = std::to_string(run); c[2] = fmt("%.3f", t);
+        c[3] = std::to_string(v.size());
+        c[8] = fmt("%.3f", pctOf(v, 0.50));
+        c[9] = fmt("%.3f", pctOf(v, 0.95));
+        c[10] = fmt("%.3f", pctOf(v, 1.0));
+        pf.row("%s", csvRow(c).c_str());
+    }
+}
+
 }  // namespace
 
 void GameWindow::run() {
@@ -775,6 +888,10 @@ void GameWindow::run() {
     std::vector<double> soakWork, soakFrame;
     std::vector<int> soakDrawn;
     double soakLastLog = 0.0;
+    ProfFile prof;                        // ADOCAO.prof（CSV，逐行 flush）
+    std::vector<double> ivWork, ivFrame;  // 只装"本采样间隔"的帧（CSV 要看随时间变化）
+    std::vector<int> ivDrawn;
+    if (profile::enabled()) prof.ensureOpen();
     // 采样间隔可调：`ADOCAO_PROFILE_INTERVAL_MS`（默认 10000）。只影响"每 N 秒打一行"，
     // 不影响逐帧采样本身（每帧都计入；结尾的 reportSteady 也是整段）。
     double soakIntervalSec = 10.0;
@@ -834,10 +951,17 @@ void GameWindow::run() {
                 soakWork.push_back(workMs);
                 soakFrame.push_back((glfwGetTime() - loopT0) * 1000.0);
                 soakDrawn.push_back(m_scene->drawnInstances());
+                ivWork.push_back(workMs);
+                ivFrame.push_back(soakFrame.back());
+                ivDrawn.push_back(soakDrawn.back());
                 const double nowS = glfwGetTime();
                 if (nowS - soakLastLog >= soakIntervalSec) {
                     soakLastLog = nowS;
                     soakLine(soakTag, soakWork, soakFrame, soakDrawn, 1000.0 / 60.0);
+                    // .prof：本间隔一行（立即 flush）
+                    profStatsRow(prof, "interval", prof.runId, nowS - runT0, ivWork.size(),
+                                 ivWork, ivFrame, ivDrawn, 1000.0 / 60.0);
+                    ivWork.clear(); ivFrame.clear(); ivDrawn.clear();
                 }
             }
         } else {
@@ -853,6 +977,11 @@ void GameWindow::run() {
     if (profile::enabled()) {
         soakLine("结束", soakWork, soakFrame, soakDrawn, 1000.0 / 60.0);
         LOG_I("soak(结束-分段): %s", profile::reportSteady().c_str());
+        const double tEnd = glfwGetTime() - runT0;
+        profStatsRow(prof, "end", prof.runId, tEnd, soakWork.size(), soakWork, soakFrame,
+                     soakDrawn, 1000.0 / 60.0);
+        profSegmentRows(prof, prof.runId, tEnd);
+        prof.close();
     }
 
     m_audioEngine->shutdown();

@@ -16,9 +16,25 @@
 
 ## 1. 分段计时（`ADOCAO_PROFILE=1`，默认关）
 
-**采样间隔 / 日志文件**：`ADOCAO_PROFILE_INTERVAL_MS`（默认 10000，最小 100）控制
-"每 N 毫秒打一行 soak"——逐帧采样不变，结尾仍打整段报告；`ADOCAO_LOG_FILE=<path>` 让这份日志
-写到指定文件（相对 = 当前目录），**多实例/profiler 不要共用 `ADOCAO.log`**。
+**Profiler 的专用文件（2026-10-17）**：开 `ADOCAO_PROFILE=1` 后，除了日志里的 `soak` 行，
+还会写一份 **`ADOCAO.prof`（CSV，每行立即 flush，运行中就能读）**：
+
+```
+# ADOCAO profiler v1 (CSV; 每行立即 flush)
+kind,run,t_s,frames,work_p50_ms,work_p95_ms,work_p99_ms,work_max_ms,
+frame_p50_ms,frame_p95_ms,frame_max_ms,over_16_7,over_pct,drawn_med,drawn_max,rss_mb,
+segment,seg_p50_ms,seg_min_ms,seg_max_ms,note
+interval,…   每个采样间隔一行（本间隔的统计）
+end,…        退出时整段统计
+segment,…    每个阶段（cull/upload/draw/trailSample/applyFrame…）的分位数
+frame,…      整帧 p50/p95/max
+```
+
+* 文件位置：`ADOCAO_PROFILE_FILE=<path>`，默认 `ADOCAO.prof`（相对 = 当前目录）。
+* 采样间隔：`ADOCAO_PROFILE_INTERVAL_MS`（默认 10000，最小 100）——只影响行频率，
+  逐帧采样与 `end`/`segment` 行不变。
+* `ADOCAO.log` 保持原样（启动/加载/错误 + 同样的 soak 行）；`ADOCAO_LOG_FILE` 仍然可以
+  整体改日志路径，但 profiler 不再依赖它。
 
 **量真实上限先关帧控**：本 app 默认按 320 fps 节流（`targetFrameTime = 1/320`），所以 `frame`
 p50≈3.13 ms 是**故意**的。要量机器真实上限 / 不受节流影响的 `frame`，设 **`ADOCAO_UNCAPPED=1`**

@@ -621,6 +621,9 @@ void GameWindow::captureAndExit() {
         const double pitch = std::max(0.1, (double)m_level->settings.pitch / 100.0);
         m_cameraDirector.seek(m_playback->timeInLevel(), p[0], p[1], tileIdx, pitch);
         m_camCtrl.snapTo(m_cameraDirector.x(), m_cameraDirector.y());
+        if (std::getenv("ADOCAO_CAM_DEBUG")) {
+            LOG_I("capture-cam: target=(%.2f,%.2f) zoom=%.2f", m_camera.targetX(), m_camera.targetY(), (double)m_camera.zoom());
+        }
         m_camera.setRotation((float)m_cameraDirector.rotation());
         LOG_I("capture-selfcheck: 关卡相机 t=%.4f pos=(%.4f, %.4f) rot=%.3f zoom=%.3f",
               m_playback->timeInLevel(), m_cameraDirector.x(), m_cameraDirector.y(),

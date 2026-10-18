@@ -89,6 +89,27 @@ void PlaybackClock::updateFrame() {
         return;
     }
     const int n = (int)nFull;
+    // 结尾定格：到"末尾合成砖"的起点（=最后一格走完）就停住，行星停在最后一格，
+    // 不再沿合成砖继续前进（旧行为会让球跑到轨道外面，看起来"最后一格没画出来"）。
+    double endTime = 0.0;
+    if (n >= 2) {
+        endTime = m_timeline->startTimeAt(n - 1);
+        if (t >= endTime) {
+            m_finished = true;
+            m_frame.timeInLevel = endTime;
+            m_frame.elapsedMs = m_elapsedTime;
+            m_currentTileIndex = n - 2;
+            m_frame.tileIndex = m_currentTileIndex;
+            const auto& p = m_timeline->level()->tilePositionAt(n - 2);
+            double dirDeg = m_timeline->level()->tileDirectionAt(n - 2);
+            double rad = dirDeg * 3.14159265358979323846 / 180.0;
+            // 停在最后一格的**中心**（格子起点 + 半格）
+            m_frame.redPosition = glm::dvec2(p[0] + std::cos(rad) * 0.5, p[1] + std::sin(rad) * 0.5);
+            m_frame.bluePosition = m_frame.redPosition;
+            return;
+        }
+    }
+    m_finished = false;
     m_currentTileIndex = m_timeline->findTileIndex(t);
     m_frame.timeInLevel = t;
     m_frame.elapsedMs = m_elapsedTime;

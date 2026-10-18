@@ -488,10 +488,14 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     }
     glDisable(GL_BLEND);
 
+    // 结尾定格后仍要画行星/拖尾（官方：球停在最后一格/传送门上）
+    const int64_t tn = timeline.tileCount();
+    const bool ended = tn >= 2 && timeInLevel >= timeline.startTimeAt(tn - 1);
+
     // Trails（RAII 段：别显式调析构，那会跟作用域结束时的析构重复累加）
     {
         profile::Scoped _s("trails");
-        if (m_showTrail && playing && m_redPlanet && m_redPlanet->trail) {
+        if (m_showTrail && (playing || ended) && m_redPlanet && m_redPlanet->trail) {
             m_redPlanet->trail->draw(*m_trailShader, camera, camera.targetX(), camera.targetY());
             m_bluePlanet->trail->draw(*m_trailShader, camera, camera.targetX(), camera.targetY());
         }
@@ -500,7 +504,7 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     // Planets
     {
         profile::Scoped _s("planets");
-        if (playing && m_redPlanet && m_redPlanet->gpuBuilt()) {
+        if ((playing || ended) && m_redPlanet && m_redPlanet->gpuBuilt()) {
             m_redPlanet->draw(*m_planetShader, camera, camera.targetX(), camera.targetY());
             m_bluePlanet->draw(*m_planetShader, camera, camera.targetX(), camera.targetY());
         }

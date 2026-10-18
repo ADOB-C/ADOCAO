@@ -25,9 +25,9 @@ struct Scratch {
 };
 
 // Constants matching re_adojas
-constexpr float TILE_WIDTH = 0.275f;
-constexpr float TILE_LENGTH = 0.5f;
-constexpr float OUTLINE = 0.025f;
+constexpr float TILE_WIDTH = 0.2695f;
+constexpr float TILE_LENGTH = 0.49f;
+constexpr float OUTLINE = 0.0125f;
 
 // Helpers
 inline float fmodWrap(float x, float y) { return x >= 0 ? std::fmod(x, y) : std::fmod(x, y) + y; }

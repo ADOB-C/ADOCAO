@@ -37,8 +37,6 @@ public:
     float preRoll() const;
     float audioStartOffset() const;
     const PlaybackFrame& frame() const { return m_frame; }
-    // 已到谱面结尾（结尾定格：行星停在最后一格，不再绕圈/继续走）
-    bool finished() const { return m_finished; }
 
 private:
     const Timeline* m_timeline = nullptr;
@@ -47,7 +45,6 @@ private:
     double m_startWallClock = 0.0;
     int m_currentTileIndex = 0;
     bool m_reportedEnd = false;
-    bool m_finished = false;
     PlaybackFrame m_frame;
 
     void updateFrame();

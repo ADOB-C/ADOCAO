@@ -95,7 +95,6 @@ void PlaybackClock::updateFrame() {
     if (n >= 2) {
         endTime = m_timeline->startTimeAt(n - 1);
         if (t >= endTime) {
-            m_finished = true;
             m_frame.timeInLevel = endTime;
             m_frame.elapsedMs = m_elapsedTime;
             m_currentTileIndex = n - 2;
@@ -109,7 +108,6 @@ void PlaybackClock::updateFrame() {
             return;
         }
     }
-    m_finished = false;
     m_currentTileIndex = m_timeline->findTileIndex(t);
     m_frame.timeInLevel = t;
     m_frame.elapsedMs = m_elapsedTime;

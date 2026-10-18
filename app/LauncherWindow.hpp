@@ -25,6 +25,10 @@ struct LauncherConfig {
     // 诊断/自动化用（CLI `--start-at`）。
     float  startAt = 0.0f;
     int    msaaSamples = 0;        // MSAA samples (0=off, 2, 4, 8)
+    // Windows 专用：全屏走“独占”而不是无边框窗口（`--exclusive`）。默认关闭 ——
+    // 独占全屏不在 DWM 合成链上，WGC/OBS 抓不到；它换来的是更短的呈现路径
+    // （无边框 GL 窗口要 blt 一份到 DWM 重定向表面，独占可以翻页）。要录屏就别开。
+    bool   exclusiveFullscreen = false;
     int  resolutionW = 1920;
     int  resolutionH = 1080;
     bool fullscreen = false;

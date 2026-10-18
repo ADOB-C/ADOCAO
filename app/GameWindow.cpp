@@ -82,6 +82,13 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     m_audioEngine = &result.audio;
     m_targetAspect = (float)cfg.resolutionW / (float)cfg.resolutionH;
     LOG_D("GameWindow::init: %lld tiles, fullscreen=%d", (long long)m_level->tileCount(), cfg.fullscreen);
+#ifndef _WIN32
+    // `--exclusive` 是 Win32 的概念（acquireMonitor 的独占全屏）。macOS/Linux 的
+    // glfwSetWindowMonitor 本来就不是独占，这个开关没有对应物 —— 别静默当没看见。
+    if (cfg.exclusiveFullscreen) {
+        LOG_W("--exclusive 只在 Windows 上有意义（本平台全屏不是独占），已忽略");
+    }
+#endif
 
     // Create window
     m_isFullscreen = cfg.fullscreen;
@@ -140,20 +147,26 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
         GLFWwindow* w = nullptr;
         if (cfg.fullscreen) {
 #ifdef _WIN32
-            // Windows 的全屏 = **无边框窗口**，不用 glfwSetWindowMonitor(monitor)。
-            // 后者在 Win32 上走 acquireMonitor()：ChangeDisplaySettingsEx(CDS_FULLSCREEN)
-            // + WS_POPUP + HWND_TOPMOST，即"独占全屏"。独占全屏不在 DWM 合成链上 ——
-            // WGC（AdoFrame / OBS 的窗口捕获）抓不到它，录屏软件列表里也找不到，
-            // 用户只能退回"屏幕采集"。无边框窗口是普通顶层窗口，DWM 照常合成，
-            // WGC / DXGI 复制都能抓，这就是"能录制的全屏"。
-            // （不设 GLFW_FLOATING：置顶窗口在 Alt+Tab 后会一直盖住别人；任务栏由
-            //  shell 的"前台窗口铺满显示器"判定隐藏，mpv/VLC 都是这么做的。）
-            glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
-            w = glfwCreateWindow(fsW, fsH, "ADOCAO", nullptr, nullptr);
-            if (w) {
-                int mx = 0, my = 0;
-                if (primary) glfwGetMonitorPos(primary, &mx, &my);
-                glfwSetWindowPos(w, mx, my);
+            if (cfg.exclusiveFullscreen) {
+                // 显式 `--exclusive`：走 Win32 的 acquireMonitor ——
+                // ChangeDisplaySettingsEx(CDS_FULLSCREEN) + WS_POPUP + HWND_TOPMOST。
+                // 呈现路径更短（无边框 GL 窗口每帧要把后备缓冲 blt 到 DWM 的重定向表面，
+                // 独占可以翻页），所以帧数通常更高；代价是不在 DWM 合成链上，WGC/OBS 抓不到，
+                // 而且切模式会让抓屏源失效。默认不开。
+                glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
+                w = glfwCreateWindow(fsW, fsH, "ADOCAO", primary, nullptr);
+            } else {
+                // 默认：**无边框窗口**，不用 glfwSetWindowMonitor(monitor)。
+                // 它是普通顶层窗口，DWM 照常合成，WGC / DXGI 复制 / PresentMon 都能用，
+                // 这就是"能录制的全屏"。（不设 GLFW_FLOATING：置顶窗口在 Alt+Tab 后会
+                // 一直盖住别人；任务栏由 shell 的"前台窗口铺满显示器"判定隐藏。）
+                glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+                w = glfwCreateWindow(fsW, fsH, "ADOCAO", nullptr, nullptr);
+                if (w) {
+                    int mx = 0, my = 0;
+                    if (primary) glfwGetMonitorPos(primary, &mx, &my);
+                    glfwSetWindowPos(w, mx, my);
+                }
             }
 #else
             // macOS/Linux 本来就不是"独占"：Cocoa 只是去标题栏 + 把 level 抬到
@@ -199,7 +212,8 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     if (cfg.fullscreen && mode) {
         LOG_I("fullscreen: %dx%d @ %d Hz（%s）", mode->width, mode->height, mode->refreshRate,
 #ifdef _WIN32
-              "无边框窗口，DWM 合成 → WGC/OBS 可抓"
+              cfg.exclusiveFullscreen ? "独占全屏：呈现路径更短，但 WGC/OBS 抓不到"
+                                      : "无边框窗口，DWM 合成 → WGC/OBS 可抓"
 #else
               "原生全屏，合成器在链上 → 可抓"
 #endif
@@ -525,12 +539,17 @@ void GameWindow::render() {
 
 void GameWindow::toggleFullscreen() {
 #ifdef _WIN32
-    // 跟 createWindow 里同一条口径：Windows 的全屏 = 无边框窗口（DWM 合成，WGC 能抓），
-    // 不是 acquireMonitor 的独占全屏。
+    // 跟 createWindow 里同一条口径：默认无边框窗口（DWM 合成、WGC 能抓）；
+    // `--exclusive` 时才走 acquireMonitor 的独占全屏（帧数略高、抓不到）。
     if (m_isFullscreen) {
-        glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_TRUE);
-        glfwSetWindowSize(m_window, m_windowedW, m_windowedH);
-        glfwSetWindowPos(m_window, m_windowedX, m_windowedY);
+        if (m_cfg->exclusiveFullscreen) {
+            glfwSetWindowMonitor(m_window, nullptr,
+                m_windowedX, m_windowedY, m_windowedW, m_windowedH, 0);
+        } else {
+            glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_TRUE);
+            glfwSetWindowSize(m_window, m_windowedW, m_windowedH);
+            glfwSetWindowPos(m_window, m_windowedX, m_windowedY);
+        }
         m_isFullscreen = false;
     } else {
         glfwGetWindowPos(m_window, &m_windowedX, &m_windowedY);
@@ -547,9 +566,13 @@ void GameWindow::toggleFullscreen() {
         int fsW = (int)(mode->width / (csx > 0.0f ? csx : 1.0f));
         int fsH = (int)(mode->height / (csy > 0.0f ? csy : 1.0f));
 
-        glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_FALSE);
-        glfwSetWindowSize(m_window, fsW, fsH);
-        glfwSetWindowPos(m_window, mx, my);
+        if (m_cfg->exclusiveFullscreen) {
+            glfwSetWindowMonitor(m_window, primary, 0, 0, fsW, fsH, mode->refreshRate);
+        } else {
+            glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_FALSE);
+            glfwSetWindowSize(m_window, fsW, fsH);
+            glfwSetWindowPos(m_window, mx, my);
+        }
         m_isFullscreen = true;
     }
 #else

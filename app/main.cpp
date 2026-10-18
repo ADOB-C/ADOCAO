@@ -132,6 +132,7 @@ void printHelp(Mode mode, bool all) {
         "  --level <file>  --music <file>  --width N  --height N  --fullscreen\n"
         "  --fill <hex>  --stroke <hex>  --bg <hex>  --no-auto-stroke\n"
         "  --msaa N                                 抗锯齿采样数（0/2/4/8）\n"
+        "  --exclusive                              Windows：全屏走独占（帧数略高，但抓屏工具抓不到）\n"
         "  --no-hitsound  --force-hitsound [TYPE]  --auto-play  --no-trail\n"
         "  --start-at SEC            播放从该时刻开始（等价于选砖后按空格；含音乐 seek）\n"
         "  --cull-block N            剔除的粗块粒度（层/块，默认 4096；0 = 关闭索引走全扫）\n"
@@ -269,6 +270,7 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--auto-play") == 0)             cli.autoPlay = true;
             else if (std::strcmp(a, "--start-at") == 0 && i+1<argc)    cli.startAt = (float)atof(argv[++i]);
             else if (std::strcmp(a, "--msaa") == 0 && i+1<argc)      cli.msaaSamples = atoi(argv[++i]);
+            else if (std::strcmp(a, "--exclusive") == 0)             cli.exclusiveFullscreen = true;
             else if (std::strcmp(a, "--no-trail") == 0)              cli.showTrail = false;
             else if (std::strcmp(a, "--cull-block") == 0 && i+1<argc) cli.cullBlockFloors = atoi(argv[++i]);
             else if (std::strcmp(a, "--capture") == 0 && i+1<argc)      cli.capturePath = argv[++i];

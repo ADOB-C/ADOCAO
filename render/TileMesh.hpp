@@ -64,7 +64,9 @@ public:
     // 视锥边界是**世界坐标** → double（float 在 x≈6.8e7 上会被量化到 8 砖，剔除边界跟着错）
     // 逐实例砖色（fill/stroke，0..255）。fn = nullptr 时实例色全 0，由 uniform 决定颜色
     // （高亮/旧行为）。回调只对**可见列表**里的砖调用（每帧几百次），ctx 由调用方保证生命周期。
-    using InstanceColorFn = void (*)(void* ctx, uint32_t tile, uint8_t fill[3], uint8_t stroke[3]);
+    // 逐实例颜色：fill/stroke 为 RGB，alpha = 颜色自带的不透明度（8 位 hex 的 AA/255）。
+    using InstanceColorFn = void (*)(void* ctx, uint32_t tile, uint8_t fill[3], uint8_t stroke[3],
+                                     float* alpha);
     // 逐实例变换（MoveTrack）：out = rot(弧度), scaleX, scaleY, alpha, moveX, moveY。
     // fn=nullptr → 全部 identity（rot 0 / scale 1 / alpha 1 / move 0）。
     using InstanceXformFn = void (*)(void* ctx, uint32_t tile, float out[6]);

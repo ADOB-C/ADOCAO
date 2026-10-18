@@ -53,6 +53,21 @@
   O(块内事件数)。条目上限 **4M**（超了 `LOG_W` 截断）；`buildRecolorIndex()` 在 `LevelLoader`
   里、丢起始时间数组之前调用。
 
+**逐实例颜色/变换的开销（2026-10-17 实测，Apple M5 / 1280×720 / uncapped / 8 s / p50）**：
+
+| 谱面 | 可见砖 | `work` | `frame` | `anim` | 占 `work` |
+|---|---|---|---|---|---|
+| The Moon | 329 | 0.458 ms | **0.654 ms** | 0.079 ms | 17% |
+| Hello (BPM) 2025 | 706 | 0.807 ms | **1.055 ms** | 0.265 ms | 33% |
+| Won't You（MYC） | 126 | 0.405 ms | **0.633 ms** | 0.018 ms | 4% |
+
+* 逐砖 ≈ **200 ns**（颜色 ~180 ns + 变换 ~5 ns）；60 fps 预算里占 **0.5–1.6%**。
+* **26.2 万可见**（LOD 上限）外推 **~50 ms** —— 只在"整张一帧"的极端视距出现（那档本来就在 85.7 ms 剔除上限附近）。
+* 没有 ColorTrack/RecolorTrack/MoveTrack 的谱 `setAnimNeeded(false)` → **0**；暂停（时间不变）→ **0**。
+* 实例 11→17 float（44→68 B）：26.2 万上限 11.5→17.8 MB（+6.3 MB）；上传字节 +55%，p50 3–6 µs。
+* 若要压"整张一帧"：下一步是**按段批量**算颜色（列表升序，每段一次；pulse/Volume 才逐砖），
+  预期 ~5 ns/砖、26.2 万约 1–2 ms。profiler 段：`anim` / `animColor` / `animXform`。
+
 **MoveTrack（2026-10-17 已落地）**：轨道动画（位置/旋转/缩放/不透明度），对齐 Re_ADOJAS
 `buildTileMoveTrack` 的"每砖属性关键帧"：
 
@@ -87,6 +102,10 @@
 * 全屏是一个 `gl_VertexID` 三角形（无 VBO）+ `flash.vert/flash.frag`；混合
   `SRC_ALPHA/ONE_MINUS_SRC_ALPHA`，`glDepthMask(false)` 不写深度。
 * 未做：`legacyFlash`（v13 及更早谱面 FG/BG 共用一块材质）的兼容分支；`Reverse` 旧样式。
+* **Alpha（2026-10-17 已落地）**：逐砖 alpha = **颜色 hex 的 AA/255**（如 `ffffffb3` → 0.70）**×**
+  MoveTrack 的 `opacity`；写进实例 `aXform.w`，`vOpacity = uOpacity * aXform.w`；砖块 pass 打开
+  `SRC_ALPHA` 混合（alpha=1 时逐字节不变）。alpha<0.005 的砖在 FS 里 discard。Flash 的 alpha 是
+  独立的叠层，不经过这里。
 
 **style 几何（2026-10-17 已落地）**：`buildShape()` 收 `styleWidth/styleLength`（Basic/Neon/NeonLight
 半宽 +0.025、半长 +0.02；Minimal 半长 −0.03），形状键 `GeoKey`/`packShapeKey` 带上 style（3 bit），

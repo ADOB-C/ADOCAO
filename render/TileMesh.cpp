@@ -833,10 +833,12 @@ void TileMesh::fillInstanceAnim() const {
         profile::Scoped _c("animColor");
         for (size_t k = 0; k < count; k++) {
             uint8_t fill[3] = {0, 0, 0}, stroke[3] = {0, 0, 0};
-            m_colorFn(m_colorCtx, m_listTiles[k], fill, stroke);
+            float alpha = 1.0f;
+            m_colorFn(m_colorCtx, m_listTiles[k], fill, stroke, &alpha);
             float* c = &m_listColors[k * 6];
             c[0] = fill[0] / 255.0f; c[1] = fill[1] / 255.0f; c[2] = fill[2] / 255.0f;
             c[3] = stroke[0] / 255.0f; c[4] = stroke[1] / 255.0f; c[5] = stroke[2] / 255.0f;
+            m_listXform[k * 6 + 3] *= alpha;   // 颜色 alpha × MoveTrack opacity
         }
     }
     if (std::getenv("ADOCAO_ANIM_DEBUG") && (m_colorFn || m_xformFn))

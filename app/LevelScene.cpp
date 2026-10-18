@@ -411,7 +411,7 @@ void trackXformAt(void* ctx, uint32_t tile, float out[6]) {
     out[0] = tr.rotDelta; out[1] = tr.scaleX; out[2] = tr.scaleY;
     out[3] = tr.alpha;    out[4] = tr.moveX;  out[5] = tr.moveY;
 }
-void trackColorAt(void* ctx, uint32_t tile, uint8_t fill[3], uint8_t stroke[3]) {
+void trackColorAt(void* ctx, uint32_t tile, uint8_t fill[3], uint8_t stroke[3], float* alpha) {
     const auto* c = static_cast<const TrackColorCtx*>(ctx);
     const TileColors col = c->level->tileColorsAt((int64_t)tile, c->time, c->amplitude, c->timeline);
     if (std::getenv("ADOCAO_COLOR_DEBUG") && tile < 4)
@@ -419,6 +419,7 @@ void trackColorAt(void* ctx, uint32_t tile, uint8_t fill[3], uint8_t stroke[3]) 
               col.fill[0], col.fill[1], col.fill[2], col.stroke[0], col.stroke[1], col.stroke[2]);
     fill[0] = col.fill[0]; fill[1] = col.fill[1]; fill[2] = col.fill[2];
     stroke[0] = col.stroke[0]; stroke[1] = col.stroke[1]; stroke[2] = col.stroke[2];
+    *alpha = col.opacity;
 }
 }  // namespace
 
@@ -453,6 +454,9 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
 
     // 轨道（砖 + 图标，一次 draw）。默认逐实例颜色（ColorTrack / trackStyle）；
     // `--fill/--stroke` 显式覆盖时退回 uniform，由 uUseInstColor 切换。
+    // 砖块 pass 开混合：alpha=1 时结果不变；alpha<1（颜色 hex 的 AA / MoveTrack opacity）才透。
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     m_tileShader->use();
     m_tileShader->setMat4("uVP", glm::value_ptr(camera.viewProj()));
     m_tileShader->setVec3("uFillColor", m_fillRGB[0], m_fillRGB[1], m_fillRGB[2]);
@@ -471,6 +475,7 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
         m_tileMesh->draw(vl, vr, vb, vt, camera.targetX(), camera.targetY(),
                          &trackColorAt, &ctx, &trackXformAt, &xctx);
     }
+    glDisable(GL_BLEND);
 
     // Trails（RAII 段：别显式调析构，那会跟作用域结束时的析构重复累加）
     {
@@ -498,6 +503,7 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
         m_highlightShader->setVec3("uFillColor", m_fillRGB[0], m_fillRGB[1], m_fillRGB[2]);
         m_highlightShader->setVec3("uStrokeColor", m_strokeRGB[0], m_strokeRGB[1], m_strokeRGB[2]);
         m_highlightShader->setFloat("uUseInstColor", 0.0f);   // 高亮沿用 uniform 颜色
+        glDisable(GL_BLEND);
         m_tileMesh->drawHighlightedTile(highlightTile, camera.targetX(), camera.targetY());
         glEnable(GL_DEPTH_TEST);
     }

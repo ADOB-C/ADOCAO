@@ -65,10 +65,14 @@ public:
         m_blocks.resize(nb);
         // 细表只在**体积可控**时建（粗表 0.0098 B/砖，细表约 0.078 B/砖）：超预算就退回单级
         // （2³¹−1 层时细表 ~168 MB 太贵；那种规模的谱本地不存在，D1 的账仍以粗表为准）。
-        const size_t subBytes = nb * kSubPerBlock * sizeof(Block);
-        m_useSub = (m_floors % kSubFloors == 0) && subBytes <= kSubMaxBytes;
+        // 细块数**随粒度变**：kSubPerBlock 是 4096 的默认值，8192/16384 时必须分别是 16/32，
+        // 否则每块只建前 8 个细块、其余层永远不会被 forEachHitBlock 交出（静默漏画）。
+        m_subPerBlock = (kSubFloors > 0 && m_floors >= kSubFloors && m_floors % kSubFloors == 0)
+                            ? m_floors / kSubFloors : 0;
+        const size_t subBytes = nb * m_subPerBlock * sizeof(Block);
+        m_useSub = m_subPerBlock > 0 && subBytes <= kSubMaxBytes;
         m_sub.clear();
-        if (m_useSub) m_sub.resize(nb * kSubPerBlock);
+        if (m_useSub) m_sub.resize(nb * m_subPerBlock);
         for (size_t b = 0; b < nb; ++b) {
             const size_t lo = b * m_floors;
             const size_t hi = (lo + m_floors < n) ? (lo + m_floors) : n;
@@ -95,7 +99,7 @@ public:
         }
     }
 
-    void clear() { m_blocks.clear(); m_sub.clear(); m_useSub = false; }
+    void clear() { m_blocks.clear(); m_sub.clear(); m_useSub = false; m_subPerBlock = 0; }
     bool valid() const { return !m_blocks.empty(); }
     size_t blockCount() const { return m_blocks.size(); }
     size_t floorsPerBlock() const { return m_floors; }
@@ -106,7 +110,7 @@ public:
 
     template <class F>
     void buildSub(size_t b, size_t lo, size_t hi, F&& posAt, double halfExtent) {
-        const size_t nsub = kSubPerBlock;
+        const size_t nsub = m_subPerBlock;
         size_t i = lo;
         for (size_t si = 0; si < nsub && i < hi; ++si) {
             const size_t subLo = i;
@@ -140,8 +144,8 @@ public:
             if (b.maxX < vl || b.minX > vr || b.maxY < vb || b.minY > vt) continue;
             if (!m_useSub) { fn(b.first, b.count); continue; }
             // 细块：只交出真正与视锥相交的那些（每个细块的 AABB 比粗块小 8 倍量级）
-            for (size_t si = 0; si < kSubPerBlock; ++si) {
-                const Block& sb = m_sub[bi * kSubPerBlock + si];
+            for (size_t si = 0; si < m_subPerBlock; ++si) {
+                const Block& sb = m_sub[bi * m_subPerBlock + si];
                 if (sb.count == 0) continue;
                 if (sb.maxX < vl || sb.minX > vr || sb.maxY < vb || sb.minY > vt) continue;
                 fn(sb.first, sb.count);
@@ -168,8 +172,8 @@ public:
             for (size_t bi = 0; bi < m_blocks.size(); ++bi) {
                 const Block& b = m_blocks[bi];
                 if (b.maxX < vl || b.minX > vr || b.maxY < vb || b.minY > vt) continue;
-                for (size_t si = 0; si < kSubPerBlock; ++si) {
-                    const Block& sb = m_sub[bi * kSubPerBlock + si];
+                for (size_t si = 0; si < m_subPerBlock; ++si) {
+                    const Block& sb = m_sub[bi * m_subPerBlock + si];
                     if (sb.count == 0) continue;
                     if (sb.maxX < vl || sb.minX > vr || sb.maxY < vb || sb.minY > vt) continue;
                     const double cx = std::min(std::max(camX, sb.minX), sb.maxX);
@@ -208,6 +212,7 @@ private:
     std::vector<Block> m_sub;
     bool m_useSub = false;
     size_t m_floors = kBlockFloors;
+    size_t m_subPerBlock = 0;   // = m_floors / kSubFloors（构建时算；0 = 不建细表）
 };
 
 }  // namespace adofai

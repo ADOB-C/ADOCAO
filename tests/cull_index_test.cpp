@@ -218,6 +218,20 @@ int main(int argc, char** argv) {
               "正面对照：正确外扩时必须逐元素相同");
     }
 
+    // 7) 细块数必须随粗块粒度变：kSubPerBlock 写死 8 时，8192/16384 粒度下每块只有前 8
+    //    个细块被建，剩下的层永远不会被 forEachHitBlock 交出（用户选 8k/16k 会静默漏画）。
+    {
+        auto pts = makeLine(20000);
+        const Rect all{-1e9, 1e9, -1e9, 1e9, "全部"};
+        for (size_t bf : {size_t(512), size_t(4096), size_t(8192), size_t(16384)}) {
+            CullIndex idx;
+            idx.build(pts.size(), [&](size_t i, double& x, double& y) { x = pts[i].x; y = pts[i].y; },
+                      0.5, bf);
+            check(indexedScan(idx, pts, all) == fullScan(pts, all),
+                  "块粒度 " + std::to_string(bf) + "：索引未覆盖全部砖");
+        }
+    }
+
     if (g_fail == 0) std::printf("全部通过\n");
     else std::printf("%d 项不通过\n", g_fail);
     return g_fail == 0 ? 0 : 1;

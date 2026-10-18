@@ -194,11 +194,15 @@ void main() {
     // 避免半透明砖内部 part 自重叠被混合两次（2026-10-18：单砖内部暗阶梯）。
     pos.z -= (1.0 - layer) * 2e-4;
     if (part >= 6.0) pos.z -= 2e-4;   // 图标（P_ICON_*）最近，盖在 fill/stroke 之上
-    {
-        vec2 xp = vec2(pos.x * aXform.y, pos.y * aXform.z);
+    if (aXform.x == 0.0 && aXform.y == 1.0 && aXform.z == 1.0) {
+        pos = vec3(pos.xy + aMove, pos.z);          // 纯位移：逐位同旧路径
+    } else {
+        // 旋转/缩放绕**砖心**（aPivot = 0.5×方向）：和 tile_cpu.vert 同一算式。
+        vec2 q = pos.xy - aPivot;
+        q = vec2(q.x * aXform.y, q.y * aXform.z);
         float xc = cos(aXform.x), xs = sin(aXform.x);
-        xp = vec2(fma(xp.x, xc, -(xp.y * xs)), fma(xp.x, xs, xp.y * xc));
-        pos = vec3(xp + aMove, pos.z);
+        q = vec2(fma(q.x, xc, -(q.y * xs)), fma(q.x, xs, q.y * xc));
+        pos = vec3(q + aPivot + aMove, pos.z);
     }
 #endif
     vOpacity = uOpacity * aXform.w;

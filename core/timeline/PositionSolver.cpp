@@ -187,21 +187,27 @@ PositionSolver::TrailWindow PositionSolver::trailWindow(const Timeline& timeline
         rate = span > 1e-9
              ? (double)cfg.tiles * (double)cfg.samplesPerTile / span
              : (double)cfg.fixedRate;
-        rate = std::max(rate, (double)cfg.rateMin);
     } else {
         rate = (double)cfg.fixedRate;
         if (cfg.speedAware)
             rate = std::max(rate, tilePathSpeed(timeline, t) * (double)cfg.samplesPerTile);
-        // rateMax 是**自适应**的上限（docs/rendering.md 的拖尾 governor）；用户显式给的固定率
-        // 不该被它静默夹掉 —— 只保留 rateMin 与后面的 maxPoints 硬上限。
+        // 只有**自适应 governor** 才夹 rateMin/rateMax（那是内部算法自己的边界）。
+        // 用户显式给的固定率原样使用：rateMin 也不再抬（以前设 10/s 会被静默抬到 60/s）。
         if (cfg.adaptive) rate = std::clamp(rate, (double)cfg.rateMin, (double)cfg.rateMax);
-        else              rate = std::max(rate, (double)cfg.rateMin);
     }
 
-    // 3) Hard bound on the point count, whatever the mode.
-    if (span > 1e-9 && rate * span > (double)cfg.maxPoints)
+    // 3) 点数硬上限（环容量）：只在**真的**要截断时告警，不再静默改用户参数。
+    if (span > 1e-9 && rate * span > (double)cfg.maxPoints) {
         rate = (double)cfg.maxPoints / span;
-    if (rate < 1.0) rate = 1.0;
+        static double lastWarn = -1e9;
+        const double now = std::chrono::duration<double>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        if (now - lastWarn > 2.0) {
+            lastWarn = now;
+            LOG_W("trail: rate × span 超过 maxPoints=%.0f（span=%.3fs）→ 实际 %.1f/s（告警去重 2s）",
+                  (double)cfg.maxPoints, span, rate);
+        }
+    }
 
     w.startTime = start;
     w.sampleRate = (float)rate;

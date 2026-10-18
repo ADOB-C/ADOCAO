@@ -230,11 +230,18 @@ int main() {
             auto bg = [&](double t) { return lv.flashStateAt(1, t); };
             if (fg((double)tl.startTimeAt(0) + 0.1).active != true) { std::printf("FAIL flash fg active\n"); fail++; }
             if (bg(trig2 - 0.05).active) { std::printf("FAIL flash bg before\n"); fail++; }
-            const auto mid = bg(trig2 + 1.0);
+            // duration 是**拍**：2 拍 × 该层一拍（bpm 120 → 0.5 s）= 1.0 s
+            const double durSec = 2.0 * tl.durationAt(2);
+            const auto mid = bg(trig2 + durSec * 0.5);
             if (!mid.active || mid.color[0] < 76 || mid.color[0] > 78 ||
                 mid.color[1] < 88 || mid.color[1] > 90 || mid.color[2] < 101 || mid.color[2] > 103 ||
                 mid.alpha < 0.46f || mid.alpha > 0.47f) {
                 std::printf("FAIL flash mid: %d,%d,%d a=%.3f\n", mid.color[0], mid.color[1], mid.color[2], (double)mid.alpha);
+                fail++;
+            }
+            const auto done = bg(trig2 + durSec + 0.01);
+            if (done.alpha > 0.61f || done.alpha < 0.59f) {
+                std::printf("FAIL flash duration-unit: end alpha=%.3f (应为 endOpacity 0.6)\n", (double)done.alpha);
                 fail++;
             }
             if (fg((double)tl.startTimeAt(8) + 0.1).active) { std::printf("FAIL flash kill\n"); fail++; }

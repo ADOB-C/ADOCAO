@@ -95,10 +95,11 @@ public:
         std::vector<uint8_t> icon;
     };
     // 形状键打包：sa/ea 各 20 位（角度 ×100，范围 ±18000），mid 1 位 —— 无冲突
-    static uint64_t packShapeKey(float sa, float ea, bool mid) {
+    static uint64_t packShapeKey(float sa, float ea, bool mid, uint8_t style = 0) {
         const uint32_t qa = (uint32_t)(int32_t)std::lround(sa * 100.0f) & 0xFFFFFu;
         const uint32_t qe = (uint32_t)(int32_t)std::lround(ea * 100.0f) & 0xFFFFFu;
-        return (uint64_t)qa | ((uint64_t)qe << 20) | (mid ? (1ull << 40) : 0ull);
+        return (uint64_t)qa | ((uint64_t)qe << 20) | (mid ? (1ull << 40) : 0ull) |
+               ((uint64_t)(style & 0x7u) << 41);
     }
     // `wc`（可选）= 调用线程自己的 provider 窗口克隆（并行剔除用；nullptr = 共享缓存）
     void deriveRange(const LevelData& level, int64_t i0, int64_t i1, DerivedRange& out,

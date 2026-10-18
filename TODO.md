@@ -760,7 +760,10 @@ off 那两个采样值相等=被钳住，on 是正常插值，差值正好是**�
 
 - [x] 砖色渲染接线第一段（2026-10-17）：每实例 fill/stroke（11 float/实例）+ shader
       `uUseInstColor`，默认可视化 = 谱面颜色；像素门槛 54 个状态按新行为重存。
+- [x] style 几何差异（2026-10-17）：`buildShape(styleWidth/styleLength)` + 形状键带 style
+      （Basic/Neon/NeonLight 放大、Minimal 半长 −0.03）。
+- [x] Volume（2026-10-17）：AudioEngine 的 50 Hz RMS 包络 + `amplitudeAt` → 逐帧颜色。
 - [ ] 砖色渲染剩余：① Neon/NeonLight/Basic/Minimal 的 **2×128 渐变条**（要给顶点补
-      "距外缘归一化 v"，在 `TileShape::expand` 侧算，别动几何位精确）；② style 的几何差异
-      （Gems / Minimal / Basic 尺寸、Neon 搭接）；③ Volume 幅度与逐砖 alpha；④ TweenColor 插值；
-      ⑤ 抓帧状态补 6 种 trackStyle + 3 种 pulse 的对照图。
+      "距外缘归一化 v"，在 `TileShape::expand` 侧算，别动几何位精确）；② Gems 宝石网格；
+      ③ 逐砖 alpha；④ TweenColor 插值；⑤ 抓帧状态补 6 种 trackStyle + 3 种 pulse 的对照图；
+      ⑥ 向导 Colors 页文案（现在只影响高亮/`--fill`）。

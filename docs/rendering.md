@@ -37,12 +37,23 @@
 * **默认可视化 = 谱面颜色**（settings + ColorTrack），`--fill/--stroke` 仍可整体覆盖（CLI 显式给才生效）。
   像素门槛 54 个状态因此按新行为**重存**（原基线的描边是启动器默认 0.5×，现在是 chart 的 0.7×）。
 
+**style 几何（2026-10-17 已落地）**：`buildShape()` 收 `styleWidth/styleLength`（Basic/Neon/NeonLight
+半宽 +0.025、半长 +0.02；Minimal 半长 −0.03），形状键 `GeoKey`/`packShapeKey` 带上 style（3 bit），
+所以同一角度在不同 style 下是不同形状；`deriveRange` 的查表也带 style。The Moon 的 1296 条 Neon /
+64 条 Minimal 事件因此真的变了形状（门槛 3 个状态重存）。
+
+**Volume（2026-10-17 已落地）**：`AudioEngine` 在 `loadMusic` 后用**另一个单声道解码器**扫一遍，
+存 **50 Hz 的 RMS 包络**（`amplitudeAt(seconds)`；10 分钟 ≈ 120 KB）。`GameWindow::render` 把
+`amplitudeAt(audioPos)` 传进 `LevelScene::render`，`tileColorsAt(floor, t, amp)` 用它做 Volume 插值。
+离线包络 → **抓帧确定**（不依赖当时是否在放音），与 Re_ADOJAS 的 WebAudio RMS（2048 样本窗口）同义。
+
 **还没做**：
 * Neon/NeonLight/Basic/Minimal 的 **2×128 渐变条**（需要给每个顶点补一个"距外缘归一化"的 v，
   在 `TileShape::expand` 侧算；现在是硬边 ring，颜色对、过渡不对）。
-* style 的几何差异（Gems 宝石网格、Minimal/Basic 的尺寸微调、Neon 的搭接放大）。
-* Volume 的逐帧幅度（现在传 0）与逐砖 alpha（8 位 hex 的 AA）。
+* **Gems 的宝石网格**（现在用 Standard 几何 + Gems 颜色）。
+* 逐砖 alpha（8 位 hex 的 AA）。
 * TweenColor（`duration`/`ease` 已解析进 `ColorEvent`，插值未接）。
+* 向导 Colors 页现在只影响高亮/`--fill` 覆盖（谱面颜色优先），UI 文案要跟着改。
 
 ## 拖尾采样率：固定率 vs 自适应上限（2026-10-17）
 

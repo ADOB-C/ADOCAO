@@ -130,7 +130,7 @@ static void setRec(PartRecord& r, float a0 = 0, float a1 = 0, float a2 = 0, floa
 }
 static PartRecord& rec(Shape& s, int part, int layer) { return s.rec[part * kLayers + layer]; }
 
-Shape buildShape(float sa, float ea, bool mid) {
+Shape buildShape(float sa, float ea, bool mid, float styleWidth, float styleLength) {
     constexpr float PI = 3.14159265f;
     Shape s;
     // 参考实现：m11 = cos(sa*PI/180), m12 = sin(...), m21 = cos(ea*PI/180), m22 = sin(...)
@@ -140,7 +140,9 @@ Shape buildShape(float sa, float ea, bool mid) {
     if (mid) {
         // createMidSpinMesh(a1 = sa)：五边形
         s.mode = 3;
-        float width = TILE_WIDTH, length = TILE_WIDTH;
+        // 中旋：Re_ADOJAS 传 styleWidth/styleLength，但我们的参考实现用的是 width=length；
+        // 这里保留 width=length 的关系，只随 styleWidth 变化（避免改变既有几何）。
+        float width = styleWidth, length = styleWidth;
         float m1 = m11, m2 = m12;
         float mx = -m1 * 0.04f, my = -m2 * 0.04f;
         float widthS = width + OUTLINE, lengthS = length + OUTLINE;
@@ -153,7 +155,7 @@ Shape buildShape(float sa, float ea, bool mid) {
         setRec(rec(s, P_CAPS, 0));   setRec(rec(s, P_CAPS, 1));
         setRec(rec(s, P_EXT4, 0));   setRec(rec(s, P_EXT4, 1));
     } else {
-        float width = TILE_WIDTH, length = TILE_LENGTH;
+        float width = styleWidth, length = styleLength;
         float a0, a1;
         if (fmodWrap(sa - ea, 360) >= fmodWrap(ea - sa, 360)) {
             a0 = fmodWrap(sa, 360) * PI / 180; a1 = a0 + fmodWrap(ea - sa, 360) * PI / 180;

@@ -27,6 +27,17 @@ miniaudio 的 `ma_device` 有两个率，含义不同：
 `sampleRate = 0` 时，回调率才等于硬件率（那时音色缓冲确实要跟着变）。CLI 导出固定 48k
 （不随声卡变化，保证可复现）。
 
+### 音乐幅度包络（`amplitudeAt`，Volume 砖色用）
+
+`loadMusic()` 之后用**另一个单声道解码器**把音乐扫一遍，按 50 Hz 存 RMS（`sqrt(mean(v²))`）：
+`m_envelope[i]` = 第 `i/50` 秒的幅度。`amplitudeAt(seconds)` 取最近点；没有音乐 = 0。
+10 分钟 ≈ 120 KB，扫描本身在加载期的后台 job 里（约一两百毫秒）。
+
+为什么离线算：Re_ADOJAS 用 WebAudio `AnalyserNode`（2048 样本时域 RMS）**实时**取幅度，
+玩家看的是"当前响度"；我们用文件包络，语义相同，但**抓帧可复现**（不依赖当时有没有在放音）。
+只有 `trackColorType = Volume` 的砖会消费它（`LevelScene` 每帧把 `amplitudeAt(audioPos)` 传给
+`tileColorsAt`）。
+
 ### audio-as-chart（每层一个采样的巨型谱）
 
 `--force-hitsound raw-pcm`（向导 Override 下拉里也有）走**直通**，不做 hitsound 混音：

@@ -139,9 +139,40 @@ bool AudioEngine::loadMusic(const std::string& filepath) {
     m_fileData = std::move(data);  // keep alive for memory-backed decoder
 
     m_hasMusic = true;
+    buildEnvelope();
     LOG_I("AudioEngine: Loaded (%dHz, stereo, %.1fs): %s",
           m_sampleRate, m_duration, filepath.c_str());
     return true;
+}
+
+void AudioEngine::buildEnvelope() {
+    m_envelope.clear();
+    if (m_fileData.empty() || m_sampleRate <= 0) return;
+    // 单独一个单声道解码器扫一遍（不碰播放用的 m_decoder）；只留 RMS，
+    // 内存 = envHz 个 float/秒（50 Hz × 10 分钟 = 120 KB）。
+    ma_decoder dec;
+    ma_decoder_config dc = ma_decoder_config_init(ma_format_f32, 1, (ma_uint32)m_sampleRate);
+    if (ma_decoder_init_memory(m_fileData.data(), m_fileData.size(), &dc, &dec) != MA_SUCCESS) return;
+    const int win = std::max(1, m_sampleRate / m_envHz);
+    std::vector<float> buf(8192);
+    m_envelope.reserve((size_t)(m_duration * (float)m_envHz) + 2);
+    double acc = 0.0;
+    int n = 0;
+    for (;;) {
+        ma_uint64 got = 0;
+        if (ma_decoder_read_pcm_frames(&dec, buf.data(), buf.size(), &got) != MA_SUCCESS || got == 0) break;
+        for (ma_uint64 i = 0; i < got; i++) {
+            const double v = buf[(size_t)i];
+            acc += v * v;
+            if (++n == win) {
+                m_envelope.push_back((float)std::sqrt(acc / (double)win));
+                acc = 0.0; n = 0;
+            }
+        }
+    }
+    if (n > 0) m_envelope.push_back((float)std::sqrt(acc / (double)n));
+    ma_decoder_uninit(&dec);
+    LOG_D("AudioEngine: 幅度包络 %zu 点 @ %d Hz（%.1fs）", m_envelope.size(), m_envHz, (double)m_duration);
 }
 
 void AudioEngine::play() {

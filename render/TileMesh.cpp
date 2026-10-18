@@ -42,14 +42,37 @@ using TileShape::Shape;
 namespace {
 
 // 形状键：与改造前 `TileMesh::build` 逐字相同（0.01° 网格 + 中旋标志）
-struct GeoKey { int sa, ea; bool mid; };
+// trackStyle → 几何档位（Re_ADOJAS createTrackMesh 的 styleWidth/styleLength 微调）。
+// 0 Standard / 1 Neon / 2 NeonLight / 3 Basic / 4 Gems / 5 Minimal / 6 其它（按 Standard）
+inline uint8_t styleIdOf(const std::string& s) {
+    if (s == "Neon") return 1;
+    if (s == "NeonLight") return 2;
+    if (s == "Basic") return 3;
+    if (s == "Gems") return 4;
+    if (s == "Minimal") return 5;
+    return 0;
+}
+inline float styleWidthOf(uint8_t id) {
+    return (id == 1 || id == 2 || id == 3) ? TILE_WIDTH + 0.025f : TILE_WIDTH;
+}
+inline float styleLengthOf(uint8_t id) {
+    if (id == 1 || id == 2 || id == 3) return TILE_LENGTH + 0.02f;
+    if (id == 5) return TILE_LENGTH - 0.03f;
+    return TILE_LENGTH;
+}
+inline uint8_t styleOfTile(const LevelData& lv, int64_t i) {
+    const LevelData::ColorEvent* e = lv.colorEventAt(i);
+    return styleIdOf(e ? e->cfg.style : lv.settings.trackStyle);
+}
+
+struct GeoKey { int sa, ea; bool mid; uint8_t style; };
 struct GeoKeyHash {
     size_t operator()(const GeoKey& k) const {
         return (size_t)k.sa * 31 + (size_t)k.ea * 17 + (size_t)k.mid;
     }
 };
 bool operator==(const GeoKey& a, const GeoKey& b) {
-    return a.sa == b.sa && a.ea == b.ea && a.mid == b.mid;
+    return a.sa == b.sa && a.ea == b.ea && a.mid == b.mid && a.style == b.style;
 }
 
 inline void pushAttr(std::vector<float>& v, float ox, float oy, float oz, uint32_t shape, uint8_t bits) {
@@ -170,7 +193,7 @@ void TileMesh::deriveRange(const LevelData& level, int64_t i0, int64_t i1, Deriv
         out.posY[k] = (float)(p[1] - m_chunkY[c]);
         float sa, ea; bool mid;
         TileShape::keyForTile(level, (int)i, sa, ea, mid, wc);
-        const auto it = m_shapeIndex.find(packShapeKey(sa, ea, mid));
+        const auto it = m_shapeIndex.find(packShapeKey(sa, ea, mid, styleOfTile(level, i)));
         out.shape[k] = (it != m_shapeIndex.end()) ? it->second : 0u;
         // 图标位：与 buildIcons 的判据逐字相同（Twirl / SetSpeed 的 1.05、0.95 阈值）
         const bool ht = i < (int64_t)level.tileHasTwirl.size() && level.tileHasTwirl[(size_t)i];
@@ -205,7 +228,8 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
         if (shouldCancel && (i & 0xFFFF) == 0 && (*shouldCancel)()) return;   // ④ 取消：块边界
         float sa, ea; bool mid;
         TileShape::keyForTile(level, i, sa, ea, mid);
-        GeoKey k{(int)std::round(sa * 100.0f), (int)std::round(ea * 100.0f), mid};
+        const uint8_t style = styleOfTile(level, i);
+        GeoKey k{(int)std::round(sa * 100.0f), (int)std::round(ea * 100.0f), mid, style};
         shapeGroups[k].push_back(i);
     }
     LOG_D("TileMesh::build: %zu unique shapes", shapeGroups.size());
@@ -230,8 +254,9 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
         const GeoKey& key = kv.first;
         std::vector<int>& tileIndices = kv.second;
         const uint32_t shapeIdx = (uint32_t)m_shapes.size();
-        m_shapes.push_back(TileShape::buildShape(key.sa / 100.0f, key.ea / 100.0f, key.mid));
-        m_shapeIndex[packShapeKey(key.sa / 100.0f, key.ea / 100.0f, key.mid)] = shapeIdx;
+        m_shapes.push_back(TileShape::buildShape(key.sa / 100.0f, key.ea / 100.0f, key.mid,
+                                                 styleWidthOf(key.style), styleLengthOf(key.style)));
+        m_shapeIndex[packShapeKey(key.sa / 100.0f, key.ea / 100.0f, key.mid, key.style)] = shapeIdx;
     }
     // 绘制顺序 = **按砖号（= 层号）升序**（2026-10-15 起）：所以不再需要 `m_drawOrder` 那支
     // 4 B/砖 的排列数组（MYC 27 MB、2³¹−1 外推 **8.6 GB**）——剔除与上传**直接用下标**（下标即

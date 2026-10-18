@@ -66,8 +66,9 @@ public:
     // Draw the whole scene into the current viewport using the given camera.
     // highlightTile: selected tile index to outline, or -1 for none (only
     // drawn while stopped).
+    // volumeAmplitude：当前音乐 RMS（0..1），给 trackColorType=Volume 用（见 AudioEngine::amplitudeAt）。
     void render(adofai::Camera& camera, const adofai::Timeline& timeline, bool playing,
-                double timeInLevel, int highlightTile);
+                double timeInLevel, int highlightTile, float volumeAmplitude = 0.0f);
 
 private:
     bool compileShaders();

@@ -496,8 +496,10 @@ void GameWindow::render() {
     }
 
     bool playing = m_playback->isPlaying();
+    // Volume 砖色：音乐位置的 RMS（与抓帧/音频播放无关，纯包络 → 可复现）。
+    const float audioPos = m_playback->timeInLevel() + m_playback->preRoll() - m_playback->audioStartOffset();
     m_scene->render(m_camera, *m_timeline, playing, m_playback->timeInLevel(),
-                    playing ? -1 : m_selectedTile);
+                    playing ? -1 : m_selectedTile, m_audioEngine->amplitudeAt(audioPos));
     // (glfwSwapBuffers is called by run() so it can time the work separately
     // from the vsync/pacing wait.)
 }

@@ -382,10 +382,11 @@ namespace {
 struct TrackColorCtx {
     const LevelData* level;
     double time;
+    float amplitude;   // Volume 类型用（音乐 RMS）
 };
 void trackColorAt(void* ctx, uint32_t tile, uint8_t fill[3], uint8_t stroke[3]) {
     const auto* c = static_cast<const TrackColorCtx*>(ctx);
-    const TileColors col = c->level->tileColorsAt((int64_t)tile, c->time);
+    const TileColors col = c->level->tileColorsAt((int64_t)tile, c->time, c->amplitude);
     if (std::getenv("ADOCAO_COLOR_DEBUG") && tile < 4)
         LOG_I("color-debug: tile=%u t=%.3f fill=%02x%02x%02x stroke=%02x%02x%02x", tile, c->time,
               col.fill[0], col.fill[1], col.fill[2], col.stroke[0], col.stroke[1], col.stroke[2]);
@@ -395,7 +396,7 @@ void trackColorAt(void* ctx, uint32_t tile, uint8_t fill[3], uint8_t stroke[3]) 
 }  // namespace
 
 void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
-                        double timeInLevel, int highlightTile) {
+                        double timeInLevel, int highlightTile, float volumeAmplitude) {
     // Track appear/disappear animation
     { profile::Scoped _s("vis"); updateTileVisibility(timeline, timeInLevel, playing); }
 
@@ -415,7 +416,7 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
         m_tileMesh->draw(vl, vr, vb, vt, camera.targetX(), camera.targetY());
     } else {
         // 逐砖颜色（ColorTrack）：只对可见列表里的砖算（每帧几百次），见 TileMesh::InstanceColorFn。
-        TrackColorCtx ctx{m_level, timeInLevel};
+        TrackColorCtx ctx{m_level, timeInLevel, volumeAmplitude};
         m_tileShader->setFloat("uUseInstColor", 1.0f);
         m_tileMesh->draw(vl, vr, vb, vt, camera.targetX(), camera.targetY(), &trackColorAt, &ctx);
     }

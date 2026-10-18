@@ -137,7 +137,11 @@ struct Shape {
 inline int quantizeAngle(float deg) { return (int)std::round(deg * 100.0f); }
 
 // 建一个形状：参数、part 记录、局部包围盒（double，逐字同今天的组包围盒算法）。
-Shape buildShape(float sa, float ea, bool mid);
+// `styleWidth/styleLength` = trackStyle 的半宽/半长（Re_ADOJAS createTrackMesh 的 styleWidth/
+// styleLength：Basic/Neon/NeonLight 半宽 +0.025、半长 +0.02，Minimal 半长 −0.03）。
+// 默认值 = Standard，逐位保持原行为（tile_expansion 对拍不受影响）。
+Shape buildShape(float sa, float ea, bool mid,
+                 float styleWidth = TILE_WIDTH, float styleLength = TILE_LENGTH);
 
 // ---- 形状表（GPU 端 = RGBA32F 纹理，texelFetch 读） --------------------
 // 布局：一行 kTexW 个 texel，每个形状 kTexelsPerShape 个 texel，第 (layer*kTileParts + part)

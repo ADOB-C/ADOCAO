@@ -44,6 +44,16 @@ public:
     // **内部重采样**（本机 callback=48000 / internal=44100，见 docs/audio.md）。
     int deviceSampleRate() const { return m_deviceRate; }
 
+    // 音乐**幅度包络**（RMS，0..1，按 envHz 采样）。Volume 砖色类型用它：
+    // Re_ADOJAS 用 WebAudio 的时域 RMS（2048 样本窗口），这里离线算成一条包络，
+    // 于是**抓帧也确定**（不依赖当时有没有在放音）。
+    float amplitudeAt(float seconds) const {
+        if (m_envelope.empty() || seconds < 0.0f) return 0.0f;
+        const size_t i = (size_t)(seconds * (float)m_envHz);
+        return i < m_envelope.size() ? m_envelope[i] : 0.0f;
+    }
+    bool hasEnvelope() const { return !m_envelope.empty(); }
+
     // External audio source for mixing (hitsounds)
     void attachExternal(const float* buffer, size_t totalFrames, int channels, int sampleRate,
                         size_t* cursor, bool* playing);
@@ -55,6 +65,9 @@ private:
     std::vector<uint8_t> m_fileData;  // keep file memory alive for decoder
     int m_sampleRate = 44100;
     int m_deviceRate = AUDIO_SAMPLE_RATE;
+    std::vector<float> m_envelope;   // 音乐 RMS 包络（见 amplitudeAt）
+    int m_envHz = 50;
+    void buildEnvelope();
     uint64_t m_readCursor = 0;  // current decoder position in frames
     float m_duration = 0.0f;
     float m_volume = 1.0f;

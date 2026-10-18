@@ -862,19 +862,11 @@ void TileMesh::draw(double viewL, double viewR, double viewB, double viewT,
     // 所以不用设 uniform —— 只要保证绑的是**当前程序要的那张**。
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_cpuGeometry ? m_slotTex : m_shapeTex);
-    // 两趟：① 砖（GL_LESS：同层同 z 的 part 后者丢弃，防半透明自重叠双叠）；
-    //       ② 图标（与 fill 共面，GL_LEQUAL：同深度后画的赢，混合跟着轨道 alpha）。
-    // 图标**不能**靠固定 z 偏移压 fill —— 几百万砖同屏时可见窗口的 z 间距只有 1e-7 量级，
-    // 任何固定偏移都会穿透前后几百上千块砖（2026-10-18 用户指出的正是这条）。
-    glDepthFunc(GL_LESS);
-    glDrawElementsInstanced(GL_TRIANGLES, TileShape::kTileIndexCount, GL_UNSIGNED_SHORT, nullptr,
+    // 一次画完：砖三角形 + 紧跟着的图标三角形（同一份索引表、同一个 draw）。
+    // 图标与 fill 共面（z=0），靠 **GL_LEQUAL**（同深度后画的赢）压过 fill；
+    // 不靠固定 z 偏移 —— 几百万砖同屏时可见窗口的 z 间距只有 1e-7 量级，任何常量都会穿透。
+    glDrawElementsInstanced(GL_TRIANGLES, TileShape::kIndexCount, GL_UNSIGNED_SHORT, nullptr,
                             (GLsizei)count);
-    glDepthFunc(GL_LEQUAL);
-    glDrawElementsInstanced(GL_TRIANGLES, TileShape::kIndexCount - TileShape::kTileIndexCount,
-                            GL_UNSIGNED_SHORT,
-                            (void*)((size_t)TileShape::kTileIndexCount * sizeof(uint16_t)),
-                            (GLsizei)count);
-    glDepthFunc(GL_LESS);
     glBindVertexArray(0);
 }
 

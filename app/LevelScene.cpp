@@ -276,15 +276,22 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
     sc.rateMin        = m_trailRateMin;
     sc.rateMax        = m_trailRateMax;
 
+    // 关卡结束后时间还在走（结尾的 Flash/MoveCamera 要放），但**球停在最后一格**：
+    // 拖尾必须按"停在最后一格"的时间采样，否则 sampleTrailRange 会在谱面末尾之外
+    // 继续外推位置，拖尾被拉成一条飞出屏幕/绕成结的带子（2026-10-18 用户看到的
+    // 结尾那团红蓝"吃豆人"就是它）。
+    const double tEnd = timeline.tileCount() > 0
+                      ? timeline.startTimeAt(timeline.tileCount() - 1) : frame.timeInLevel;
+    const double tTrail = std::min(frame.timeInLevel, tEnd);
     PositionSolver::TrailWindow win;
     {
         profile::Scoped _s("trailWindow");
-        win = PositionSolver::trailWindow(timeline, frame.timeInLevel, sc);
+        win = PositionSolver::trailWindow(timeline, tTrail, sc);
     }
     std::vector<glm::dvec2> redPts, bluePts;
     {
         profile::Scoped _s("trailSample");
-        PositionSolver::sampleTrailRange(timeline, win.startTime, frame.timeInLevel, win.sampleRate,
+        PositionSolver::sampleTrailRange(timeline, win.startTime, tTrail, win.sampleRate,
                                          frame.redPosition, frame.bluePosition,
                                          redPts, bluePts);
     }
@@ -312,7 +319,7 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
     if (redPts.empty() || bluePts.empty()) return;
 
     const int maxPoints =
-        (int)std::ceil((frame.timeInLevel - win.startTime) * win.sampleRate) + 1;
+        (int)std::ceil((tTrail - win.startTime) * win.sampleRate) + 1;
     std::vector<double> redXY(redPts.size() * 2), blueXY(bluePts.size() * 2);
     for (size_t i = 0; i < redPts.size(); i++) {
         redXY[i*2] = redPts[i].x;

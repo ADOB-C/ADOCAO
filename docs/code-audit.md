@@ -20,6 +20,8 @@
 | 6 | `bb5b1fe` | `Logger::setDebugConsole`、`Easing` 恒真判断、`Scheduler::configure/Config/m_mainParticipates`、`CameraTimeline::clear`、`CameraDirector::cursor`、`HitsoundManager::setHitsoundType/reset/isEnabled` |
 | 7 | `97e735d` | `--width/--height` 校验、image 帮助去重、`m_firstStartTime` 注释与实现对齐、槽位/三角形/texel 注释修正 |
 | 10 | `15bfd0e` | `AdocaoWriter` 段级 zstd 决策/组装共用缓存（此前同一 blob 压两遍；输出逐字节不变） |
+| 12 | `c293716` | `Progress::enabled`、`Profile::Entry::hits`、`Scheduler` 恒假分支、`AudioEngine` 的 `stop/resume/setVolume/hasEnvelope/m_initialized/m_volume`（×1.0 删除，逐位不变） |
+| 13 | `5925b45` | `AdocaoReader` 的 `Container::data/length`、`Sec::elems`、零调用 `Container::find()` |
 | 11 | `79cfd2e` | 不再夹取谱面 zoom（Re_ADOJAS 也不夹，仅保留除零兜底）；`ADOCAO_CULL_BLOCK` 覆盖用户设置改为 `LOG_W` |
 | 8 | 本轮 | `PlatformPaths` 统一 `executableDirectory()`（Windows 版补 `GetModuleFileNameA`）、`Application` 两段逐行重复的导出/加载/进游戏合并为 `runLevelToGame()` |
 
@@ -58,7 +60,7 @@
   `angles360` 打包输出与改动前**逐字节相同**。
 - ~~`LevelMap` 死字段 / `PngStream` 1-bit 死路~~：已删（`6a72419`）；`--thickness` 超界现在会 `LOG_W`。
 - `Camera` 的 `z<1`/`z>1e5` 夹取已删（`79cfd2e`）；`--cull-block` 被 env 覆盖现在 `LOG_W`。
-- 剩余：`core/util` 的 `Progress::enabled`、`Profile::Entry::hits/reset`、`Scheduler` 的恒假
-  `m_workers.empty()`/`chunks<=1` 分支、`cameras`/`PngBand` 的只写字段、`AudioEngine` 的零调用
-  `setVolume/stop/resume/hasEnvelope`、`Ilybin` 只写输出字段 —— 按同样的"可陈述理由"标准继续清。
+- 剩余：`AdocaoBlocked`（形参名/恒 true 的 compress/重复 break/`.first` 只写）、`AdocaoDiagnostics`
+  的 `sentinelRuns/allIntegers`（无读者）、`PngBand` 的 `s1/s2` 初值、`Ilybin` 只写输出字段、
+  `Scheduler::tokCopy` 副本、`CameraTimeline/Director` 其余零调用访问器 —— 继续按同一标准清。
 - `docs/` 里还有若干"实测 X 种粒度逐字节相同"一类历史结论，需要按细块后的实现重测再改。

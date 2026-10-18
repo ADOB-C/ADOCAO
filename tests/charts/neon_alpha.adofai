@@ -1,0 +1,37 @@
+{
+ "angleData": [
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0
+ ],
+ "settings": {
+  "bpm": 120,
+  "trackColor": "debb7b80",
+  "secondaryTrackColor": "ffffff",
+  "trackColorType": "Single",
+  "trackColorPulse": "None",
+  "trackStyle": "Neon",
+  "trackGlowIntensity": 100,
+  "backgroundColor": "ffffff",
+  "zoom": 200
+ },
+ "actions": [
+  {
+   "floor": 2,
+   "eventType": "ColorTrack",
+   "trackColor": "ff0000ff",
+   "trackStyle": "Neon"
+  },
+  {
+   "floor": 5,
+   "eventType": "ColorTrack",
+   "trackColor": "00ff0000",
+   "trackStyle": "Neon"
+  }
+ ]
+}

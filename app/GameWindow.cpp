@@ -201,7 +201,9 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
 
     // Camera + background
     {
-        std::string hex = cfg.backgroundColor;
+        // 谱面的 backgroundColor 才是权威；cfg.backgroundColor 只作兜底。
+        std::string hex = m_level->settings.backgroundColor;
+        if (hex.empty()) hex = cfg.backgroundColor;
         if (hex.length()>=6) { unsigned r,g,b; sscanf(hex.c_str(),"%02x%02x%02x",&r,&g,&b);
             m_bgR=r/255.0f; m_bgG=g/255.0f; m_bgB=b/255.0f; }
     }

@@ -32,7 +32,6 @@ struct Sec {
     uint16_t flags = 0;
     const uint8_t* p = nullptr;
     size_t size = 0;
-    uint64_t elems = 0;      // elemCount（元素个数）
     size_t elems0Raw = 0;    // 段表里的 rawSize（解压后的长度，用来核对）
     bool materialized = false;
 };
@@ -41,16 +40,10 @@ struct Sec {
 // 为什么按需：③ 的窗口化加载一次只要"一个段里的一块"，不该顺手把整份谱的所有段都摊开
 // （那也是 O(n) 的瞬时内存，正是 D1 要消掉的东西）。
 struct Container {
-    const uint8_t* data = nullptr;
-    size_t length = 0;
     uint16_t version = 0;
     std::vector<Sec> secs;
     std::vector<std::string> plain;      // 段级解压的后备（decompressLevelArchive 的出参是 string）
 
-    const Sec* find(SectionId id) const {
-        for (const Sec& s : secs) if (s.id == (uint8_t)id) return &s;
-        return nullptr;
-    }
     size_t indexOf(uint8_t id) const {
         for (size_t i = 0; i < secs.size(); ++i) if (secs[i].id == id) return i;
         return (size_t)-1;
@@ -91,8 +84,6 @@ struct Container {
 
 bool openContainer(const uint8_t* data, size_t length, Container& out, std::string& err) {
     out = Container{};
-    out.data = data;
-    out.length = length;
     if (!data || !have(length, 0, sizeof(Header))) {
         err = "文件太短（连文件头都不完整）";
         return false;
@@ -141,7 +132,6 @@ bool openContainer(const uint8_t* data, size_t length, Container& out, std::stri
         s.flags = (uint16_t)(e[2] | ((uint16_t)e[3] << 8));
         const uint64_t off = rdU64(e + 4);
         const uint64_t size = rdU64(e + 12);
-        s.elems = rdU64(e + 28);
         s.elems0Raw = (size_t)rdU64(e + 20);   // rawSize
         if (!have(length, (size_t)off, (size_t)size)) {
             err = "段 " + std::to_string(s.id) + " 越界（偏移 " + std::to_string(off) + " 长度 " +

@@ -60,22 +60,22 @@ bool decompressFrame(const uint8_t* p, size_t n, size_t rawSize, Bytes& out) {
 }
 
 // 三种列类型各自转发到 AdocaoColumns 的编码器/解码器（那里已有"编完解回来逐位比"的自检）
-bool encodeBlob(ColKind, const std::vector<double>& v, Bytes& o, ColumnStats* s) {
+bool encodeBlob(const std::vector<double>& v, Bytes& o, ColumnStats* s) {
     return encodeDoubleColumn(v, o, s);
 }
-bool encodeBlob(ColKind, const std::vector<int64_t>& v, Bytes& o, ColumnStats* s) {
+bool encodeBlob(const std::vector<int64_t>& v, Bytes& o, ColumnStats* s) {
     return encodeIntColumn(v, o, s);
 }
-bool encodeBlob(ColKind, const std::vector<uint32_t>& v, Bytes& o, ColumnStats* s) {
+bool encodeBlob(const std::vector<uint32_t>& v, Bytes& o, ColumnStats* s) {
     return encodeU32Column(v, o, s);
 }
-bool decodeBlob(ColKind, const uint8_t* p, size_t n, std::vector<double>& o) {
+bool decodeBlob(const uint8_t* p, size_t n, std::vector<double>& o) {
     return decodeDoubleColumn(p, n, o);
 }
-bool decodeBlob(ColKind, const uint8_t* p, size_t n, std::vector<int64_t>& o) {
+bool decodeBlob(const uint8_t* p, size_t n, std::vector<int64_t>& o) {
     return decodeIntColumn(p, n, o);
 }
-bool decodeBlob(ColKind, const uint8_t* p, size_t n, std::vector<uint32_t>& o) {
+bool decodeBlob(const uint8_t* p, size_t n, std::vector<uint32_t>& o) {
     return decodeU32Column(p, n, o);
 }
 
@@ -103,7 +103,7 @@ bool buildBlocked(const std::vector<T>& v, ColKind kind, Bytes& out, ColumnLayou
     const size_t nBlocks = (n + kBlockElems - 1) / kBlockElems;
 
     // ① 每块独立编码（自带列头/字典/首值；这是"任意块可单独解码"的根据）
-    std::vector<std::pair<uint64_t, Bytes>> blocks;   // (firstElement, blob)
+    std::vector<Bytes> blocks;
     blocks.reserve(nBlocks);
     for (size_t bi = 0; bi < nBlocks; ++bi) {
         const size_t from = bi * kBlockElems;
@@ -111,21 +111,21 @@ bool buildBlocked(const std::vector<T>& v, ColKind kind, Bytes& out, ColumnLayou
         std::vector<T> slice(v.begin() + from, v.begin() + to);
         Bytes blob;
         ColumnStats cs;
-        if (!encodeBlob(kind, slice, blob, &cs)) return false;
-        blocks.emplace_back((uint64_t)from, std::move(blob));
+        if (!encodeBlob(slice, blob, &cs)) return false;
+        blocks.push_back(std::move(blob));
     }
 
     // ② 聚合成帧：解压后目标 ~256 KB / 最多 256 块（§8.3：帧大小与 seek 粒度解耦）
     std::vector<FramePlan> frames;
     size_t codecBytes = 0;
-    for (const auto& b : blocks) codecBytes += b.second.size();
+    for (const auto& b : blocks) codecBytes += b.size();
     size_t bi = 0;
     while (bi < blocks.size()) {
         Bytes raw;
         FramePlan fp;
         fp.firstBlock = bi;          // **块号**（不是元素号）：locateBlock/自洽校验都按块号二分的
         while (bi < blocks.size() && fp.blockCount < kMaxBlocksPerFrame) {
-            const Bytes& blob = blocks[bi].second;
+            const Bytes& blob = blocks[bi];
             if (fp.blockCount > 0 && raw.size() + blob.size() + 4 > kFrameTargetRaw) break;
             putU32(raw, (uint32_t)blob.size());
             putBytes(raw, blob.data(), blob.size());
@@ -185,15 +185,11 @@ namespace {
 size_t g_mustBlockBytes = kMustBlockBytes;   // 见 AdocaoBlocked.hpp：强制分块的阈值
 
 // 单块布局的容器：12 B 容器头 + 20 B 单块头 + 载荷
-void writeSingle(Bytes& dst, ColKind kind, uint64_t total, const Bytes& blob, bool compress) {
+void writeSingle(Bytes& dst, ColKind kind, uint64_t total, const Bytes& blob) {
     Bytes stored;
     uint8_t codec = (uint8_t)Codec::Raw;
-    if (compress) {
-        if (compressFrame(blob, stored)) codec = (uint8_t)Codec::SectionZstd;
-        else stored = blob;
-    } else {
-        stored = blob;
-    }
+    if (compressFrame(blob, stored)) codec = (uint8_t)Codec::SectionZstd;
+    else stored = blob;
     dst.clear();
     writeContainerHeader(dst, kind, kLayoutSingle, total);
     putU8(dst, codec);
@@ -211,7 +207,7 @@ bool encodeTyped(ColKind kind, const std::vector<T>& v, ColumnStorage storage,
 
     // 列 blob：AdocaoColumns 的编码器**自带**"编完解回来逐位比"的自检
     Bytes blob; ColumnStats cs;
-    if (!encodeBlob(kind, v, blob, &cs)) return false;
+    if (!encodeBlob(v, blob, &cs)) return false;
     s.singleCodecBytes = blob.size();
 
     // ① LegacyV2：**裸列字节**（连容器头都不加），交给段级 zstd —— 与 v2 文件逐字节等价
@@ -225,7 +221,7 @@ bool encodeTyped(ColKind kind, const std::vector<T>& v, ColumnStorage storage,
 
     // ② SingleZstd：载荷自己压一帧（段级不再压）
     Bytes zs;
-    writeSingle(zs, kind, n, blob, /*compress=*/true);
+    writeSingle(zs, kind, n, blob);
     s.singleBytes = zs.size();
 
     // ③ Blocked：每块独立编码 + 帧级 zstd（列太短时 1 块 == 单块，纯亏头部，不做）
@@ -441,7 +437,7 @@ bool decodeTyped(const uint8_t* p, size_t n, ColKind expect, std::vector<T>& out
                                     (size_t)rawSize, raw)) {
             return false;
         }
-        return decodeBlob(expect, raw.data(), raw.size(), out) && out.size() == (size_t)v.total;
+        return decodeBlob(raw.data(), raw.size(), out) && out.size() == (size_t)v.total;
     }
 
     out.reserve((size_t)v.total);
@@ -458,7 +454,7 @@ bool decodeTyped(const uint8_t* p, size_t n, ColKind expect, std::vector<T>& out
             off += 4;
             if (!have(raw.size(), off, len)) return false;
             std::vector<T> block;
-            if (!decodeBlob(expect, raw.data() + off, len, block)) return false;
+            if (!decodeBlob(raw.data() + off, len, block)) return false;
             if (block.empty() && v.total != 0) return false;
             out.insert(out.end(), block.begin(), block.end());
             if (out.size() > (size_t)v.total) return false;
@@ -498,7 +494,7 @@ bool decodeBlockTyped(const ColumnView& v, uint64_t blockIndex, ColKind expect, 
     const uint8_t* blob = nullptr;
     size_t blobN = 0;
     if (!seekBlockInFrame(raw, inFrame, &blob, &blobN)) return false;
-    return decodeBlob(expect, blob, blobN, out);
+    return decodeBlob(blob, blobN, out);
 }
 
 }  // namespace

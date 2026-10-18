@@ -27,9 +27,18 @@ set -u
 # 而用 `bash scripts/…`（PATH 里是 5.x）永远看不出来。CI 的 Linux 是 5.x，同样看不出来。
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
-BIN=build/adocao
+# 隔离运行：把构建产物复制到 build/gate/ 下再抓帧。
+# 为什么（2026-10-18 用户实测）：macOS 的 APFS 大小写**不敏感**，`build/adocao.log`
+# 就是 `build/ADOCAO.log` —— 用户自己开着 `build/ADOCAO` 时，两个进程写同一个日志，
+# 门槛取"最后一条 capture 行"可能取到用户的（或反过来），只能报 54 个假 FAIL。
+# 复制到独立目录后日志、进程检查都隔离，门槛可以在用户开着播放器时跑
+# （2026-10-18 之前为此直接 kill 过用户的实例，那是错的）。
+mkdir -p build/gate
+[ -f build/ADOCAO ] || { echo "缺少 build/ADOCAO（先 ./build.sh）"; exit 2; }
+cp -f build/ADOCAO build/gate/adocao
+BIN=build/gate/adocao
 STATES=tests/capture_states.txt
-LOG=build/adocao.log
+LOG=build/gate/adocao.log
 # 长期保留的产物放 `~/Projects/.ADOCAO/`（ADOCAO 系的仓库与镜像都在 `~/Projects` 下，一处收齐）。
 # 两条硬约束：① **别放 `/tmp`** —— 会被系统定期清掉，基线丢了就得重存（真发生过）；
 #            ② **也别放仓库里** —— `git clean -xdf` / `rm -rf build` 会把基线一起删掉，
@@ -92,9 +101,9 @@ run_capture() {   # name chart mode value zoom WxH → 写 $CAPDIR/$name.png；�
     # 只关心**写同一个日志**的进程（= 直接跑 build/adocao 的那个）。macOS 的
     # build/adocao.app 是另一条日志路径（~/Library/Logs/ADOCAO/，见 AGENTS），
     # 而且可能是用户自己开着的，所以不拦它 —— 正则也顺带避开"匹配到自己命令行"。
-    local running; running=$(pgrep -if '(^|/)build/adocao( |$)' | wc -l | tr -d ' ')
+    local running; running=$(pgrep -if '(^|/)build/gate/adocao( |$)' | wc -l | tr -d ' ')
     if [ "$running" != "0" ]; then
-        echo "FAIL|$name|跑之前有 $running 个 build/adocao 进程（日志共享，先收干净）"; return 1
+        echo "FAIL|$name|跑之前有 $running 个 build/gate/adocao 进程（另一个门槛还没结束）"; return 1
     fi
     local flag
     case "$mode" in

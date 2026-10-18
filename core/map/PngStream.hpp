@@ -19,9 +19,6 @@ public:
     bool writeRow(const uint8_t* rgbaRow);       // width*4 字节（RGBA8 模式）
     bool writePackedRow(const uint8_t* packed);  // (width+7)/8 字节（索引 1 bit 模式）
     bool close();
-    bool failed() const { return m_failed; }
-    uint32_t width()  const { return m_w; }
-    uint32_t height() const { return m_h; }
 
 private:
     bool openCommon(const std::string& path, uint32_t width, uint32_t height);

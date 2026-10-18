@@ -45,15 +45,13 @@ public:
     template <class F>
     void parallelFor(size_t n, size_t minGrain, Lane lane, F&& fn) {
         if (n == 0) return;
-        if (serialForced() || inParallel() || m_workers.empty() || n <= minGrain) {
+        if (serialForced() || inParallel() || n <= minGrain) {
             fn((size_t)0, n);
             return;
         }
         const size_t per = (n + targetChunks() - 1) / targetChunks();
         const size_t grain = per > minGrain ? per : minGrain;
         const size_t chunks = (n + grain - 1) / grain;
-        if (chunks <= 1) { fn((size_t)0, n); return; }
-
         // 一个任务 = 一个块（确定性：块按 index 连续切、写自己的输出段）
         auto done = std::make_shared<std::atomic<size_t>>(0);
         {

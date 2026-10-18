@@ -48,7 +48,6 @@ bool AudioEngine::init() {
         }
     }
 
-    m_initialized = true;
     // **回调率**才是我们该跟的：miniaudio 在 internal 率与回调率不一致时**内部重采样**，
     // dataCallback 永远按 `pDevice->sampleRate` 被调用（本机实测 callback=48000、internal=44100，
     // 而音乐的 ffprobe 也是 48000 —— 拿 internal 率去配解码器会把音乐弄慢 8.8%）。
@@ -76,7 +75,6 @@ void AudioEngine::shutdown() {
         m_decoder = nullptr;
     }
     m_fileData.clear();
-    m_initialized = false;
     m_hasMusic = false;
     m_playing = false;
 }
@@ -182,22 +180,8 @@ void AudioEngine::play() {
         ma_device_start(m_device);
 }
 
-void AudioEngine::resume() {
-    if (!m_device || !m_hasMusic) return;
-    m_playing = true;
-    if (ma_device_is_started(m_device) == MA_FALSE)
-        ma_device_start(m_device);
-}
-
 void AudioEngine::pause() {
     m_playing = false;
-    if (m_device && ma_device_is_started(m_device) != MA_FALSE)
-        ma_device_stop(m_device);
-}
-
-void AudioEngine::stop() {
-    m_playing = false;
-    if (m_decoder) { ma_decoder_seek_to_pcm_frame(m_decoder, 0); m_readCursor = 0; }
     if (m_device && ma_device_is_started(m_device) != MA_FALSE)
         ma_device_stop(m_device);
 }
@@ -216,10 +200,6 @@ float AudioEngine::position() const {
 
 float AudioEngine::duration() const {
     return m_duration;
-}
-
-void AudioEngine::setVolume(float v) {
-    m_volume = std::max(0.0f, std::min(1.0f, v));
 }
 
 void AudioEngine::attachExternal(const float* buffer, size_t totalFrames, int channels, int sampleRate,
@@ -250,8 +230,6 @@ void AudioEngine::dataCallback(ma_device* pDevice, void* pOutput, const void*, u
     // Fill with silence first
     for (unsigned int i = 0; i < total; i++) out[i] = 0.0f;
 
-    if (!self) return;
-
     // --- Music source (ma_decoder: stereo f32 @ AUDIO_SAMPLE_RATE) ---
     if (self->m_decoder && self->m_playing) {
         float* musicBuf = (float*)alloca(frameCount * 2 * sizeof(float));
@@ -261,8 +239,8 @@ void AudioEngine::dataCallback(ma_device* pDevice, void* pOutput, const void*, u
 
         if (decoded > 0) {
             for (ma_uint64 i = 0; i < decoded; i++) {
-                out[i * devCh]     += musicBuf[i * 2]     * self->m_volume;
-                out[i * devCh + 1] += musicBuf[i * 2 + 1] * self->m_volume;
+                out[i * devCh]     += musicBuf[i * 2];
+                out[i * devCh + 1] += musicBuf[i * 2 + 1];
             }
         }
         if (decoded == 0) self->m_playing = false;

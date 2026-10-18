@@ -60,7 +60,7 @@ Scheduler::~Scheduler() {
 }
 
 size_t Scheduler::targetChunks() const {
-    const size_t w = m_workers.empty() ? 1 : m_workers.size();
+    const size_t w = m_workers.size();
     return w * 4;   // 每 worker 4 块：负载均衡 vs 分块成本
 }
 
@@ -99,7 +99,7 @@ Scheduler::Handle Scheduler::submit(Lane lane, std::function<void(CancelToken)> 
         fn(tokCopy);
         done->store(true, std::memory_order_release);
     };
-    if (serialForced() || inParallel() || m_workers.empty()) {
+    if (serialForced() || inParallel()) {
         InParallelGuard g;
         wrapped();
         return Handle(done, tok);

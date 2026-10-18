@@ -10,7 +10,6 @@ namespace adofai {
 namespace progress {
 
 void enable(bool on);            // 由 app 决定：--progress / --no-progress / isatty(stderr)
-bool enabled();
 void reset();                    // 开始新阶段（重置计时与速率基线）
 void update(long long done, long long total, const char* unit, const char* extra = nullptr);
 void finish();                   // 阶段结束：换行

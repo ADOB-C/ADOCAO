@@ -28,8 +28,6 @@ public:
     bool loadMusic(const std::string& filepath);
     void play();
     void pause();
-    void stop();
-    void resume();
     void seek(float seconds);
 
     float position() const;
@@ -37,7 +35,6 @@ public:
     bool isPlaying() const { return m_playing; }
     bool hasMusic() const { return m_hasMusic; }
 
-    void setVolume(float v);
 
     // **回调率**（`ma_device::sampleRate`）—— dataCallback 就是按它被调用的，解码器与音色
     // 缓冲必须按它来。注意不是 internalSampleRate：那是硬件率，miniaudio 会在两者之间
@@ -52,7 +49,6 @@ public:
         const size_t i = (size_t)(seconds * (float)m_envHz);
         return i < m_envelope.size() ? m_envelope[i] : 0.0f;
     }
-    bool hasEnvelope() const { return !m_envelope.empty(); }
 
     // External audio source for mixing (hitsounds)
     void attachExternal(const float* buffer, size_t totalFrames, int channels, int sampleRate,
@@ -70,8 +66,6 @@ private:
     void buildEnvelope();
     uint64_t m_readCursor = 0;  // current decoder position in frames
     float m_duration = 0.0f;
-    float m_volume = 1.0f;
-    bool m_initialized = false;
     bool m_hasMusic = false;
     bool m_playing = false;
 

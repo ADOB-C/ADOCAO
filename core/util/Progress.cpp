@@ -23,7 +23,6 @@ double nowSec() {
 }  // namespace
 
 void enable(bool on) { g_on = on; }
-bool enabled() { return g_on; }
 
 void reset() {
     std::lock_guard<std::mutex> lk(g_m);

@@ -760,6 +760,12 @@ void GameWindow::run() {
     }
 
     double targetFrameTime = 1.0 / 320.0;
+    // 诊断：`ADOCAO_UNCAPPED=1` 关掉 320fps 的帧率上限（profiler 要量机器真实上限）。
+    // 不设 = 行为完全不变。
+    if (std::getenv("ADOCAO_UNCAPPED")) {
+        targetFrameTime = 0.0;
+        LOG_I("帧率上限已关闭（ADOCAO_UNCAPPED=1）");
+    }
     // 诊断钩子：跑到 N 毫秒后**正常退出**（好让 `profile::reportSteady()` 打分段报告）。
     // 只给 `ADOCAO_PROFILE=1` 的全流程剖面用；不设 = 行为完全不变。
     double exitAfterMs = 0.0;

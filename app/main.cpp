@@ -18,7 +18,9 @@
 // Windows 直接 "not declared"（CI 真踩过一次）。
 #include "archive/Install.hpp"
 #include "app/AssetSetup.hpp"
-#ifndef _WIN32
+#ifdef _WIN32
+#include <io.h>        // _isatty / _fileno
+#else
 #include <unistd.h>
 #endif
 

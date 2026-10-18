@@ -16,6 +16,10 @@
 
 ## 1. 分段计时（`ADOCAO_PROFILE=1`，默认关）
 
+**量真实上限先关帧控**：本 app 默认按 320 fps 节流（`targetFrameTime = 1/320`），所以 `frame`
+p50≈3.13 ms 是**故意**的。要量机器真实上限 / 不受节流影响的 `frame`，设 **`ADOCAO_UNCAPPED=1`**
+（`GameWindow::run` 里把 target 设 0；日志会打一行"帧率上限已关闭"）。
+
 段名与放置：
 
 | 段 | 位置 | 量的是 |

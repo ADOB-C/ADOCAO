@@ -132,18 +132,23 @@ add_custom_command(TARGET adocao POST_BUILD
 
 # Copy MinGW runtime DLLs next to EXE
 if(MINGW)
-    get_filename_component(MINGW_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    set(MINGW_DLLS
-        "${MINGW_BIN}/libgcc_s_seh-1.dll"
-        "${MINGW_BIN}/libstdc++-6.dll"
-        "${MINGW_BIN}/libwinpthread-1.dll"
-    )
-    if(NOT EXISTS "${MINGW_BIN}/libgcc_s_seh-1.dll")
-        set(MINGW_DLLS
+    # 运行时 DLL 不在编译器旁边也能找到：直接问编译器（`-print-file-name=` 返回 sysroot 里的路径）。
+    # 旧实现假设 `${CMAKE_CXX_COMPILER}` 同目录有 DLL —— Homebrew 的 mingw 放在
+    # `toolchain-x86_64/x86_64-w64-mingw32/lib/`，于是 POST_BUILD 报"复制失败"。
+    set(MINGW_DLLS "")
+    foreach(dll libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll)
+        execute_process(COMMAND "${CMAKE_CXX_COMPILER}" -print-file-name=${dll}
+                        OUTPUT_VARIABLE _p OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(EXISTS "${_p}")
+            list(APPEND MINGW_DLLS "${_p}")
+        endif()
+    endforeach()
+    if(NOT MINGW_DLLS)
+        get_filename_component(MINGW_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
+        list(APPEND MINGW_DLLS
             "${MINGW_BIN}/libgcc_s_dw2-1.dll"
             "${MINGW_BIN}/libstdc++-6.dll"
-            "${MINGW_BIN}/libwinpthread-1.dll"
-        )
+            "${MINGW_BIN}/libwinpthread-1.dll")
     endif()
     add_custom_command(TARGET adocao POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${MINGW_DLLS} "${PROJECT_BINARY_DIR}"

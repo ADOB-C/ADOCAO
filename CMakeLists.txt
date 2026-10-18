@@ -64,7 +64,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Maximum safe optimization (no -ffast-math — timing precision is critical)
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    add_compile_options(-O3 -march=native -fomit-frame-pointer)
+    # 交叉编译（如 mingw 出 Windows 包）时不能 `-march=native`（那是**构建机**的 CPU）。
+    if(CMAKE_CROSSCOMPILING)
+        add_compile_options(-O3 -fomit-frame-pointer)
+    else()
+        add_compile_options(-O3 -march=native -fomit-frame-pointer)
+    endif()
 endif()
 
 # ---- Dependencies via FetchContent ----

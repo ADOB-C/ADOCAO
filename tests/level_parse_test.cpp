@@ -66,10 +66,10 @@ struct H {
 struct Digest {
     uint64_t angle = 0, actions = 0, tiles = 0, settings = 0, bpm = 0, twirl = 0, setspeed = 0;
     uint64_t bookmarks = 0, hitsounds = 0, hsVolumes = 0, posOffsets = 0, atStates = 0, path = 0;
-    uint64_t cameras = 0, repeats = 0, colors = 0, flashes = 0;
+    uint64_t cameras = 0, repeats = 0, colors = 0, flashes = 0, moves = 0;
     size_t angleCount = 0, actionCount = 0, tileCount = 0, bookmarkCount = 0, hitsoundCount = 0;
     size_t hsVolumeCount = 0, posOffsetCount = 0, atStateCount = 0, pathLen = 0;
-    size_t cameraCount = 0, repeatCount = 0, colorCount = 0, flashCount = 0;
+    size_t cameraCount = 0, repeatCount = 0, colorCount = 0, flashCount = 0, moveCount = 0;
     bool ok = false;
 };
 
@@ -161,6 +161,14 @@ Digest digest(const LevelData& lv, bool ok) {
         fl.bytes(e.startColor, 3); fl.bytes(e.endColor, 3);
         fl.bytes(&e.plane, 1); fl.bytes(&e.style, 1); fl.bytes(&e.ease, 1);
     }
+    H mv; for (auto& e : lv.moveTrackEvents) {
+        mv.i32(e.floor); mv.f32(e.angleOffset); mv.f32(e.durBeats); mv.i32(e.gap);
+        mv.i32(e.startOff); mv.i32(e.endOff);
+        mv.bytes(&e.startRel, 1); mv.bytes(&e.endRel, 1);
+        mv.bytes(&e.ease, 1); mv.bytes(&e.flags, 1);
+        mv.f32(e.offX); mv.f32(e.offY); mv.f32(e.rotDeg);
+        mv.f32(e.scaleX); mv.f32(e.scaleY); mv.f32(e.opacity);
+    }
     H rv; for (auto& r : lv.repeatEvents) {
         rv.i32(r.floor); rv.f32(r.repetitions); rv.f32(r.interval); rv.f32(r.gapLength);
         rv.bytes(&r.flags, 1); rv.str(r.tag);
@@ -180,6 +188,7 @@ Digest digest(const LevelData& lv, bool ok) {
     d.repeats = rv();   d.repeatCount = lv.repeatEvents.size();
     d.colors = cl();    d.colorCount = lv.colorEvents.size();
     d.flashes = fl();   d.flashCount = lv.flashEvents.size();
+    d.moves = mv();     d.moveCount = lv.moveTrackEvents.size();
     return d;
 }
 
@@ -203,6 +212,7 @@ const Section kSections[] = {
     {"repeatEvents",        &Digest::repeats,    &Digest::repeatCount},
     {"colorEvents",         &Digest::colors,     &Digest::colorCount},
     {"flashEvents",         &Digest::flashes,    &Digest::flashCount},
+    {"moveTrackEvents",     &Digest::moves,      &Digest::moveCount},
 };
 
 // 返回不同的节名（空 = 完全一致）

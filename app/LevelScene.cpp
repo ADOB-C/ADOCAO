@@ -175,7 +175,8 @@ bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level) {
     m_tileMesh->setCpuGeometry(m_cpuGeometry);   // 在 build() 之前：决定建哪张纹理
     // 抓帧 = 确定性剔除（LOD 步长只由视口 + 两段式决定，不用上一帧的反馈种子）
     m_tileMesh->setDeterministicCull(!cfg.capturePath.empty());
-    m_tileMesh->setCullBlockFloors(cfg.cullBlockFloors);   // ④ 剔除粗块粒度（0 = 全扫）
+    m_tileMesh->setCullBlockFloors(cfg.cullBlockFloors);
+    m_tileMesh->setMovePad(level.movePad(), level.moveMaxScale());   // ④ 剔除粗块粒度（0 = 全扫）
 
     // Render-layer planets. The core timeline/clock only produce pure frame
     // data; the scene owns the actual GL drawable Planet objects.
@@ -402,6 +403,13 @@ struct TrackColorCtx {
     double time;
     float amplitude;   // Volume 类型用（音乐 RMS）
 };
+struct TrackXformCtx { const LevelData* level; double time; };
+void trackXformAt(void* ctx, uint32_t tile, float out[6]) {
+    const auto* c = static_cast<const TrackXformCtx*>(ctx);
+    const LevelData::MoveTransform tr = c->level->moveTransformAt((int64_t)tile, c->time);
+    out[0] = tr.rotDelta; out[1] = tr.scaleX; out[2] = tr.scaleY;
+    out[3] = tr.alpha;    out[4] = tr.moveX;  out[5] = tr.moveY;
+}
 void trackColorAt(void* ctx, uint32_t tile, uint8_t fill[3], uint8_t stroke[3]) {
     const auto* c = static_cast<const TrackColorCtx*>(ctx);
     const TileColors col = c->level->tileColorsAt((int64_t)tile, c->time, c->amplitude, c->timeline);
@@ -449,14 +457,17 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     m_tileShader->setVec3("uFillColor", m_fillRGB[0], m_fillRGB[1], m_fillRGB[2]);
     m_tileShader->setVec3("uStrokeColor", m_strokeRGB[0], m_strokeRGB[1], m_strokeRGB[2]);
     m_tileShader->setFloat("uOpacity", 1.0f);
+    TrackXformCtx xctx{m_level, timeInLevel};
     if (m_trackColorOverride || !m_level) {
         m_tileShader->setFloat("uUseInstColor", 0.0f);
-        m_tileMesh->draw(vl, vr, vb, vt, camera.targetX(), camera.targetY());
+        m_tileMesh->draw(vl, vr, vb, vt, camera.targetX(), camera.targetY(),
+                         nullptr, nullptr, &trackXformAt, &xctx);
     } else {
-        // 逐砖颜色（ColorTrack）：只对可见列表里的砖算（每帧几百次），见 TileMesh::InstanceColorFn。
+        // 逐砖颜色（ColorTrack）与变换（MoveTrack）：只对可见列表里的砖算（每帧几百次）。
         TrackColorCtx ctx{m_level, &timeline, timeInLevel, volumeAmplitude};
         m_tileShader->setFloat("uUseInstColor", 1.0f);
-        m_tileMesh->draw(vl, vr, vb, vt, camera.targetX(), camera.targetY(), &trackColorAt, &ctx);
+        m_tileMesh->draw(vl, vr, vb, vt, camera.targetX(), camera.targetY(),
+                         &trackColorAt, &ctx, &trackXformAt, &xctx);
     }
 
     // Trails（RAII 段：别显式调析构，那会跟作用域结束时的析构重复累加）

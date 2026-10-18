@@ -65,8 +65,14 @@ public:
     // 逐实例砖色（fill/stroke，0..255）。fn = nullptr 时实例色全 0，由 uniform 决定颜色
     // （高亮/旧行为）。回调只对**可见列表**里的砖调用（每帧几百次），ctx 由调用方保证生命周期。
     using InstanceColorFn = void (*)(void* ctx, uint32_t tile, uint8_t fill[3], uint8_t stroke[3]);
+    // 逐实例变换（MoveTrack）：out = rot(弧度), scaleX, scaleY, alpha, moveX, moveY。
+    // fn=nullptr → 全部 identity（rot 0 / scale 1 / alpha 1 / move 0）。
+    using InstanceXformFn = void (*)(void* ctx, uint32_t tile, float out[6]);
     void draw(double viewL, double viewR, double viewB, double viewT, double camX, double camY,
-              InstanceColorFn colorFn = nullptr, void* colorCtx = nullptr) const;
+              InstanceColorFn colorFn = nullptr, void* colorCtx = nullptr,
+              InstanceXformFn xformFn = nullptr, void* xformCtx = nullptr) const;
+    // MoveTrack 的剔除外扩：最大位移 + 最大缩放（保守包含被移动/放大的砖）。
+    void setMovePad(float pad, float maxScale) { m_movePad = pad; m_moveMaxScale = maxScale; }
     // 视口像素高度（每帧由 app 侧设入；LOD 用它算"每世界单位多少像素"）
     void setViewportHeightPx(int h) const { m_viewportH = h; }
     // 抓帧（确定性）模式：LOD 步长只能由"当前视口 + 两段式"决定，**不许用上一帧的反馈种子**
@@ -191,6 +197,11 @@ private:
     mutable std::vector<uint32_t> m_listTiles;
     mutable std::vector<float> m_listAttr;    // 5 float/实例：offX offY offZ shape iconBits
     mutable std::vector<float> m_listColors;  // 6 float/实例：fill rgb + stroke rgb（0..1）
+    mutable std::vector<float> m_listXform;   // 6 float/实例：rot, scaleX, scaleY, alpha, moveX, moveY
+    mutable InstanceXformFn m_xformFn = nullptr;
+    mutable void* m_xformCtx = nullptr;
+    float m_movePad = 0.0f;      // 剔除外扩（MoveTrack）
+    float m_moveMaxScale = 1.0f;
     mutable std::vector<float> m_instData;    // 上传用交错缓冲：11 float/实例（5 + 6）
     mutable InstanceColorFn m_colorFn = nullptr;
     mutable void* m_colorCtx = nullptr;

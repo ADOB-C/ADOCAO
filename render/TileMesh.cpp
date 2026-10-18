@@ -425,9 +425,9 @@ void TileMesh::buildStaticGL() {
     glBindBuffer(GL_ARRAY_BUFFER, m_instVbo);
     size_t cap = (size_t)std::min(m_nTiles, 65536);
     if (cap == 0) cap = 1;
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(cap * 11 * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(cap * 17 * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
     m_instCapacity = cap;
-    const GLsizei stride = 11 * sizeof(float);
+    const GLsizei stride = 17 * sizeof(float);
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void*)0);
     glVertexAttribDivisor(1, 1);
@@ -444,6 +444,13 @@ void TileMesh::buildStaticGL() {
     glEnableVertexAttribArray(5);
     glVertexAttribPointer(5, 3, GL_FLOAT, GL_FALSE, stride, (void*)(8 * sizeof(float)));
     glVertexAttribDivisor(5, 1);
+    // MoveTrack 的逐实例变换：rot, scaleX, scaleY, alpha | moveX, moveY
+    glEnableVertexAttribArray(6);
+    glVertexAttribPointer(6, 4, GL_FLOAT, GL_FALSE, stride, (void*)(11 * sizeof(float)));
+    glVertexAttribDivisor(6, 1);
+    glEnableVertexAttribArray(7);
+    glVertexAttribPointer(7, 2, GL_FLOAT, GL_FALSE, stride, (void*)(15 * sizeof(float)));
+    glVertexAttribDivisor(7, 1);
     glBindVertexArray(0);
     LOG_D("TileMesh::buildStaticGL: shapeTex %dx%d, %d 槽位, %d 索引", TileShape::kTexW, m_shapeRows,
           TileShape::kTotalSlots, TileShape::kIndexCount);
@@ -576,7 +583,7 @@ void TileMesh::cullRange(size_t begin, size_t end, double vl, double vr, double 
 
 void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double viewT,
                               double camX, double camY) const {
-    const double m = 20.0;   // 与改造前同一个视锥外扩
+    const double m = 20.0 + (double)m_movePad;   // 外扩含 MoveTrack 最大位移/放大
     const double vl = viewL - m, vr = viewR + m, vb = viewB - m, vt = viewT + m;
     // 一律 double 比：float 在 x≈6.8e7 上 ulp 就是 8，`> 0.5f` 会退化成"只要变了就重建"
     // （虽然结果碰巧对，但边界与被比较的量都该是 double —— 见 docs/rendering.md 坐标约定）
@@ -789,6 +796,19 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
         }
         // 逐实例砖色：只对**可见列表**算（每帧几百砖）。颜色与相机无关，只在重建列表时算；
         // 平移分支不动颜色。fn=nullptr → 全 0，shader 走 uniform（高亮/旧行为）。
+        m_listXform.assign(m_listTiles.size() * 6, 0.0f);
+        for (size_t k = 0; k < m_listTiles.size(); k++) {
+            float* x = &m_listXform[k * 6];
+            x[1] = x[2] = x[3] = 1.0f;   // scaleX/Y = 1, alpha = 1
+        }
+        if (m_xformFn) {
+            for (size_t k = 0; k < m_listTiles.size(); k++) {
+                float out[6] = {0, 1, 1, 1, 0, 0};
+                m_xformFn(m_xformCtx, m_listTiles[k], out);
+                float* x = &m_listXform[k * 6];
+                for (int i = 0; i < 6; i++) x[i] = out[i];
+            }
+        }
         m_listColors.assign(m_listTiles.size() * 6, 0.0f);
         if (m_colorFn) {
             for (size_t k = 0; k < m_listTiles.size(); k++) {
@@ -821,20 +841,22 @@ void TileMesh::uploadIfNeeded() const {
     if (count > m_instCapacity) {   // 可见数由屏幕决定，容量按需增长
         size_t cap = std::max(count, m_instCapacity * 2);
         glBindBuffer(GL_ARRAY_BUFFER, m_instVbo);
-        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(cap * 11 * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(cap * 17 * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
         m_instCapacity = cap;
     }
     // 交错：5 float 几何/形状 + 6 float 颜色（颜色数组与可见列表同序）
-    m_instData.resize(count * 11);
+    m_instData.resize(count * 17);
     for (size_t k = 0; k < count; k++) {
-        float* d = &m_instData[k * 11];
+        float* d = &m_instData[k * 17];
         const float* g = &m_listAttr[k * 5];
         for (int i = 0; i < 5; i++) d[i] = g[i];
         const float* c = &m_listColors[k * 6];
         for (int i = 0; i < 6; i++) d[5 + i] = c[i];
+        const float* x = &m_listXform[k * 6];
+        for (int i = 0; i < 6; i++) d[11 + i] = x[i];
     }
     glBindBuffer(GL_ARRAY_BUFFER, m_instVbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(count * 11 * sizeof(float)), m_instData.data());
+    glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(count * 17 * sizeof(float)), m_instData.data());
     if (std::getenv("ADOCAO_COLOR_DEBUG") && count > 0)
         LOG_I("inst-debug: n=%zu colors0=%.3f,%.3f,%.3f,%.3f,%.3f,%.3f inst0=%.2f,%.2f,%.2f,%.0f,%.0f,%.3f,%.3f,%.3f",
               count, m_listColors[0], m_listColors[1], m_listColors[2], m_listColors[3],
@@ -844,11 +866,14 @@ void TileMesh::uploadIfNeeded() const {
 }
 
 void TileMesh::draw(double viewL, double viewR, double viewB, double viewT,
-                    double camX, double camY, InstanceColorFn colorFn, void* colorCtx) const {
+                    double camX, double camY, InstanceColorFn colorFn, void* colorCtx,
+                    InstanceXformFn xformFn, void* xformCtx) const {
     m_lastDrawn = 0;
     if (empty() || !m_vao) return;
     m_colorFn = colorFn;
     m_colorCtx = colorCtx;
+    m_xformFn = xformFn;
+    m_xformCtx = xformCtx;
     { profile::Scoped _s("cull"); ensureDrawList(viewL, viewR, viewB, viewT, camX, camY); }
     const size_t count = m_listTiles.size();
     m_lastDrawn = (int)count;
@@ -873,7 +898,8 @@ void TileMesh::drawHighlightedTile(int ti, double cX, double cY) const {
     const size_t base = (size_t)d->first, k = (size_t)ti - base;
     const double wx = m_chunkX[(size_t)ti >> kPosChunkShift] + (double)d->posX[k];
     const double wy = m_chunkY[(size_t)ti >> kPosChunkShift] + (double)d->posY[k];
-    float attr[11] = {0};
+    float attr[17] = {0};
+    attr[12] = attr[13] = attr[14] = 1.0f;   // scaleX/Y, alpha（rot/move 保持 0）
     attr[0] = (float)(wx - cX);
     attr[1] = (float)(wy - cY);
     attr[2] = tileZForIndex(ti, m_nTiles);
@@ -883,7 +909,7 @@ void TileMesh::drawHighlightedTile(int ti, double cX, double cY) const {
     glBindVertexArray(m_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_instVbo);
     if (m_instCapacity < 1) {
-        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(11 * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(17 * sizeof(float)), nullptr, GL_DYNAMIC_DRAW);
         m_instCapacity = 1;
     }
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(attr), attr);

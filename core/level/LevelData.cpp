@@ -263,6 +263,7 @@ struct CameraSink {
     std::vector<LevelData::RepeatEvent> repeats;
     std::vector<LevelData::ColorEvent> colors;   // ColorTrack / RecolorTrack
     std::vector<LevelData::FlashEvent> flashes;  // Flash
+    std::vector<LevelData::MoveTrackEvent> moves; // MoveTrack
 };
 
 // 前置声明：actions 在根扫描过程中就地解析（见 scanRootMembers）。
@@ -352,6 +353,7 @@ inline LevelData::FastAction::Type eventTypeOf(KeyRef k) {
     if (keyIs(k, "ColorTrack"))    return T::ColorTrack;     // → colorEvents（富结构）
     if (keyIs(k, "RecolorTrack"))  return T::RecolorTrack;   // → colorEvents（范围 + 触发时间）
     if (keyIs(k, "Flash"))         return T::Flash;          // → flashEvents（全屏闪屏）
+    if (keyIs(k, "MoveTrack"))     return T::MoveTrack;      // → moveTrackEvents（轨道动画）
     return T::Other;
 }
 
@@ -406,6 +408,10 @@ struct ActionFields {
     bool hasFlashStyle = false;  std::string flashStyle;
     bool hasLegacyColor = false, hasLegacyColorTo = false;
     std::string legacyColor, legacyColorTo;
+    // ── MoveTrack ────────────────────────────────────────────────────
+    bool hasOffX = false, hasOffY = false;
+    bool hasRotOffset = false;   float rotOffset = 0.0f;
+    bool hasScale = false;       float scaleX = 1.0f, scaleY = 1.0f;
     bool hasStartTile = false, hasEndTile = false, hasGapLength = false;
     int32_t startOff = 0, endOff = 0;
     int8_t  startRel = -1, endRel = -1;   // -1 绝对 / 0 ThisTile / 1 Start / 2 End
@@ -659,6 +665,23 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
                 std::string tmp;
                 if (!stringValue(v, vEnd, tmp)) return false;
                 f.secondaryTrackColor = std::move(tmp); f.hasSecondaryTrackColor = true;
+            } else if (keyIs(key, "scale")) {
+                // 数字（等比例）或 [x, y]（分量可 null）
+                if (vEnd > v && *v == '[') {
+                    const char* q = skipWs(v + 1, vEnd);
+                    double sx, sy;
+                    if (q < vEnd && *q != ']' && parseNumber(q, vEnd, sx)) {
+                        f.scaleX = (float)(sx / 100.0);
+                        f.scaleY = f.scaleX;
+                        q = skipWs(q, vEnd);
+                        if (q < vEnd && *q == ',') q = skipWs(q + 1, vEnd);
+                        if (q < vEnd && *q != ']' && parseNumber(q, vEnd, sy)) f.scaleY = (float)(sy / 100.0);
+                        f.hasScale = true;
+                    }
+                } else {
+                    double s1;
+                    if (parseNumber(v, vEnd, s1)) { f.scaleX = f.scaleY = (float)(s1 / 100.0); f.hasScale = true; }
+                }
             } else if (keyIs(key, "speedType")) {
                 std::string str;
                 if (!stringValue(v, vEnd, str)) return false;
@@ -740,22 +763,32 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
                 f.flashPlane = std::move(tmp); f.hasFlashPlane = true;
             } else if (keyIs(key, "positionOffset")) {
                 if (*v == '[') {                 // 非数组时旧路径直接忽略
+                    // 分量可以是 null（MoveTrack 常用 [null, y]）：逐分量独立解析。
                     const char* q = skipWs(v + 1, vEnd);
-                    double x, y;
-                    if (q < vEnd && *q != ']' && parseNumber(q, vEnd, x)) {
+                    for (int comp = 0; comp < 2; comp++) {
+                        if (q >= vEnd || *q == ']') break;
+                        double num;
+                        if (parseNumber(q, vEnd, num)) {
+                            if (comp == 0) { f.offX = (float)num; f.hasOffX = true; }
+                            else           { f.offY = (float)num; f.hasOffY = true; }
+                        } else {
+                            const char* nv = skipValue(q, vEnd);   // null / 非数字：跳过
+                            if (!nv) break;
+                            q = nv;
+                        }
                         q = skipWs(q, vEnd);
                         if (q < vEnd && *q == ',') q = skipWs(q + 1, vEnd);
-                        if (q < vEnd && *q != ']' && parseNumber(q, vEnd, y)) {
-                            f.offX = (float)x; f.offY = (float)y; f.hasOffset = true;
-                        }
                     }
+                    f.hasOffset = f.hasOffX && f.hasOffY;   // PositionTrack 需要两个分量
                 }
             } else if (rich && keyIs(key, "position")) {
                 parsePositionPair(v, vEnd, f);
             }
             break;
         case 'r':
-            if (rich) {
+            if (keyIs(key, "rotationOffset")) {
+                double rd; if (parseNumber(v, vEnd, rd)) { f.rotOffset = (float)rd; f.hasRotOffset = true; }
+            } else if (rich) {
                 if (keyIs(key, "rotation")) {
                     double rd; if (parseNumber(v, vEnd, rd)) { f.rotation = rd; f.hasRotation = true; }
                 } else if (keyIs(key, "relativeTo")) {
@@ -872,7 +905,7 @@ inline bool buildAction(const ActionFields& f, LevelData::FastAction& a, bool& k
     keep = f.hasFloor && f.hasEvent && f.type != T::Other &&
            f.type != T::MoveCamera && f.type != T::RepeatEvents &&
            f.type != T::ColorTrack && f.type != T::RecolorTrack &&
-           f.type != T::Flash;   // 后五者进富结构
+           f.type != T::Flash && f.type != T::MoveTrack;   // 后六者进富结构
     return true;
 }
 
@@ -970,6 +1003,29 @@ inline void decodeSpecialEvent(const ActionFields& f, CameraSink& sink) {
         ev.style = f.hasFlashStyle ? (f.flashStyle == "Kill" ? 1 : (f.flashStyle == "StayBlack" ? 2 : 0)) : 0;
         ev.ease = (uint8_t)f.easeId;
         sink.flashes.push_back(ev);
+    } else if (f.type == T::MoveTrack) {
+        C::MoveTrackEvent ev;
+        ev.floor = f.floor;
+        ev.angleOffset = (float)f.angleOffset;
+        ev.startOff = f.startOff; ev.startRel = f.startRel;
+        ev.endOff = f.endOff;     ev.endRel = f.endRel;
+        ev.gap = f.hasGapLength ? (int32_t)f.gapLength : 0;
+        ev.ease = (uint8_t)f.easeId;
+        ev.durBeats = f.hasDuration ? f.duration : 1.0f;
+        ev.offX = f.offX; ev.offY = f.offY;
+        ev.rotDeg = f.rotOffset;
+        ev.scaleX = f.scaleX; ev.scaleY = f.scaleY;
+        ev.opacity = f.hasLegacyOpacity ? f.legacyOpacity / 100.0f : 1.0f;
+        uint8_t flags = 0;
+        if (f.hasOffX) flags |= C::kMoveOffX;
+        if (f.hasOffY) flags |= C::kMoveOffY;
+        if (f.hasRotOffset) flags |= C::kMoveRot;
+        if (f.hasScale) flags |= C::kMoveScale;
+        if (f.hasLegacyOpacity) flags |= C::kMoveOpacity;
+        if (f.inactive) flags |= C::kMoveInactive;
+        if (f.editorOnly) flags |= C::kMoveEditorOnly;
+        ev.flags = flags;
+        sink.moves.push_back(ev);
     }
 }
 
@@ -998,7 +1054,8 @@ inline bool parseActionRegion(const char* b, const char* end,
                  f.type == LevelData::FastAction::RepeatEvents ||
                  f.type == LevelData::FastAction::ColorTrack ||
                  f.type == LevelData::FastAction::RecolorTrack ||
-                 f.type == LevelData::FastAction::Flash) {
+                 f.type == LevelData::FastAction::Flash ||
+                 f.type == LevelData::FastAction::MoveTrack) {
             // 罕见事件：对同一个对象再解析一遍富字段（热路径零成本，这里最多几百次）
             ActionFields rich;
             if (parseActionObject(p + 1, objEnd, rich, /*rich=*/true)) decodeSpecialEvent(rich, sink);
@@ -1078,7 +1135,8 @@ inline size_t parseActionRangeInto(const char* b, const char* end,
                    f.type == LevelData::FastAction::RepeatEvents ||
                    f.type == LevelData::FastAction::ColorTrack ||
                    f.type == LevelData::FastAction::RecolorTrack ||
-                   f.type == LevelData::FastAction::Flash) {
+                   f.type == LevelData::FastAction::Flash ||
+                 f.type == LevelData::FastAction::MoveTrack) {
             ActionFields rich;
             if (parseActionObject(p + 1, objEnd, rich, /*rich=*/true)) decodeSpecialEvent(rich, sink);
         }
@@ -1155,6 +1213,7 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
     const size_t repBase = sink.repeats.size();
     const size_t colBase = sink.colors.size();
     const size_t flBase = sink.flashes.size();
+    const size_t mvBase = sink.moves.size();
     std::vector<CameraSink> pieceSinks(n);
     auto tParse = now();
     std::vector<size_t> kept(n, 0);
@@ -1178,7 +1237,7 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
                           scanMs, parseMs, n, poolThreads, (int)failed.load());
     if (failed.load()) {
         out.resize(base);
-        sink.cameras.resize(camBase); sink.repeats.resize(repBase); sink.colors.resize(colBase); sink.flashes.resize(flBase);
+        sink.cameras.resize(camBase); sink.repeats.resize(repBase); sink.colors.resize(colBase); sink.flashes.resize(flBase); sink.moves.resize(mvBase);
         return parseActionRegion(b, fileEnd, out, sink, outEnd);   // 只有切分不可信时才会走到
     }
     // 相机/重复事件按**段序**合并 —— 段是按文件顺序切的，所以结果就是文件顺序。
@@ -1196,6 +1255,9 @@ inline bool parseActionRegionParallel(const char* b, const char* fileEnd,
         sink.flashes.insert(sink.flashes.end(),
                             std::make_move_iterator(ps.flashes.begin()),
                             std::make_move_iterator(ps.flashes.end()));
+        sink.moves.insert(sink.moves.end(),
+                          std::make_move_iterator(ps.moves.begin()),
+                          std::make_move_iterator(ps.moves.end()));
     }
 
     // 压实：每段末尾的空槽（被丢弃的 action）移走。没有丢弃时位移为 0，直接零拷贝。
@@ -1289,7 +1351,8 @@ struct WindowParser {
                      f.type == LevelData::FastAction::RepeatEvents ||
                      f.type == LevelData::FastAction::ColorTrack ||
                      f.type == LevelData::FastAction::RecolorTrack ||
-                     f.type == LevelData::FastAction::Flash) {
+                     f.type == LevelData::FastAction::Flash ||
+                 f.type == LevelData::FastAction::MoveTrack) {
                 ActionFields rich;
                 if (parseActionObject(p + 1, objEnd, rich, /*rich=*/true))
                     decodeSpecialEvent(rich, cameraSink);
@@ -1744,6 +1807,116 @@ LevelData::FlashState LevelData::flashStateAt(uint8_t plane, double timeSec) con
     return st;
 }
 
+void LevelData::buildMoveTrackIndex(const Timeline& timeline) {
+    m_moveIndex.clear();
+    m_moveBlocks.clear();
+    m_moveReady = true;
+    m_movePad = 0.0f;
+    m_moveMaxScale = 1.0f;
+    const int64_t n = tileCount();
+    if (n <= 0) return;
+    const double pitch = std::max(0.1, (double)settings.pitch / 100.0);
+    for (const MoveTrackEvent& src : moveTrackEvents) {
+        if (src.flags & (kMoveInactive | kMoveEditorOnly)) continue;
+        if ((src.flags & 0x1F) == 0) continue;      // 没有可动属性
+        MoveTrackEvent ev = src;
+        auto floorOf = [&](int32_t off, int8_t rel, int32_t host) -> int64_t {
+            if (rel < 0) return (int64_t)off;
+            const int64_t b = (rel == 1) ? 0 : (rel == 2 ? n - 1 : host);
+            return b + (int64_t)off;
+        };
+        int64_t a = floorOf(ev.startOff, ev.startRel, ev.floor);
+        int64_t b = floorOf(ev.endOff, ev.endRel, ev.floor);
+        if (a > b) std::swap(a, b);
+        ev.lo = (int32_t)std::clamp<int64_t>(a, 0, n - 1);
+        ev.hi = (int32_t)std::clamp<int64_t>(b, 0, n - 1);
+        const double beat = (double)timeline.durationAt(ev.floor);
+        ev.trigger = (double)timeline.startTimeAt(ev.floor) +
+                     ((double)ev.angleOffset / 180.0) * beat;
+        ev.durSec = (double)std::max(0.0f, ev.durBeats) * beat / pitch;
+        m_moveIndex.push_back(ev);
+        const float sc = std::max(std::abs(ev.scaleX), std::abs(ev.scaleY));
+        if (sc > m_moveMaxScale) m_moveMaxScale = sc;
+        const float pad = std::hypot(src.offX, src.offY) + (sc > 1.0f ? (sc - 1.0f) * 0.75f : 0.0f);
+        if (pad > m_movePad) m_movePad = pad;
+    }
+    if (m_moveIndex.empty()) return;
+    const size_t blocks = (size_t)((n + kRecolorBlock - 1) / kRecolorBlock);
+    m_moveBlocks.resize(blocks);
+    size_t total = 0;
+    bool capped = false;
+    for (size_t i = 0; i < m_moveIndex.size() && !capped; ++i) {
+        const MoveTrackEvent& e = m_moveIndex[i];
+        const int64_t step = (int64_t)e.gap + 1;
+        for (int64_t f = e.lo; f <= e.hi; f += step) {
+            auto& v = m_moveBlocks[(size_t)f / kRecolorBlock];
+            if (v.empty() || v.back() != (uint32_t)i) v.push_back((uint32_t)i);
+            if (++total > kRecolorMaxEntries) { capped = true; break; }
+        }
+    }
+    for (auto& v : m_moveBlocks) {
+        std::sort(v.begin(), v.end(), [&](uint32_t x, uint32_t y) {
+            const auto& a = m_moveIndex[x];
+            const auto& b = m_moveIndex[y];
+            if (a.trigger != b.trigger) return a.trigger < b.trigger;
+            return a.order < b.order;
+        });
+    }
+    LOG_D("MoveTrack: %zu 条事件，块表 %zu 块 / %zu 条目，pad=%.2f maxScale=%.2f",
+          m_moveIndex.size(), m_moveBlocks.size(), total, (double)m_movePad,
+          (double)m_moveMaxScale);
+}
+
+LevelData::MoveTransform LevelData::moveTransformAt(int64_t floor, double timeSec) const {
+    MoveTransform out;
+    if (!m_moveReady || m_moveBlocks.empty() || floor < 0) return out;
+    const size_t blk = (size_t)floor / kRecolorBlock;
+    if (blk >= m_moveBlocks.size()) return out;
+    const auto& list = m_moveBlocks[blk];
+    if (list.empty()) return out;
+
+    struct Prop { bool has=false; float from=0, target=0; double trig=0, dur=0; uint8_t ease=0; };
+    Prop px, py, rot, sx, sy, op;
+    px.from = py.from = rot.from = 0.0f;
+    sx.from = sy.from = op.from = 1.0f;
+    sx.target = sy.target = op.target = 1.0f;
+
+    for (uint32_t idx : list) {
+        const MoveTrackEvent& e = m_moveIndex[idx];
+        if (e.lo > floor || e.hi < floor) continue;
+        if (e.gap > 0 && ((floor - e.lo) % ((int64_t)e.gap + 1)) != 0) continue;
+        if (e.trigger > timeSec + 1e-9) break;
+        auto set = [&](Prop& p, float target) {
+            p.from = p.has ? p.target : p.from;
+            p.target = target;
+            p.has = true;
+            p.trig = e.trigger;
+            p.dur = e.durSec;
+            p.ease = e.ease;
+        };
+        if (e.flags & kMoveOffX) set(px, e.offX);
+        if (e.flags & kMoveOffY) set(py, e.offY);
+        if (e.flags & kMoveRot) set(rot, e.rotDeg * 3.14159265358979323846f / 180.0f);
+        if (e.flags & kMoveScale) { set(sx, e.scaleX); set(sy, e.scaleY); }
+        if (e.flags & kMoveOpacity) set(op, e.opacity);
+    }
+    auto value = [&](const Prop& p) -> float {
+        if (!p.has) return p.from;
+        if (p.dur <= 0.0 || timeSec >= p.trig + p.dur) return p.target;
+        const double t = std::clamp((timeSec - p.trig) / p.dur, 0.0, 1.0);
+        const double q = easeApply((Ease)p.ease, t);
+        return (float)((double)p.from + ((double)p.target - (double)p.from) * q);
+    };
+    out.any = px.has || py.has || rot.has || sx.has || sy.has || op.has;
+    out.moveX = value(px);
+    out.moveY = value(py);
+    out.rotDelta = value(rot);
+    out.scaleX = value(sx);
+    out.scaleY = value(sy);
+    out.alpha = value(op);
+    return out;
+}
+
 const LevelData::ColorEvent* LevelData::persistentColorAtOrBefore(int64_t floor) const {
     for (auto it = colorEvents.rbegin(); it != colorEvents.rend(); ++it) {
         if (it->floor > floor) continue;
@@ -1961,6 +2134,10 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
                         else flashEvents.insert(flashEvents.end(),
                                                 std::make_move_iterator(wp.cameraSink.flashes.begin()),
                                                 std::make_move_iterator(wp.cameraSink.flashes.end()));
+                        if (moveTrackEvents.empty()) moveTrackEvents = std::move(wp.cameraSink.moves);
+                        else moveTrackEvents.insert(moveTrackEvents.end(),
+                                                    std::make_move_iterator(wp.cameraSink.moves.begin()),
+                                                    std::make_move_iterator(wp.cameraSink.moves.end()));
                         return finishLoad(onProgress, exportOnly);
                     }
                 }
@@ -2127,6 +2304,9 @@ bool LevelData::tryFastParse(const char* data, size_t len, ProgressCb onProgress
     if (flashEvents.empty()) flashEvents = std::move(newCamera.flashes);
     else flashEvents.insert(flashEvents.end(), std::make_move_iterator(newCamera.flashes.begin()),
                             std::make_move_iterator(newCamera.flashes.end()));
+    if (moveTrackEvents.empty()) moveTrackEvents = std::move(newCamera.moves);
+    else moveTrackEvents.insert(moveTrackEvents.end(), std::make_move_iterator(newCamera.moves.begin()),
+                                std::make_move_iterator(newCamera.moves.end()));
     if (repeatEvents.empty()) repeatEvents = std::move(newCamera.repeats);
     else repeatEvents.insert(repeatEvents.end(), std::make_move_iterator(newCamera.repeats.begin()),
                              std::make_move_iterator(newCamera.repeats.end()));
@@ -2260,6 +2440,49 @@ void jsonTileRef(const rapidjson::Value& v, int32_t& off, int8_t& rel) {
         }
         off = (int32_t)n2; rel = r;
     }
+}
+
+void jsonReadMoveTrackEvent(const rapidjson::Value& a, std::vector<LevelData::MoveTrackEvent>& out) {
+    using C = LevelData;
+    C::MoveTrackEvent ev;
+    ev.floor = a["floor"].GetInt();
+    if (a.HasMember("startTile")) jsonTileRef(a["startTile"], ev.startOff, ev.startRel);
+    if (a.HasMember("endTile")) jsonTileRef(a["endTile"], ev.endOff, ev.endRel);
+    ev.gap = (a.HasMember("gapLength") && a["gapLength"].IsNumber()) ? (int32_t)a["gapLength"].GetDouble() : 0;
+    ev.durBeats = (a.HasMember("duration") && a["duration"].IsNumber()) ? a["duration"].GetFloat() : 1.0f;
+    ev.angleOffset = (a.HasMember("angleOffset") && a["angleOffset"].IsNumber()) ? a["angleOffset"].GetFloat() : 0.0f;
+    if (a.HasMember("ease") && a["ease"].IsString()) ev.ease = (uint8_t)easeFromName(a["ease"].GetString());
+    uint8_t flags = 0;
+    if (a.HasMember("positionOffset") && a["positionOffset"].IsArray()) {
+        const auto& p = a["positionOffset"];
+        if (p.Size() >= 1 && p[0].IsNumber()) { ev.offX = p[0].GetFloat(); flags |= C::kMoveOffX; }
+        if (p.Size() >= 2 && p[1].IsNumber()) { ev.offY = p[1].GetFloat(); flags |= C::kMoveOffY; }
+    }
+    if (a.HasMember("rotationOffset") && a["rotationOffset"].IsNumber()) {
+        ev.rotDeg = a["rotationOffset"].GetFloat(); flags |= C::kMoveRot;
+    }
+    if (a.HasMember("scale")) {
+        const auto& sc = a["scale"];
+        if (sc.IsNumber()) { ev.scaleX = ev.scaleY = (float)(sc.GetDouble() / 100.0); flags |= C::kMoveScale; }
+        else if (sc.IsArray()) {
+            bool any = false;
+            if (sc.Size() >= 1 && sc[0].IsNumber()) { ev.scaleX = (float)(sc[0].GetDouble() / 100.0); any = true; }
+            if (sc.Size() >= 2 && sc[1].IsNumber()) { ev.scaleY = (float)(sc[1].GetDouble() / 100.0); any = true; }
+            if (any) flags |= C::kMoveScale;
+        }
+    }
+    if (a.HasMember("opacity") && a["opacity"].IsNumber()) {
+        ev.opacity = (float)(a["opacity"].GetDouble() / 100.0); flags |= C::kMoveOpacity;
+    }
+    if (a.HasMember("active")) {
+        const auto& v = a["active"];
+        if ((v.IsBool() && !v.GetBool()) || (v.IsString() && std::string(v.GetString()) == "Disabled"))
+            flags |= C::kMoveInactive;
+    }
+    if (a.HasMember("editorOnly") && a["editorOnly"].IsBool() && a["editorOnly"].GetBool())
+        flags |= C::kMoveEditorOnly;
+    ev.flags = flags;
+    out.push_back(ev);
 }
 
 void jsonReadFlashEvent(const rapidjson::Value& a, std::vector<LevelData::FlashEvent>& out) {
@@ -2422,6 +2645,7 @@ bool LevelData::parseLegacy(const std::string& jsonStr, ProgressCb onProgress, b
             else if (et == "ColorTrack") { jsonReadColorEvent(a, colorEvents); continue; }
             else if (et == "RecolorTrack") { jsonReadColorEvent(a, colorEvents, true); continue; }
             else if (et == "Flash") { jsonReadFlashEvent(a, flashEvents); continue; }
+            else if (et == "MoveTrack") { jsonReadMoveTrackEvent(a, moveTrackEvents); continue; }
             else continue;
             if (act.type == FastAction::SetSpeed) {
                 if (a.HasMember("speedType") && std::string(a["speedType"].GetString()) == "Multiplier") {

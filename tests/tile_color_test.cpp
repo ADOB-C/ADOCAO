@@ -243,6 +243,44 @@ int main() {
         }
     }
 
+    // MoveTrack：相对位移 / 绝对角度 / 缩放 / 不透明度 + 时长（拍）
+    {
+        const char* json = R"({"angleData":[0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90],
+            "settings":{"bpm":120},
+            "actions":[
+              {"floor":4,"eventType":"MoveTrack","startTile":[-2,"ThisTile"],"endTile":[3,"ThisTile"],
+               "positionOffset":[1,0],"rotationOffset":90,"scale":[200,150],"opacity":0,
+               "duration":2,"ease":"Linear"}]})";
+        LevelData lv; Timeline tl;
+        if (!lv.loadFromBuffer(json, std::strlen(json))) { std::printf("FAIL move: load\n"); fail++; }
+        else {
+            tl.build(lv, false);
+            lv.buildMoveTrackIndex(tl);
+            const double trig = tl.startTimeAt(4);
+            const double dur = 2.0 * tl.durationAt(4);
+            auto tr = [&](int f, double t) { return lv.moveTransformAt(f, t); };
+            const auto before = tr(3, trig - 0.05);
+            if (before.any) { std::printf("FAIL move before\n"); fail++; }
+            const auto mid = tr(3, trig + dur * 0.5);
+            if (!mid.any || mid.moveX < 0.49f || mid.moveX > 0.51f ||
+                mid.rotDelta < 0.78f || mid.rotDelta > 0.79f ||
+                mid.scaleX < 1.49f || mid.scaleX > 1.51f ||
+                mid.scaleY < 1.24f || mid.scaleY > 1.26f ||
+                mid.alpha < 0.49f || mid.alpha > 0.51f) {
+                std::printf("FAIL move mid: mx=%.3f rot=%.3f sx=%.3f sy=%.3f a=%.3f\n",
+                            (double)mid.moveX, (double)mid.rotDelta, (double)mid.scaleX,
+                            (double)mid.scaleY, (double)mid.alpha);
+                fail++;
+            }
+            const auto after = tr(3, trig + dur + 0.05);
+            if (after.moveX < 0.99f || after.rotDelta < 1.57f || after.scaleX < 1.99f ||
+                after.scaleY < 1.49f || after.alpha > 0.01f) {
+                std::printf("FAIL move after\n"); fail++;
+            }
+            if (tr(9, trig + dur + 0.05).any) { std::printf("FAIL move range\n"); fail++; }
+        }
+    }
+
     if (fail) {
         std::printf("%d 项失败（%d 例金标）\n", fail, n);
         return 1;

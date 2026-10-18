@@ -53,6 +53,25 @@
   O(块内事件数)。条目上限 **4M**（超了 `LOG_W` 截断）；`buildRecolorIndex()` 在 `LevelLoader`
   里、丢起始时间数组之前调用。
 
+**MoveTrack（2026-10-17 已落地）**：轨道动画（位置/旋转/缩放/不透明度），对齐 Re_ADOJAS
+`buildTileMoveTrack` 的"每砖属性关键帧"：
+
+* 字段：`startTile`/`endTile`/`gapLength`（与 RecolorTrack 同一套范围解析）、
+  `positionOffset`（**相对基础位置**，分量可为 null）、`rotationOffset`（**绝对角度**，覆盖砖自身
+  旋转；我们的形状已经把方向烘进几何，所以实例旋转就是 rotationOffset 本身）、
+  `scale`（数字或 [x,y]，%/100）、`opacity`（%/100）、`duration`（**拍**）、`ease`、`angleOffset`；
+* 每条事件对"它写了"的属性做一次补间：`from = 同属性上一次的目标值`（Kill(complete) 语义）、
+  `to = 绝对值`，时长 = `duration × 该事件层一拍 / max(0.1, pitch/100)`；末值保持；
+* 索引：与 RecolorTrack 一样按 4096 层分块、块内按 trigger 排序；查询 O(块内事件数)。
+  `movePad()` = max(|positionOffset| + (maxScale−1)×0.75)，`ensureDrawList` 的视锥外扩加上它，
+  保证被移走/放大的砖不会漏剔除；
+* 渲染：实例从 11 → **17 float**（+ `rot, scaleX, scaleY, alpha, moveX, moveY`）。顶点 shader 先
+  `pos *= scale`、再绕原点旋转、再 `+ aMove + aInstOffset`；`vOpacity *= alpha`。
+  identity（rot=0/scale=1/alpha=1/move=0）逐位不变（`geom_probe` 197 万坐标 0 失败，走 GEOM_PROBE
+  分支时不做变换）。
+* 未做：MoveTrack 的 `RepeatEvents` 展开（现在只按事件本身的范围）；行星仍沿原路径（不跟随
+  MoveTrack 位移，与原版一致）；`eventTag` 只存不消费。
+
 **Flash（2026-10-17 已落地）**：全屏闪屏，按 `plane` 分两层：
 
 * **Background**：在砖之前画（砖会盖住它，视觉上"只染背景"）；

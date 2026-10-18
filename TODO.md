@@ -779,7 +779,8 @@ off 那两个采样值相等=被钳住，on 是正常插值，差值正好是**�
       按段指针批量（O(可见+段数)，目标 ≤2 ms @26.2 万可见）；`ColorEvent` 预存 startTime/beatSeconds；
       事件数上限/按块索引（逐层 justThisTile 时 2³¹ → 320 GB）。
 
-- [ ] **MoveTrack**（2026-10-17 已按 Re_ADOJAS `buildTileMoveTrack` 摸清语义，未实现）：
+- [x] **MoveTrack**（2026-10-17 已落地：解析/键帧/实例变换/剔除外扩/容器段 13）。未做：
+      `RepeatEvents` 对 MoveTrack 的展开、`eventTag` 消费。原计划备忘：
       每个砖一条"属性关键帧"（positionX/Y、rotation、scaleX/Y、opacity）；事件 `duration` 单位是
       **拍**（× secPerBeat / pitch），`positionOffset` 是**相对基础位置**、`rotationOffset` 是
       **绝对角度**（覆盖砖自身旋转）、`scale`/`opacity` 是绝对值（%/100）；每条新事件对同属性做

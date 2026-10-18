@@ -166,6 +166,46 @@ struct LevelData {
         float    angleOffset = 0.0f;   // 触发时间 = startTime(floor) + angleOffset/180 * 一拍
     };
 
+    // ── MoveTrack（轨道动画：位置/旋转/缩放/不透明度）──────────────────
+    // 语义对齐 Re_ADOJAS `buildTileMoveTrack`：每条事件对**指定属性**做一次补间，
+    // positionOffset = 相对基础位置（target = base + offset），rotationOffset = **绝对角度**
+    // （覆盖砖自身旋转），scale/opacity = 绝对值（%/100）；duration 单位是**拍**；
+    // 同属性的旧补间 Kill(complete)（跳到旧目标）再补；末值保持。
+    struct MoveTrackEvent {
+        int32_t floor = 0;
+        float   angleOffset = 0.0f;
+        int32_t startOff = 0, endOff = 0;
+        int8_t  startRel = -1, endRel = -1;
+        int32_t gap = 0;
+        int32_t lo = 0, hi = 0;        // resolved
+        double  trigger = 0.0;
+        float   durBeats = 0.0f;   // 原始（拍）
+        double  durSec = 0.0;
+        uint8_t ease = 0;
+        uint32_t order = 0;
+        uint8_t flags = 0;             // bit0 offX / bit1 offY / bit2 rot / bit3 scale / bit4 opacity
+        float   offX = 0.0f, offY = 0.0f;
+        float   rotDeg = 0.0f;
+        float   scaleX = 1.0f, scaleY = 1.0f;
+        float   opacity = 1.0f;
+    };
+    enum MoveFlags : uint8_t {
+        kMoveOffX = 1 << 0, kMoveOffY = 1 << 1, kMoveRot = 1 << 2,
+        kMoveScale = 1 << 3, kMoveOpacity = 1 << 4,
+        kMoveInactive = 1 << 5, kMoveEditorOnly = 1 << 6,
+    };
+    struct MoveTransform {
+        bool any = false;
+        float rotDelta = 0.0f;     // 弧度（值 - 砖的基础朝向）
+        float scaleX = 1.0f, scaleY = 1.0f;
+        float alpha = 1.0f;
+        float moveX = 0.0f, moveY = 0.0f;   // 相对基础位置
+    };
+    void buildMoveTrackIndex(const Timeline& timeline);
+    MoveTransform moveTransformAt(int64_t floor, double timeSec) const;
+    float movePad() const { return m_movePad; }
+    float moveMaxScale() const { return m_moveMaxScale; }
+
     // ── Flash（全屏闪屏）──────────────────────────────────────────────
     // 语义见 Re_ADOJAS `FlashEffect`：每条事件把某个 plane 从 start 补到 end；
     // duration<=0 或补完后**保持**终值，直到下一次 Flash/Kill。
@@ -214,6 +254,7 @@ struct LevelData {
     std::vector<RepeatEvent> repeatEvents;   // RepeatEvents（只服务运镜展开；其他事件暂不消费）
     std::vector<ColorEvent> colorEvents;     // ColorTrack / RecolorTrack（未展开；按 floor 查）
     std::vector<FlashEvent> flashEvents;     // Flash（buildFlashIndex 后按 trigger 排序）
+    std::vector<MoveTrackEvent> moveTrackEvents;   // MoveTrack（buildMoveTrackIndex 后有效）
 
     // floor 处生效的颜色事件：
     //   * f 正好是某条 `justThisTile` 事件的层 → 该层**最后一条** justThisTile（覆盖持久段）；
@@ -249,7 +290,7 @@ struct LevelData {
         uint16_t strId = 0;                 // 0 = 空串；索引进 actionStrTable
         // MoveCamera / RepeatEvents **不留在 actions 里**（keep=false）：它们走 cameraEvents /
         // repeatEvents 两个富结构。这两个枚举值只用于"解析时认出它"。
-        enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, MoveCamera, RepeatEvents, ColorTrack, RecolorTrack, Flash, Other } type = Other;
+        enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, MoveCamera, RepeatEvents, ColorTrack, RecolorTrack, Flash, MoveTrack, Other } type = Other;
         bool flag = false;
         float val1 = 0, val2 = 0;
     };
@@ -275,6 +316,12 @@ struct LevelData {
     std::vector<RecolorTrigger> m_recolorTriggers;
     std::vector<std::vector<uint32_t>> m_recolorBlocks;
     bool m_recolorReady = false;
+    // MoveTrack 运行时索引
+    std::vector<MoveTrackEvent> m_moveIndex;
+    std::vector<std::vector<uint32_t>> m_moveBlocks;
+    bool m_moveReady = false;
+    float m_movePad = 0.0f;
+    float m_moveMaxScale = 1.0f;
     // 可选 `wc`：并行剔除时传**本线程自己的克隆**（见 `FloorWindowCache::clone()`）；
     // 不传 = 用共享缓存（单线程路径，语义与以前逐位相同）。
     std::array<double, 2> tilePositionAt(int64_t i, FloorWindowCache* wc = nullptr) const;

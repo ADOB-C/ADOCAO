@@ -460,6 +460,34 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
             out.repeatEvents.push_back(std::move(r));
         }
     }
+    if (const Sec* mvSec = findSec(secs, SectionId::MoveTrack)) {
+        constexpr size_t kRec = 52;
+        if (mvSec->size % kRec != 0) { err = "movetrack 段长度不是记录整数倍"; return false; }
+        const size_t cnt = mvSec->size / kRec;
+        out.moveTrackEvents.clear();
+        out.moveTrackEvents.reserve(cnt);
+        for (size_t i = 0; i < cnt; ++i) {
+            const uint8_t* q = mvSec->p + i * kRec;
+            LevelData::MoveTrackEvent e;
+            e.floor = (int32_t)rdU32(q);
+            std::memcpy(&e.angleOffset, q + 4, 4);
+            std::memcpy(&e.durBeats, q + 8, 4);
+            e.gap = (int32_t)rdU32(q + 12);
+            e.startOff = (int32_t)rdU32(q + 16);
+            e.endOff = (int32_t)rdU32(q + 20);
+            e.startRel = (int8_t)q[24];
+            e.endRel = (int8_t)q[25];
+            e.ease = q[26];
+            e.flags = q[27];
+            std::memcpy(&e.offX, q + 28, 4);
+            std::memcpy(&e.offY, q + 32, 4);
+            std::memcpy(&e.rotDeg, q + 36, 4);
+            std::memcpy(&e.scaleX, q + 40, 4);
+            std::memcpy(&e.scaleY, q + 44, 4);
+            std::memcpy(&e.opacity, q + 48, 4);
+            out.moveTrackEvents.push_back(e);
+        }
+    }
     if (const Sec* flSec = findSec(secs, SectionId::Flash)) {
         constexpr size_t kRec = 32;
         if (flSec->size % kRec != 0) { err = "flash 段长度不是记录整数倍"; return false; }

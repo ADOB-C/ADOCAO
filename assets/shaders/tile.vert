@@ -36,6 +36,9 @@ uniform float uOpacity;
 // 逐实例砖色：uUseInstColor=1 时用实例色（ColorTrack），0 时用上面的 uniform（高亮/旧行为）。
 layout(location = 4) in vec3 aFillColor;
 layout(location = 5) in vec3 aStrokeColor;
+// MoveTrack：rot(弧度) / scaleX / scaleY / alpha | moveXY（所有砖默认 identity）
+layout(location = 6) in vec4 aXform;
+layout(location = 7) in vec2 aMove;
 uniform float uUseInstColor;
 
 out vec3  vColor;
@@ -175,7 +178,14 @@ void main() {
     }
 
     vColor = color;
-    vOpacity = uOpacity;
+
+#ifndef GEOM_PROBE
+    vec2 xp = vec2(pos.x * aXform.y, pos.y * aXform.z);
+    float xc = cos(aXform.x), xs = sin(aXform.x);
+    xp = vec2(fma(xp.x, xc, -(xp.y * xs)), fma(xp.x, xs, xp.y * xc));
+    pos = vec3(xp + aMove, pos.z);
+#endif
+    vOpacity = uOpacity * aXform.w;
 
 #ifdef GEOM_PROBE
     // 一个"顶点"画在像素 (gl_VertexID, gl_InstanceID) 上：顶点号 = canonical 槽号，

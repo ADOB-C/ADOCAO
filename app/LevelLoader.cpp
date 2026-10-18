@@ -108,6 +108,7 @@ void runLevelLoading(const LauncherConfig& cfg, LoadingProgress& progress, LoadR
     // RecolorTrack 的运行时索引（范围 + 触发时间）：必须在丢起始时间数组之前建。
     result.level->buildRecolorIndex(*result.timeline);
     result.level->buildFlashIndex(*result.timeline);
+    result.level->buildMoveTrackIndex(*result.timeline);
 
     // PlaybackClock is created after final Timeline settings are known.
     result.playback = std::make_shared<PlaybackClock>();

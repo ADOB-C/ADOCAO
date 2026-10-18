@@ -1,0 +1,13 @@
+{
+  "angleData": [0, 90, 180, 270, 0, 90, 180, 270, 0, 90, 180, 270],
+  "settings": {"bpm": 120},
+  "actions": [
+    {"floor": 4, "eventType": "MoveTrack", "startTile": [-2, "ThisTile"], "endTile": [3, "ThisTile"],
+     "positionOffset": [1, -0.5], "rotationOffset": 90, "scale": [200, 150], "opacity": 0,
+     "duration": 2, "ease": "OutQuad", "angleOffset": 90, "gapLength": 0},
+    {"floor": 6, "eventType": "MoveTrack", "startTile": "Start+1", "endTile": "End",
+     "positionOffset": [null, 2], "scale": 50, "duration": 0},
+    {"floor": 8, "eventType": "MoveTrack", "startTile": [0, "ThisTile"], "endTile": [0, "ThisTile"],
+     "positionOffset": [9, 9], "active": false}
+  ]
+}

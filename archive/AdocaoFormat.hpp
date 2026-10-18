@@ -53,7 +53,8 @@ enum class SectionId : uint8_t {
     Camera     = 9,   // MoveCamera 富事件（定长记录 38 B；docs/camera.md §4.1）
     Repeat     = 10,  // RepeatEvents（定长记录 19 B；运镜展开用，docs/camera.md §2.3）
     Colour     = 11,  // ColorTrack / RecolorTrack（v3 32 B / v4 50 B）
-    Flash      = 12,  // Flash（定长记录 32 B；全屏闪屏，docs/rendering.md「Flash」）
+    Flash      = 12,  // Flash（定长记录 32 B；全屏闪屏）
+    MoveTrack  = 13,  // MoveTrack（定长记录 52 B；轨道动画）
 };
 
 // 列/段的编码方式。`ColumnHeader::codec` 与 `SectionEntry::codec` 共用这一套。

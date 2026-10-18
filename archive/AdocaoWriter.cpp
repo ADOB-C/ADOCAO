@@ -511,6 +511,27 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         }
         secs.push_back(std::move(s));
     }
+    if (!level.moveTrackEvents.empty()) {
+        Section s; s.id = (uint8_t)SectionId::MoveTrack; s.elements = level.moveTrackEvents.size();
+        s.blob.reserve(level.moveTrackEvents.size() * 52);
+        for (const LevelData::MoveTrackEvent& e : level.moveTrackEvents) {
+            putU32(s.blob, (uint32_t)e.floor);
+            putF32(s.blob, e.angleOffset);
+            putF32(s.blob, e.durBeats);
+            putU32(s.blob, (uint32_t)e.gap);
+            putU32(s.blob, (uint32_t)e.startOff);
+            putU32(s.blob, (uint32_t)e.endOff);
+            putU8(s.blob, (uint8_t)e.startRel);
+            putU8(s.blob, (uint8_t)e.endRel);
+            putU8(s.blob, e.ease);
+            putU8(s.blob, e.flags);
+            putF32(s.blob, e.offX); putF32(s.blob, e.offY);
+            putF32(s.blob, e.rotDeg);
+            putF32(s.blob, e.scaleX); putF32(s.blob, e.scaleY);
+            putF32(s.blob, e.opacity);
+        }
+        secs.push_back(std::move(s));
+    }
     if (!level.pathData.empty()) {
         Section s; s.id = (uint8_t)SectionId::PathData;
         putU64(s.blob, level.pathData.size());

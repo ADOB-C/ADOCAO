@@ -64,7 +64,6 @@ void CameraTimeline::build(const LevelData& level,
                            const std::vector<float>& tileBPMs) {
     m_keys.clear();
     m_droppedInactive = 0;
-    m_expandedKeys = 0;
     if (level.cameraEvents.empty()) return;
 
     // ── RepeatEvents 表：floor → 该层上的 [tag, info]（同 tag 后写的覆盖先写的，与 Re_ADOJAS 一致）
@@ -138,7 +137,6 @@ void CameraTimeline::build(const LevelData& level,
             k.bpm = bpmAt(ev.floor);
             k.ev = ev;
             m_keys.push_back(std::move(k));
-            m_expandedKeys++;
             continue;
         }
 
@@ -173,7 +171,6 @@ void CameraTimeline::build(const LevelData& level,
             k.ev.floor = (int32_t)epFloor;          // 与 Player 的 `{...event, floor}` 一致
             k.ev.angleOffset = (float)epAngleOffset;
             m_keys.push_back(std::move(k));
-            m_expandedKeys++;
         }
     }
 

@@ -88,7 +88,6 @@ public:
     // （验收：`ADOCAO_CPU_GEOMETRY=1 scripts/capture-gate.sh check` 51/51）。
     // 必须在 build() 之前设（buildStaticGL 里据此决定建哪张纹理）。
     void setCpuGeometry(bool b) { m_cpuGeometry = b; }
-    bool cpuGeometry() const { return m_cpuGeometry; }
     void drawHighlightedTile(int tileIdx, double camX, double camY) const;
 
     void setVisibleThreshold(int lastVisible);

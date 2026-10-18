@@ -210,7 +210,6 @@ struct LevelData {
     bool hasScaleRadiusEvents() const { return m_hasScaleRadius; }
     MoveTransform moveTransformAt(int64_t floor, double timeSec) const;
     float movePad() const { return m_movePad; }
-    float moveMaxScale() const { return m_moveMaxScale; }
 
     // ── Flash（全屏闪屏）──────────────────────────────────────────────
     // 语义见 Re_ADOJAS `FlashEffect`：每条事件把某个 plane 从 start 补到 end；
@@ -253,7 +252,6 @@ struct LevelData {
     void buildRecolorIndex(const Timeline& timeline);
     // 逐砖视觉是否随关卡时间变化（颜色事件/MoveTrack；Flash 不算，它不碰砖实例）。
     bool animatesTiles() const { return !colorEvents.empty() || !moveTrackEvents.empty(); }
-    bool hasRecolorIndex() const { return m_recolorReady; }
 
     Settings settings;
     std::vector<double> angleData;

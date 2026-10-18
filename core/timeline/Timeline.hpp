@@ -28,7 +28,6 @@ public:
 
     void build(const LevelData& level, bool exportOnly = false);
     void setForceHitsoundType(const std::string& type) { m_forceHitsoundType = type; }
-    const std::string& forceHitsoundType() const { return m_forceHitsoundType; }
 
     const LevelData* level() const { return m_level; }
 
@@ -81,7 +80,6 @@ public:
     bool  trackVisCoarseMonotone() const { return m_visCoarseMonotone; }
     int64_t tileCount() const { return (int64_t)m_tileBPM.size(); }
     const std::vector<double>& coarseDisappearTimes() const { return m_coarseDA; }
-    const std::vector<double>& coarseAppearTimes() const { return m_coarseAA; }
     // 逐层 TrackVis 时间（未窗口化时直接读密集数组；窗口化时物化所在块）
     const BlockResult* windowFor(int64_t i) const;   // 单块缓存（物化 i 所在的块）
     // 起始时间：未窗口化时直读密集数组，窗口化时物化所在块（单块缓存）

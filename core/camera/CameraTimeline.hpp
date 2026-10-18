@@ -36,12 +36,10 @@ public:
 
     // 诊断计数（测试/日志用）：被过滤掉的事件数（inactive / editorOnly）与展开出的条目数。
     size_t droppedInactive() const { return m_droppedInactive; }
-    size_t expandedKeys() const { return m_expandedKeys; }
 
 private:
     std::vector<CameraKey> m_keys;
     size_t m_droppedInactive = 0;
-    size_t m_expandedKeys = 0;
 };
 
 }  // namespace adofai

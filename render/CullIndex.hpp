@@ -104,9 +104,7 @@ public:
     size_t blockCount() const { return m_blocks.size(); }
     size_t floorsPerBlock() const { return m_floors; }
     size_t bytes() const { return m_blocks.size() * sizeof(Block) + m_sub.size() * sizeof(Block); }
-    bool hasSubLevel() const { return m_useSub; }
     // 诊断/测试用：把覆盖到的块直接换出来（只读）
-    const std::vector<Block>& blocks() const { return m_blocks; }
 
     template <class F>
     void buildSub(size_t b, size_t lo, size_t hi, F&& posAt, double halfExtent) {

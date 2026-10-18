@@ -47,6 +47,16 @@
 `amplitudeAt(audioPos)` 传进 `LevelScene::render`，`tileColorsAt(floor, t, amp)` 用它做 Volume 插值。
 离线包络 → **抓帧确定**（不依赖当时是否在放音），与 Re_ADOJAS 的 WebAudio RMS（2048 样本窗口）同义。
 
+**TweenColor（2026-10-17）**：`tileColorsAt(floor, t, amp, timeline)` 在事件 `duration > 0` 且
+`trackColorType ∈ {Single, Stripes}` 时插值（Re_ADOJAS `tickColorFade`）：
+
+* `duration` 的单位是**拍** → 秒 = `duration × timeline.durationAt(e->floor)`（该层一拍）。
+* 起点 = `timeline.startTimeAt(e->floor)`（玩家"跨过"事件层的那一刻）。
+* `t < start` → 上一段目标色；`t ≥ start+dur` → 目标色；中间按 `easeApply(e->ease, p)` 插值。
+* 打断语义 = `Kill(complete:true)`：新事件的 "from" 是**上一段的目标色**（不是当时的混合值）。
+* `justThisTile` 只影响本层，它的 "from" 是"若没有这条事件时该层生效的持久段"。
+* alpha 不插值（Re_ADOJAS 一直用新事件的 alpha）。
+
 **还没做**：
 * Neon/NeonLight/Basic/Minimal 的 **2×128 渐变条**（需要给每个顶点补一个"距外缘归一化"的 v，
   在 `TileShape::expand` 侧算；现在是硬边 ring，颜色对、过渡不对）。
@@ -58,7 +68,7 @@
   形状记录 25 → 29 texel；`tile.vert` 的 `fetchRec` 里 `layer * 6` 同步改成 `layer * 7`，
   `tile_cpu.vert` 的槽位/层边界常量也同步。几何逐位对拍（`geom_probe`，197 万坐标）**0 失败**。
 * 逐砖 alpha（8 位 hex 的 AA）。
-* TweenColor（`duration`/`ease` 已解析进 `ColorEvent`，插值未接）。
+* ~~TweenColor~~ —— 2026-10-17 已落地（见下）。
 * 向导 Colors 页现在只影响高亮/`--fill` 覆盖（谱面颜色优先），UI 文案要跟着改。
 
 ## 拖尾采样率：固定率 vs 自适应上限（2026-10-17）

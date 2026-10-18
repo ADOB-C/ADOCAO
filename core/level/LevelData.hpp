@@ -20,6 +20,8 @@
 
 namespace adofai {
 
+class Timeline;
+
 uint16_t internActionStrIn(std::vector<std::string>& table, const std::string& v);
 
 struct LevelData;
@@ -173,7 +175,16 @@ struct LevelData {
     const ColorEvent* colorEventAt(int64_t floor) const;
 
     // floor/t 时刻的最终 fill/stroke（含 Volume 幅度）。
-    TileColors tileColorsAt(int64_t floor, double timeSec, float amplitude = 0.0f) const;
+    // `timeline` 非空时按 TweenColor 语义处理 `duration`（拍 × 该层 BPM → 秒）：
+    // 事件在 `startTimeAt(floor)` 被"跨过"时开始渐变，`start+dur` 后到位；`t < start` 显示上一段目标色。
+    // nullptr = 不插值（纯静态色，测试/一次性查询用）。
+    TileColors tileColorsAt(int64_t floor, double timeSec, float amplitude = 0.0f,
+                            const Timeline* timeline = nullptr) const;
+
+    // 某层处生效的**持久段**（忽略 justThisTile / inactive / editorOnly）；没有 → nullptr。
+    const ColorEvent* persistentColorAtOrBefore(int64_t floor) const;
+    // 严格早于 floor 的最后一条持久段（TweenColor 的 "from" 色）。
+    const ColorEvent* persistentColorBefore(int64_t floor) const;
 
     // Lightweight action (avoids nlohmann DOM allocation for millions of actions)
     // 事件里的字符串（hitsound 名、trackDisappear 动画名）绝大多数是重复的少数几个值，

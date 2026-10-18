@@ -2,6 +2,7 @@
 // 覆盖六个 trackStyle 的 fill/stroke 派生 + 七种 trackColorType + 三种 pulse + Volume 幅度。
 #include "core/level/TileColor.hpp"
 #include "core/level/LevelData.hpp"
+#include "core/timeline/Timeline.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -117,6 +118,57 @@ int main() {
             if (hexAt(2) != "00ff00/00b300") { std::printf("FAIL colors floor2 (justThisTile): %s\n", hexAt(2).c_str()); fail++; }
             if (hexAt(3) != "ff0000/b30000") { std::printf("FAIL colors floor3 (inactive skipped): %s\n", hexAt(3).c_str()); fail++; }
             if (hexAt(5) != "ff0000/b30000") { std::printf("FAIL colors floor5: %s\n", hexAt(5).c_str()); fail++; }
+        }
+    }
+
+    // TweenColor：duration 是**拍**（× 该层时长 = 秒），start = startTimeAt(floor)；
+    // 生效前显示上一段目标色，生效中按 ease 插值，结束后到位。
+    {
+        const char* json = R"({"angleData":[0,90,0,90,0,90,0,90],"settings":{
+            "bpm":120,"trackColor":"FF0000","trackColorType":"Single","trackStyle":"Standard"},
+            "actions":[
+              {"floor":2,"eventType":"ColorTrack","trackColor":"00FF00","justThisTile":true,
+               "duration":1,"ease":"Linear"},
+              {"floor":4,"eventType":"ColorTrack","trackColor":"0000FF","duration":2,"ease":"Linear"}]})";
+        LevelData lv;
+        Timeline tl;
+        if (!lv.loadFromBuffer(json, std::strlen(json))) { std::printf("FAIL tween: load\n"); fail++; }
+        else {
+            tl.build(lv, false);
+            auto col = [&](int f, double t) {
+                const TileColors c = lv.tileColorsAt(f, t, 0.0f, &tl);
+                return hex3(c.fill) + "/" + hex3(c.stroke);
+            };
+            // 用 timeline 自己的时间（不同角度的砖拍数不同，别硬编码）
+            const double beat4 = tl.durationAt(4), start4 = tl.startTimeAt(4);
+            const double dur4 = 2.0 * beat4;
+            if (col(5, start4 - 0.05) != "ff0000/b30000") {
+                std::printf("FAIL tween before: %s\n", col(5, start4 - 0.05).c_str()); fail++;
+            }
+            if (col(5, start4 + dur4 * 0.5) != "800080/5a005a") {
+                std::printf("FAIL tween mid: %s\n", col(5, start4 + dur4 * 0.5).c_str()); fail++;
+            }
+            if (col(5, start4 + dur4 + 0.05) != "0000ff/0000b3") {
+                std::printf("FAIL tween after: %s\n", col(5, start4 + dur4 + 0.05).c_str()); fail++;
+            }
+            if (col(3, start4 + dur4 * 0.5) != "ff0000/b30000") {
+                std::printf("FAIL tween range: %s\n", col(3, start4 + dur4 * 0.5).c_str()); fail++;
+            }
+            // justThisTile：只影响这一层，且自己也有 fade（1 拍）
+            const double beat2 = tl.durationAt(2), start2 = tl.startTimeAt(2);
+            const double dur2 = 1.0 * beat2;
+            if (col(2, start2 - 0.05) != "ff0000/b30000") {
+                std::printf("FAIL jtt before: %s\n", col(2, start2 - 0.05).c_str()); fail++;
+            }
+            if (col(2, start2 + dur2 * 0.5) != "808000/5a5a00") {
+                std::printf("FAIL jtt mid: %s\n", col(2, start2 + dur2 * 0.5).c_str()); fail++;
+            }
+            if (col(2, start2 + dur2 + 0.05) != "00ff00/00b300") {
+                std::printf("FAIL jtt after: %s\n", col(2, start2 + dur2 + 0.05).c_str()); fail++;
+            }
+            if (col(3, start2 + dur2 * 0.5) != "ff0000/b30000") {
+                std::printf("FAIL jtt leak: %s\n", col(3, start2 + dur2 * 0.5).c_str()); fail++;
+            }
         }
     }
 

@@ -1,4 +1,5 @@
 #include "LevelData.hpp"
+#include "core/timeline/Timeline.hpp"
 #include "FloorWindow.hpp"   // ③ 切片 4：按块物化缓存（~LevelData 需要完整类型）
 #include "JsonCleaner.hpp"
 #include "ByteSource.hpp"   // 容器识别 + 解压后端接口（实现见 archive/）
@@ -1448,13 +1449,67 @@ const LevelData::ColorEvent* LevelData::colorEventAt(int64_t floor) const {
     return nullptr;
 }
 
-TileColors LevelData::tileColorsAt(int64_t floor, double timeSec, float amplitude) const {
+const LevelData::ColorEvent* LevelData::persistentColorAtOrBefore(int64_t floor) const {
+    for (auto it = colorEvents.rbegin(); it != colorEvents.rend(); ++it) {
+        if (it->floor > floor) continue;
+        if (it->flags & (kColorInactive | kColorEditorOnly)) continue;
+        if (it->flags & kColorJustThisTile) continue;
+        return &*it;
+    }
+    return nullptr;
+}
+
+const LevelData::ColorEvent* LevelData::persistentColorBefore(int64_t floor) const {
+    for (auto it = colorEvents.rbegin(); it != colorEvents.rend(); ++it) {
+        if (it->floor >= floor) continue;
+        if (it->flags & (kColorInactive | kColorEditorOnly)) continue;
+        if (it->flags & kColorJustThisTile) continue;
+        return &*it;
+    }
+    return nullptr;
+}
+
+TileColors LevelData::tileColorsAt(int64_t floor, double timeSec, float amplitude,
+                                   const Timeline* timeline) const {
+    const ColorEvent* e = colorEventAt(floor);
     TileColorConfig cfg = baseColorConfig();
-    if (const ColorEvent* e = colorEventAt(floor)) {
+    if (e) {
         cfg = e->cfg;
         if (!(e->flags & kColorHasGlow)) cfg.glowIntensity = settings.trackGlowIntensity;
     }
-    return computeTileColors(cfg, timeSec, (int)floor, amplitude);
+    const TileColors to = computeTileColors(cfg, timeSec, (int)floor, amplitude);
+
+    // TweenColor：只对 Single/Stripes（Re_ADOJAS `tickColorFade` 的判据）。
+    if (!e || !timeline || e->duration <= 0.0f) return to;
+    if (cfg.colorType != "Single" && cfg.colorType != "Stripes") return to;
+
+    const double start = timeline->startTimeAt(e->floor);
+    const double beat = (double)timeline->durationAt(e->floor);   // 一砖 = 一拍（秒）
+    const double dur = (double)e->duration * beat;
+    if (dur <= 0.0) return to;
+    if (timeSec >= start + dur) return to;
+
+    // "from" = 事件生效前的颜色（Re_ADOJAS 的 Kill(complete:true)：旧 tween 直接跳到目标色）。
+    const ColorEvent* fromE = (e->flags & kColorJustThisTile)
+                                  ? persistentColorAtOrBefore(e->floor)
+                                  : persistentColorBefore(e->floor);
+    TileColorConfig fromCfg = fromE ? fromE->cfg : baseColorConfig();
+    if (fromE && !(fromE->flags & kColorHasGlow)) fromCfg.glowIntensity = settings.trackGlowIntensity;
+    const TileColors from = computeTileColors(fromCfg, start, (int)floor, amplitude);
+
+    if (timeSec <= start) return from;
+    const double p = (timeSec - start) / dur;
+    const double q = easeApply((Ease)e->ease, p);   // core/util/Easing.hpp；不 clamp（与 Re_ADOJAS 一致）
+    auto mixCh = [&](std::uint8_t a, std::uint8_t b) {
+        return (std::uint8_t)std::clamp<long>(std::lround((double)a + ((double)b - (double)a) * q), 0, 255);
+    };
+    TileColors out;
+    for (int c = 0; c < 3; c++) {
+        out.fill[c] = mixCh(from.fill[c], to.fill[c]);
+        out.stroke[c] = mixCh(from.stroke[c], to.stroke[c]);
+    }
+    out.opacity = to.opacity;   // Re_ADOJAS 的 tickColorFade 也一直用 fromAlpha（= 新事件的 alpha）
+    return out;
 }
 
 // Fast parser: extract angleData float array from JSON without DOM allocation.

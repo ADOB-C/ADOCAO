@@ -70,3 +70,25 @@
 - 仍可按模块做更深的语义审计（例如 `AdocaoColumns` 的编码器分支、`AdocaoWindow` 的窗口重算
   分支是否有不可达组合），但机械可查的死代码已经清完。
 - `docs/` 里还有若干"实测 X 种粒度逐字节相同"一类历史结论，需要按细块后的实现重测再改。
+
+## 完成证据（2026-10-18）
+
+| 检查 | 结果 |
+|---|---|
+| `ctest --test-dir build` | **31/31** |
+| 像素门槛 `scripts/capture-gate.sh check` | **54/54 逐字节相同** |
+| `-Wall -Wextra -Wunused*`（排除第三方/链接重复） | **0 告警** |
+| 头文件 accessor 零调用扫描 | **0**（脚本：`X() const { return ...; }` 且全仓零调用） |
+| 成员字段出现次数 ≤2 扫描 | 仅剩 `TileMesh::m_fill/m_stroke`（memcpy 使用）与测试里的字符串护栏 |
+| `adocao pack angles360` 与审计前字节比 | **完全相同** |
+| 剔除粒度 4096/8192/16384 同帧 PNG | **逐字节相同** |
+| Windows 构建（MinGW） | 通过 |
+| 工作区 | clean |
+
+### 审计边界（诚实声明）
+
+- 已覆盖：`app/ core/level core/timeline core/camera core/util core/map render archive audio tests`
+  的机械可查项（未调用 API、恒真/恒假分支、只写字段、死文件、重复实现、静默 clamp），
+  并由四个模块级 subagent 逐文件通读 + 全仓调用点核对。
+- 仍需按需继续：个别编码器/窗口重算的**语义分支**（"在真实输入下是否可达"）无法靠
+  grep/告警判定，需要构造输入实测；这些列在"已知仍待处理"里，不假装已证完。

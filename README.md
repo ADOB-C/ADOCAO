@@ -111,7 +111,7 @@ All dependencies are fetched automatically via CMake `FetchContent`:
 
 ```
 adocao.exe --level <file> --music <file> [--width N] [--height N]
-           [--fullscreen] [--fill HEX] [--stroke HEX] [--bg HEX]
+           [--fullscreen] [--no-exclusive] [--fill HEX] [--stroke HEX] [--bg HEX]
            [--no-auto-stroke] [--no-hitsound] [--no-trail] [--debug]
            [--force-hitsound [TYPE]] [--auto-play] [--export] [--legacy-culling]
            [--msaa N]

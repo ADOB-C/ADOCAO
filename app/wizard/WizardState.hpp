@@ -144,8 +144,9 @@ struct State {
     bool  trailLengthInTiles = false;  // optional: length in tiles instead of seconds
     float trailTiles = 8.0f;
     bool fullscreen = false;
-    // Windows 专用：全屏走独占（帧数更高、抓屏工具抓不到）。见 Graphics 页与 docs/cli.md。
-    bool exclusive = false;
+    // Windows 专用：全屏走独占（帧数更高、抓屏工具抓不到）。默认开 —— 多数人只玩不录；
+    // 要抓屏就取消勾选（等价 CLI 的 `--no-exclusive`）。见 Graphics 页与 docs/cli.md。
+    bool exclusive = true;
     int  msaaIdx = 0;                  // 0 = Off
     int  resoIdx = 2;                  // default: 1920x1080
     int  cullBlockIdx = kCullBlockDefaultIdx;   // 剔除粗块粒度（Graphics 页）

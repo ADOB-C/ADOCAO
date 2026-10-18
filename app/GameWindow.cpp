@@ -82,13 +82,6 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     m_audioEngine = &result.audio;
     m_targetAspect = (float)cfg.resolutionW / (float)cfg.resolutionH;
     LOG_D("GameWindow::init: %lld tiles, fullscreen=%d", (long long)m_level->tileCount(), cfg.fullscreen);
-#ifndef _WIN32
-    // `--exclusive` 是 Win32 的概念（acquireMonitor 的独占全屏）。macOS/Linux 的
-    // glfwSetWindowMonitor 本来就不是独占，这个开关没有对应物 —— 别静默当没看见。
-    if (cfg.exclusiveFullscreen) {
-        LOG_W("--exclusive 只在 Windows 上有意义（本平台全屏不是独占），已忽略");
-    }
-#endif
 
     // Create window
     m_isFullscreen = cfg.fullscreen;

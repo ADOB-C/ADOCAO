@@ -23,7 +23,8 @@ void drawGraphicsPage(State& st, const Chrome& ch) {
 #ifdef _WIN32
     // 独占全屏是 Win32 的概念（acquireMonitor）；别的平台没有对应物，所以不画。
     // 呈现路径更短（少一次全帧 blt，见 docs/cli.md"全屏与录屏"），代价是 WGC/OBS 抓不到 ——
-    // 默认不勾。它也决定 Alt+Enter 用哪种模式，所以不跟 Fullscreen 复选框联动置灰。
+    // **默认勾上**（多数人只玩不录），要抓屏就取消勾选（= `--no-exclusive`）。
+    // 它也决定 Alt+Enter 用哪种模式，所以不跟 Fullscreen 复选框联动置灰。
     formLabel(ch, "Exclusive mode");
     ImGui::Checkbox("##exclusive", &st.exclusive);
 #endif

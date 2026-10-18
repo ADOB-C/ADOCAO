@@ -92,3 +92,17 @@
   并由四个模块级 subagent 逐文件通读 + 全仓调用点核对。
 - 仍需按需继续：个别编码器/窗口重算的**语义分支**（"在真实输入下是否可达"）无法靠
   grep/告警判定，需要构造输入实测；这些列在"已知仍待处理"里，不假装已证完。
+
+## 语义分支审计（2026-10-18 续）
+
+机械死代码清完后，按"真实输入下是否可达"核了几处：
+
+| 位置 | 核查方式 | 结论 |
+|---|---|---|
+| `AdocaoColumns` 的 7 个列级 codec | 已有 `tests/adocao_columns_test` 逐项断言取舍：Const / Dict / DeltaVarint / DeltaRleVarint / BitPack / Rle / Raw 都有输入能选中，且逐位往返 | 全部可达 |
+| `Codec::JsonPassthrough`(5) | 全仓无 encoder/decoder 分支 | **删枚举与 codecName case**，id 5 保留为空洞并写进格式文档 |
+| `SectionXz`(17) | writer 只写 SectionZstd；reader 有兼容分支 | 标注"仅读侧兼容"，删 codecName 里不可达的 case |
+| `CkFlags::kCkRadius` / `radiusScale` / `kCkSentinelRun` | checkpoint 重算不写半径，`sentinelRun` 由字段直接读、flag 位无读者 | **格式预留位**：写盘 96 B 记录不变，保留并在注释/文档里注明预留（不删除，否则破坏格式字节） |
+
+结论：列级编码器的每个分支都有真实输入；剩下的"看起来没人用"的只有格式预留位，
+它们是 `.adocao` 记录的一部分，删了会改文件字节 —— 因此按"保留 + 注明"处理，而不是删。

@@ -123,7 +123,6 @@ void drawWelcomePage(State& st, const Chrome& ch) {
                 st.cfg.exportDir = dir;
                 st.cfg.enableHitsounds = true;
                 st.cfg.exportHitsounds = true;
-                st.cfg.cancelled = false;
                 st.done = true;
             }
         }

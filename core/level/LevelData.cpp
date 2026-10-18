@@ -2894,7 +2894,6 @@ void LevelData::calculateTilePositions() {
             (float)(tiles[n-1].position[0] + std::cos(rad) * length),
             (float)(tiles[n-1].position[1] + std::sin(rad) * length)
         };
-        extra.angle = 180.0f;
         extra.direction = (float)dir;
         tiles.push_back(extra);
     }

@@ -8,7 +8,6 @@
 // Loading progress reporter passed to the loading callback
 struct LoadingProgress {
     std::atomic<float> percent{0.0f};  // 0.0 - 100.0
-    std::atomic<int>   stage{0};
     char stageText[256] = "Initializing...";
     std::mutex textMutex;  // guards stageText (written from loader thread, read from UI thread)
 };

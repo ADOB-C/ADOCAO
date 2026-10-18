@@ -149,7 +149,6 @@ struct State {
     int  cullBlockIdx = kCullBlockDefaultIdx;   // 剔除粗块粒度（Graphics 页）
 
     std::string lastError;
-    bool musicAutoTried = false;
 
     // Preload: background thread spawned by the Welcome page; the wizard loop
     // joins it and advances to Hitsounds when preloadFinished flips.

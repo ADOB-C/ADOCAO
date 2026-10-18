@@ -43,6 +43,13 @@ std::string executableDirectory() {
     auto pos = dir.find_last_of('/');
     if (pos != std::string::npos) dir = dir.substr(0, pos);
     return dir;
+#elif defined(_WIN32)
+    char buf[MAX_PATH];
+    DWORD n = GetModuleFileNameA(nullptr, buf, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return {};
+    std::string p(buf, n);
+    auto pos = p.find_last_of("\\/");
+    return pos == std::string::npos ? std::string{} : p.substr(0, pos);
 #else
     return {};
 #endif

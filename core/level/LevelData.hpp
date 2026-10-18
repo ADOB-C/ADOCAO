@@ -72,7 +72,8 @@ struct LevelData {
 
     // 32 B → 24 B：`index` 从来只被写入（`= i`），没有任何读者 —— 层号就是它在 `tiles` 里的位置。
     struct Tile {
-        float angle = 180.0f;
+        // 原 `float angle` 无人读（渲染/时间线只用 direction + position），删掉后
+        // 结构仍是 24 B（20 B + 对齐填充），但少了一个会误导人的"有角度值"字段。
         float direction = 0.0f;
         std::array<double, 2> position = {0.0, 0.0};
     };

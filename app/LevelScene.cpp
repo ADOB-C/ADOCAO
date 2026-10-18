@@ -13,19 +13,15 @@
 #include "render/Planet.hpp"
 #include "render/PlanetTrail.hpp"
 #include "core/timeline/Timeline.hpp"
-#include "core/timeline/PlaybackClock.hpp"
+#include "core/timeline/PlaybackClock.hpp"   // PlaybackFrame
 #include "core/timeline/PositionSolver.hpp"
 #include "core/util/Logger.hpp"
 #include "core/util/Scheduler.hpp"
 #include "core/util/Profile.hpp"
-#include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <algorithm>
-#include <chrono>
 #include <cmath>
-#include <fstream>
-#include <thread>
 #include <vector>
 
 #ifdef __APPLE__

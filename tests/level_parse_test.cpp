@@ -99,7 +99,7 @@ Digest digest(const LevelData& lv, bool ok) {
     }
     H t;  for (auto& x : lv.tiles) {
         // Tile::index 已删（层号 = tiles 里的位置，从来没有读者）—— 摘要里也不再哈希它
-        t.f32(x.angle); t.f32(x.direction); t.bytes(&x.position, sizeof(x.position));
+        t.f32(x.direction); t.bytes(&x.position, sizeof(x.position));
     }
     H s;
     s.i32(lv.settings.version); s.f32(lv.settings.bpm); s.f32(lv.settings.offset);

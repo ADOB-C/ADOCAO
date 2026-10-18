@@ -217,7 +217,6 @@ void startPreload(State& st) {
         st.preloadThread.clear();
     }
     st.preloadProgress.percent.store(0.0f);
-    st.preloadProgress.stage.store(0);
     {
         std::lock_guard<std::mutex> lk(st.preloadProgress.textMutex);
         snprintf(st.preloadProgress.stageText, sizeof(st.preloadProgress.stageText), "Starting...");

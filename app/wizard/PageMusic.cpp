@@ -18,15 +18,6 @@ void drawMusicPage(State& st, const Chrome& ch) {
     drawConfigHeader(ch, "Music", 100.0f);
 
     // Auto-detect music once (from parsed level + same-dir files)
-    if (!st.musicAutoTried) {
-        st.musicAutoTried = true;
-        if (st.musicBuf[0] == '\0' && st.cfg.preloadedLevel) {
-            std::string autoMusic = detectMusicFile(st.cfg.levelPath);
-            if (!autoMusic.empty())
-                snprintf(st.musicBuf, sizeof(st.musicBuf), "%s", autoMusic.c_str());
-        }
-    }
-
     formLabel(ch, "Music file");
     const float rowW = formCtrlW(ch);
     ImGui::SetNextItemWidth(rowW - kFormButtonW - kFormGap);   // 输入框 + 间距 + 按钮 = 控件列宽

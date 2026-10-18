@@ -107,7 +107,7 @@ void main() {
         bool dn = floor(aIconBits / 4.0) >= 1.0;
         bool on = (part < 7.5) ? tw : ((part < 8.5) ? up : dn);
         if (on) {
-            pos = vec3(k0 + aPivot.x, k1 + aPivot.y, 0.0);   // 图标在砖心（实例偏移是砖起点）   // 图标与砖共面（谁盖谁由绘制序决定）
+            pos = vec3(k0, k1, 0.0);   // 图标与砖共面（谁盖谁由绘制序决定）
             type = 1.0;
             color = (part < 7.5) ? kTwirlColor : ((part < 8.5) ? kSSUpColor : kSSDownColor);
         }
@@ -302,7 +302,7 @@ void main() {
         bool dn = floor(aIconBits / 4.0) >= 1.0;
         bool on = (part < 7.5) ? tw : ((part < 8.5) ? up : dn);
         if (on) {
-            pos = vec3(k0 + aPivot.x, k1 + aPivot.y, 0.0);   // 图标在砖心（实例偏移是砖起点）   // 图标与砖共面
+            pos = vec3(k0, k1, 0.0);   // 图标与砖共面
             type = 1.0;
             color = (part < 7.5) ? kTwirlColor : ((part < 8.5) ? kSSUpColor : kSSDownColor);
         }

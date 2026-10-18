@@ -59,7 +59,6 @@ public:
     bool open(const uint8_t* data, size_t length, std::string& err);
 
     uint32_t stride() const { return m_stride; }
-    uint64_t floorCount() const { return m_floors; }
     uint64_t blockCount() const { return m_blocks; }
     // angleData 是分块布局（按块寻址的前提）；action 列可能是 legacy（那就整段解一次再切，
     // 仍然正确、但少了那一侧的内存收益）
@@ -76,8 +75,6 @@ public:
     const std::vector<std::string>& strings() const { return m_strings; }
 
 private:
-    const uint8_t* m_file = nullptr;
-    size_t m_fileLen = 0;
     uint32_t m_stride = kCheckpointStride;
     uint64_t m_floors = 0;
     uint64_t m_blocks = 0;

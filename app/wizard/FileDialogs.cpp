@@ -115,6 +115,7 @@ namespace wizard {
 std::string openFileDialog(const char* title, const std::vector<std::string>& patterns,
                            const char* description) {
 #ifdef __APPLE__
+    (void)patterns;   // macOS 不传过滤器（见下）
     // macOS：tinyfd 走 osascript 的 `choose file`，**一旦给了类型表**，名字与类型匹配的
     // 文件夹就会被当成文件 —— 选得中、但进不去。本工程的谱恰恰都放在 `<名字>.adofai/`
     // 这种文件夹里（如 Charts/Song.adofai/），所以这里不传过滤器，保证文件夹永远能进去。

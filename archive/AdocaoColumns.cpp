@@ -146,6 +146,8 @@ const char* codecName(Codec c) {
         case Codec::BitPack: return "BitPack";
         case Codec::JsonPassthrough: return "JsonPassthrough";
         case Codec::Rle: return "Rle";
+        case Codec::SectionZstd: return "SectionZstd";
+        case Codec::SectionXz: return "SectionXz";
         case Codec::DeltaRleVarint: return "DeltaRleVarint";
     }
     return "?";

@@ -31,7 +31,7 @@ void Planet::destroyGPU() {
     if (m_vao) { glDeleteVertexArrays(1, &m_vao); m_vao = 0; }
 }
 
-bool Planet::buildGPU() {
+void Planet::buildGPU() {
     destroyGPU();
 
     constexpr int rings = 24, sectors = 24;

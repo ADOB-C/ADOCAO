@@ -29,7 +29,7 @@ public:
 
     void setTrailPoints(const double* xy, int count, int maxExpected);
 
-    bool buildGPU();
+    void buildGPU();
     void draw(Shader& shader, const Camera& camera, double camX, double camY) const;
     bool gpuBuilt() const { return m_vao != 0; }
     GLuint vao() const { return m_vao; }

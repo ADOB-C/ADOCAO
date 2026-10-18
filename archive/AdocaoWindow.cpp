@@ -109,8 +109,6 @@ bool gatherU(const ColumnView& v, uint64_t from, uint64_t to, std::vector<uint32
 }  // namespace
 
 bool FloorWindowSource::open(const uint8_t* data, size_t length, std::string& err) {
-    m_file = data;
-    m_fileLen = length;
     std::string e;
     if (!getSectionView(data, length, (uint8_t)SectionId::AngleData, m_angleSec, e)) {
         err = "窗口化：取 AngleData 段失败：" + e;

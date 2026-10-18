@@ -80,19 +80,6 @@ void drawSegmentHard(std::vector<uint8_t>& img, int W, int H,
     }
 }
 
-void drawDisc(std::vector<uint8_t>& img, int W, int H, double cx, double cy,
-              double r, const Rgba& c) {
-    int ix0 = std::max(0, (int)std::floor(cx - r - 1)), ix1 = std::min(W - 1, (int)std::ceil(cx + r + 1));
-    int iy0 = std::max(0, (int)std::floor(cy - r - 1)), iy1 = std::min(H - 1, (int)std::ceil(cy + r + 1));
-    for (int y = iy0; y <= iy1; ++y)
-        for (int x = ix0; x <= ix1; ++x) {
-            const double ddx = (double)x + 0.5 - cx, ddy = (double)y + 0.5 - cy;
-            const double d = std::sqrt(ddx * ddx + ddy * ddy);
-            const float cov = (float)(r + 0.5 - d);
-            if (cov > 0.0f) blend(&img[((size_t)y * W + x) * 4], c, cov);
-        }
-}
-
 }  // namespace
 
 bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector<uint8_t>& out) {

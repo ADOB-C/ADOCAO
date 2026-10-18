@@ -455,9 +455,6 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
         glEnable(GL_DEPTH_TEST);
     };
     drawFlashPass(1);   // Background：在砖之前（砖会盖住它）
-    // Foreground 也画在砖**之前**（= Re_ADOJAS 的 'behind' 模式）：官方/Re_ADOJAS 播放器里
-    // 黑闪（如 2025 floor 995 的 000000 1.0→0）不会把轨道盖死；画在最上层会得到纯黑屏。
-    drawFlashPass(0);
 
     m_tileMesh->setViewportHeightPx(m_viewportHpx);
     double vl, vr, vb, vt;      // 世界坐标 → double（见 docs/rendering.md 坐标约定）
@@ -519,4 +516,5 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
         glEnable(GL_DEPTH_TEST);
     }
 
+    drawFlashPass(0);   // Foreground：最上层
 }

@@ -113,9 +113,7 @@
 **Flash（2026-10-17 已落地）**：全屏闪屏，按 `plane` 分两层：
 
 * **Background**：在砖之前画（砖会盖住它，视觉上"只染背景"）；
-* **Foreground**：画在砖**之前**（= Re_ADOJAS 的 `'behind'` 模式）——官方/播放器里
-  黑闪（如 2025 floor 995 的 `000000 1.0→0`）不会把轨道盖死；画在最上层会得到纯黑屏
-  （2026-10-17 用户实测“tile≈998 纯黑”，官方同帧砖轮廓可见）。
+* **Foreground**：在所有内容之后画（屏幕空间最上层）；
 * 事件字段：`duration`（秒）、`plane`、`startColor`/`endColor`、`startOpacity`/`endOpacity`
   （0..100 → 0..1）、`ease`、`angleOffset`、`flashStyle`（Flash/Kill/StayBlack）；兼容旧格式
   `color`/`colorTo`/`opacity`/`flashStyle`。

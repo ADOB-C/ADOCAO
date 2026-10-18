@@ -68,6 +68,21 @@
 * 若要压"整张一帧"：下一步是**按段批量**算颜色（列表升序，每段一次；pulse/Volume 才逐砖），
   预期 ~5 ns/砖、26.2 万约 1–2 ms。profiler 段：`anim` / `animColor` / `animXform`。
 
+**ScaleRadius（2026-10-17 已落地）**：轨道半径缩放（黑洞/吸入类特效）。
+
+* 字段：`floor`、`scale`（%，缺省 100）。**继承**：从事件层起一直生效到下一个 ScaleRadius。
+* 算法（对齐 Re_ADOJAS `buildTileRadiusScales` + `applyRadiusScaleOffsets`）：
+  `r = scale/100`；从第 1 层起，若 `r ≠ 1`，沿**入口方向**（指向上一砖，`direction[i-1] + 180°`）
+  累加 `(1-r)` 个单位：`ox += cos(θ)(1-r)`、`oy += sin(θ)(1-r)`，然后
+  `tiles[i].position += (ox, oy)`。所以 `r>1` 把砖往**前进方向**推（拉长/绕圈），`r<1` 往回收。
+* 位置是**烘进 `tiles[i].position`** 的（和 PositionTrack 同一个 pass 之后），渲染/剔除/行星/相机
+  全都自动吃到；砖的**尺寸不变**（与原版一致）。
+* **副作用**：偏移是"按入口方向的前缀和"，checkpoint 里没有它 → 有 ScaleRadius 的谱面
+  **禁用起始时间窗口化**（保留密集数组，`LevelLoader` 里会打日志）。2³¹ 目标下这是待解项
+  （要么把前缀和放进 checkpoint，要么按窗口从最近事件回放）。
+* 验证：2025 有 335 条事件，t≈13.3–16.3 s 的"吸入"变形已出现；`.adocao` 动作列往返一致；
+  ctest 31/31；像素门槛按新行为重存。
+
 **MoveTrack（2026-10-17 已落地）**：轨道动画（位置/旋转/缩放/不透明度），对齐 Re_ADOJAS
 `buildTileMoveTrack` 的"每砖属性关键帧"：
 

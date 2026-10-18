@@ -354,6 +354,7 @@ inline LevelData::FastAction::Type eventTypeOf(KeyRef k) {
     if (keyIs(k, "RecolorTrack"))  return T::RecolorTrack;   // → colorEvents（范围 + 触发时间）
     if (keyIs(k, "Flash"))         return T::Flash;          // → flashEvents（全屏闪屏）
     if (keyIs(k, "MoveTrack"))     return T::MoveTrack;      // → moveTrackEvents（轨道动画）
+    if (keyIs(k, "ScaleRadius"))   return T::ScaleRadius;    // 轨道半径缩放（烘进砖位）
     return T::Other;
 }
 
@@ -886,6 +887,9 @@ inline bool buildAction(const ActionFields& f, LevelData::FastAction& a, bool& k
     case T::PositionTrack:
         if (f.hasOffset) { a.val1 = f.offX; a.val2 = f.offY; }
         a.flag = f.justThisTile;
+        break;
+    case T::ScaleRadius:
+        a.val1 = f.hasScale ? f.scaleX : 1.0f;
         break;
     case T::SetHitsound:
         a.strId = g_internOwner ? g_internOwner->internActionStr(f.hitsound) : 0;
@@ -2646,6 +2650,7 @@ bool LevelData::parseLegacy(const std::string& jsonStr, ProgressCb onProgress, b
             else if (et == "RecolorTrack") { jsonReadColorEvent(a, colorEvents, true); continue; }
             else if (et == "Flash") { jsonReadFlashEvent(a, flashEvents); continue; }
             else if (et == "MoveTrack") { jsonReadMoveTrackEvent(a, moveTrackEvents); continue; }
+            else if (et == "ScaleRadius") act.type = FastAction::ScaleRadius;
             else continue;
             if (act.type == FastAction::SetSpeed) {
                 if (a.HasMember("speedType") && std::string(a["speedType"].GetString()) == "Multiplier") {
@@ -2653,6 +2658,9 @@ bool LevelData::parseLegacy(const std::string& jsonStr, ProgressCb onProgress, b
                 } else { act.val1 = a.HasMember("beatsPerMinute") ? a["beatsPerMinute"].GetFloat() : 0.0f; }
             } else if (act.type == FastAction::Pause) {
                 act.val1 = a.HasMember("duration") ? a["duration"].GetFloat() : 0.0f;
+            } else if (act.type == FastAction::ScaleRadius) {
+                act.val1 = (a.HasMember("scale") && a["scale"].IsNumber())
+                               ? a["scale"].GetFloat() / 100.0f : 1.0f;
             } else if (act.type == FastAction::PositionTrack) {
                 if (a.HasMember("positionOffset") && a["positionOffset"].IsArray() && a["positionOffset"].Size() >= 2) {
                     act.val1 = a["positionOffset"][0].GetFloat(); act.val2 = a["positionOffset"][1].GetFloat();
@@ -2724,6 +2732,7 @@ bool LevelData::finishLoad(ProgressCb onProgress, bool exportOnly) {
     refreshDerivedCaches();
     if (!exportOnly) {
         applyPositionTrackOffsets();
+        applyRadiusScaleOffsets();
     }
     return true;
 }
@@ -2990,6 +2999,37 @@ void LevelData::applyPositionTrackOffsets() {
     }
 }
 
+void LevelData::applyRadiusScaleOffsets() {
+    m_hasScaleRadius = false;
+    std::vector<std::pair<int, float>> evs;
+    for (const FastAction& a : actions) {
+        if (a.type == FastAction::ScaleRadius) evs.push_back({a.floor, a.val1});
+    }
+    if (evs.empty()) return;
+    std::sort(evs.begin(), evs.end(),
+              [](const auto& x, const auto& y) { return x.first < y.first; });
+    m_hasScaleRadius = true;
+    const int64_t n = (int64_t)tiles.size();
+    if (n < 2) return;
+    float cur = 1.0f;
+    size_t ei = 0;
+    double ox = 0.0, oy = 0.0;
+    for (int64_t i = 0; i < n; ++i) {
+        while (ei < evs.size() && (int64_t)evs[ei].first == i) { cur = evs[ei].second; ++ei; }
+        if (i > 0 && cur != 1.0f) {
+            const double theta = (double)tiles[(size_t)i - 1].direction * 3.14159265358979323846 / 180.0 + 3.14159265358979323846;
+            const double off = 1.0 - (double)cur;
+            ox += std::cos(theta) * off;
+            oy += std::sin(theta) * off;
+        }
+        if (i > 0) {
+            tiles[(size_t)i].position[0] += ox;
+            tiles[(size_t)i].position[1] += oy;
+        }
+    }
+    LOG_D("ScaleRadius: %zu 条事件（偏移已烘进砖位）", evs.size());
+}
+
 void WinCacheDeleter::operator()(FloorWindowCache* p) const { delete p; }
 
 LevelData::~LevelData() = default;
@@ -3033,6 +3073,7 @@ bool LevelData::rebuildPositions(std::string* err) {
     calculateTilePositions();
     refreshDerivedCaches();
     applyPositionTrackOffsets();
+        applyRadiusScaleOffsets();
     return true;
 }
 

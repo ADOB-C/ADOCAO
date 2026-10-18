@@ -202,6 +202,10 @@ struct LevelData {
         float moveX = 0.0f, moveY = 0.0f;   // 相对基础位置
     };
     void buildMoveTrackIndex(const Timeline& timeline);
+    // ScaleRadius（轨道半径缩放）：逐砖继承的 radiusScale，按入口方向累进成位置偏移，
+    // 直接烘进 tiles[i].position（必须在 finishLoad 里、位置算完之后）。
+    void applyRadiusScaleOffsets();
+    bool hasScaleRadiusEvents() const { return m_hasScaleRadius; }
     MoveTransform moveTransformAt(int64_t floor, double timeSec) const;
     float movePad() const { return m_movePad; }
     float moveMaxScale() const { return m_moveMaxScale; }
@@ -292,7 +296,7 @@ struct LevelData {
         uint16_t strId = 0;                 // 0 = 空串；索引进 actionStrTable
         // MoveCamera / RepeatEvents **不留在 actions 里**（keep=false）：它们走 cameraEvents /
         // repeatEvents 两个富结构。这两个枚举值只用于"解析时认出它"。
-        enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, MoveCamera, RepeatEvents, ColorTrack, RecolorTrack, Flash, MoveTrack, Other } type = Other;
+        enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, MoveCamera, RepeatEvents, ColorTrack, RecolorTrack, Flash, MoveTrack, Other, ScaleRadius } type = Other;
         bool flag = false;
         float val1 = 0, val2 = 0;
     };
@@ -322,6 +326,7 @@ struct LevelData {
     std::vector<MoveTrackEvent> m_moveIndex;
     std::vector<std::vector<uint32_t>> m_moveBlocks;
     bool m_moveReady = false;
+    bool m_hasScaleRadius = false;
     float m_movePad = 0.0f;
     float m_moveMaxScale = 1.0f;
     // 可选 `wc`：并行剔除时传**本线程自己的克隆**（见 `FloorWindowCache::clone()`）；

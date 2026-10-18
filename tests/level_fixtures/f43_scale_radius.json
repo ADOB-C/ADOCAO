@@ -1,0 +1,9 @@
+{
+  "angleData": [0, 0, 90, 0, 0, 90, 0, 0, 0, 90, 0, 0],
+  "settings": {"bpm": 120},
+  "actions": [
+    {"floor": 2, "eventType": "ScaleRadius", "scale": 250, "trend": 0},
+    {"floor": 6, "eventType": "ScaleRadius", "scale": 50},
+    {"floor": 9, "eventType": "ScaleRadius", "scale": 100}
+  ]
+}

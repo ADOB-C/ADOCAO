@@ -191,8 +191,12 @@ void runLevelLoading(const LauncherConfig& cfg, LoadingProgress& progress, LoadR
     // 只有"可重算（无 AT 事件）+ 粗索引单调"时才丢（`dropTrackVisArrays()` 自己判定），
     // 否则保留密集数组、行为与以前**完全一样**。
     if (result.timeline) {
-        const bool dropStart = result.timeline->dropStartTimesArray();
-        LOG_I("timeline: 起始时间密集数组 %s（省 8 B/层）", dropStart ? "已窗口化" : "保留");
+        // ScaleRadius 的偏移是"按入口方向的前缀和"，窗口重算的 checkpoint 里没有它 →
+        // 有 ScaleRadius 时保留密集数组（窗口化会丢半径偏移）。
+        const bool hasRadius = result.level->hasScaleRadiusEvents();
+        const bool dropStart = hasRadius ? false : result.timeline->dropStartTimesArray();
+        LOG_I("timeline: 起始时间密集数组 %s（%s）", dropStart ? "已窗口化" : "保留",
+              hasRadius ? "ScaleRadius 需要密集位置" : (dropStart ? "省 8 B/层" : "不可重算"));
         const bool dropped = result.timeline->dropTrackVisArrays();
         LOG_I("timeline: TrackVis 密集数组 %s（%s）", dropped ? "已窗口化" : "保留",
               dropped ? result.timeline->blocksRecomputableWhy() : "不可重算/粗索引不单调");

@@ -771,3 +771,10 @@ off 那两个采样值相等=被钳住，on 是正常插值，差值正好是**�
       "距外缘归一化 v"，在 `TileShape::expand` 侧算，别动几何位精确）；② 逐砖 alpha；
       ③ 抓帧状态补 6 种 trackStyle + 3 种 pulse 的对照图；
       ④ 向导 Colors 页文案（现在只影响高亮/`--fill`）。
+
+- [ ] **2e9：相机去掉密集数组依赖**（`docs/2e9.md` §3.5）：`CameraTimeline::build` 改收
+      `Timeline`（窗口化 `startTimeAt/durationAt/bpmAt`，只查 K 个事件层）；`entryBeat` 按点
+      求值（不再 `vector<double>(n)` = 8 B/层）；`kMaxCamKeys`（20 万）+ 超限 fixture。
+- [ ] **2e9：ColorTrack 的段级缓存**（§3.5）：每段预解析 fill/stroke/opacity/style；绘制列表
+      按段指针批量（O(可见+段数)，目标 ≤2 ms @26.2 万可见）；`ColorEvent` 预存 startTime/beatSeconds；
+      事件数上限/按块索引（逐层 justThisTile 时 2³¹ → 320 GB）。

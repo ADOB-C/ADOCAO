@@ -32,10 +32,10 @@ void Camera::setZoom(float zoom) {
 
 void Camera::setAdoZoom(float adoZoom) {
     // clamp：谱面里出现 0/负数时别把投影做成 inf（视觉上"整屏空白"比不缩放更糟）
+    // 只兜底 0/负数（会除零/投影 inf）。Re_ADOJAS 的 setZoom 不做上下限夹取；
+    // 谱面/用户给多大就是多大（极端值仍是有限 float：21937.8/1e9 = 2.2e-5）。
     double z = (double)adoZoom;
     if (!(z > 0.0)) z = 100.0;
-    if (z < 1.0) z = 1.0;
-    if (z > 100000.0) z = 100000.0;
     setZoom((float)(kAdoZoomNumerator / z));
 }
 

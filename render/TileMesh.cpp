@@ -243,7 +243,7 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     int wantFloors = m_cullFloors;
     if (const char* e = std::getenv("ADOCAO_CULL_BLOCK")) {
         wantFloors = std::atoi(e);
-        LOG_I("cull-index: ADOCAO_CULL_BLOCK=%d 覆盖设置值 %d", wantFloors, m_cullFloors);
+        LOG_W("cull-index: ADOCAO_CULL_BLOCK=%d 覆盖了设置的粒度 %d（env 优先）", wantFloors, m_cullFloors);
     }
     if (wantFloors != 0) {
         const int clamped = wantFloors < kCullMinBlockFloors ? kCullMinBlockFloors

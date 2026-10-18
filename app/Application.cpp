@@ -137,6 +137,18 @@ static std::string executableDir() {
 // one case falls through to the per-user log directory, then the temp dir.
 static const std::string& logPath() {
     static const std::string path = []() -> std::string {
+        // 每进程独立的日志：`ADOCAO_LOG_FILE=<path>`（相对 = 当前工作目录）。
+        // 给 profiler/多实例用 —— 否则所有实例共用可执行文件旁边的 ADOCAO.log。
+        if (const char* e = std::getenv("ADOCAO_LOG_FILE")) {
+            if (*e) {
+                std::filesystem::path p(e);
+                if (p.has_parent_path()) {
+                    std::error_code ec;
+                    std::filesystem::create_directories(p.parent_path(), ec);
+                }
+                return p.string();
+            }
+        }
         const std::string exeDir = executableDir();
         if (!exeDir.empty() && exeDir.find("/Contents/MacOS") == std::string::npos) {
             const std::string p = exeDir + "/ADOCAO.log";

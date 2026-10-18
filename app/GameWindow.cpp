@@ -775,6 +775,15 @@ void GameWindow::run() {
     std::vector<double> soakWork, soakFrame;
     std::vector<int> soakDrawn;
     double soakLastLog = 0.0;
+    // 采样间隔可调：`ADOCAO_PROFILE_INTERVAL_MS`（默认 10000）。只影响"每 N 秒打一行"，
+    // 不影响逐帧采样本身（每帧都计入；结尾的 reportSteady 也是整段）。
+    double soakIntervalSec = 10.0;
+    if (const char* e = std::getenv("ADOCAO_PROFILE_INTERVAL_MS")) {
+        const double v = std::atof(e);
+        if (v >= 100.0) soakIntervalSec = v / 1000.0;
+    }
+    char soakTag[32];
+    std::snprintf(soakTag, sizeof(soakTag), "%gs", soakIntervalSec);
 
     while (!glfwWindowShouldClose(m_window)) {
         const double loopT0 = glfwGetTime();
@@ -826,9 +835,9 @@ void GameWindow::run() {
                 soakFrame.push_back((glfwGetTime() - loopT0) * 1000.0);
                 soakDrawn.push_back(m_scene->drawnInstances());
                 const double nowS = glfwGetTime();
-                if (nowS - soakLastLog >= 10.0) {
+                if (nowS - soakLastLog >= soakIntervalSec) {
                     soakLastLog = nowS;
-                    soakLine("10s", soakWork, soakFrame, soakDrawn, 1000.0 / 60.0);
+                    soakLine(soakTag, soakWork, soakFrame, soakDrawn, 1000.0 / 60.0);
                 }
             }
         } else {

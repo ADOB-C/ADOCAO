@@ -61,6 +61,18 @@ Visuals page / CLI):
 音色游标一起跳过去。给 profiling/自动化用（配合 `ADOCAO_PROFILE=1 ADOCAO_EXIT_AFTER_MS=N`
 就能量"从某个中途点开始播"的整段剖面，而不必从头播）。
 
+### 录屏（OBS/QuickTime）建议
+
+应用默认 `glfwSwapInterval(0)`（无 vsync）。macOS 上 **OBS 的 Window Capture** 抓无 vsync 的
+GL 窗口时，可能抓到“两帧合成”的撕裂帧（轨道重影/重叠），或偶发 1–2 帧全黑；这不是渲染输出。
+对比/录屏时：
+
+```bash
+ADOCAO_VSYNC=1 ./build/adocao "谱面"
+```
+
+或改用 **Display Capture**。确定性抓帧（`--capture`）始终走单帧渲染，不受此影响。
+
 ### 抓帧与关卡相机（`--capture` / `--capture-camera`）
 
 `--capture <out.png>` 是**确定性抓帧**（不走 wall clock / 音频 / 帧时间反馈），

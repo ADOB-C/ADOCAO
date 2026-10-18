@@ -166,7 +166,13 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     if (!m_window) { LOG_E("Failed to create game window"); return false; }
 
     glfwMakeContextCurrent(m_window);
-    glfwSwapInterval(0);
+    // 录屏/对比时建议 ADOCAO_VSYNC=1：无 vsync 的 GL 窗口在 macOS + OBS 窗口捕获下
+    // 会抓到“两帧合成”的撕裂帧（表现为轨道重影/黑帧）。
+    const bool vsync = [] {
+        const char* e = std::getenv("ADOCAO_VSYNC");
+        return e && std::atoi(e) != 0;
+    }();
+    glfwSwapInterval(vsync ? 1 : 0);
     glGetIntegerv(GL_MAJOR_VERSION, &m_glMajor);
     glGetIntegerv(GL_MINOR_VERSION, &m_glMinor);
     if (!loadGLCore()) { LOG_E("Failed to load OpenGL functions"); glfwDestroyWindow(m_window); return false; }

@@ -143,6 +143,7 @@ struct State {
     float trailSamplesPerTile = 4.0f;
     bool  trailLengthInTiles = false;  // optional: length in tiles instead of seconds
     float trailTiles = 8.0f;
+    int  windowMode = 1;   // 0=Windowed / 1=Borderless / 2=Exclusive（fullscreen 由它派生）
     bool fullscreen = false;
     // Windows 专用：全屏走独占（帧数更高、抓屏工具抓不到）。默认开 —— 多数人只玩不录；
     // 要抓屏就取消勾选（等价 CLI 的 `--no-exclusive`）。见 Graphics 页与 docs/cli.md。

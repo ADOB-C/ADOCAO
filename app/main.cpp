@@ -132,7 +132,7 @@ void printHelp(Mode mode, bool all) {
         "  --level <file>  --music <file>  --width N  --height N  --fullscreen\n"
         "  --fill <hex>  --stroke <hex>  --bg <hex>  --no-auto-stroke\n"
         "  --msaa N                                 抗锯齿采样数（0/2/4/8）\n"
-        "  --no-exclusive                           Windows：全屏改用无边框窗口（能抓屏；默认独占）\n"
+        "  --windowed | --borderless | --exclusive  窗口模式三档（默认 Borderless；--no-exclusive = --borderless）\n"
         "  --no-hitsound  --force-hitsound [TYPE]  --auto-play  --no-trail\n"
         "  --start-at SEC            播放从该时刻开始（等价于选砖后按空格；含音乐 seek）\n"
         "  --cull-block N            剔除的粗块粒度（层/块，默认 4096；0 = 关闭索引走全扫）\n"
@@ -250,7 +250,9 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--music") == 0     && i+1<argc) cli.musicPath = argv[++i];
             else if (std::strcmp(a, "--width") == 0     && i+1<argc) cli.resolutionW = atoi(argv[++i]);
             else if (std::strcmp(a, "--height") == 0    && i+1<argc) cli.resolutionH = atoi(argv[++i]);
-            else if (std::strcmp(a, "--fullscreen") == 0)           cli.fullscreen = true;
+            else if (std::strcmp(a, "--fullscreen") == 0)           { cli.fullscreen = true; cli.windowMode = 1; }
+            else if (std::strcmp(a, "--windowed") == 0)             { cli.fullscreen = false; cli.windowMode = 0; }
+            else if (std::strcmp(a, "--borderless") == 0)           { cli.fullscreen = true;  cli.windowMode = 1; }
             else if (std::strcmp(a, "--fill") == 0      && i+1<argc) { cli.trackFillColor = argv[++i]; cli.trackColorOverride = true; }
             else if (std::strcmp(a, "--stroke") == 0    && i+1<argc) { cli.trackStrokeColor = argv[++i]; cli.trackColorOverride = true; }
             else if (std::strcmp(a, "--bg") == 0        && i+1<argc) cli.backgroundColor = argv[++i];
@@ -270,7 +272,8 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--auto-play") == 0)             cli.autoPlay = true;
             else if (std::strcmp(a, "--start-at") == 0 && i+1<argc)    cli.startAt = (float)atof(argv[++i]);
             else if (std::strcmp(a, "--msaa") == 0 && i+1<argc)      cli.msaaSamples = atoi(argv[++i]);
-            else if (std::strcmp(a, "--no-exclusive") == 0)          cli.exclusiveFullscreen = false;
+            else if (std::strcmp(a, "--exclusive") == 0)             { cli.exclusiveFullscreen = true;  cli.windowMode = 2; cli.fullscreen = true; }
+            else if (std::strcmp(a, "--no-exclusive") == 0)          { cli.exclusiveFullscreen = false; cli.windowMode = 1; }
             else if (std::strcmp(a, "--no-trail") == 0)              cli.showTrail = false;
             else if (std::strcmp(a, "--cull-block") == 0 && i+1<argc) cli.cullBlockFloors = atoi(argv[++i]);
             else if (std::strcmp(a, "--capture") == 0 && i+1<argc)      cli.capturePath = argv[++i];

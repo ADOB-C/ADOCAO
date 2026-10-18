@@ -74,24 +74,22 @@ ADOCAO_VSYNC=1 ./build/adocao "谱面"
 
 或改用 **Display Capture**。确定性抓帧（`--capture`）始终走单帧渲染，不受此影响。
 
-### 全屏与录屏（`--fullscreen` / `--no-exclusive` / Alt+Enter）
+### 窗口模式（`--windowed` / `--borderless` / `--exclusive` / Alt+Enter）
 
-全屏有**两种**，**默认独占**（大多数人只玩不录）：
+和 osu! / SDL 一样是**三档**（`cfg.windowMode`：0/1/2），默认 **Borderless**：
 
-| | 实现 | 呈现路径 | 抓屏（WGC/DXGI） | Alt+Tab |
-|---|---|---|---|---|
-| **默认：独占全屏（Windows）** | `glfwSetWindowMonitor(monitor)` → `acquireMonitor()`：`ChangeDisplaySettingsEx(CDS_FULLSCREEN)` + `WS_POPUP` + `HWND_TOPMOST` | 可翻页，少一次全帧 blt → **帧数通常更高**（分辨率越高、越偏 GPU/呈现瓶颈，差距越大） | **抓不到**（不在 DWM 合成链上） | 会切出去 |
-| **`--no-exclusive`：无边框窗口全屏** | `GLFW_DECORATED=false`，铺满显示器，**不** acquireMonitor | DWM 合成；GL 窗口每帧 blt 一份到重定向表面 | **能抓** | 秒切 |
+| 模式 | Windows | macOS / Linux | 抓屏（WGC/OBS） |
+|---|---|---|---|
+| **Windowed**（`--windowed`） | 带边框的普通窗口，`--width×--height` | 同左 | 能 |
+| **Borderless**（`--borderless`，默认；`--no-exclusive` 是它的旧别名） | `GLFW_DECORATED=false` + 铺满显示器，**不** acquireMonitor | 无边框、铺满显示器的普通窗口（合成器全程在链上） | **能** |
+| **Exclusive**（`--exclusive`） | `glfwSetWindowMonitor(monitor)` → `acquireMonitor()`：`CDS_FULLSCREEN` + `WS_POPUP` + `HWND_TOPMOST`，可翻页 → **帧数通常更高** | `glfwSetWindowMonitor(monitor)` → Cocoa 无边框 + level 抬到菜单栏之上（原生全屏） | Windows **抓不到**；macOS 仍可抓（没有真正的独占路径） |
 
-* 向导 **Graphics 页**有同样的开关（`Exclusive mode`，只在 Windows 上显示，**默认勾上**）：
-  取消勾选 = `--no-exclusive`。
-* **要录屏/给 AdoFrame 测就取消勾选**：独占全屏不在 DWM 合成链上，OBS 的窗口捕获、WGC、
-  AdoFrame 都拿不到它（用户 2026-10 报的"ADOCAO 是唯一一个没有全屏录制的播放器"就是这个）。
-* 独占还会顺带挑一个视频模式（GLFW 取同分辨率里刷新率最高的），这是"独占"的一部分；无边框那条
-  路完全不碰显示模式。
-* macOS / Linux 没有这个开关：`glfwSetWindowMonitor` 本来就不是独占（Cocoa 去标题栏 + 抬
-  level 盖住菜单栏，X11/Wayland 走 EWMH），`exclusiveFullscreen` 在那边只是不生效，全屏照样能抓。
-* `--width/--height` 只对**窗口模式**有意义（全屏始终铺满显示器）。
+* 向导 **Graphics 页**是同一个三档下拉（`Window mode`），选完即写入 `cfg.windowMode`。
+* **要录屏/AdoFrame 测就用 Borderless**：Windows 的 Exclusive 不在 DWM 合成链上，OBS 窗口捕获、
+  WGC、AdoFrame 都拿不到（用户 2026-10 报的"ADOCAO 是唯一一个没有全屏录制的播放器"就是这个）。
+* Windows 的 Exclusive 会顺带挑一个视频模式（同分辨率里刷新率最高的）；Borderless 完全不碰显示模式。
+* Alt+Enter 在 **Windowed ↔ 当前 fullscreen 模式**之间切（记住 `cfg.windowMode`）。
+* `--width/--height` 只对 **Windowed** 有意义（两种全屏都铺满显示器）。
 
 想量真实帧率，先确认日志里的 `swap interval:` 一行：`0` 才是无 vsync（默认），`1` 是
 `ADOCAO_VSYNC=1` 打开的、上限就是显示器刷新率。另外注意 **WGC / DXGI 复制类抓屏只能看见

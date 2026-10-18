@@ -28,7 +28,10 @@ struct LauncherConfig {
     // Windows 专用：全屏走“独占”而不是无边框窗口。**默认开**（大多数人只玩不录）：
     // 无边框 GL 窗口每帧要把后备缓冲 blt 到 DWM 的重定向表面，独占可以翻页，帧数更高；
     // 代价是它不在 DWM 合成链上，WGC/OBS 抓不到。要录屏就取消勾选 / 加 `--no-exclusive`。
-    bool   exclusiveFullscreen = true;
+    // 0 = 窗口（带边框）/ 1 = 无边框铺满（可抓屏）/ 2 = 独占（Win：acquireMonitor；
+    // macOS：原生全屏 / 低延迟但抓屏受限）。`fullscreen` 由它派生（mode != 0）。
+    int    windowMode = 1;
+    bool   exclusiveFullscreen = true;   // 兼容旧代码：= (windowMode == 2)
     int  resolutionW = 1920;
     int  resolutionH = 1080;
     bool fullscreen = false;

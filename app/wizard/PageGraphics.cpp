@@ -17,17 +17,14 @@ void drawGraphicsPage(State& st, const Chrome& ch) {
     ImGui::SetNextItemWidth(formCtrlW(ch));
     ImGui::Combo("##reso", &st.resoIdx, kResoNames.data(), (int)kResoNames.size());
 
-    formLabel(ch, "Fullscreen");   // 布尔字段：标签在左列、框在控件列
-    ImGui::Checkbox("##fullscreen", &st.fullscreen);
-
-#ifdef _WIN32
-    // 独占全屏是 Win32 的概念（acquireMonitor）；别的平台没有对应物，所以不画。
-    // 呈现路径更短（少一次全帧 blt，见 docs/cli.md"全屏与录屏"），代价是 WGC/OBS 抓不到 ——
-    // **默认勾上**（多数人只玩不录），要抓屏就取消勾选（= `--no-exclusive`）。
-    // 它也决定 Alt+Enter 用哪种模式，所以不跟 Fullscreen 复选框联动置灰。
-    formLabel(ch, "Exclusive mode");
-    ImGui::Checkbox("##exclusive", &st.exclusive);
-#endif
+    // 窗口模式三档（对齐 osu! / SDL）：Windowed / Borderless（无边框铺满，可抓屏）/
+    // Exclusive（Win：acquireMonitor；macOS：原生全屏）。fullscreen 由它派生。
+    formLabel(ch, "Window mode");
+    ImGui::SetNextItemWidth(formCtrlW(ch));
+    static const char* kWindowModes[] = {"Windowed", "Borderless", "Exclusive"};
+    ImGui::Combo("##windowmode", &st.windowMode, kWindowModes, 3);
+    st.fullscreen = (st.windowMode != 0);
+    st.exclusive  = (st.windowMode == 2);
 
     formLabel(ch, "MSAA");         // Off/2x/4x/8x
     ImGui::SetNextItemWidth(formCtrlW(ch));

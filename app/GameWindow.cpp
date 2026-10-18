@@ -141,7 +141,7 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
         GLFWwindow* w = nullptr;
         if (cfg.fullscreen) {
 #ifdef _WIN32
-            if (cfg.exclusiveFullscreen) {
+            if (cfg.windowMode == 2) {
                 // 显式 `--exclusive`：走 Win32 的 acquireMonitor ——
                 // ChangeDisplaySettingsEx(CDS_FULLSCREEN) + WS_POPUP + HWND_TOPMOST。
                 // 呈现路径更短（无边框 GL 窗口每帧要把后备缓冲 blt 到 DWM 的重定向表面，
@@ -166,8 +166,20 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
             // macOS/Linux 本来就不是"独占"：Cocoa 只是去标题栏 + 把 level 抬到
             // NSMainMenuWindowLevel+1（盖住菜单栏），X11/Wayland 走 EWMH fullscreen，
             // 合成器全程在链上，抓屏没问题 —— 保持 glfwSetWindowMonitor 这条路。
-            glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
-            w = glfwCreateWindow(fsW, fsH, "ADOCAO", primary, nullptr);
+            if (cfg.windowMode == 2) {
+                // 原生全屏（glfwSetWindowMonitor 那条：Cocoa 无边框 + level 抬到菜单栏之上）
+                glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
+                w = glfwCreateWindow(fsW, fsH, "ADOCAO", primary, nullptr);
+            } else {
+                // 无边框铺满：普通窗口（合成器全程在链上，OBS/录屏能抓）
+                glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+                w = glfwCreateWindow(fsW, fsH, "ADOCAO", nullptr, nullptr);
+                if (w) {
+                    int mx = 0, my = 0;
+                    if (primary) glfwGetMonitorPos(primary, &mx, &my);
+                    glfwSetWindowPos(w, mx, my);
+                }
+            }
 #endif
         } else {
             glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
@@ -206,7 +218,7 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     if (cfg.fullscreen && mode) {
         LOG_I("fullscreen: %dx%d @ %d Hz（%s）", mode->width, mode->height, mode->refreshRate,
 #ifdef _WIN32
-              cfg.exclusiveFullscreen ? "独占全屏：呈现路径更短，但 WGC/OBS 抓不到"
+              cfg.windowMode == 2 ? "独占全屏：呈现路径更短，但 WGC/OBS 抓不到"
                                       : "无边框窗口，DWM 合成 → WGC/OBS 可抓"
 #else
               "原生全屏，合成器在链上 → 可抓"
@@ -536,7 +548,7 @@ void GameWindow::toggleFullscreen() {
     // 跟 createWindow 里同一条口径：默认无边框窗口（DWM 合成、WGC 能抓）；
     // `--exclusive` 时才走 acquireMonitor 的独占全屏（帧数略高、抓不到）。
     if (m_isFullscreen) {
-        if (m_cfg->exclusiveFullscreen) {
+        if (m_cfg->windowMode == 2) {
             glfwSetWindowMonitor(m_window, nullptr,
                 m_windowedX, m_windowedY, m_windowedW, m_windowedH, 0);
         } else {
@@ -560,7 +572,7 @@ void GameWindow::toggleFullscreen() {
         int fsW = (int)(mode->width / (csx > 0.0f ? csx : 1.0f));
         int fsH = (int)(mode->height / (csy > 0.0f ? csy : 1.0f));
 
-        if (m_cfg->exclusiveFullscreen) {
+        if (m_cfg->windowMode == 2) {
             glfwSetWindowMonitor(m_window, primary, 0, 0, fsW, fsH, mode->refreshRate);
         } else {
             glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_FALSE);
@@ -572,6 +584,7 @@ void GameWindow::toggleFullscreen() {
 #else
     if (m_isFullscreen) {
         // Go windowed
+        glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_TRUE);
         glfwSetWindowMonitor(m_window, nullptr,
             m_windowedX, m_windowedY, m_windowedW, m_windowedH, 0);
         m_isFullscreen = false;
@@ -590,7 +603,16 @@ void GameWindow::toggleFullscreen() {
         int fsW = (int)(mode->width / (csx > 0.0f ? csx : 1.0f));
         int fsH = (int)(mode->height / (csy > 0.0f ? csy : 1.0f));
 
-        glfwSetWindowMonitor(m_window, primary, 0, 0, fsW, fsH, mode->refreshRate);
+        if (m_cfg->windowMode == 2) {
+            glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_TRUE);
+            glfwSetWindowMonitor(m_window, primary, 0, 0, fsW, fsH, mode->refreshRate);
+        } else {
+            int mx = 0, my = 0;
+            glfwGetMonitorPos(primary, &mx, &my);
+            glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_FALSE);
+            glfwSetWindowSize(m_window, fsW, fsH);
+            glfwSetWindowPos(m_window, mx, my);
+        }
         m_isFullscreen = true;
     }
 #endif

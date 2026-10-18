@@ -100,6 +100,7 @@ void main() {
         if (on) {
             pos = vec3(k0, k1, 0.0);   // 图标与砖共面（谁盖谁由绘制序决定）
             type = 1.0;
+            layer = 1.0;   // 与 fill 共面（z=0）
             color = (part < 7.5) ? kTwirlColor : ((part < 8.5) ? kSSUpColor : kSSDownColor);
         }
     } else {
@@ -177,7 +178,8 @@ void main() {
     // stroke 层（z 更小=更近）压过 fill；同层同 z 的 part 由 GL_LESS 丢弃后画的那个，
     // 避免半透明砖内部 part 自重叠被混合两次（2026-10-18：单砖内部暗阶梯）。
     pos.z -= (1.0 - layer) * 2e-4;
-    if (part >= 6.0) pos.z -= 2e-4;   // 图标（P_ICON_*）最近，盖在 fill/stroke 之上
+    // 图标与 fill **共面**（z=0）：不靠 z 偏移，靠第二趟 draw + GL_LEQUAL 压过 fill。
+    // 固定 z 偏移在"几百万砖同屏"时一定会穿透（可见窗口的 z 间距只有 1e-7 量级）。
     if (aXform.x == 0.0 && aXform.y == 1.0 && aXform.z == 1.0) {
         pos = vec3(pos.xy + aMove, pos.z);          // 纯位移：逐位同旧路径
     } else {

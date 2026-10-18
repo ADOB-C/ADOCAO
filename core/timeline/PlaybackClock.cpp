@@ -95,19 +95,17 @@ void PlaybackClock::updateFrame() {
     if (n >= 2) {
         endTime = m_timeline->startTimeAt(n - 1);
         if (t >= endTime) {
-            // 只定格**球**，不定格**时间**：结尾的 Flash（2025 是 768 拍白色淡出）
-            // 和 MoveCamera（512 拍推出）都排在最后一层，按时间推进才播得出来。
-            // 时间继续走到音乐结束（syncToAudio 让 t 跟着音频位置），球留在最后一格中心。
+            // 结尾 = 官方的 **Infinite Rotation**（Re_ADOJAS `Player.ts` 的
+            // "past the last tile" 分支）：枢轴星停在最后一格**中心**，移动星继续
+            // 以半径 1 绕它转，角速度 = 该格的 bpm。别再手写"两颗球都放到格心"——
+            // 那会让红蓝完全重合（2026-10-18 用户问的"为什么重叠"就是它）。
+            // 时间继续走：结尾的 Flash（2025 是 768 拍白色淡出）和 512 拍 MoveCamera
+            // 都排在最后一层，时间不走就永远不播。
             m_frame.timeInLevel = t;
             m_frame.elapsedMs = m_elapsedTime;
             m_currentTileIndex = n - 2;
             m_frame.tileIndex = m_currentTileIndex;
-            const auto& p = m_timeline->level()->tilePositionAt(n - 2);
-            double dirDeg = m_timeline->level()->tileDirectionAt(n - 2);
-            double rad = dirDeg * 3.14159265358979323846 / 180.0;
-            // 停在最后一格的**中心**（格子起点 + 半格）
-            m_frame.redPosition = glm::dvec2(p[0] + std::cos(rad) * 0.5, p[1] + std::sin(rad) * 0.5);
-            m_frame.bluePosition = m_frame.redPosition;
+            PositionSolver::positionAt(*m_timeline, t, m_frame.redPosition, m_frame.bluePosition);
             return;
         }
     }

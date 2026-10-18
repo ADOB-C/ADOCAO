@@ -276,13 +276,9 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
     sc.rateMin        = m_trailRateMin;
     sc.rateMax        = m_trailRateMax;
 
-    // 关卡结束后时间还在走（结尾的 Flash/MoveCamera 要放），但**球停在最后一格**：
-    // 拖尾按 frame.timeInLevel 采样（窗口随时间滑走），但采样时刻**夹到末尾** ——
-    // 窗口滑出末尾后不再有点 → 拖尾缩短、消失。若不夹，PositionSolver 会在末尾之外
-    // 继续外推位置，拖尾被拉成飞出屏幕/绕成结的带子（2026-10-18 用户看到的
-    // 结尾彩色方块/环就是它）。
-    const double tEnd = timeline.tileCount() > 0
-                      ? timeline.startTimeAt(timeline.tileCount() - 1) : frame.timeInLevel;
+    // 拖尾按时间正常采样即可：关卡结束后是"移动星继续绕枢轴星转"（Infinite Rotation，
+    // 见 PlaybackClock），positionAtTile 在末尾之外走的是**轨道角**而不是外推直线，
+    // 所以不会再画出飞出屏幕的带子（2026-10-18 用户看到的彩色方块/环）。
     PositionSolver::TrailWindow win;
     {
         profile::Scoped _s("trailWindow");
@@ -293,7 +289,7 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
         profile::Scoped _s("trailSample");
         PositionSolver::sampleTrailRange(timeline, win.startTime, frame.timeInLevel, win.sampleRate,
                                          frame.redPosition, frame.bluePosition,
-                                         redPts, bluePts, tEnd);
+                                         redPts, bluePts);
     }
 
     // 【诊断，env 门控】拖尾点哈希：A/B "按块物化 provider" 是否改变了拖尾

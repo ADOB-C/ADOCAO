@@ -82,8 +82,9 @@ bool decodeCheckpoints(const uint8_t* p, size_t n, uint32_t& stride,
     stride = rdU32(p);
     if (stride == 0) return false;
     const uint64_t count = rdU64(p + 8);
-    if (!have(n, 16, (size_t)count * kCheckpointBytes)) return false;
+    // 先验 count 再算 count*96：反过来乘法可能先溢出，护栏等于没防。
     if (count > (uint64_t)1 << 40) return false;
+    if (!have(n, 16, (size_t)count * kCheckpointBytes)) return false;
     out.reserve((size_t)count);
     size_t off = 16;
     for (uint64_t i = 0; i < count; ++i, off += kCheckpointBytes) {

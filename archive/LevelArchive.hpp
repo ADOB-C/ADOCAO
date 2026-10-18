@@ -56,7 +56,6 @@ public:
     bool failed() const override;
     bool stuck() const override;       // 单个值 > 半窗，调用方退回整份解压
     bool eof() const override;
-    size_t halfSize() const override;
     const std::string& error() const override;
 
 private:

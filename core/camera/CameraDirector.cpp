@@ -53,7 +53,6 @@ void CameraDirector::resetState() {
     m_pos = Vec{};
     m_timer = 0.0;
     m_followMode = true;
-    m_holdOffset = Vec{};
 
     m_lastEventRelativePosition = Vec{};
     m_lastUsedMovementType = LevelData::CamPlayer;
@@ -150,18 +149,13 @@ void CameraDirector::update(double nowSeconds, double deltaSeconds, float bpm, d
 
     if (m_followMode) {
         const double t = clamp01(m_timer / camspeed);
-        const double tx = m_topos.x + m_holdOffset.x;
-        const double ty = m_topos.y + m_holdOffset.y;
+        const double tx = m_topos.x;
+        const double ty = m_topos.y;
         m_pos.x = m_frompos.x + (tx - m_frompos.x) * t;
         m_pos.y = m_frompos.y + (ty - m_frompos.y) * t;
     } else {
         m_pos = Vec{};
     }
-}
-
-void CameraDirector::setHoldOffset(double x, double y) {
-    m_holdOffset.x = x;
-    m_holdOffset.y = y;
 }
 
 // ── 事件 → 4 条 tween（startEffect，逐行对应 Re_ADOJAS） ───────────────────

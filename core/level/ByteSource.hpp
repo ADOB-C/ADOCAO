@@ -48,7 +48,6 @@ public:
     virtual bool failed() const = 0;
     virtual bool stuck() const = 0;                            // 单个值 > 半窗 → 调用方退回整份解压
     virtual bool eof() const = 0;
-    virtual size_t halfSize() const = 0;
     virtual const std::string& error() const = 0;
 };
 

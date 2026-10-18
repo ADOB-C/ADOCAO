@@ -128,9 +128,6 @@ void HitsoundManager::setHitsoundType(const std::string& type) {
     m_synthesized = false;
 }
 
-void HitsoundManager::setVolume(float vol) {
-    m_volume = std::max(0.0f, std::min(100.0f, vol)) / 100.0f;
-}
 
 void HitsoundManager::setEnabled(bool enabled) {
     m_enabled = enabled;

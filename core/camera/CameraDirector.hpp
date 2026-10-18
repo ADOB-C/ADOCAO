@@ -35,7 +35,6 @@ public:
                 double planetX, double planetY, int64_t tileIndex);
 
     // 长按带：跟随目标叠加的圆心滑动量（每帧由 app 写；非长按砖写 0）。
-    void setHoldOffset(double x, double y);
 
     // ── 结果 ───────────────────────────────────────────────────────────────
     double x() const { return m_camParent.x + m_pos.x; }
@@ -81,7 +80,6 @@ private:
     Vec    m_frompos, m_topos, m_pos;
     double m_timer = 0.0;
     bool   m_followMode = true;
-    Vec    m_holdOffset;
 
     // 记账
     Vec     m_lastEventRelativePosition;

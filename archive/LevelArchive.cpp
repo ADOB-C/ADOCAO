@@ -340,7 +340,6 @@ size_t ArchiveStream::size() const { return m_impl->len; }
 bool ArchiveStream::failed() const { return m_impl->failed; }
 bool ArchiveStream::stuck() const { return m_impl->stuck; }
 bool ArchiveStream::eof() const { return m_impl->eof; }
-size_t ArchiveStream::halfSize() const { return m_impl->half; }
 const std::string& ArchiveStream::error() const { return m_impl->error; }
 
 namespace archive {

@@ -6,7 +6,6 @@
 #include "core/util/Logger.hpp"
 #include "core/util/Scheduler.hpp"
 #include <fstream>
-#include <sstream>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -15,7 +14,6 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cstdio>
 #include <iterator>
 #include "core/util/CountLimits.hpp"
 #include "core/util/Easing.hpp"
@@ -1953,7 +1951,12 @@ void LevelData::buildMoveTrackIndex(const Timeline& timeline) {
         for (int64_t f = e.lo; f <= e.hi; f += step) {
             auto& v = m_moveBlocks[(size_t)f / kRecolorBlock];
             if (v.empty() || v.back() != (uint32_t)i) v.push_back((uint32_t)i);
-            if (++total > kRecolorMaxEntries) { capped = true; break; }
+            if (++total > kRecolorMaxEntries) {
+                LOG_W("MoveTrack: 索引条目超过上限 %zu，后续事件被截断（范围/事件数异常）",
+                      (size_t)kRecolorMaxEntries);
+                capped = true;
+                break;
+            }
         }
     }
     for (auto& v : m_moveBlocks) {
@@ -2989,7 +2992,7 @@ void LevelData::refreshDerivedCaches() {
             tileHasTwirl[floor] = true; break;
         case FastAction::SetSpeed:
             tileHasSetSpeed[floor] = true;
-            if (floor >= 0 && floor < n) ssEvents.push_back({floor, a.val1, a.flag});
+            ssEvents.push_back({floor, a.val1, a.flag});
             break;
         case FastAction::PositionTrack:
             tilePositionOffsets[floor] = {a.val1, a.val2, a.flag}; break;
@@ -3045,8 +3048,6 @@ void LevelData::refreshDerivedCaches() {
             }
         }
     }
-
-    std::sort(bookmarkFloors.begin(), bookmarkFloors.end());
 
     // Viewer convenience: tile 0 and the final tile are always jump targets,
     // even when the chart defines no Bookmark events (Ctrl+←/→ while stopped).
@@ -3204,7 +3205,6 @@ void LevelData::releaseMemory() {
     hitsoundCachesReleased = true;
     // atStates 只有 Timeline::build() 用（它在本函数之前就跑完了），运行时只靠 hasAtStates 判定，
     // 所以实体可以释放：每条 101 B（两个 std::string + 2 float + bool），AnimateTrack 密集的谱上很可观。
-    atStates.clear();
     std::unordered_map<int, ATState>().swap(atStates);
     std::string().swap(pathData);
     // angleData kept: needed by TileMesh::build() for midspin detection

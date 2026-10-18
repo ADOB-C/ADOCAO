@@ -26,7 +26,6 @@ public:
     static void setDefaultHitsoundSubdir(const std::string& subdir);
 
     void setHitsoundType(const std::string& type);
-    void setVolume(float vol);  // 0-100
     void setEnabled(bool enabled);
     bool isEnabled() const { return m_enabled; }
 
@@ -72,7 +71,6 @@ private:
     size_t m_readCursor = 0;
 
     std::string m_hitsoundType = "Kick";
-    float m_volume = 1.0f;
     bool m_enabled = true;
     bool m_synthesized = false;
     bool m_playing = false;

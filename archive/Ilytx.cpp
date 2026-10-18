@@ -83,8 +83,9 @@ bool findMember(const char* tar, size_t length, const char* want, const char*& d
                                                  : memberName(m);
         // 只认普通文件；目录（'5'）与 GNU 扩展（'L'/'K'）跳过/报错
         if (typeflag == '0' || typeflag == '\0') {
-            if (leaf == want || (leaf.size() > 2 && leaf.compare(leaf.size() - strlen(want), strlen(want), want) == 0
-                                 && leaf[leaf.size() - strlen(want) - 1] == '/')) {
+            const size_t wl = strlen(want);
+            if (leaf == want || (leaf.size() > wl && leaf.compare(leaf.size() - wl, wl, want) == 0
+                                 && leaf[leaf.size() - wl - 1] == '/')) {
                 data = m.data;
                 size = m.size;
                 return true;

@@ -166,7 +166,6 @@ std::unique_ptr<FloorWindowCache> FloorWindowCache::clone() const {
     c->m_tileCount = m_tileCount;
     c->m_ready = m_ready;
     c->m_windowed = m_windowed;
-    c->m_why = m_why;
     c->m_block = -1;                 // 可变：全新窗口
     c->m_blocks = 0;
     return c;
@@ -251,22 +250,18 @@ bool FloorWindowCache::init(LevelData& level, const std::vector<double>& startTi
     const size_t nData = (size_t)level.angleCount();
     m_tileCount = level.tileCount();          // 丢数组之前的权威砖数（含末尾合成砖）
     if (nData == 0 || m_tileCount < (int64_t)(nData + 1)) {
-        m_why = "tiles 还没算好（需要在 finishLoad 之后调用）";
-        err = m_why;
+        err = "tiles 还没算好（需要在 finishLoad 之后调用）";
         return false;
     }
     if (level.hasAtStates) {   // 有 AnimateTrack：atStates 需要事件本体，本条路不适用
-        m_why = "有 AnimateTrack（需要事件本体）";
-        err = m_why;
+        err = "有 AnimateTrack（需要事件本体）";
         return false;
     }
     if (isCW.size() < nData) {
-        m_why = "缺 tileIsCW";
-        err = m_why;
+        err = "缺 tileIsCW";
         return false;
     }
     if (!computeCheckpoints(level, kCheckpointStride, startTimes, bpms, m_ck, err)) {
-        m_why = err.c_str();   // 让日志说清楚为什么没接
         return false;
     }
 
@@ -274,7 +269,6 @@ bool FloorWindowCache::init(LevelData& level, const std::vector<double>& startTi
     m_extra = level.tiles.back();                // 末尾那块合成砖不在任何窗口里，单独留一份
     m_hasExtra = (level.tileCount() > (int64_t)nData);
     m_ready = true;
-    m_why = "可窗口化";
     return true;
 }
 

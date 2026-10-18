@@ -35,8 +35,7 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
         double dist = 1.0;
         glm::dvec2 mv(p0[0] + std::cos(angle) * dist, p0[1] + std::sin(angle) * dist);
         glm::dvec2 pv(p0[0], p0[1]);
-        if (0 % 2 == 0) { redOut = pv; blueOut = mv; }
-        else            { blueOut = pv; redOut = mv; }
+        redOut = pv; blueOut = mv;
         return;
     }
 
@@ -93,8 +92,7 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
         double angle = cw ? (startAngle + dts * rps) : (startAngle - dts * rps);
         glm::dvec2 mv(p0[0] + std::cos(angle), p0[1] + std::sin(angle));
         glm::dvec2 pv(p0[0], p0[1]);
-        if (0 % 2 == 0) { redOut = pv; blueOut = mv; }
-        else            { blueOut = pv; redOut = mv; }
+        redOut = pv; blueOut = mv;
         return;
     }
     if (tileIdx >= n - 1) {
@@ -133,9 +131,7 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
 
 double PositionSolver::tilePathSpeed(const Timeline& timeline, double t) {
     if (timeline.tileCount() == 0) return 0.0;
-    int idx = timeline.findTileIndex(t);
-    if (idx < 0) idx = 0;
-    if (idx >= (int)timeline.tileCount()) idx = (int)timeline.tileCount() - 1;
+    const int idx = timeline.findTileIndex(t);   // 保证落在 [0, n-1]
     const double d = timeline.durationAt(idx);
     if (d <= 1e-9) return 0.0;
 
@@ -155,15 +151,12 @@ PositionSolver::TrailWindow PositionSolver::trailWindow(const Timeline& timeline
                                                         const TrailSamplingConfig& cfg) {
     TrailWindow w;
     w.startTime = t;
-    w.sampleRate = cfg.fixedRate;
-    if (timeline.tileCount() == 0) return w;
+    if (timeline.tileCount() == 0) { w.sampleRate = cfg.fixedRate; return w; }
 
     // 1) Window first: seconds (default) or a tile count back.
     double start = t - (double)cfg.duration;
     if (cfg.lengthInTiles) {
-        int i = timeline.findTileIndex(t);
-        if (i < 0) i = 0;
-        if (i >= (int)timeline.tileCount()) i = (int)timeline.tileCount() - 1;
+        int i = timeline.findTileIndex(t);   // 保证落在 [0, n-1]
         // Walk back by tile COUNT (not by accumulated seconds) and take a
         // fraction of the tile before that for a fractional request.
         const double back = std::max(0.0, (double)cfg.tiles);

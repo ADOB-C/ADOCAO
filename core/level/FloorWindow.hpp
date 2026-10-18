@@ -114,7 +114,6 @@ public:
     bool ready() const { return m_ready; }
     int64_t tileCount() const { return m_tileCount; }   // 丢数组之后仍然权威（= 当初的 tiles.size()）
     bool windowed() const { return m_windowed; }
-    const char* why() const { return m_why; }
     size_t blocksMaterialized() const { return m_blocks; }
     // 第 i 层的 Tile（物化所在块；i == angleData.size() 时是末尾那块合成砖）
     const LevelData::Tile* tileAt(int64_t i) const;
@@ -140,7 +139,6 @@ private:
     int64_t m_tileCount = 0;
     bool m_ready = false;
     bool m_windowed = false;
-    const char* m_why = "未初始化";
     mutable int64_t m_block = -1;
     // 复用的重算输出（**不每次重建**：容量保留 → 没有 churn；`tileAt` 直接指进这里）
     mutable FloorWindow m_scratch;

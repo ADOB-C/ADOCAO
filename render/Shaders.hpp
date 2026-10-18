@@ -213,7 +213,7 @@ out vec4 fragColor;
 const vec3 kTwirlColor = vec3(0.502, 0.0, 0.502);
 const vec3 kSSUpColor  = vec3(1.0, 0.0, 0.0);
 const vec3 kSSDownColor= vec3(0.0, 0.0, 1.0);
-const float kIconRadius = 0.11;
+const float kIconRadius = 0.22;   // Re_ADOJAS uIconSize = 0.44（直径）
 
 void main() {
     vec3 color = vColor;

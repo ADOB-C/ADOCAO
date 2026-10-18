@@ -21,7 +21,7 @@ public:
     PlanetTrail* trail = nullptr;
 
     Planet() = default;
-    Planet(const glm::vec3& color, bool showTrail, float planetRadius = 0.25f);
+    Planet(const glm::vec3& color, bool showTrail, float planetRadius = 0.22f);
     ~Planet();
 
     Planet(const Planet&) = delete;

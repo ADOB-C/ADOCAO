@@ -114,7 +114,9 @@
 
 * **Background**：在砖之前画（砖会盖住它，视觉上"只染背景"）；
 * **Foreground**：在所有内容之后画（屏幕空间最上层）；
-* 事件字段：`duration`（秒）、`plane`、`startColor`/`endColor`、`startOpacity`/`endOpacity`
+* 事件字段：`duration`（**拍**，`buildFlashIndex` 里换算成秒 = `duration × 该层一拍 / pitch`；
+  2025 floor 995 的 `dur 32` 在 bpm 12150 下 ≈ 0.16 s，官方实测“纯黑只有几帧”）、`plane`、
+  `startColor`/`endColor`、`startOpacity`/`endOpacity`
   （0..100 → 0..1）、`ease`、`angleOffset`、`flashStyle`（Flash/Kill/StayBlack）；兼容旧格式
   `color`/`colorTo`/`opacity`/`flashStyle`。
 * 语义（对齐 Re_ADOJAS `FlashEffect`）：触发时把该 plane 设成 start 再按 ease 补到 end；

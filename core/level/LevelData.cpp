@@ -1771,10 +1771,15 @@ TileColors LevelData::tileColorsAt(int64_t floor, double timeSec, float amplitud
 }
 
 void LevelData::buildFlashIndex(const Timeline& timeline) {
+    // Flash 的 duration 是**拍**（和 MoveTrack/相机一致），不是秒：
+    // 2025 floor 995 的 `000000 1.0→0 dur 32` 在 bpm 12150 下 ≈ 0.16 s（几帧），
+    // 官方实测"纯黑但只有几帧"；按秒算会黑 32 秒（2026-10-17 用户实测）。
+    const double pitch = std::max(0.1, (double)settings.pitch / 100.0);
     for (FlashEvent& e : flashEvents) {
         const double beat = (double)timeline.durationAt(e.floor);
         e.trigger = (double)timeline.startTimeAt(e.floor) +
                     ((double)e.angleOffset / 180.0) * beat;
+        e.durSec = (double)e.duration * beat / pitch;
     }
     std::stable_sort(flashEvents.begin(), flashEvents.end(),
                      [](const FlashEvent& a, const FlashEvent& b) { return a.trigger < b.trigger; });
@@ -1796,12 +1801,12 @@ LevelData::FlashState LevelData::flashStateAt(uint8_t plane, double timeSec) con
             st.alpha = 1.0f;
             return st;
         }
-        if (i->duration <= 0.0f) {                          // 零时长：停在终值
+        if (i->durSec <= 0.0) {                             // 零时长：停在终值
             st.color[0] = i->endColor[0]; st.color[1] = i->endColor[1]; st.color[2] = i->endColor[2];
             st.alpha = i->endOpacity;
             return st;
         }
-        const double p = std::clamp((timeSec - i->trigger) / (double)i->duration, 0.0, 1.0);
+        const double p = std::clamp((timeSec - i->trigger) / i->durSec, 0.0, 1.0);
         const double q = easeApply((Ease)i->ease, p);
         for (int c = 0; c < 3; c++) {
             st.color[c] = (uint8_t)std::clamp<long>(std::lround(

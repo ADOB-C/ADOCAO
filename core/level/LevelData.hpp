@@ -216,7 +216,8 @@ struct LevelData {
     // duration<=0 或补完后**保持**终值，直到下一次 Flash/Kill。
     struct FlashEvent {
         int32_t floor = 0;
-        float duration = 0.0f;      // 秒（Re_ADOJAS 直接用 event.duration 秒）
+        float duration = 0.0f;      // 原始（拍；buildFlashIndex 换算成 durSec）
+        double durSec = 0.0;        // 秒 = duration × 该层一拍 / pitch
         float angleOffset = 0.0f;   // 触发偏移（度）→ trigger = startTime(floor) + angleOffset/180*拍
         float startOpacity = 1.0f;  // 0..1（事件里的 0..100 已归一）
         float endOpacity = 1.0f;

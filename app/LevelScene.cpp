@@ -426,7 +426,7 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
         glDepthMask(GL_TRUE);
         glEnable(GL_DEPTH_TEST);
     };
-    drawFlashPass(1);   // Background：在砖之前（砖会盖住它）
+    if (!env::flag("ADOCAO_DEBUG_NO_FLASH")) drawFlashPass(1);   // Background：在砖之前（砖会盖住它）
 
     m_tileMesh->setViewportHeightPx(m_viewportHpx);
     double vl, vr, vb, vt;      // 世界坐标 → double（见 docs/rendering.md 坐标约定）
@@ -495,5 +495,5 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
         glEnable(GL_DEPTH_TEST);
     }
 
-    drawFlashPass(0);   // Foreground：最上层
+    if (!env::flag("ADOCAO_DEBUG_NO_FLASH")) drawFlashPass(0);   // Foreground：最上层
 }

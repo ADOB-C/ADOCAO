@@ -35,6 +35,7 @@
 | `ADOCAO_PROFILE` | 布尔 | 关 | 开分段计时（`core/util/Profile.hpp`） |
 | `ADOCAO_PROFILE_FILE` | 路径 | `<ADOCAO.log 所在目录>/ADOCAO.prof` | `.prof`（CSV）路径；相对 = CWD |
 | `ADOCAO_PROFILE_INTERVAL_MS` | 整数（ms） | `10000` | 每隔 N ms 落一行 `interval`（<100 忽略） |
+| `ADOCAO_DEBUG_NO_FLASH` | 布尔 | 关 | 跳过 Flash 的 BG/FG 两趟，便于看清轨道（抓帧/调试用） |
 | `ADOCAO_EXIT_AFTER_MS` | 浮点（ms） | `0` = 不自动退 | 跑满 N ms 正常退出，让 `end`/`segment` 汇总落盘 |
 | `ADOCAO_LOG_FILE` | 路径 | exe 旁 → 系统日志目录 | 改 `ADOCAO.log` 路径（`.prof` 默认跟着走）；相对 = CWD，父目录自动建 |
 

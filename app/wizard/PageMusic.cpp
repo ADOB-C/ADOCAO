@@ -54,7 +54,6 @@ void drawMusicPage(State& st, const Chrome& ch) {
         st.cfg.forceHitsoundType = st.forceHS ? kHitsoundTypes[st.forceHSIdx] : "";
         st.cfg.msaaSamples       = kMsaaSamples[st.msaaIdx];
         st.cfg.windowMode        = st.windowMode;
-        st.cfg.exclusiveFullscreen = (st.windowMode == 2);
         st.cfg.resolutionW       = kResoW[st.resoIdx];
         st.cfg.resolutionH       = kResoH[st.resoIdx];
         st.cfg.fullscreen        = st.fullscreen;

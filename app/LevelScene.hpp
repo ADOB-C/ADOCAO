@@ -34,7 +34,8 @@ public:
 
     // Compile shaders (with inline fallback), create planets and allocate the
     // tile mesh. A GL context must be current. Returns false on shader failure.
-    bool init(const LauncherConfig& cfg, const adofai::LevelData& level);
+    bool init(const LauncherConfig& cfg, const adofai::LevelData& level,
+              const adofai::Timeline* timeline = nullptr);
 
     // Build tile mesh + planet GPU buffers synchronously (main thread/context).
     // After this the caller must release the LevelData mesh temporaries
@@ -75,6 +76,9 @@ private:
 
     adofai::TileMesh* m_tileMesh = nullptr;
     const adofai::LevelData* m_level = nullptr;   // 砖色（ColorTrack）查询用；生命周期由调用方保证
+    // 形状表要用它把 trackStyle 解析到"砖被踩到的那一刻"（见 TileMesh::build）；
+    // 由 init() 传入、buildSync() 消费 —— 生命周期同样由调用方（GameWindow）保证。
+    const adofai::Timeline* m_buildTimeline = nullptr;
     bool m_trackColorOverride = false;            // --fill/--stroke：整条轨道用同一套颜色
     std::unique_ptr<adofai::Planet> m_redPlanet;
     std::unique_ptr<adofai::Planet> m_bluePlanet;
@@ -86,6 +90,8 @@ private:
     float m_fillRGB[3] = {1, 1, 1}, m_strokeRGB[3] = {0, 0, 0};
     bool m_showTrail = true;
     float m_trailDuration = 0.4f;
+    float m_trailSagitta  = 0.0f;   // >0 = 按"每样本偏离 ≤ N px"反推采样率（0 = 关闭）
+    float m_lastZoom      = 100.0f; // 上一帧渲染时的相机放大倍数（applyFrame 算 pixelsPerTile 用）
     float m_trailSampleRate = 200.0f;
     // Trail sample-rate governor (see setMeasuredFrameMs)
     bool m_trailAdaptive = true;

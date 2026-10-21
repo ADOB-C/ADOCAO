@@ -17,14 +17,14 @@ void drawGraphicsPage(State& st, const Chrome& ch) {
     ImGui::SetNextItemWidth(formCtrlW(ch));
     ImGui::Combo("##reso", &st.resoIdx, kResoNames.data(), (int)kResoNames.size());
 
-    // 窗口模式三档（对齐 osu! / SDL）：Windowed / Borderless（无边框铺满，可抓屏）/
-    // Exclusive（Win：acquireMonitor；macOS：原生全屏）。fullscreen 由它派生。
+    // 窗口模式两档（对齐 osu! 的 Borderless）：Windowed / Borderless（无边框铺满，
+    // 不切显示模式、不进 Space、抓屏工具能抓）。fullscreen 由它派生。
+    // **没有 Exclusive**（2026-10-19 删除 —— 见 docs/mac-recovery.md）。
     formLabel(ch, "Window mode");
     ImGui::SetNextItemWidth(formCtrlW(ch));
-    static const char* kWindowModes[] = {"Windowed", "Borderless", "Exclusive"};
-    ImGui::Combo("##windowmode", &st.windowMode, kWindowModes, 3);
+    static const char* kWindowModes[] = {"Windowed", "Borderless"};
+    ImGui::Combo("##windowmode", &st.windowMode, kWindowModes, 2);
     st.fullscreen = (st.windowMode != 0);
-    st.exclusive  = (st.windowMode == 2);
 
     formLabel(ch, "MSAA");         // Off/2x/4x/8x
     ImGui::SetNextItemWidth(formCtrlW(ch));

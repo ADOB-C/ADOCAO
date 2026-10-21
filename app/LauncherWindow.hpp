@@ -26,20 +26,23 @@ struct LauncherConfig {
     // 播放从这一时刻（关卡时间，秒）开始；>0 时等价于"选砖后按空格"（含音乐 seek）。
     // 诊断/自动化用（CLI `--start-at`）。
     float  startAt = 0.0f;
-    int    msaaSamples = 0;        // MSAA samples (0=off, 2, 4, 8)
-    // Windows 专用：全屏走“独占”而不是无边框窗口。**默认开**（大多数人只玩不录）：
-    // 无边框 GL 窗口每帧要把后备缓冲 blt 到 DWM 的重定向表面，独占可以翻页，帧数更高；
-    // 代价是它不在 DWM 合成链上，WGC/OBS 抓不到。要录屏就取消勾选 / 加 `--no-exclusive`。
-    // 0 = 窗口（带边框）/ 1 = 无边框铺满（可抓屏）/ 2 = 独占（Win：acquireMonitor；
-    // macOS：原生全屏 / 低延迟但抓屏受限）。`fullscreen` 由它派生（mode != 0）。
-    int    windowMode = 1;
-    bool   exclusiveFullscreen = true;   // 兼容旧代码：= (windowMode == 2)
+    // MSAA 采样数（0=off）。**默认 4**：砖的边缘是解析几何（shader 里按 v 坐标算），
+    // MSAA 抗得住；细于 1 px 的描边（超远视距下的轨道）不开 MSAA 会碎成虚线
+    // （2026-10-21 与录制版对比实测）。这也正是**不用 2×128 条带纹理**的原因：
+    // 纹理软边只能靠超采样，MSAA 管不到。
+    int    msaaSamples = 4;
+    // 0 = 窗口（带边框）/ 1 = 无边框铺满（= osu! 的 Borderless：不切显示模式、不进 Space，
+    // 抓屏工具也能抓）。**没有"独占全屏"了**（2026-10-19 删除：macOS 上照着 osu! 的 Fullscreen
+    // 去切显示模式 / 上 kiosk presentation options 会把系统锁死、把用户困住）。
+    int  windowMode = 1;
     int  resolutionW = 1920;
     int  resolutionH = 1080;
     bool fullscreen = false;
     bool showTrail = true;
     float trailDuration = 0.4f;    // seconds of trail history
-    float trailSampleRate = 200.0f; // samples per second (fixed, or the starting rate when adaptive)
+    // 默认 800：按 sagitta 判据（每样本偏离 ≈0.5 px）在默认视距下大约覆盖到 BPM 2000 以上；
+    // 0.4 s 拖尾是 320 个点（上限 8192），实测对帧时间影响可忽略（2026-10-21 用户拍板）。
+    float trailSampleRate = 800.0f; // samples per second (fixed, or the starting rate when adaptive)
     bool trailAdaptive = true;     // budget-driven adaptive trail sample rate
     float trailTargetFps = 120.0f; // adaptive: keep at least this FPS before raising the rate
     float trailRateMin = 60.0f;    // adaptive lower bound (samples per second)
@@ -47,7 +50,9 @@ struct LauncherConfig {
     bool  trailPerTile = false;    // optional: scale the sample rate with the local tile speed
     float trailSamplesPerTile = 4.0f; // per-tile mode: samples per tile (clamped to rateMin/Max)
     bool  trailLengthInTiles = false; // optional: trail length in tiles instead of seconds
-    float trailTiles = 8.0f;       // trail length in tiles (when trailLengthInTiles)
+    float trailTiles = 8.0f;
+    // >0 = sagitta 判据（每样本允许偏离 N 像素，按屏幕尺度反推采样率；0 = 关闭，用固定率/governor）
+    float trailSagitta = 0.0f;       // trail length in tiles (when trailLengthInTiles)
     // ④ 剔除用的粗块粒度（层/块；0 = 关闭索引、退回全扫）。
     // 更小 → 折叠/绕圈谱的块 AABB 更紧、剔除更快，但索引内存按比例增大
     // （实测 0.0098 B/砖 @4096；2³¹−1 外推 21 MB @4096 → 320 MB @256）。

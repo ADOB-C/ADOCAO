@@ -1,4 +1,5 @@
 #include "LevelScene.hpp"
+
 #include <cstdlib>   // getenv（诊断转储）
 
 #include "core/util/AssetPaths.hpp"
@@ -122,7 +123,8 @@ bool LevelScene::compileShaders() {
     return true;
 }
 
-bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level) {
+bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level, const Timeline* timeline) {
+    m_buildTimeline = timeline;
     m_fillColor = cfg.trackFillColor;
     // autoStroke：描边 = 填充 ×0.5（与向导的 deriveStroke 同一规则）。CLI 的 --no-auto-stroke
     // 才用显式 trackStrokeColor；否则 --fill 会带着推导出的描边，不再是一个无效开关。
@@ -144,6 +146,7 @@ bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level) {
     m_trackColorOverride = cfg.trackColorOverride;
     m_showTrail = cfg.showTrail;
     m_trailDuration = cfg.trailDuration;
+    m_trailSagitta  = cfg.trailSagitta;
     m_trailSampleRate = cfg.trailSampleRate;
     m_trailAdaptive = cfg.trailAdaptive;
     m_trailTargetFps = cfg.trailTargetFps;
@@ -205,7 +208,7 @@ static void logResidentDelta(const char* what, size_t before) {
 
 void LevelScene::buildSync(const LevelData& level) {
     const size_t rss0 = appmem::currentResidentBytes();
-    m_tileMesh->build(level, m_fillColor, m_strokeColor);
+    m_tileMesh->build(level, m_fillColor, m_strokeColor, m_buildTimeline);
     logResidentDelta("TileMesh", rss0);
     if (m_redPlanet) {
         m_redPlanet->buildGPU();
@@ -254,6 +257,11 @@ void LevelScene::setMeasuredFrameMs(double workMs) {
 //    arc of the tile's relative angle) so the polyline still follows the track.
 // The window/rate maths lives in core (PositionSolver::trailWindow) so it can be
 // exercised headlessly.
+// 一砖占多少像素 = 视口高 / 视野高（= 12 砖 × 100/zoom）
+static float camera_pixelsPerTile(int fbHeight, float zoom) {
+    return fbHeight > 0 ? (float)fbHeight * zoom / 1200.0f : 0.0f;
+}
+
 void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline) {
     if (!m_redPlanet || !m_bluePlanet) return;
 
@@ -275,6 +283,8 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
     sc.adaptive       = m_trailAdaptive;        // true = 受 rateMax 夹；false = 用户显式固定率
     sc.rateMin        = m_trailRateMin;
     sc.rateMax        = m_trailRateMax;
+    sc.sagittaPx      = m_trailSagitta;
+    sc.pixelsPerTile  = m_viewportHpx > 0 ? camera_pixelsPerTile(m_viewportHpx, m_lastZoom) : 0.0f;
 
     // 拖尾按时间正常采样即可：关卡结束后是"移动星继续绕枢轴星转"（Infinite Rotation，
     // 见 PlaybackClock），positionAtTile 在末尾之外走的是**轨道角**而不是外推直线，
@@ -405,6 +415,7 @@ void trackColorAt(void* ctx, uint32_t tile, uint8_t fill[3], uint8_t stroke[3], 
 
 void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
                         double timeInLevel, int highlightTile, float volumeAmplitude) {
+    m_lastZoom = camera.zoom();   // sagitta 判据下一帧用（applyFrame 在 render 之前跑）
     // Track appear/disappear animation
     { profile::Scoped _s("vis"); updateTileVisibility(timeline, timeInLevel, playing); }
 

@@ -995,12 +995,13 @@ void GameWindow::run() {
     while (!glfwWindowShouldClose(m_window)) {
         const double loopT0 = glfwGetTime();
         glfwPollEvents();
+#ifdef __APPLE__
+        // 全屏进入要等窗口真正上屏（见 GameWindow.hpp 的成员注释）；非 Apple 平台没有这条路径。
         if (m_pendingFullscreenEnter) {
             m_pendingFullscreenEnter = false;
-#ifdef __APPLE__
             macosBorderlessEnter(m_window);
-#endif
         }
+#endif
         handleInput();
 
         // Frame pacing

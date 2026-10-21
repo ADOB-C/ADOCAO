@@ -148,6 +148,13 @@ double PositionSolver::tilePathSpeed(const Timeline& timeline, double t) {
     return std::max(step, arc) / d;
 }
 
+double PositionSolver::curvatureRadius(const Timeline& timeline, double t) {
+    const int64_t n = timeline.tileCount();
+    if (n <= 0) return 0.0;
+    const int idx = timeline.findTileIndex(t);
+    return std::max((double)timeline.tileStartDist(idx), (double)timeline.tileEndDist(idx));
+}
+
 PositionSolver::TrailWindow PositionSolver::trailWindow(const Timeline& timeline, double t,
                                                         const TrailSamplingConfig& cfg) {
     TrailWindow w;
@@ -187,7 +194,18 @@ PositionSolver::TrailWindow PositionSolver::trailWindow(const Timeline& timeline
             rate = std::max(rate, tilePathSpeed(timeline, t) * (double)cfg.samplesPerTile);
         // 只有**自适应 governor** 才夹 rateMin/rateMax（那是内部算法自己的边界）。
         // 用户显式给的固定率原样使用：rateMin 也不再抬（以前设 10/s 会被静默抬到 60/s）。
-        if (cfg.adaptive) rate = std::clamp(rate, (double)cfg.rateMin, (double)cfg.rateMax);
+        // Sagitta 判据：每个样本在折线上允许偏离 `sagittaPx` 像素。
+        // 圆弧上步长 s（砖）对应的偏离 ≈ s²/(8R) 砖 → 换成像素就是 s²·pxPerTile/(8R)。
+        // 令其 ≤ sagittaPx ⇒ s ≤ sqrt(8·R·sagittaPx/pxPerTile)，rate = v/s。
+        if (cfg.sagittaPx > 0.0f && cfg.pixelsPerTile > 0.0f) {
+            const double R = curvatureRadius(timeline, t);
+            if (R > 1e-6) {
+                const double sMax = std::sqrt(8.0 * R * (double)cfg.sagittaPx / (double)cfg.pixelsPerTile);
+                if (sMax > 1e-9) rate = std::max(rate, tilePathSpeed(timeline, t) / sMax);
+            }
+        }
+        if (cfg.adaptive || cfg.sagittaPx > 0.0f)
+            rate = std::clamp(rate, (double)cfg.rateMin, (double)cfg.rateMax);
     }
 
     // 3) 点数硬上限（环容量）：只在**真的**要截断时告警，不再静默改用户参数。

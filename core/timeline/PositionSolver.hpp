@@ -27,7 +27,7 @@ public:
         float tiles          = 8.0f;   // tiles back (when lengthInTiles)
         bool  speedAware     = false;  // raise the rate with track covered/second
         float samplesPerTile = 4.0f;
-        float fixedRate      = 200.0f; // baseline rate (governor-adjusted)
+        float fixedRate      = 800.0f; // baseline rate (governor-adjusted)
         float rateMin        = 60.0f;
         float rateMax        = 4000.0f;
         float maxPoints      = 8192.0f;
@@ -35,10 +35,15 @@ public:
         // false = 用户显式选的固定率（Launcher/CLI），只受 maxPoints 约束 ——
         // 否则"把采样率调到 64000"会被 rateMax 静默夹回 4000，设置等于没生效。
         bool  adaptive       = false;
+        // **Sagitta 判据**（像素级"不欠采样"）：允许的折线偏离（px，0 = 关闭）与当前
+        // 一砖占多少像素。开启时按 `s = sqrt(8·R·p/pxPerTile)`（砖/样本）反推采样率，
+        // R 是该砖的行星轨道半径（砖）。这套判据跟 zoom 走：拉近看曲线才需要更密。
+        float sagittaPx      = 0.0f;
+        float pixelsPerTile  = 0.0f;
     };
     struct TrailWindow {
         double startTime = 0.0;
-        float  sampleRate = 200.0f;
+        float  sampleRate = 800.0f;
     };
     static TrailWindow trailWindow(const Timeline& timeline, double t,
                                    const TrailSamplingConfig& cfg);
@@ -71,6 +76,8 @@ public:
     // slow tile that sweeps a large angle (180 deg / midspin), while a fixed
     // samples-per-second rate under-samples fast straight runs.
     static double tilePathSpeed(const Timeline& timeline, double t);
+    // 行星在 t 时刻绕的半径（砖）：max(tileStartDist, tileEndDist)。sagitta 判据用它当曲率半径。
+    static double curvatureRadius(const Timeline& timeline, double t);
 };
 
 }  // namespace adofai

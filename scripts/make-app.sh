@@ -49,7 +49,15 @@ else
     chmod +x "$APP/Contents/MacOS/ADOCAO"
 fi
 
-cp -R "$ROOT/assets" "$APP/Contents/Resources/assets"
+# **--link 模式下资源也做成符号链接**：否则 bundle 里的 assets 是构建时的快照，
+# 改了 shader/资产后 .app 仍加载旧文件（2026-10-21 真踩过：pivot 修复没进 .app，
+# 用户对着旧画面怀疑人生）。快照模式（正式打包）仍然复制。
+if [ "$LINK_MODE" = 1 ]; then
+    rm -rf "$APP/Contents/Resources/assets"
+    ln -s "$ROOT/assets" "$APP/Contents/Resources/assets"
+else
+    cp -R "$ROOT/assets" "$APP/Contents/Resources/assets"
+fi
 
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -91,4 +99,4 @@ fi
 echo "✅ 已打包 $APP"
 echo "   版本       : $VERSION"
 echo "   可执行文件 : $(du -h "$APP/Contents/MacOS/ADOCAO" | cut -f1)"
-echo "   资产       : $(find "$APP/Contents/Resources/assets" -type f | wc -l | tr -d ' ') 个文件, $(du -sh "$APP/Contents/Resources/assets" | cut -f1)"
+echo "   资产       : $(find -L "$APP/Contents/Resources/assets" -type f | wc -l | tr -d ' ') 个文件, $(du -shL "$APP/Contents/Resources/assets" | cut -f1)"

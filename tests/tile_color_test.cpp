@@ -254,7 +254,9 @@ int main() {
         }
     }
 
-    // MoveTrack：相对位移 / 绝对角度 / 缩放 / 不透明度 + 时长（拍）
+    // MoveTrack：相对位移 / **绝对角度** / 缩放 / 不透明度 + 时长（拍）
+    // 绝对角度 = `rotationOffset − 砖自身方向`（Re_ADOJAS 直接写 `mesh.rotation.z = rotationOffset`，
+    // 而我们的几何已经把砖的方向烘进去了）。这个用例里砖 3 的方向是 90°，所以 rotOffset=90 → Δ=0。
     {
         const char* json = R"({"angleData":[0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90],
             "settings":{"bpm":120},
@@ -274,7 +276,7 @@ int main() {
             if (before.any) { std::printf("FAIL move before\n"); fail++; }
             const auto mid = tr(3, trig + dur * 0.5);
             if (!mid.any || mid.moveX < 0.49f || mid.moveX > 0.51f ||
-                mid.rotDelta < 0.78f || mid.rotDelta > 0.79f ||
+                mid.rotDelta < -0.01f || mid.rotDelta > 0.01f ||
                 mid.scaleX < 1.49f || mid.scaleX > 1.51f ||
                 mid.scaleY < 1.24f || mid.scaleY > 1.26f ||
                 mid.alpha < 0.49f || mid.alpha > 0.51f) {
@@ -284,7 +286,8 @@ int main() {
                 fail++;
             }
             const auto after = tr(3, trig + dur + 0.05);
-            if (after.moveX < 0.99f || after.rotDelta < 1.57f || after.scaleX < 1.99f ||
+            if (after.moveX < 0.99f || after.rotDelta < -0.01f || after.rotDelta > 0.01f ||
+                after.scaleX < 1.99f ||
                 after.scaleY < 1.49f || after.alpha > 0.01f) {
                 std::printf("FAIL move after\n"); fail++;
             }

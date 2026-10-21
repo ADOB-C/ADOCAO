@@ -392,6 +392,10 @@ struct TrackColorCtx {
 };
 struct TrackXformCtx { const LevelData* level; const Timeline* timeline; double time; };
 void trackXformAt(void* ctx, uint32_t tile, float out[8]) {
+    static const long g_dbgTile = [] {
+        const char* e = std::getenv("ADOCAO_XFORM_DEBUG");
+        return e ? std::atol(e) : -1L;
+    }();
     const auto* c = static_cast<const TrackXformCtx*>(ctx);
     const LevelData::MoveTransform tr = c->level->moveTransformAt((int64_t)tile, c->time);
     // AnimateTrack 的 appear/disappear 动画（Re_ADOJAS 的 keyframe 语义）：位置/旋转/缩放/透明度增量
@@ -406,6 +410,10 @@ void trackXformAt(void* ctx, uint32_t tile, float out[8]) {
     } else {
         out[0] = tr.rotDelta; out[1] = tr.scaleX; out[2] = tr.scaleY;
         out[3] = tr.alpha;    out[4] = tr.moveX;  out[5] = tr.moveY;
+    }
+    if (g_dbgTile >= 0 && (long)tile == g_dbgTile) {
+        LOG_I("xform[tile=%u t=%.4f] move=(%.4f,%.4f) rot=%.4f scale=(%.4f,%.4f) alpha=%.4f",
+              tile, c->time, out[4], out[5], out[0], out[1], out[2], out[3]);
     }
     // 砖心相对砖起点的偏移（Re_ADOJAS 的几何以砖心为原点：旋转/缩放绕砖心）
     const double dir = (double)c->level->tileDirectionAt((int64_t)tile) * 3.14159265358979323846 / 180.0;

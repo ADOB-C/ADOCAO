@@ -7,6 +7,7 @@
 #include <limits>
 #include "core/util/CountLimits.hpp"
 #include "core/util/Env.hpp"
+#include <cstdio>
 
 
 namespace adofai {
@@ -478,6 +479,17 @@ void Timeline::precalculateTiming() {
         if (env::flag("ADOCAO_TRACKVIS_DUMP")) {
             LOG_I("trackvis: startTimes[0..3] = %.4f %.4f %.4f %.4f",
                   m_tileStartTimes[0], m_tileStartTimes[1], m_tileStartTimes[2], m_tileStartTimes[3]);
+            // 值 "2" 时额外把整张网格写成 CSV，供 Re_ADOJAS 的 headless harness 用同一套网格
+            if (const char* v = std::getenv("ADOCAO_TRACKVIS_DUMP"); v && v[0] == '2') {
+                if (FILE* f = std::fopen("build/trackvis_grid.csv", "w")) {
+                    std::fprintf(f, "floor,startTime,bpm\n");
+                    for (int64_t i = 0; i < (int64_t)n; ++i)
+                        std::fprintf(f, "%lld,%.17g,%.9g\n", (long long)i,
+                                     m_tileStartTimes[(size_t)i], (double)m_tileBPM[(size_t)i]);
+                    std::fclose(f);
+                    LOG_I("trackvis: 网格已写 build/trackvis_grid.csv（%lld 层）", (long long)n);
+                }
+            }
             int shown = 0;
             for (int i = 0; i < n - 1 && shown < 24; ++i) {
                 const bool isAT = m_level->atStates.count(i) != 0;

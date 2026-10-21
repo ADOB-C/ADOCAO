@@ -178,12 +178,15 @@ void main() {
     if (aXform.x == 0.0 && aXform.y == 1.0 && aXform.z == 1.0) {
         pos = vec3(pos.xy + aMove, pos.z);          // 纯位移：逐位同旧路径
     } else {
-        // 旋转/缩放绕**砖心**（aPivot = 0.5×方向）：和 tile_cpu.vert 同一算式。
-        vec2 q = pos.xy - aPivot;
+        // 旋转/缩放绕**砖的起点**（局部原点）：与 Re_ADOJAS 的 `mesh.position = 砖起点 +
+        // positionOffset`、`mesh.rotation.z = rotationOffset` 一致 —— three.js 绕几何原点转，
+        // 而几何原点就是砖起点。**不要**改成绕砖心（`pos.xy - aPivot`）：那样 180°/缩放
+        // 会把砖翻到枢轴另一侧，表现就是 MoveTrack "位置不对"（2026-10-21 Plum - R）。
+        vec2 q = pos.xy;
         q = vec2(q.x * aXform.y, q.y * aXform.z);
         float xc = cos(aXform.x), xs = sin(aXform.x);
         q = vec2(fma(q.x, xc, -(q.y * xs)), fma(q.x, xs, q.y * xc));
-        pos = vec3(q + aPivot + aMove, pos.z);
+        pos = vec3(q + aMove, pos.z);
     }
 #endif
     vOpacity = uOpacity * aXform.w;
@@ -317,11 +320,12 @@ void main() {
     if (aXform.x == 0.0 && aXform.y == 1.0 && aXform.z == 1.0) {
         pos = vec3(pos.xy + aMove, pos.z);
     } else {
-        vec2 q = pos.xy - aPivot;
+        // 旋转/缩放绕**砖的起点**（局部原点），与 Re_ADOJAS 的 mesh 约定一致
+        vec2 q = pos.xy;
         q *= vec2(aXform.y, aXform.z);
         float xc = cos(aXform.x), xs = sin(aXform.x);
         q = vec2(q.x * xc - q.y * xs, q.x * xs + q.y * xc);
-        pos = vec3(q + aPivot + aMove, pos.z);
+        pos = vec3(q + aMove, pos.z);
     }
     vOpacity = uOpacity * aXform.w;
     gl_Position = uVP * vec4(pos + aInstOffset, 1.0);

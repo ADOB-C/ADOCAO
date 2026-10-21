@@ -143,8 +143,10 @@ if(MINGW)
     # 运行时 DLL 不在编译器旁边也能找到：直接问编译器（`-print-file-name=` 返回 sysroot 里的路径）。
     # 旧实现假设 `${CMAKE_CXX_COMPILER}` 同目录有 DLL —— Homebrew 的 mingw 放在
     # `toolchain-x86_64/x86_64-w64-mingw32/lib/`，于是 POST_BUILD 报"复制失败"。
+    # **别再写死 dw2 文件名**：msys2 的 mingw64 只有 seh 版，写死 dw2 会让
+    # "找不到就回退"那条路指向一个不存在的文件 → Windows CI 直接红（2026-10-21 真踩过）。
     set(MINGW_DLLS "")
-    foreach(dll libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll)
+    foreach(dll libgcc_s_seh-1.dll libgcc_s_dw2-1.dll libstdc++-6.dll libwinpthread-1.dll)
         execute_process(COMMAND "${CMAKE_CXX_COMPILER}" -print-file-name=${dll}
                         OUTPUT_VARIABLE _p OUTPUT_STRIP_TRAILING_WHITESPACE)
         if(EXISTS "${_p}")
@@ -152,16 +154,22 @@ if(MINGW)
         endif()
     endforeach()
     if(NOT MINGW_DLLS)
+        # 回退：编译器同目录下按通配找（seh 优先），找到哪个拷哪个。
         get_filename_component(MINGW_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
-        list(APPEND MINGW_DLLS
-            "${MINGW_BIN}/libgcc_s_dw2-1.dll"
-            "${MINGW_BIN}/libstdc++-6.dll"
-            "${MINGW_BIN}/libwinpthread-1.dll")
+        foreach(pattern libgcc_s_seh-1.dll libgcc_s_dw2-1.dll libstdc++-6.dll libwinpthread-1.dll)
+            file(GLOB _found "${MINGW_BIN}/${pattern}")
+            if(_found)
+                list(APPEND MINGW_DLLS ${_found})
+            endif()
+        endforeach()
     endif()
-    add_custom_command(TARGET adocao POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${MINGW_DLLS} "${PROJECT_BINARY_DIR}"
-        COMMENT "Copying MinGW runtime DLLs to build directory"
-    )
+    if(MINGW_DLLS)
+        add_custom_command(TARGET adocao POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${MINGW_DLLS} "${PROJECT_BINARY_DIR}"
+            COMMENT "Copying MinGW runtime DLLs to build directory")
+    else()
+        message(WARNING "MINGW: 没找到运行时 DLL（libgcc/libstdc++/libwinpthread），跳过拷贝")
+    endif()
 endif()
 
 # ---- Copy example level (if available) ----

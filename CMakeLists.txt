@@ -15,7 +15,15 @@ if(NOT CMAKE_C_COMPILER AND NOT CMAKE_CXX_COMPILER)
     endif()
 endif()
 
-enable_language(OBJCXX)
+# Objective-C++ 只有 macOS 的 MacBorderless.mm 需要，而且**必须在 project() 之前**开：
+# GLFW（FetchContent 子项目）要继承这个语言设置才能正确编它的 .m/.mm。
+# 但**不能无条件** enable —— Windows/mingw 上 CMake 会去找 ObjC++ 编译器（cc1objplus 不存在），
+# Configure 直接失败（2026-10-21 CI windows-portable 就是这么红的）。
+# 所以用**宿主系统**判断（project() 之前还拿不到 APPLE）。
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+    enable_language(OBJCXX)
+endif()
+
 project(ADOCAO VERSION 7.1.0 LANGUAGES CXX C)
 
 option(ADOCAO_PORTABLE "Build a static-linked portable executable" OFF)

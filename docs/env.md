@@ -21,6 +21,7 @@
 | `ADOCAO_UNCAPPED` | 布尔 | 关 | 去掉 320 fps 帧控，量机器真实上限（`docs/profiling.md`） |
 | `ADOCAO_GL_VERSION` | `M.m` | `4.1` | 强制 GL 版本；`3.3` 会走 CPU 几何回退（验收降级链） |
 | `ADOCAO_CPU_GEOMETRY` | 布尔 | 关 | 强制 CPU 几何回退（救急/验收） |
+| `ADOCAO_TRACKVIS_DUMP` | 布尔 | `0` | 逐层打印 AnimateTrack 的 appear/disappear 类型与时间窗（前 24 条），用来和 Re_ADOJAS 的 `buildAnimateTrackKeyframes` 逐条核对 |
 | `ADOCAO_TILE_STYLE_SCALE` | 布尔 | `0` | 诊断开关：`1` = 恢复按 trackStyle 放大砖（Neon/NeonLight/Basic +0.025 宽/+0.02 长、Minimal −0.03）。它会**逐砖累加**、把轨道整体拉长（与录制版 t=100 s 差 26,801 像素），默认关 |
 | `ADOCAO_DRAW_ORDER` | `ascending`/`asc` | 倒序 | 砖的提交顺序。**默认倒序** = Re_ADOJAS 的 `renderOrder=-tileIndex`（楼层大的先画、早的压在上面 → Neon 接缝描边连续，修「被狗啃」）；`ascending` 回到旧升序做 A/B |
 | `ADOCAO_FLOOR_WINDOW` | `0`/`1` | **开** | `=0` 关闭按块物化（保留密集 `tiles`，A/B 用） |

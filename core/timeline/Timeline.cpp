@@ -6,6 +6,7 @@
 #include <thread>
 #include <limits>
 #include "core/util/CountLimits.hpp"
+#include "core/util/Env.hpp"
 
 
 namespace adofai {
@@ -471,6 +472,25 @@ void Timeline::precalculateTiming() {
                     m_animAppearStart[(size_t)pi] = start;
                     m_animAppearEnd[(size_t)pi] = start + dur;
                 }
+            }
+        }
+        // 调试：把若干层的 appear/disappear 窗口打出来（对齐 Re_ADOJAS 的逐条核对用）
+        if (env::flag("ADOCAO_TRACKVIS_DUMP")) {
+            LOG_I("trackvis: startTimes[0..3] = %.4f %.4f %.4f %.4f",
+                  m_tileStartTimes[0], m_tileStartTimes[1], m_tileStartTimes[2], m_tileStartTimes[3]);
+            int shown = 0;
+            for (int i = 0; i < n - 1 && shown < 24; ++i) {
+                const bool isAT = m_level->atStates.count(i) != 0;
+                const bool hasA = m_animAppearType[(size_t)i] != 0;
+                const bool hasD = m_animDisappearType[(size_t)i] != 0;
+                if (!isAT && !hasA && !hasD && shown > 0) continue;
+                LOG_I("trackvis[%d]%s appear=%u [%.3f,%.3f] disappear=%u [%.3f,%.3f]",
+                      i, isAT ? " (AT)" : "",
+                      (unsigned)m_animAppearType[(size_t)i], m_animAppearStart[(size_t)i],
+                      m_animAppearEnd[(size_t)i],
+                      (unsigned)m_animDisappearType[(size_t)i], m_animDisappearStart[(size_t)i],
+                      m_animDisappearEnd[(size_t)i]);
+                ++shown;
             }
         }
         // Debug: count tiles with finite disappear times

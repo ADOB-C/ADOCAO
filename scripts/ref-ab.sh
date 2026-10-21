@@ -59,7 +59,8 @@ export NODE_PATH
 "$NODE" -e 'require("playwright")' >/dev/null 2>&1 || \
   echo "警告: 找不到 playwright —— 设 NODE_PATH=$(npm root -g 2>/dev/null || echo '<全局 node_modules>')" >&2
 
-OUT="build/ref-ab"; mkdir -p "$OUT"
+# **绝对路径**：下面起 vite 时在子 shell 里 `cd "$REF"`，相对路径会把日志写到参考仓库里去
+OUT="$PWD/build/ref-ab"; mkdir -p "$OUT"
 NAME="$(basename "${CHART%.adofai}")"
 [ -n "$TIME" ] && NAME="${NAME}_t${TIME}"
 [ -n "$TILE" ] && NAME="${NAME}_f${TILE}"

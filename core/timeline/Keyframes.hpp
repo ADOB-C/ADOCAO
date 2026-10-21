@@ -50,6 +50,11 @@ struct TileKeyframes {
     double rangeStart = 0.0;   // 动画活跃区间（含 RANGE_GRACE）
     double rangeEnd = 0.0;
 
+    // 区间**之前/之后**的可见性（建帧后算一次）：绝大多数砖在任一时刻都落在这两段里，
+    // 逐帧判定于是变成 O(1)，不必每帧对每块砖做 6 次二分（2026-10-21 的性能要求）。
+    bool hiddenBefore = false;
+    bool hiddenAfter  = false;
+
     static constexpr double kRangeGrace = 0.1;   // Re_ADOJAS: RANGE_GRACE
     bool activeAt(double t) const { return t >= rangeStart && t < rangeEnd; }
     // 超过任何关键帧之后的状态就是"最后一帧的值"；没有关键帧时返回 fallback。

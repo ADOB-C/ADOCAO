@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 术语表（用户口径，别再猜）
+
+- **R** = 谱面 `~/Documents/Charts/Plum - R/main.adofai`（**不是** Re_ADOJAS 的简称！参考实现一律写全名 **Re_ADOJAS**）。
+- **2025 / 2021 / 2026** = `Hello (BPM) 2025 - Camellia (かめりあ)` / `HELLO_BPM_2021` / `HELLO (BPM) 2026`。
+- **Tile = Track = 砖块 = 轨道 = 格子**（同一个东西）；**AnimationTrack = 轨道动画**（JSON 里的 `AnimateTrack`）。
+- **编辑器/全图视角**（Re_ADOJAS `#/editor`）≠ **播放器**：编辑器画**全部**砖、忽略 appear/disappear；
+  播放器只画当前可见窗口内的砖。两者画面不同是正常的，别拿它当 MoveTrack 的 bug。
+- **缩放**：用户说"轨道缩放/超级拉伸"多指 MoveTrack 的 `scale`/`positionOffset` 造成的展开，
+  不是相机 zoom；相机 zoom 我们内部越大越近、ADOFAI 口径越大越远。
+
 ## 导航（先读这里，省 token）
 
 - 目标结构蓝图 + 已拍板决策 1–10：`docs/project-structure.md`

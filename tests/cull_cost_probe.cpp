@@ -34,6 +34,9 @@
 
 #include <algorithm>
 #include <chrono>
+#if defined(__APPLE__)
+#include <mach/mach_time.h>
+#endif
 #include <unordered_map>
 #include <cmath>
 #include <cstdio>
@@ -84,11 +87,21 @@ HashGrid buildGrid(const LevelData& lv, double cell) {
 // 防 DCE：三种策略的结果都要"被用掉"，否则编译器会把整个循环删掉（实测 B/C 计时变成 0.000 ms）
 volatile size_t g_sink = 0;
 
-double msNow() {
+// 计时：macOS 上直接 `mach_absolute_time()`（单条 vDSO 读，~20 ns 开销、纳秒刻度），
+// 其它平台退回 steady_clock。**别用 std::chrono 再换算成"毫秒保留 4 位"** —— 扫 3~43 个块的
+// AABB 只有几百纳秒，那样打印出来一律是 0.0000，看不出块粒度之间的差别（2026-10-21 用户指出）。
+double nsNow() {
+#if defined(__APPLE__)
+    static mach_timebase_info_data_t tb{0, 0};
+    if (tb.denom == 0) mach_timebase_info(&tb);
+    return (double)mach_absolute_time() * (double)tb.numer / (double)tb.denom;
+#else
     using clk = std::chrono::steady_clock;
     static clk::time_point start = clk::now();
-    return std::chrono::duration<double, std::milli>(clk::now() - start).count();
+    return std::chrono::duration<double, std::nano>(clk::now() - start).count();
+#endif
 }
+double msNow() { static const double t0 = nsNow(); return (nsNow() - t0) / 1e6; }
 
 struct Result {
     size_t visible = 0;        // 中心落在矩形里的砖数（= "真的该画"的代理）
@@ -189,27 +202,45 @@ BlockQuery queryBlocksN(const LevelData& lv, const std::vector<Block>& bl, const
         hits.clear();
         r.candidates = 0;
         r.hitBlocks = 0;
-        const double t0 = msNow();
-        for (size_t b = 0; b < bl.size(); ++b) {
-            const Block& k = bl[b];
-            if (k.maxX < q.l || k.minX > q.r || k.maxY < q.b || k.minY > q.t) continue;
-            hits.push_back((uint32_t)b);
-            r.candidates += k.count;
-        }
-        const double t1 = msNow();
-        size_t found = 0;
-        for (uint32_t b : hits) {
-            const Block& k = bl[b];
-            for (size_t i = k.first; i < k.first + k.count; ++i) {
-                const double x = lv.tiles[i].position[0], y = lv.tiles[i].position[1];
-                if (x - kHalfTile > q.r || x + kHalfTile < q.l) continue;
-                if (y - kHalfTile > q.t || y + kHalfTile < q.b) continue;
-                ++found;
+        // mach_absolute_time 的刻度是 ~41.7 ns（Apple Silicon 125/3），单次扫块表常常不足一格
+        // → 必须**平均多次**才看得见块粒度之间的差别（2026-10-21 用户指出）。
+        const int kInner = 512;
+        const double t0 = nsNow();
+        for (int k = 0; k < kInner; ++k) {
+            // volatile 微扰：不改变命中集合（1e-12 远小于 AABB 尺度），但阻止 LICM 把整段提出循环
+            // —— 否则 3 个块的扫描会被优化成"一次 + 除法"，量出 2 ns/次的假数（2026-10-21 用户指出）。
+            const volatile double jitter = (double)k * 1e-12;
+            const double ql = q.l + jitter, qr = q.r + jitter;
+            hits.clear();
+            r.candidates = 0;
+            r.hitBlocks = 0;
+            for (size_t b = 0; b < bl.size(); ++b) {
+                const Block& kk = bl[b];
+                if (kk.maxX < ql || kk.minX > qr || kk.maxY < q.b || kk.minY > q.t) continue;
+                hits.push_back((uint32_t)b);
+                r.candidates += kk.count;
             }
         }
-        const double t2 = msNow();
-        bestF = std::min(bestF, t1 - t0);
-        bestI = std::min(bestI, t2 - t1);
+        const double t1 = nsNow();
+        size_t found = 0;
+        const double t2a = nsNow();
+        for (int k = 0; k < kInner; ++k) {
+            const volatile double jitter = (double)k * 1e-12;
+            const double ql = q.l + jitter, qr = q.r + jitter;
+            found = 0;
+            for (uint32_t b : hits) {
+                const Block& kk = bl[b];
+                for (size_t i = kk.first; i < kk.first + kk.count; ++i) {
+                    const double x = lv.tiles[i].position[0], y = lv.tiles[i].position[1];
+                    if (x - kHalfTile > qr || x + kHalfTile < ql) continue;
+                    if (y - kHalfTile > q.t || y + kHalfTile < q.b) continue;
+                    ++found;
+                }
+            }
+        }
+        const double t2 = nsNow();
+        bestF = std::min(bestF, (t1 - t0) / kInner);
+        bestI = std::min(bestI, (t2 - t2a) / kInner);
         r.found = found;
         r.hitBlocks = hits.size();
         g_sink += found;
@@ -420,9 +451,11 @@ int main(int argc, char** argv) {
                     worstCand = std::max(worstCand, r.candidates);
                     worstHits = std::max(worstHits, r.hitBlocks);
                 }
-                std::printf("      zoom %-7g 最坏：扫块表 %7.4f ms + 块内 %7.4f ms = %7.4f ms"
-                            "｜命中块 %-6zu 候选 %-8zu\n",
-                            (double)z, worstFilter, worstIn, worstFilter + worstIn,
+                // 毫秒保留 4 位会把"几百纳秒"一律打成 0.0000 —— 同时给 ns 口径（mach_absolute_time）
+                std::printf("      zoom %-7g 最坏：扫块表 %8.0f ns + 块内 %8.0f ns = %8.0f ns"
+                            "（%.4f ms）｜命中块 %-4zu 候选 %-8zu\n",
+                            (double)z, worstFilter, worstIn,
+                            worstFilter + worstIn, (worstFilter + worstIn) / 1e6,
                             worstHits, worstCand);
             }
         }

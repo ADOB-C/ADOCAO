@@ -37,6 +37,18 @@ void PlaybackClock::startAt(double wallClockSec, float audioPosSec, float offset
     LOG_D("Playback started mid-level at tile %d, time=%.3fs", m_currentTileIndex, timeInLevel());
 }
 
+void PlaybackClock::startAtLevelTime(double levelTimeSec) {
+    if (!m_timeline || m_isPlaying) return;
+    m_isPlaying = true;
+    m_elapsedTime = (levelTimeSec + (double)m_timeline->preRoll()) * 1000.0;
+    if (m_elapsedTime < 0.0) m_elapsedTime = 0.0;
+    m_startWallClock = 0.0;
+    m_currentTileIndex = m_timeline->findTileIndex(timeInLevel());
+    m_reportedEnd = false;
+    updateFrame();
+    LOG_D("Playback started at level time %.6fs (tile %d)", levelTimeSec, m_currentTileIndex);
+}
+
 void PlaybackClock::stop() {
     if (!m_timeline) return;
     m_isPlaying = false;

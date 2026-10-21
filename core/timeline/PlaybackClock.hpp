@@ -25,6 +25,9 @@ public:
 
     void start(double wallClockSec);
     void startAt(double wallClockSec, float audioPosSec, float offsetSec);
+    // 直接用**关卡时间**定位（double 计算，避开 audioPos 的 float 精度：
+    // 6.8e7 砖的谱面上 float 只有 ~1e-4 s，按 audioPos 定位会漂到隔壁砖）。
+    void startAtLevelTime(double levelTimeSec);
     void stop();
     void update(float deltaMs);
     void updateWallClock(double wallClockSec);

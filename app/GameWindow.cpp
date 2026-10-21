@@ -590,7 +590,8 @@ void GameWindow::captureAndExit() {
         LOG_I("capture-selfcheck: 拖尾采样率已钉死 = %.1f Hz（adaptive off，确定性抓帧）",
               (double)m_cfg->trailSampleRate);
     }
-    float targetTime = m_cfg->captureTime;
+    double targetTime = (double)m_cfg->captureTime;   // double：2.64e6 BPM 的谱砖区间只有 ~1e-6 s
+    double capSpan = 1e-6;   // 目标砖的区间宽度（用于抓帧自校正）
     if (m_cfg->captureTile >= 0) {
         size_t N = (size_t)m_cfg->captureTile;
         const size_t nTiles = (size_t)m_timeline->tileCount();
@@ -600,13 +601,38 @@ void GameWindow::captureAndExit() {
             // ~1e-4 s 分辨率），落在区间起点上会被舍到上一砖，currentTileIndex() 就变成 N-1。
             double span = (N + 1 < nTiles) ? (m_timeline->startTimeAt((int64_t)N + 1) -
                                                m_timeline->startTimeAt((int64_t)N)) : 0.0;
-            targetTime = (float)(m_timeline->startTimeAt((int64_t)N) + 0.5 * span);
+            capSpan = std::max(1e-9, span);
+            targetTime = (double)m_timeline->startTimeAt((int64_t)N) + 0.5 * span;
+            // 自检：大砖号上 `startTimeAt` 是 float 累加，区间宽度有 ~1e-4 的相对误差，
+            // "中点"可能已经越到下一砖（实测 500000 → 500001）。落在隔壁就往回退。
+            for (int tries = 0; tries < 8 &&
+                                (size_t)m_timeline->findTileIndex((double)targetTime) != N; ++tries) {
+                targetTime -= 0.25 * std::max(1e-9, span);
+            }
         } else {
             LOG_W("capture: --capture-tile %d 超出 %zu 砖，退回 --capture-time", m_cfg->captureTile, nTiles);
         }
     }
-    const float audioPos = targetTime + m_playback->preRoll() - m_playback->audioStartOffset();
-    m_playback->startAt(0.0, audioPos, 0.0f);
+    // **按关卡时间定位（double）**：`audioPos` 是 float，6.8e7 砖的谱面上分辨率只有 ~1e-4 s，
+    // 会漂到隔壁砖（实测 singularity_mid 漂 3 块、门槛直接判"抓错砖"）。
+    m_playback->startAtLevelTime(targetTime);
+    // **抓帧定点自校正**：按砖号定位必须真的落在该砖上。`--capture-tile` 用 1/2 区间中点，
+    // 但 2.64e6 BPM 的谱上砖区间极窄，float 级误差就会落到隔壁（实测 500000 → 500001/500003）。
+    // 这里按**播放器自己报的** currentTileIndex 收敛，最多 8 次。
+    if (m_cfg->captureTile >= 0) {
+        const int64_t want = (int64_t)m_cfg->captureTile;
+        for (int i = 0; i < 8; ++i) {
+            const int64_t got = m_playback->currentTileIndex();
+            if (got == want) break;
+            const double dir = (got > want) ? -1.0 : 1.0;
+            targetTime += dir * 0.25 * capSpan;
+            m_playback->stop();
+            m_playback->startAtLevelTime(targetTime);
+        }
+        if (m_playback->currentTileIndex() != want)
+            LOG_W("capture: --capture-tile %lld 未能定点（落在 %lld）", (long long)want,
+                  (long long)m_playback->currentTileIndex());
+    }
     m_scene->applyFrame(m_playback->frame(), *m_timeline);
 
     int tileIdx = m_playback->currentTileIndex();
@@ -636,22 +662,27 @@ void GameWindow::captureAndExit() {
     // `--capture-camera` 下 **zoom 由关卡相机说了算**（`--capture-zoom` 被忽略）——
     // 否则运镜的 zoom 事件会被 CLI 覆盖掉，等于没测。普通抓帧仍走 --capture-zoom。
     if (m_cfg->captureFitAll) {
-        // 包住全部砖：用所有砖的原始位置 + MoveTrack 位移外扩，取较大的一边换算 zoom。
+        // 包住"变换后"的全部砖（原始位置 + 关键帧动画的位移），用于复现编辑器的全图构图。
         double minX = 1e300, maxX = -1e300, minY = 1e300, maxY = -1e300;
         const auto& tls = m_level->tiles;
-        for (const auto& t : tls) {
-            minX = std::min(minX, t.position[0]); maxX = std::max(maxX, t.position[0]);
-            minY = std::min(minY, t.position[1]); maxY = std::max(maxY, t.position[1]);
+        for (size_t i = 0; i < tls.size(); ++i) {
+            double x = tls[i].position[0], y = tls[i].position[1];
+            if (const adofai::TileAnimation* anim = m_scene->animation()) {
+                adofai::TileAnimSample an{};
+                if (anim->sample((int64_t)i, targetTime, an)) { x += an.posX; y += an.posY; }
+            }
+            minX = std::min(minX, x); maxX = std::max(maxX, x);
+            minY = std::min(minY, y); maxY = std::max(maxY, y);
         }
-        const float pad = m_level->movePad() + 2.0f;
+        const float pad = 1.5f;
         minX -= pad; maxX += pad; minY -= pad; maxY += pad;
-        const double w = std::max(1e-6, maxX - minX), h = std::max(1e-6, maxY - minY);
         m_camCtrl.snapTo((minX + maxX) * 0.5, (minY + maxY) * 0.5);
-        const int fbW2 = 1280, fbH2 = 720;
-        (void)fbW2;
-        const double aspect = (double)fbH2 > 0 ? 16.0 / 9.0 : 1.0;
+        int fbw = 1280, fbh = 720;
+        glfwGetFramebufferSize(m_window, &fbw, &fbh);
+        const double aspect = (fbh > 0) ? (double)fbw / (double)fbh : 16.0 / 9.0;
+        const double w = std::max(1e-6, maxX - minX), h = std::max(1e-6, maxY - minY);
         const double needH = std::max(h, w / aspect);
-        m_camera.setZoom((float)(1200.0 / std::max(1e-6, needH)));
+        m_camera.setZoom((float)(1200.0 / needH));   // 视野高 = 1200/zoom 砖
     } else if (m_cfg->captureCamera) m_camera.setAdoZoom((float)m_cameraDirector.zoom());
     else                      m_camera.setZoom(m_cfg->captureZoom);   // 本类口径：100 = 视野高 12 砖
 

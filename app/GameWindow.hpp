@@ -54,10 +54,15 @@ private:
     // Playback/UI state
     int m_selectedTile = -1;
     bool m_wasSpacePressed = false;
-    bool m_wasAltEnterPressed = false;
     double m_autoPlayTriggerTime = 0;
     bool m_musicPending = false;
     bool m_isFullscreen = false;
+#ifdef __APPLE__
+    // 全屏进入要**等窗口真正上屏**再做（SDL 的 pendingWindowOperation）：
+    // 建完窗口后一帧再进全屏（窗口还没上屏时设置 frame 会被系统忽略）。
+    bool m_pendingFullscreenEnter = false;
+    bool m_nativeCleanupDone = false;   // run() 收尾已做过原生清理（析构别再碰 window）
+#endif
     // 实际拿到的 GL 版本（4.1 拿不到时会退到 3.3，那时砖块几何走 CPU 回退路）。
     int m_windowedX = 0, m_windowedY = 0;
     int m_windowedW = 1920, m_windowedH = 1080;
@@ -70,7 +75,6 @@ private:
     void handleInput();
     void update(float deltaMs);
     void render();
-    void toggleFullscreen();
 
     // 开发：确定性抓帧（--capture）—— 固定时刻/相机/缩放渲染一帧写 PNG 后退出。
     // 只给"像素 diff"当验收工具用，不进正常主循环。

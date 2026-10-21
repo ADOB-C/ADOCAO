@@ -52,6 +52,13 @@ target_link_libraries(adocao_imgui PUBLIC glfw)
 add_library(tinyfiledialogs STATIC ${tinyfiledialogs_SOURCE_DIR}/tinyfiledialogs.c)
 target_include_directories(tinyfiledialogs PUBLIC ${tinyfiledialogs_SOURCE_DIR})
 
+
+if(APPLE)
+    # macOS 专用：真正的 borderless fullscreen（抬高 window level + 隐藏菜单栏/Dock）。
+    # 注意 OBJCXX 必须在**顶层** project() 之后 enable（见根 CMakeLists）—— 在这里 enable
+    # 会让已经配置过的 GLFW 目标丢掉归档规则（link.txt 变空，libglfw3.a 永远不生成）。
+    list(APPEND ADOCAO_APP_SOURCES MacBorderless.mm MacBorderless.hpp)
+endif()
 add_executable(adocao ${ADOCAO_APP_SOURCES})
 set_target_properties(adocao PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"

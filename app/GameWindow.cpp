@@ -1,4 +1,7 @@
 #include "GameWindow.hpp"
+#ifdef __APPLE__
+#include "MacBorderless.hpp"
+#endif
 
 #include "LauncherWindow.hpp"
 #include "LevelLoader.hpp"
@@ -71,7 +74,12 @@ static void jumpToTile(Timeline& timeline, PlaybackClock& clock, AudioEngine& au
 
 } // namespace
 
-GameWindow::~GameWindow() = default;
+GameWindow::~GameWindow() {
+#ifdef __APPLE__
+    // 兜底：正常析构时把窗口级状态（level）还原；run() 收尾已做过就不重复。
+    if (!m_nativeCleanupDone && m_isFullscreen) macosBorderlessExit(m_window);
+#endif
+}
 
 bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     m_cfg = &cfg;
@@ -103,8 +111,12 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     }
     int winW = (int)(cfg.resolutionW / csx); if (winW < 1) winW = 1;
     int winH = (int)(cfg.resolutionH / csy); if (winH < 1) winH = 1;
-    int screenW = mode ? (int)(mode->width / csx) : winW; if (screenW < 1) screenW = 1;
-    int screenH = mode ? (int)(mode->height / csy) : winH; if (screenH < 1) screenH = 1;
+    // **别把 video mode 再除一次 content scale**：macOS 的 `glfwGetVideoMode()` 报的就是
+    // **逻辑点**（与窗口/坐标系同单位），不是物理像素 —— 实测本机 mode=1470x956、scale=2.0，
+    // 除完只剩 735x478，于是"无边框铺满"只铺了屏幕左上四分之一（2026-10-19 用户截图）。
+    // Windows/Linux 的 scale 恒为 1，这条对它们没有影响。
+    int screenW = mode ? mode->width : winW; if (screenW < 1) screenW = 1;
+    int screenH = mode ? mode->height : winH; if (screenH < 1) screenH = 1;
     int fsW = mode ? screenW : winW;
     int fsH = mode ? screenH : winH;
     m_windowedW = winW;
@@ -119,7 +131,11 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     }
 
     if (cfg.msaaSamples > 0) glfwWindowHint(GLFW_SAMPLES, cfg.msaaSamples);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    // 与 osu!/SDL 对齐：窗口**创建时就是 RESIZABLE** —— SDL 里只有 RESIZABLE 的窗口才被允许
+    // 进 Space（`NSWindowCollectionBehaviorFullScreenPrimary`，否则 FullScreenNone）。
+    // 只有全屏（Borderless）需要 RESIZABLE：macOS 只允许可缩放的窗口进 Space。
+    // 窗口态不可缩放（大小由 --width/--height 决定，启动后不改）。
+    glfwWindowHint(GLFW_RESIZABLE, cfg.fullscreen ? GLFW_TRUE : GLFW_FALSE);
     // 抓帧（--capture）是开发/验收用的脚本化运行：**别弹窗、别抢焦点**。
     // GL 仍然需要窗口（GLFW 的隐藏窗口照样有有效 drawable），所以三个 hint 一起给：
     // 不显示、创建时不聚焦、显示时也不聚焦 —— 否则 macOS 上建窗口会激活 App，
@@ -141,44 +157,30 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
         GLFWwindow* w = nullptr;
         if (cfg.fullscreen) {
 #ifdef _WIN32
-            if (cfg.windowMode == 2) {
-                // 显式 `--exclusive`：走 Win32 的 acquireMonitor ——
-                // ChangeDisplaySettingsEx(CDS_FULLSCREEN) + WS_POPUP + HWND_TOPMOST。
-                // 呈现路径更短（无边框 GL 窗口每帧要把后备缓冲 blt 到 DWM 的重定向表面，
-                // 独占可以翻页），所以帧数通常更高；代价是不在 DWM 合成链上，WGC/OBS 抓不到，
-                // 而且切模式会让抓屏源失效。默认不开。
-                glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
-                w = glfwCreateWindow(fsW, fsH, "ADOCAO", primary, nullptr);
-            } else {
-                // 默认：**无边框窗口**，不用 glfwSetWindowMonitor(monitor)。
-                // 它是普通顶层窗口，DWM 照常合成，WGC / DXGI 复制 / PresentMon 都能用，
-                // 这就是"能录制的全屏"。（不设 GLFW_FLOATING：置顶窗口在 Alt+Tab 后会
-                // 一直盖住别人；任务栏由 shell 的"前台窗口铺满显示器"判定隐藏。）
-                glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
-                w = glfwCreateWindow(fsW, fsH, "ADOCAO", nullptr, nullptr);
-                if (w) {
-                    int mx = 0, my = 0;
-                    if (primary) glfwGetMonitorPos(primary, &mx, &my);
-                    glfwSetWindowPos(w, mx, my);
-                }
+            // 全屏 = **无边框窗口**（osu! 的 Borderless 语义），不用 glfwSetWindowMonitor(monitor)。
+            // 它是普通顶层窗口，DWM 照常合成，WGC / DXGI 复制 / PresentMon 都能用，
+            // 这就是"能录制的全屏"。（不设 GLFW_FLOATING：置顶窗口在 Alt+Tab 后会
+            // 一直盖住别人；任务栏由 shell 的"前台窗口铺满显示器"判定隐藏。）
+            glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+            w = glfwCreateWindow(fsW, fsH, "ADOCAO", nullptr, nullptr);
+            if (w) {
+                int mx = 0, my = 0;
+                if (primary) glfwGetMonitorPos(primary, &mx, &my);
+                glfwSetWindowPos(w, mx, my);
             }
 #else
-            // macOS/Linux 本来就不是"独占"：Cocoa 只是去标题栏 + 把 level 抬到
-            // NSMainMenuWindowLevel+1（盖住菜单栏），X11/Wayland 走 EWMH fullscreen，
-            // 合成器全程在链上，抓屏没问题 —— 保持 glfwSetWindowMonitor 这条路。
-            if (cfg.windowMode == 2) {
-                // 原生全屏（glfwSetWindowMonitor 那条：Cocoa 无边框 + level 抬到菜单栏之上）
-                glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
-                w = glfwCreateWindow(fsW, fsH, "ADOCAO", primary, nullptr);
-            } else {
-                // 无边框铺满：普通窗口（合成器全程在链上，OBS/录屏能抓）
-                glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
-                w = glfwCreateWindow(fsW, fsH, "ADOCAO", nullptr, nullptr);
-                if (w) {
-                    int mx = 0, my = 0;
-                    if (primary) glfwGetMonitorPos(primary, &mx, &my);
-                    glfwSetWindowPos(w, mx, my);
-                }
+            // macOS/Linux 全屏 = osu! 的 **Borderless**（源码 `SDL_WINDOW_FULLSCREEN_DESKTOP`）：
+            // 铺满屏幕的普通无边框窗口，**不改显示模式、不进 Space、不改系统 UI**。
+            // （2026-10-19：曾照 osu! 的 Fullscreen 去切显示模式 / 上 kiosk presentation options，
+            //   结果把用户的机器搞死过 —— kiosk 会禁掉 Mission Control/⌘Tab，app 一卡住人就被困住；
+            //   切模式会把桌面从 2x 掉成 1x。**这两条都不再做了**。）
+            // 窗口级只做：无边框 + 铺满 + 抬到菜单栏之上（进程退出即消失）。
+            glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+            w = glfwCreateWindow(fsW, fsH, "ADOCAO", nullptr, nullptr);
+            if (w) {
+                int mx = 0, my = 0;
+                if (primary) glfwGetMonitorPos(primary, &mx, &my);
+                glfwSetWindowPos(w, mx, my);
             }
 #endif
         } else {
@@ -200,8 +202,22 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
         m_window = createWindow(3, 3);
     }
     if (!m_window) { LOG_E("Failed to create game window"); return false; }
+#ifdef __APPLE__
+    // 窗口态只留关闭按钮；全屏 = 进自己的 Space（等窗口上屏后由主循环第一帧触发）。
+    if (!cfg.fullscreen) macosWindowedChrome(m_window);
+    else m_pendingFullscreenEnter = true;
+#endif
 
     glfwMakeContextCurrent(m_window);
+    {
+        int ww = 0, wh = 0, fw = 0, fh = 0;
+        glfwGetWindowSize(m_window, &ww, &wh);
+        glfwGetFramebufferSize(m_window, &fw, &fh);
+        int mx = 0, my = 0, mw = 0, mh = 0;
+        if (primary) glfwGetMonitorWorkarea(primary, &mx, &my, &mw, &mh);
+        LOG_I("window: %dx%d 点, framebuffer %dx%d, 工作区 %dx%d 点, content scale %.2f, fullscreen=%d mode=%d",
+              ww, wh, fw, fh, mw, mh, csx, (int)cfg.fullscreen, cfg.windowMode);
+    }
     // 录屏/对比时建议 ADOCAO_VSYNC=1：无 vsync 的 GL 窗口在 macOS + OBS 窗口捕获下
     // 会抓到“两帧合成”的撕裂帧（表现为轨道重影/黑帧）。
     const bool vsync = [] {
@@ -218,15 +234,19 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     if (cfg.fullscreen && mode) {
         LOG_I("fullscreen: %dx%d @ %d Hz（%s）", mode->width, mode->height, mode->refreshRate,
 #ifdef _WIN32
-              cfg.windowMode == 2 ? "独占全屏：呈现路径更短，但 WGC/OBS 抓不到"
-                                      : "无边框窗口，DWM 合成 → WGC/OBS 可抓"
+              "无边框窗口，DWM 合成 → WGC/OBS 可抓"
 #else
-              "原生全屏，合成器在链上 → 可抓"
+              "Borderless：铺满屏幕的无边框窗口（不切显示模式、不进 Space、不动系统 UI）"
 #endif
         );
     }
     if (!loadGLCore()) { LOG_E("Failed to load OpenGL functions"); glfwDestroyWindow(m_window); return false; }
     if (cfg.msaaSamples > 0) glEnable(GL_MULTISAMPLE);
+    {   // 实际拿到的采样数可能被驱动/显示器降级（GLFW_SAMPLES 只是 hint）→ 记一行，别让它静默变了
+        GLint got = 0;
+        glGetIntegerv(GL_SAMPLES, &got);
+        LOG_I("MSAA: 请求 %dx，实际 %dx（0 = 驱动没给到这个采样数）", cfg.msaaSamples, (int)got);
+    }
     LOG_D("OpenGL %s | GLSL %s", glGetString(GL_VERSION), glGetString(GL_SHADING_LANGUAGE_VERSION));
 
     const char* vendor = (const char*)glGetString(GL_VENDOR);
@@ -240,7 +260,7 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
 
     // Scene: shaders / tile mesh / planets (heap objects freed by LevelScene)
     m_scene = std::make_unique<LevelScene>();
-    if (!m_scene->init(cfg, *m_level)) {
+    if (!m_scene->init(cfg, *m_level, m_timeline)) {
         // Shader compile failed; fall back strings are already exhausted
         m_scene.reset();
         glfwDestroyWindow(m_window);
@@ -325,14 +345,8 @@ void GameWindow::handleInput() {
     if (glfwGetKey(m_window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(m_window, GLFW_TRUE);
 
-    // Alt+Enter toggles fullscreen
-    bool altEnter = (glfwGetKey(m_window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS
-                  || glfwGetKey(m_window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS)
-                 && glfwGetKey(m_window, GLFW_KEY_ENTER) == GLFW_PRESS;
-    if (altEnter && !m_wasAltEnterPressed) {
-        toggleFullscreen();
-    }
-    m_wasAltEnterPressed = altEnter;
+    // 窗口模式在启动时就定好了（用户 2026-10-19 拍板）：运行期**不允许**切全屏，
+    // 所以 Alt+Enter 不再是快捷键（真按了也不会有任何反应）。
 
     double now = glfwGetTime();
 
@@ -542,81 +556,6 @@ void GameWindow::render() {
                     playing ? -1 : m_selectedTile, m_audioEngine->amplitudeAt(audioPos));
     // (glfwSwapBuffers is called by run() so it can time the work separately
     // from the vsync/pacing wait.)
-}
-
-void GameWindow::toggleFullscreen() {
-#ifdef _WIN32
-    // 跟 createWindow 里同一条口径：默认无边框窗口（DWM 合成、WGC 能抓）；
-    // `--exclusive` 时才走 acquireMonitor 的独占全屏（帧数略高、抓不到）。
-    if (m_isFullscreen) {
-        if (m_cfg->windowMode == 2) {
-            glfwSetWindowMonitor(m_window, nullptr,
-                m_windowedX, m_windowedY, m_windowedW, m_windowedH, 0);
-        } else {
-            glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_TRUE);
-            glfwSetWindowSize(m_window, m_windowedW, m_windowedH);
-            glfwSetWindowPos(m_window, m_windowedX, m_windowedY);
-        }
-        m_isFullscreen = false;
-    } else {
-        glfwGetWindowPos(m_window, &m_windowedX, &m_windowedY);
-        glfwGetWindowSize(m_window, &m_windowedW, &m_windowedH);
-
-        GLFWmonitor* primary = glfwGetPrimaryMonitor();
-        const GLFWvidmode* mode = primary ? glfwGetVideoMode(primary) : nullptr;
-        if (!mode) return;
-
-        int mx = 0, my = 0;
-        glfwGetMonitorPos(primary, &mx, &my);
-        float csx = 1.0f, csy = 1.0f;
-        glfwGetMonitorContentScale(primary, &csx, &csy);
-        int fsW = (int)(mode->width / (csx > 0.0f ? csx : 1.0f));
-        int fsH = (int)(mode->height / (csy > 0.0f ? csy : 1.0f));
-
-        if (m_cfg->windowMode == 2) {
-            glfwSetWindowMonitor(m_window, primary, 0, 0, fsW, fsH, mode->refreshRate);
-        } else {
-            glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_FALSE);
-            glfwSetWindowSize(m_window, fsW, fsH);
-            glfwSetWindowPos(m_window, mx, my);
-        }
-        m_isFullscreen = true;
-    }
-#else
-    if (m_isFullscreen) {
-        // Go windowed
-        glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_TRUE);
-        glfwSetWindowMonitor(m_window, nullptr,
-            m_windowedX, m_windowedY, m_windowedW, m_windowedH, 0);
-        m_isFullscreen = false;
-    } else {
-        // Save windowed position and size
-        glfwGetWindowPos(m_window, &m_windowedX, &m_windowedY);
-        glfwGetWindowSize(m_window, &m_windowedW, &m_windowedH);
-
-        GLFWmonitor* primary = glfwGetPrimaryMonitor();
-        const GLFWvidmode* mode = glfwGetVideoMode(primary);
-        if (!mode) return;
-
-        // Convert physical pixel mode to logical points (Retina content scale)
-        float csx = 1.0f, csy = 1.0f;
-        glfwGetMonitorContentScale(primary, &csx, &csy);
-        int fsW = (int)(mode->width / (csx > 0.0f ? csx : 1.0f));
-        int fsH = (int)(mode->height / (csy > 0.0f ? csy : 1.0f));
-
-        if (m_cfg->windowMode == 2) {
-            glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_TRUE);
-            glfwSetWindowMonitor(m_window, primary, 0, 0, fsW, fsH, mode->refreshRate);
-        } else {
-            int mx = 0, my = 0;
-            glfwGetMonitorPos(primary, &mx, &my);
-            glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_FALSE);
-            glfwSetWindowSize(m_window, fsW, fsH);
-            glfwSetWindowPos(m_window, mx, my);
-        }
-        m_isFullscreen = true;
-    }
-#endif
 }
 
 // （原来这里是 `releaseMeshTemporaries()`：网格建完就清 `tileHasTwirl/tileHasSetSpeed`
@@ -1008,6 +947,12 @@ void GameWindow::run() {
     while (!glfwWindowShouldClose(m_window)) {
         const double loopT0 = glfwGetTime();
         glfwPollEvents();
+        if (m_pendingFullscreenEnter) {
+            m_pendingFullscreenEnter = false;
+#ifdef __APPLE__
+            macosBorderlessEnter(m_window);
+#endif
+        }
         handleInput();
 
         // Frame pacing
@@ -1073,6 +1018,12 @@ void GameWindow::run() {
     m_audioEngine->shutdown();
     // Cleanup GL objects while the context is still current
     m_scene.reset();
+#ifdef __APPLE__
+    // **必须在 destroyWindow 之前**：macosBorderlessExit 会碰 NSWindow
+    // （glfwGetCocoaWindow），销毁之后再调就是 dangling pointer。
+    if (!m_nativeCleanupDone && m_isFullscreen) { macosBorderlessExit(m_window); }
+    m_nativeCleanupDone = true;
+#endif
     glfwDestroyWindow(m_window);
 }
 

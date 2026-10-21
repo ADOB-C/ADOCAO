@@ -132,13 +132,14 @@ void printHelp(Mode mode, bool all) {
         "  --level <file>  --music <file>  --width N  --height N  --fullscreen\n"
         "  --fill <hex>  --stroke <hex>  --bg <hex>  --no-auto-stroke\n"
         "  --msaa N                                 抗锯齿采样数（0/2/4/8）\n"
-        "  --windowed | --borderless | --exclusive  窗口模式三档（默认 Borderless；--no-exclusive = --borderless）\n"
+        "  --windowed | --borderless                窗口 / 无边框全屏（默认 Borderless；= osu! 的 Borderless 语义）\n"
         "  --no-hitsound  --force-hitsound [TYPE]  --auto-play  --no-trail\n"
         "  --start-at SEC            播放从该时刻开始（等价于选砖后按空格；含音乐 seek）\n"
         "  --cull-block N            剔除的粗块粒度（层/块，默认 4096；0 = 关闭索引走全扫）\n"
         "  --trail-duration SEC | --trail-tiles N   拖尾长度（二选一，默认关）\n"
         "  --trail-sample-rate N | --trail-target-fps N            固定 / 自适应采样率\n"
         "  --trail-samples-per-tile N  --trail-rate-min N  --trail-rate-max N\n"
+        "  --trail-sagitta PX        按每一采样点的折线偏离不超过 PX 像素反推采样率（随 zoom 自适应；0=关）\n"
         "\n"
         "全局:\n"
         "  --progress | --no-progress               进度（默认：stderr 是终端才显示）\n"
@@ -272,8 +273,6 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--auto-play") == 0)             cli.autoPlay = true;
             else if (std::strcmp(a, "--start-at") == 0 && i+1<argc)    cli.startAt = (float)atof(argv[++i]);
             else if (std::strcmp(a, "--msaa") == 0 && i+1<argc)      cli.msaaSamples = atoi(argv[++i]);
-            else if (std::strcmp(a, "--exclusive") == 0)             { cli.exclusiveFullscreen = true;  cli.windowMode = 2; cli.fullscreen = true; }
-            else if (std::strcmp(a, "--no-exclusive") == 0)          { cli.exclusiveFullscreen = false; cli.windowMode = 1; }
             else if (std::strcmp(a, "--no-trail") == 0)              cli.showTrail = false;
             else if (std::strcmp(a, "--cull-block") == 0 && i+1<argc) cli.cullBlockFloors = atoi(argv[++i]);
             else if (std::strcmp(a, "--capture") == 0 && i+1<argc)      cli.capturePath = argv[++i];
@@ -303,6 +302,7 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--trail-samples-per-tile") == 0 && i+1<argc) { cli.trailSamplesPerTile = (float)atof(argv[++i]); cli.trailPerTile = true; }
             // 拖尾按"层数"而不是秒数计量（0.4s 在 BPM 1.5M 的谱上是几万层）
             else if (std::strcmp(a, "--trail-tiles") == 0 && i+1<argc) { cli.trailTiles = (float)atof(argv[++i]); cli.trailLengthInTiles = true; }
+            else if (std::strcmp(a, "--trail-sagitta") == 0 && i+1<argc) { cli.trailSagitta = (float)atof(argv[++i]); }
             else goto unknown;
         }
         // ── adocao image <out.png> --level <谱> [--1px [--scale N] [--1bit]]

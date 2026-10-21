@@ -1593,6 +1593,10 @@ static void readSettings(const rapidjson::Value& s, LevelData::Settings& out) {
     out.pitch           = getF("pitch", out.pitch);
     out.offset          = getF("offset", out.offset);
     out.countdownTicks  = getI("countdownTicks", out.countdownTicks);
+    if (s.HasMember("separateCountdownTime")) {
+        const auto& v = s["separateCountdownTime"];
+        out.separateCountdownTime = v.IsBool() ? v.GetBool() : (v.IsInt() ? v.GetInt() != 0 : out.separateCountdownTime);
+    }
     out.zoom            = getF("zoom", out.zoom);
     out.rotation        = getF("rotation", out.rotation);
     out.relativeTo      = getS("relativeTo", out.relativeTo);

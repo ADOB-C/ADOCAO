@@ -37,6 +37,7 @@ struct LevelData {
         float  bpm = 100.0f;
         float  offset = 0.0f;        // ms
         int    countdownTicks = 4;
+        bool   separateCountdownTime = false;   // 决定时间基准（Re_ADOJAS getTimeOrigin）
         float  zoom = 100.0f;
         float  rotation = 0.0f;
         std::string relativeTo = "Player";
@@ -210,6 +211,9 @@ struct LevelData {
     bool hasScaleRadiusEvents() const { return m_hasScaleRadius; }
     MoveTransform moveTransformAt(int64_t floor, double timeSec) const;
     float movePad() const { return m_movePad; }
+    // 已展开（RepeatEvents 处理完、范围/触发时刻已解析）的 MoveTrack 事件表。
+    // 逐砖关键帧时间轴（core/timeline/TileAnimation）复用它建帧 —— 别再自己展开一遍。
+    const std::vector<MoveTrackEvent>& moveEvents() const { return m_moveIndex; }
 
     // ── Flash（全屏闪屏）──────────────────────────────────────────────
     // 语义见 Re_ADOJAS `FlashEffect`：每条事件把某个 plane 从 start 补到 end；

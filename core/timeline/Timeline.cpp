@@ -17,12 +17,26 @@ void Timeline::build(const LevelData& level, bool exportOnly) {
     m_exportOnly = exportOnly;
     precalculateTiming();
 
-    // Pre-roll: total time before tile 1 (>=360° / 2 beats on tile 0)
+    // Pre-roll = **Re_ADOJAS `getTimeOrigin()`**：把"墙钟/音乐时间"换成"关卡时间"。
+    //   separateCountdownTime 关：origin = offset/1000
+    //   开：origin = countdownTicks * 60/bpm + offset/1000 − tileStartTimes[1]
+    // （tileStartTimes 已在构建时归一化到 tile1 = 0，所以最后一项恒为 0。）
+    // **这是 2026-10-21 的老坑**：只按 max(offset, 2 beats) 算 preRoll 时，
+    // separateCountdownTime 打开的谱（如 Plum - R，offset 1360ms、4 ticks、180 BPM）
+    // 关卡时间会**晚 1.333 s**，与 Re_ADOJAS 的播放/动画时刻整体错位。
     {
-        float secPerBeat = 60.0f / level.settings.bpm;
-        float offsetSec = level.settings.offset / 1000.0f;
-        float min2Beats = 2.0f * secPerBeat;  // 360° at initial BPM
-        m_preRoll = std::max(offsetSec, min2Beats);
+        const float secPerBeat = 60.0f / level.settings.bpm;
+        const float offsetSec = level.settings.offset / 1000.0f;
+        if (level.settings.separateCountdownTime) {
+            // 实测锚点：Plum - R 在 Re_ADOJAS 里 elapsed=6200ms 时当前砖 = 14，
+            // 而 tile 14 的 chart time = 3.500s → origin = 6200/1000 − 3.500 = 2.700 ≈ 2.693
+            // = countdown(4×0.3333) + offset(1.36) − tileStartTimes[1](归一化后为 0)。
+            // 换句话说：`getTimeOrigin` 用的是**归一化后**的 tileStartTimes[1]，即 0。
+            m_preRoll = level.settings.countdownTicks * secPerBeat + offsetSec - startTimeAt(1);
+        } else {
+            m_preRoll = offsetSec;
+        }
+        if (m_preRoll < 0.0f) m_preRoll = 0.0f;
         m_audioStartOffset = m_preRoll - offsetSec;
     }
 }
@@ -482,10 +496,13 @@ void Timeline::precalculateTiming() {
             // 值 "2" 时额外把整张网格写成 CSV，供 Re_ADOJAS 的 headless harness 用同一套网格
             if (const char* v = std::getenv("ADOCAO_TRACKVIS_DUMP"); v && v[0] == '2') {
                 if (FILE* f = std::fopen("build/trackvis_grid.csv", "w")) {
-                    std::fprintf(f, "floor,startTime,bpm\n");
-                    for (int64_t i = 0; i < (int64_t)n; ++i)
-                        std::fprintf(f, "%lld,%.17g,%.9g\n", (long long)i,
-                                     m_tileStartTimes[(size_t)i], (double)m_tileBPM[(size_t)i]);
+                    std::fprintf(f, "floor,startTime,bpm,posX,posY\n");
+                    for (int64_t i = 0; i < (int64_t)n; ++i) {
+                        const auto p = m_level->tilePositionAt(i);
+                        std::fprintf(f, "%lld,%.17g,%.9g,%.17g,%.17g\n", (long long)i,
+                                     m_tileStartTimes[(size_t)i], (double)m_tileBPM[(size_t)i],
+                                     (double)p[0], (double)p[1]);
+                    }
                     std::fclose(f);
                     LOG_I("trackvis: 网格已写 build/trackvis_grid.csv（%lld 层）", (long long)n);
                 }

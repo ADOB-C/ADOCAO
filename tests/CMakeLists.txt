@@ -255,3 +255,7 @@ add_test(NAME keyframes COMMAND adocao_keyframes_test)
 add_executable(adocao_tile_animation_test tile_animation_test.cpp)
 target_link_libraries(adocao_tile_animation_test PRIVATE adocao_core)
 add_test(NAME tile_animation COMMAND adocao_tile_animation_test)
+
+add_executable(adocao_time_origin_test time_origin_test.cpp)
+target_link_libraries(adocao_time_origin_test PRIVATE adocao_core)
+add_test(NAME time_origin COMMAND adocao_time_origin_test)

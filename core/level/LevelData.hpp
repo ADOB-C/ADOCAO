@@ -308,6 +308,10 @@ struct LevelData {
     struct FastAction {
         int floor = 0;
         uint16_t strId = 0;                 // 0 = 空串；索引进 actionStrTable
+        // AnimateTrack 专用：`trackAnimation` 的字符串（strId 存的是 `trackDisappearAnimation`）。
+        // 2026-10-21 之前只留了一个 `flag`（"有没有写 trackAnimation"），字符串本身被丢掉 →
+        // 逐事件的 appear 类型永远等于全局 settings，跟 Re_ADOJAS 不一致。
+        uint16_t strId2 = 0;
         // MoveCamera / RepeatEvents **不留在 actions 里**（keep=false）：它们走 cameraEvents /
         // repeatEvents 两个富结构。这两个枚举值只用于"解析时认出它"。
         enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, MoveCamera, RepeatEvents, ColorTrack, RecolorTrack, Flash, MoveTrack, Other, ScaleRadius } type = Other;
@@ -321,6 +325,10 @@ struct LevelData {
     uint16_t internActionStr(const std::string& v) { return internActionStrIn(actionStrTable, v); }
     const std::string& actionStr(const FastAction& a) const {
         return a.strId < actionStrTable.size() ? actionStrTable[a.strId] : actionStrTable[0];
+    }
+    // AnimateTrack 的 `trackAnimation`（strId2）；空串 = 事件没写。
+    const std::string& actionStr2(const FastAction& a) const {
+        return a.strId2 < actionStrTable.size() ? actionStrTable[a.strId2] : actionStrTable[0];
     }
 
     // ③ 切片 4（第 1 步）：**运行期读者不要再直接碰 `tiles[i]`** —— `tiles` 现在会按块物化，
@@ -411,7 +419,17 @@ struct LevelData {
     std::vector<int> bookmarkFloors;  // Bookmark event floors
 
     // AnimateTrack state overrides (sparse, floor → state)
-    struct ATState { std::string da, aa; float bb=4, ba=3; bool hasAA=false; };
+    // 逐事件的 AnimateTrack 状态。**只记"事件写了什么"**，缺省/继承的语义全在
+    // `Timeline::build()` 里按 Re_ADOJAS 的规则做（见 TimelineManager.ts:1046-1116）：
+    //   * trackAnimation 缺失 → 继承上一条；beatsAhead 缺失 → 沿用上一条
+    //   * trackDisappearAnimation 缺失 → **None**（不继承）；beatsBehind 缺失 → 沿用上一条
+    // float 用负数表示"事件没写这个字段"。
+    struct ATState {
+        std::string da, aa;             // 事件原文（da 空 = 没写；aa 空 = 没写）
+        float bb = -1.0f, ba = -1.0f;   // <0 = 没写
+        bool hasAA = false;             // 写了 trackAnimation（flag2 的判据）
+        bool hasDA = false;             // 写了 trackDisappearAnimation
+    };
     std::unordered_map<int, ATState> atStates;
     // 粘性标志：releaseMemory() 会清掉 atStates 的实体（每条 101 B，巨谱上是几十 MB~几百 MB），
     // 但 Timeline 与 LevelScene 都要按"有没有 AnimateTrack"来判定 TrackVis —— 那个判定发生在

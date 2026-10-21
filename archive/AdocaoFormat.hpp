@@ -29,7 +29,7 @@ namespace adocao {
 inline constexpr char kMagic[4] = {kAdocaoMagic[0], kAdocaoMagic[1], kAdocaoMagic[2], kAdocaoMagic[3]};
 static_assert(kAdocaoMagic[0] == 'A' && kAdocaoMagic[1] == 'D' && kAdocaoMagic[2] == 'O' &&
               kAdocaoMagic[3] == '1', "core 的 kAdocaoMagic 变了，archive 这边要一起改");
-inline constexpr uint16_t kVersion  = 5;   // v5：MoveTrack 段加 eventTag（52→54 B，RepeatEvents 展开用）   // v3：列改**分块容器**（每 4096 元素一块、块内自选编码、
+inline constexpr uint16_t kVersion  = 6;   // v6：actions 加 actions.strId2（AnimateTrack 的 trackAnimation）   // v5：MoveTrack 段加 eventTag（52→54 B，RepeatEvents 展开用）   // v3：列改**分块容器**（每 4096 元素一块、块内自选编码、
                                           //     帧级 zstd 与 seek 粒度解耦，见 AdocaoBlocked.hpp）
                                           // + Derived 段（PositionTrack/前缀状态 checkpoint，§8.8）
 inline constexpr uint16_t kMinReadVersion = 2;   // 读侧仍认 v2（双读）；更早的版本没有实现过

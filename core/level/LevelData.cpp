@@ -372,7 +372,7 @@ struct ActionFields {
     float hitsoundVolume = 0.0f, beatsBehind = 0.0f, beatsAhead = 0.0f;
     float offX = 0.0f, offY = 0.0f;
     bool justThisTile = false;
-    std::string hitsound, trackDisappear;
+    std::string hitsound, trackDisappear, trackAnimation;
 
     // ── 以下只给 MoveCamera / RepeatEvents 用（rich 模式才填；热路径一个字段都不碰） ──
     bool hasAngleOffset = false; double angleOffset = 0.0;
@@ -726,7 +726,7 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
                 if (!stringValue(v, vEnd, f.trackDisappear)) return false;
                 f.hasTrackDisappear = true;
             } else if (keyIs(key, "trackAnimation")) {
-                if (*v != '"') return false;
+                if (!stringValue(v, vEnd, f.trackAnimation)) return false;
                 f.hasTrackAnimation = true;
             } else if (rich && keyIs(key, "tag")) {
                 std::string tagTmp;
@@ -902,6 +902,7 @@ inline bool buildAction(const ActionFields& f, LevelData::FastAction& a, bool& k
         a.val2 = f.hasBeatsAhead ? f.beatsAhead : -1.0f;
         if (f.hasTrackDisappear) a.strId = g_internOwner ? g_internOwner->internActionStr(f.trackDisappear) : 0;
         a.flag = f.hasTrackAnimation;
+        if (f.hasTrackAnimation) a.strId2 = g_internOwner ? g_internOwner->internActionStr(f.trackAnimation) : 0;
         break;
     default:
         break;
@@ -2830,7 +2831,10 @@ bool LevelData::parseLegacy(const std::string& jsonStr, ProgressCb onProgress, b
             } else if (act.type == FastAction::AnimateTrack) {
                 act.val1 = -1.0f; act.val2 = -1.0f; // sentinel: not set
                 if (a.HasMember("trackDisappearAnimation")) act.strId = g_internOwner ? g_internOwner->internActionStr(a["trackDisappearAnimation"].GetString()) : 0;
-                if (a.HasMember("trackAnimation"))  act.flag = true; // flag2: has trackAnimation
+                if (a.HasMember("trackAnimation")) {
+                    act.flag = true;   // flag2: has trackAnimation
+                    act.strId2 = g_internOwner ? g_internOwner->internActionStr(a["trackAnimation"].GetString()) : 0;
+                }
                 if (a.HasMember("beatsBehind")) act.val1 = a["beatsBehind"].GetFloat();
                 if (a.HasMember("beatsAhead"))  act.val2 = a["beatsAhead"].GetFloat();
             }
@@ -3051,11 +3055,16 @@ void LevelData::refreshDerivedCaches() {
             bookmarkFloors.push_back(floor); break;
         case FastAction::AnimateTrack:
             hasAtStates = true;
-            atStates[floor] = {actionStr(a).empty() ? settings.trackDisappearAnimation : actionStr(a),
-                               settings.trackAnimation, // aa not parsed yet; use global
-                               a.val1 >= 0 ? a.val1 : settings.beatsBehind,
-                               a.val2 >= 0 ? a.val2 : settings.beatsAhead,
-                               a.flag};
+            {
+                ATState st;
+                st.hasDA = !actionStr(a).empty();
+                st.da    = actionStr(a);
+                st.hasAA = a.flag && !actionStr2(a).empty();
+                st.aa    = actionStr2(a);
+                st.bb    = a.val1;   // <0 = 事件没写
+                st.ba    = a.val2;
+                atStates[floor] = std::move(st);
+            }
             break;
         default: break;
         }

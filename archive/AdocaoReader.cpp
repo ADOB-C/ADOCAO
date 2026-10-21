@@ -333,12 +333,12 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
             return false;
         }
         const uint32_t cols = rdU32(p);
-        if (cols != 6) {
-            err = "actions 列数不是 6（是 " + std::to_string(cols) + "）";
+        if (cols != 7) {
+            err = "actions 列数不是 7（是 " + std::to_string(cols) + "）";
             return false;
         }
-        std::vector<const uint8_t*> cp(6, nullptr);
-        std::vector<size_t> cn(6, 0);
+        std::vector<const uint8_t*> cp(7, nullptr);
+        std::vector<size_t> cn(7, 0);
         size_t off = 4;
         for (uint32_t i = 0; i < cols; ++i) {
             if (!have(n, off, 8)) {
@@ -366,11 +366,12 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
             if (!decU(c + 12, csz - 12, vals, actLegacy)) return false;
             return vals.size() == used;
         };
-        std::vector<uint32_t> strs, v1, v2;
-        uint32_t mStr = 0, mV1 = 0, mV2 = 0;
+        std::vector<uint32_t> strs, strs2, v1, v2;
+        uint32_t mStr = 0, mS2 = 0, mV1 = 0, mV2 = 0;
         if (!decI(cp[0], cn[0], floors, actLegacy) || !decU(cp[1], cn[1], types, actLegacy) ||
-            !readSparse(mStr, strs, cp[2], cn[2]) || !decU(cp[3], cn[3], flags, actLegacy) ||
-            !readSparse(mV1, v1, cp[4], cn[4]) || !readSparse(mV2, v2, cp[5], cn[5])) {
+            !readSparse(mStr, strs, cp[2], cn[2]) || !decU(cp[3], cn[3], strs2, actLegacy) ||
+            !decU(cp[4], cn[4], flags, actLegacy) ||
+            !readSparse(mV1, v1, cp[5], cn[5]) || !readSparse(mV2, v2, cp[6], cn[6])) {
             err = "actions 某列解码失败";
             return false;
         }
@@ -380,7 +381,7 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
             return false;
         }
         out.actions.resize(m);
-        size_t ks = 0, k1 = 0, k2 = 0;
+        size_t ks = 0, k2i = 0, k1 = 0, k2 = 0;
         for (size_t i = 0; i < m; ++i) {
             LevelData::FastAction& a = out.actions[i];
             const uint32_t t = types[i];
@@ -388,12 +389,14 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
             a.floor = (int)floors[i];
             a.type = (LevelData::FastAction::Type)(uint8_t)t;
             a.strId = (mStr & bit) ? (uint16_t)strs[ks++] : 0;
+            a.strId2 = (i < strs2.size()) ? (uint16_t)strs2[i] : 0;
             a.flag = (flags[i] != 0);
             const uint32_t x1 = (mV1 & bit) ? v1[k1++] : 0u;
             const uint32_t x2 = (mV2 & bit) ? v2[k2++] : 0u;
             std::memcpy(&a.val1, &x1, 4);
             std::memcpy(&a.val2, &x2, 4);
         }
+        if (strs2.size() != m) { err = "actions.strId2 列长度不符（文件损坏）"; return false; }
         if (ks != strs.size() || k1 != v1.size() || k2 != v2.size()) {
             err = "actions 稀疏列的条数与掩码不符（文件损坏）";
             return false;

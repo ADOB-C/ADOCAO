@@ -161,6 +161,108 @@ float Timeline::totalAngleAt(int64_t i) const {
     else      totalAngle += rot * 2.0f * 3.14159265f;
     return totalAngle;
 }
+// AnimateTrack 的动画类型 id（appear / disappear 共用一张表；名字来自 ADOFAI 编辑器）
+//   1 Extend  2 Assemble  3 Assemble_Far  4 Grow  5 Grow_Spin  6 Fade(appear)
+//   7 Fade    8 Drop      9 Rise
+//   10 Scatter 11 Scatter_Far 12 Retract 13 Shrink 14 Shrink_Spin
+static uint8_t animId(const std::string& s) {
+    if (s == "Extend") return 1;
+    if (s == "Assemble") return 2;
+    if (s == "Assemble_Far" || s == "AssembleFar") return 3;
+    if (s == "Grow") return 4;
+    if (s == "Grow_Spin" || s == "GrowSpin") return 5;
+    if (s == "Fade") return 7;
+    if (s == "Drop") return 8;
+    if (s == "Rise") return 9;
+    if (s == "Scatter") return 10;
+    if (s == "Scatter_Far" || s == "ScatterFar") return 11;
+    if (s == "Retract") return 12;
+    if (s == "Shrink") return 13;
+    if (s == "Shrink_Spin" || s == "ShrinkSpin") return 14;
+    if (s == "None" || s.empty()) return 0;
+    return 0;   // 未知类型按 None（与 Re_ADOJAS 的 switch default 一致）
+}
+static double easeOutSine(double u) { return std::sin(u * 3.14159265358979323846 * 0.5); }
+static double easeOutQuad(double u) { return 1.0 - (1.0 - u) * (1.0 - u); }
+// Re_ADOJAS 的 seededRandom：x = sin(seed*12.9898 + seed*78.233) * 43758.5453，取小数部分
+static double seededRandom(double seed) {
+    const double x = std::sin(seed * 12.9898 + seed * 78.233) * 43758.5453;
+    return x - std::floor(x);
+}
+
+bool Timeline::animAt(int64_t i, double time, AnimSample& out) const {
+    out = AnimSample{};
+    if (i < 0 || (size_t)i >= m_animAppearType.size()) return false;
+    const size_t k = (size_t)i;
+    bool any = false;
+    const uint8_t at = m_animAppearType[k], dt = m_animDisappearType[k];
+    if (at != 0 && time < m_animAppearEnd[k]) {
+        const double t0 = m_animAppearStart[k], t1 = m_animAppearEnd[k];
+        const double u = (t1 > t0) ? std::clamp((time - t0) / (t1 - t0), 0.0, 1.0) : 1.0;
+        switch (at) {
+            case 1: {   // Extend：从上一砖的位置 + 0 缩放长出来
+                const double q = easeOutSine(u);
+                out.scaleX = out.scaleY = (float)q;
+                any = true; break;
+            }
+            case 2: case 3: {   // Assemble / _Far：随机偏移 + 旋转，SineOut 归位（用增量表示）
+                const double range = (at == 3) ? 8.0 : 4.0;
+                const double seed = (double)i * 7919.0;
+                const double dx = seededRandom(seed) * range * 2 - range;
+                const double dy = seededRandom(seed + 1) * range * 2 - range;
+                const double dr = (seededRandom(seed + 2) * 150 - 75) * 3.14159265358979323846 / 180.0;
+                const double q = 1.0 - easeOutSine(u);
+                out.posX = (float)(dx * q); out.posY = (float)(dy * q); out.rot = (float)(dr * q);
+                any = true; break;
+            }
+            case 4: {   // Grow：缩放 0→1（Quad.easeOut）
+                const float s = (float)easeOutQuad(u);
+                out.scaleX = out.scaleY = s; any = true; break;
+            }
+            case 5: {   // Grow_Spin：缩放 0→1 + 旋转 −π→0
+                const float s = (float)easeOutQuad(u);
+                out.scaleX = out.scaleY = s;
+                out.rot = (float)(-3.14159265358979323846 * (1.0 - easeOutSine(u)));
+                any = true; break;
+            }
+            case 7: {   // Fade：透明度 0→1（Linear）
+                out.alpha = (float)u; any = true; break;
+            }
+            case 8: case 9: {   // Drop / Rise：位移 ±8 → 0（Linear）+ 前 1/8 时长缩放 0→1
+                const double dir = (at == 8) ? 1.0 : -1.0;
+                out.posY = (float)(dir * 8.0 * (1.0 - u));
+                const float s = (float)std::min(1.0, easeOutQuad(std::min(1.0, u * 8.0)));
+                out.scaleX = out.scaleY = s;
+                any = true; break;
+            }
+            default: break;
+        }
+    }
+    if (dt != 0 && time > m_animDisappearStart[k]) {
+        const double t0 = m_animDisappearStart[k], t1 = m_animDisappearEnd[k];
+        const double u = (t1 > t0) ? std::clamp((time - t0) / (t1 - t0), 0.0, 1.0) : 1.0;
+        const double q = easeOutSine(u);
+        switch (dt) {
+            case 7: out.alpha *= (float)(1.0 - u); any = true; break;                    // Fade
+            case 10: case 11: {   // Scatter / _Far：随机飞散
+                const double range = (dt == 11) ? 8.0 : 4.0;
+                const double seed = (double)i * 3571.0 + 1000.0;
+                const double dx = seededRandom(seed) * range * 2 - range;
+                const double dy = seededRandom(seed + 1) * range * 2 - range;
+                const double dr = (seededRandom(seed + 2) * 150 - 75) * 3.14159265358979323846 / 180.0;
+                out.posX += (float)(dx * q); out.posY += (float)(dy * q); out.rot += (float)(dr * q);
+                any = true; break;
+            }
+            case 12: out.scaleX *= (float)(1.0 - q); out.scaleY *= (float)(1.0 - q); any = true; break;  // Retract（位移略）
+            case 13: out.scaleX *= (float)(1.0 - q); out.scaleY *= (float)(1.0 - q); any = true; break;  // Shrink
+            case 14: out.scaleX *= (float)(1.0 - q); out.scaleY *= (float)(1.0 - q);
+                     out.rot += (float)(-3.14159265358979323846 * q); any = true; break;   // Shrink_Spin
+            default: break;
+        }
+    }
+    return any;
+}
+
 float Timeline::durationAt(int64_t i) const {
     const int64_t n = (int64_t)m_tileBPM.size();
     if (i >= n - 1) return m_exportOnly ? 0.1f : 0.0f;
@@ -305,28 +407,71 @@ void Timeline::precalculateTiming() {
     {
         m_tileDisappearTimes.assign(n, std::numeric_limits<double>::infinity());
         m_tileAppearTimes.assign(n, -std::numeric_limits<double>::infinity());
+        // **逐条对齐 Re_ADOJAS `TimelineManager.buildAnimateTrackKeyframes`**
+        // （src/lib/Player/TimelineManager.ts:1046-1116）：
+        //   * appear：事件写了 trackAnimation 才覆盖；`beatsAhead` 缺失沿用上一条
+        //   * disappear：事件写了 trackDisappearAnimation 才覆盖；**缺失按 None**（不继承）
+        //   * flag2 = **最近一条** AT 事件是否写 trackAnimation（不是"曾经有过"）
+        //   * num5/num6 **只在 AT 所在层**推进
+        //   * scaledBeats = beats × (tileBPM[floor] / refBPM)，再乘 60/refBPM 得秒
+        //   * beatsAhead ≤ 0 时除 Fade 外**跳过 appear**（Assemble/Grow 会闪回）
+        m_animAppearType.assign(n, 0);
+        m_animDisappearType.assign(n, 0);
+        m_animAppearStart.assign(n, 0.0);
+        m_animAppearEnd.assign(n, 0.0);
+        m_animDisappearStart.assign(n, 0.0);
+        m_animDisappearEnd.assign(n, 0.0);
+        // 与 Re_ADOJAS 的 GLOBAL_ANIM_TILE_LIMIT 一致：没有逐条 AT、只有全局动画的超大谱
+        // 直接跳过动画（否则要按层分配 6 个数组）。
+        const bool skipGlobalAnim = (m_level->atStates.empty() && n > 100000);
         std::string curDA = m_level->settings.trackDisappearAnimation;
         std::string curAA = m_level->settings.trackAnimation;
         float curBB = m_level->settings.beatsBehind, curBA = m_level->settings.beatsAhead;
         float num5 = m_tileBPM[0], num6 = m_tileBPM[0];
         bool flag2 = false;
+        const double pitch = (m_level->settings.pitch > 0.0f) ? std::max(0.1, (double)m_level->settings.pitch / 100.0) : 1.0;
+        uint8_t appearId = animId(curAA), disappearId = animId(curDA);
         for (int i = 0; i < n - 1; i++) {
-            // C# ApplyEventsToFloors: num5/num6 advance EVERY tile (i>0), independent of events
-            if (i > 0) { num5 = num6; num6 = m_tileBPM[i]; }
+            bool hadAT = false, floorFlag2 = false;
             auto it = m_level->atStates.find(i);
             if (it != m_level->atStates.end()) {
                 auto& st = it->second;
-                if (!st.da.empty()) { curDA = st.da; curBB = st.bb; }
-                if (st.hasAA) { curAA = st.aa; curBA = st.ba; }
-                // C# semantics: flag2 latches true once any floor has angleData, never resets
-                if (st.hasAA) flag2 = true;
+                if (st.hasAA) { curAA = st.aa; appearId = animId(curAA); if (st.ba >= 0.0f) curBA = st.ba; }
+                if (st.hasDA) { curDA = st.da; disappearId = animId(curDA); if (st.bb >= 0.0f) curBB = st.bb; }
+                floorFlag2 = st.hasAA;
+                hadAT = true;
             }
-            float refBPM = flag2 ? num6 : num5;
-            // beatsBehind * 60 / refBPM  (tile BPM cancels out in reference formula)
-            if (curDA != "None")
-                m_tileDisappearTimes[i] = m_tileStartTimes[i + 1] + (double)(curBB * 60.0f / refBPM);
-            if (curAA != "None")
-                m_tileAppearTimes[i] = m_tileStartTimes[i] - (double)(curBA * 60.0f / refBPM);
+            if (hadAT) { num5 = num6; num6 = m_tileBPM[i]; flag2 = floorFlag2; }
+            const float refBPM = flag2 ? num6 : num5;
+            const float speed = m_tileBPM[i];
+            const float ratio = (refBPM > 0.0f) ? speed / refBPM : 1.0f;
+            const float sBA = curBA * ratio, sBB = curBB * ratio;
+            const double secPerBeat = 60.0 / (double)(speed > 0.0f ? speed : 100.0f);
+            const int64_t pi = (int64_t)i;
+            if (disappearId != 0) {
+                const double nextEntry = m_tileStartTimes[(size_t)i + 1];
+                const double start = nextEntry + (double)sBB * secPerBeat;
+                const double dur = std::min((secPerBeat * 0.5) / pitch, 0.5);
+                m_tileDisappearTimes[(size_t)i] = start;
+                if (!skipGlobalAnim) {
+                    m_animDisappearType[(size_t)i] = disappearId;
+                    m_animDisappearStart[(size_t)i] = start;
+                    m_animDisappearEnd[(size_t)i] = start + dur;
+                }
+            }
+            if (appearId != 0 && (sBA > 0.0f || appearId == 7 /* Fade */)) {
+                const bool dropRise = (appearId == 8 || appearId == 9);
+                const double tilesLead = (double)sBA * (dropRise ? 2.0 : 1.0);
+                const double start = std::max(m_tileStartTimes[(size_t)pi] - tilesLead * secPerBeat, 0.0);
+                const double dur = dropRise ? (secPerBeat * (double)sBA) / pitch
+                                            : std::min((secPerBeat * 0.5) / pitch, 0.5);
+                m_tileAppearTimes[(size_t)pi] = start;
+                if (!skipGlobalAnim) {
+                    m_animAppearType[(size_t)pi] = appearId;
+                    m_animAppearStart[(size_t)pi] = start;
+                    m_animAppearEnd[(size_t)pi] = start + dur;
+                }
+            }
         }
         // Debug: count tiles with finite disappear times
         int dc = 0; for (int i = 0; i < n; i++) if (m_tileDisappearTimes[i] < 1e100) dc++;

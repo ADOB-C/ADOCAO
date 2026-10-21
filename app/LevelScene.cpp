@@ -390,12 +390,23 @@ struct TrackColorCtx {
     double time;
     float amplitude;   // Volume 类型用（音乐 RMS）
 };
-struct TrackXformCtx { const LevelData* level; double time; };
+struct TrackXformCtx { const LevelData* level; const Timeline* timeline; double time; };
 void trackXformAt(void* ctx, uint32_t tile, float out[8]) {
     const auto* c = static_cast<const TrackXformCtx*>(ctx);
     const LevelData::MoveTransform tr = c->level->moveTransformAt((int64_t)tile, c->time);
-    out[0] = tr.rotDelta; out[1] = tr.scaleX; out[2] = tr.scaleY;
-    out[3] = tr.alpha;    out[4] = tr.moveX;  out[5] = tr.moveY;
+    // AnimateTrack 的 appear/disappear 动画（Re_ADOJAS 的 keyframe 语义）：位置/旋转/缩放/透明度增量
+    Timeline::AnimSample an;
+    if (c->timeline && c->timeline->animAt((int64_t)tile, c->time, an)) {
+        out[0] = tr.rotDelta + an.rot;
+        out[1] = tr.scaleX * an.scaleX;
+        out[2] = tr.scaleY * an.scaleY;
+        out[3] = tr.alpha * an.alpha;
+        out[4] = tr.moveX + an.posX;
+        out[5] = tr.moveY + an.posY;
+    } else {
+        out[0] = tr.rotDelta; out[1] = tr.scaleX; out[2] = tr.scaleY;
+        out[3] = tr.alpha;    out[4] = tr.moveX;  out[5] = tr.moveY;
+    }
     // 砖心相对砖起点的偏移（Re_ADOJAS 的几何以砖心为原点：旋转/缩放绕砖心）
     const double dir = (double)c->level->tileDirectionAt((int64_t)tile) * 3.14159265358979323846 / 180.0;
     out[6] = (float)(0.5 * std::cos(dir));
@@ -456,7 +467,7 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     m_tileShader->setVec3("uFillColor", m_fillRGB[0], m_fillRGB[1], m_fillRGB[2]);
     m_tileShader->setVec3("uStrokeColor", m_strokeRGB[0], m_strokeRGB[1], m_strokeRGB[2]);
     m_tileShader->setFloat("uOpacity", 1.0f);
-    TrackXformCtx xctx{m_level, timeInLevel};
+    TrackXformCtx xctx{m_level, &timeline, timeInLevel};
     m_tileMesh->setTime(timeInLevel);   // 时间驱动颜色/变换：相机静止时也要重算
     if (m_trackColorOverride) {
         m_tileShader->setFloat("uUseInstColor", 0.0f);

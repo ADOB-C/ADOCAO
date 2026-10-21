@@ -284,12 +284,13 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         // ---- actions：列式（floor 差分、type/strId/flag 位打包、val1/val2 按 float 位模式）----
         const size_t n = level.actions.size();
         std::vector<int64_t> floors;
-        std::vector<uint32_t> types, strIds, flags, v1, v2;
-        floors.reserve(n); types.reserve(n); strIds.reserve(n); flags.reserve(n); v1.reserve(n); v2.reserve(n);
+        std::vector<uint32_t> types, strIds, strIds2, flags, v1, v2;
+        floors.reserve(n); types.reserve(n); strIds.reserve(n); strIds2.reserve(n); flags.reserve(n); v1.reserve(n); v2.reserve(n);
         for (const LevelData::FastAction& a : level.actions) {
             floors.push_back((int64_t)a.floor);
             types.push_back((uint32_t)a.type);
             strIds.push_back((uint32_t)a.strId);
+            strIds2.push_back((uint32_t)a.strId2);
             flags.push_back(a.flag ? 1u : 0u);
             uint32_t x = 0;
             std::memcpy(&x, &a.val1, 4); v1.push_back(x);
@@ -304,8 +305,9 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
                 if (mask & (1u << (types[i] & 31u))) used.push_back(col[i]);
             return used;
         };
-        uint32_t mStr = 0, mV1 = 0, mV2 = 0;
+        uint32_t mStr = 0, mS2 = 0, mV1 = 0, mV2 = 0;
         const std::vector<uint32_t> usedStr = sparseUsed(strIds, mStr);
+        const std::vector<uint32_t> usedS2  = sparseUsed(strIds2, mS2);
         const std::vector<uint32_t> usedV1  = sparseUsed(v1, mV1);
         const std::vector<uint32_t> usedV2  = sparseUsed(v2, mV2);
 
@@ -323,6 +325,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
             {"actions.floor", ColKind::Int64, floors.data(), floors.size(), floors.size() * 8, false, 0, 0},
             {"actions.type",  ColKind::U32,   types.data(),  types.size(),  types.size() * 4,  false, 0, 0},
             {"actions.strId", ColKind::U32,   usedStr.data(), usedStr.size(), strIds.size() * 4, true, mStr, usedStr.size()},
+            {"actions.strId2",ColKind::U32,   strIds2.data(), strIds2.size(), strIds2.size() * 4, false, 0, 0},
             {"actions.flag",  ColKind::U32,   flags.data(),  flags.size(),  flags.size() * 4,  false, 0, 0},
             {"actions.val1",  ColKind::U32,   usedV1.data(), usedV1.size(), v1.size() * 4,      true, mV1, usedV1.size()},
             {"actions.val2",  ColKind::U32,   usedV2.data(), usedV2.size(), v2.size() * 4,      true, mV2, usedV2.size()},
@@ -331,7 +334,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         auto buildActions = [&](ColumnStorage mode, std::vector<uint8_t>& dst,
                                 std::vector<ColumnLayoutStats>* stats) -> bool {
             dst.clear();
-            putU32(dst, 6);                      // 列数
+            putU32(dst, 7);                      // 列数
             for (const ColPlan& c : plans) {
                 std::vector<uint8_t> enc; ColumnLayoutStats st;
                 if (!encodeColumnV3(c.kind, c.data, c.count, mode, enc, &st)) return false;
@@ -409,7 +412,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
     }
     {
         static const char* kNames[] = {"actions.floor", "actions.type", "actions.strId",
-                                       "actions.flag", "actions.val1", "actions.val2"};
+                                       "actions.strId2", "actions.flag", "actions.val1", "actions.val2"};
         const uint64_t elems[] = {(uint64_t)level.actions.size(), (uint64_t)level.actions.size(),
                                   (uint64_t)actionStats.size() ? (uint64_t)level.actions.size() : 0,
                                   (uint64_t)level.actions.size(), (uint64_t)level.actions.size(),

@@ -164,9 +164,9 @@ bool FloorWindowSource::open(const uint8_t* data, size_t length, std::string& er
         const size_t n = m_actionsSec.size;
         if (!haveW(n, 0, 4)) { err = "窗口化：Actions 段太短"; return false; }
         const uint32_t cols = rdU32w(p);
-        if (cols != 6) { err = "窗口化：Actions 列数不是 6"; return false; }
+        if (cols != 7) { err = "窗口化：Actions 列数不是 7"; return false; }
         size_t off = 4;
-        for (uint32_t i = 0; i < 6; ++i) {
+        for (uint32_t i = 0; i < 7; ++i) {
             if (!haveW(n, off, 8)) { err = "窗口化：Actions 列长度越界"; return false; }
             const uint64_t len = rdU64w(p + off);
             off += 8;
@@ -175,7 +175,7 @@ bool FloorWindowSource::open(const uint8_t* data, size_t length, std::string& er
             size_t colN = (size_t)len;
             off += (size_t)len;
             ActionColumn& c = m_cols[i];
-            if (i == 2 || i == 4 || i == 5) {          // strId / val1 / val2 是稀疏列
+            if (i == 2 || i == 5 || i == 6) {              // strId / val1 / val2 是稀疏列
                 if (!haveW(colN, 0, 12)) { err = "窗口化：稀疏列前缀越界"; return false; }
                 c.sparse = true;
                 c.mask = rdU32w(col);
@@ -285,7 +285,7 @@ bool FloorWindowSource::readBlock(uint64_t block, FloorBlock& out, std::string& 
     }
 
     std::vector<int64_t> floors;
-    std::vector<uint32_t> types, flags, strs, v1, v2;
+    std::vector<uint32_t> types, flags, strs, strs2, v1, v2;
     auto need = [&](int i) -> const ActionColumn& { return m_cols[i]; };
     const bool dbg = env::flag("ADOCAO_WINDOW_DBG");
     auto diag = [&](int col, uint64_t f, uint64_t t, bool ok) {
@@ -318,23 +318,26 @@ bool FloorWindowSource::readBlock(uint64_t block, FloorBlock& out, std::string& 
     if (!takeU(1, a0, a1, types)) {
         diag(1, a0, a1, false); err = "窗口化：actions.type 取区间失败"; return false;
     }
-    if (!takeU(3, a0, a1, flags)) {
-        diag(3, a0, a1, false); err = "窗口化：actions.flag 取区间失败"; return false;
+    if (!takeU(4, a0, a1, flags)) {
+        diag(4, a0, a1, false); err = "窗口化：actions.flag 取区间失败"; return false;
     }
     if (need(2).sparse && !takeU(2, uStr0, uStr1, strs)) {
         err = "窗口化：actions.strId 取区间失败"; return false;
     }
-    if (need(4).sparse && !takeU(4, uV10, uV11, v1)) {
+    if (!takeU(3, a0, a1, strs2)) {
+        err = "窗口化：actions.strId2 取区间失败"; return false;
+    }
+    if (need(5).sparse && !takeU(5, uV10, uV11, v1)) {
         err = "窗口化：actions.val1 取区间失败"; return false;
     }
-    if (need(5).sparse && !takeU(5, uV20, uV21, v2)) {
+    if (need(6).sparse && !takeU(6, uV20, uV21, v2)) {
         err = "窗口化：actions.val2 取区间失败"; return false;
     }
     const size_t m = floors.size();
     if (types.size() != m || flags.size() != m) { err = "窗口化：actions 列长度不一致"; return false; }
 
     out.actions.resize(m);
-    size_t ks = 0, k1 = 0, k2 = 0;
+    size_t ks = 0, ks2 = 0, k1 = 0, k2 = 0;
     for (size_t i = 0; i < m; ++i) {
         LevelData::FastAction& a = out.actions[i];
         const uint32_t t = types[i];
@@ -342,12 +345,14 @@ bool FloorWindowSource::readBlock(uint64_t block, FloorBlock& out, std::string& 
         a.floor = (int)floors[i];
         a.type = (LevelData::FastAction::Type)(uint8_t)t;
         a.strId = (need(2).mask & bit) ? (uint16_t)strs[ks++] : 0;
+        a.strId2 = (i < strs2.size()) ? (uint16_t)strs2[i] : 0;
         a.flag = (flags[i] != 0);
-        const uint32_t x1 = (need(4).mask & bit) ? v1[k1++] : 0u;
-        const uint32_t x2 = (need(5).mask & bit) ? v2[k2++] : 0u;
+        const uint32_t x1 = (need(5).mask & bit) ? v1[k1++] : 0u;
+        const uint32_t x2 = (need(6).mask & bit) ? v2[k2++] : 0u;
         std::memcpy(&a.val1, &x1, 4);
         std::memcpy(&a.val2, &x2, 4);
     }
+    if (strs2.size() != m) { err = "窗口化：actions.strId2 列长度不符"; return false; }
     if (ks != strs.size() || k1 != v1.size() || k2 != v2.size()) {
         err = "窗口化：actions 稀疏列条数与掩码不符";
         return false;
@@ -453,11 +458,20 @@ bool computeFloorWindow(const LevelData::Settings& settings, const FloorWindowIn
                 const std::string& s0 = (strs && a.strId < strs->size()) ? (*strs)[a.strId]
                                                                         : std::string();
                 out.hasAtStates = true;
-                out.atStates[(int)k] = {s0.empty() ? settings.trackDisappearAnimation : s0,
-                                        settings.trackAnimation,
-                                        a.val1 >= 0 ? a.val1 : settings.beatsBehind,
-                                        a.val2 >= 0 ? a.val2 : settings.beatsAhead,
-                                        a.flag};
+                {
+                    // 与 `LevelData::processActions` 逐字同一条构造：**只记事件写了什么**，
+                    // 缺省/继承交给 Timeline（对齐 Re_ADOJAS）。
+                    LevelData::ATState st;
+                    st.hasDA = !s0.empty();
+                    st.da    = s0;
+                    const std::string& s2 = (strs && a.strId2 < strs->size()) ? (*strs)[a.strId2]
+                                                                             : std::string();
+                    st.hasAA = a.flag && !s2.empty();
+                    st.aa    = s2;
+                    st.bb    = a.val1;
+                    st.ba    = a.val2;
+                    out.atStates[(int)k] = std::move(st);
+                }
                 break;
             }
             default: break;

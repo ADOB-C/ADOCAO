@@ -5,11 +5,14 @@
 #include "core/util/Env.hpp"
 #include "core/util/Profile.hpp"
 #include "core/util/Scheduler.hpp"
+#include "core/timeline/Timeline.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <atomic>
+#include <limits>
 
 
 namespace adofai {
@@ -43,7 +46,7 @@ using TileShape::Shape;
 namespace {
 
 // 形状键：与改造前 `TileMesh::build` 逐字相同（0.01° 网格 + 中旋标志）
-// trackStyle → 几何档位（Re_ADOJAS createTrackMesh 的 styleWidth/styleLength 微调）。
+// trackStyle → 几何档位。**只保留给着色/图标用，不再改尺寸**（见下面 styleWidthOf 的说明）。
 // 0 Standard / 1 Neon / 2 NeonLight / 3 Basic / 4 Gems / 5 Minimal / 6 其它（按 Standard）
 inline uint8_t styleIdOf(const std::string& s) {
     if (s == "Neon") return 1;
@@ -53,17 +56,33 @@ inline uint8_t styleIdOf(const std::string& s) {
     if (s == "Minimal") return 5;
     return 0;
 }
+// **不做按风格的尺寸放大**（Re_ADOJAS 01bc128 的 +0.025 宽 / +0.02 长）。
+// 它是**逐砖累加**的：每砖长 0.49→0.51 就是 +4%，几千砖之后整条轨道被拉长，
+// 实测与录制版（9ac56ec）在 t=100 s 差 26,801 像素，关掉后逐字节相同。
+// 用户 2026-10-21 复现"超级拉伸那段"不一致，判定这就是原因 → 保持基准尺寸。
+inline bool styleScaleEnabled() {
+    static const bool on = [] {
+        const char* e = std::getenv("ADOCAO_TILE_STYLE_SCALE");
+        return e && (e[0] == '1' || e[0] == 't' || e[0] == 'T' || e[0] == 'y' || e[0] == 'Y');
+    }();
+    return on;
+}
 inline float styleWidthOf(uint8_t id) {
-    return (id == 1 || id == 2 || id == 3) ? TILE_WIDTH + 0.025f : TILE_WIDTH;
+    if (styleScaleEnabled() && (id == 1 || id == 2 || id == 3)) return TILE_WIDTH + 0.025f;
+    return TILE_WIDTH;
 }
 inline float styleLengthOf(uint8_t id) {
-    if (id == 1 || id == 2 || id == 3) return TILE_LENGTH + 0.02f;
-    if (id == 5) return TILE_LENGTH - 0.03f;
+    if (styleScaleEnabled()) {
+        if (id == 1 || id == 2 || id == 3) return TILE_LENGTH + 0.02f;
+        if (id == 5) return TILE_LENGTH - 0.03f;
+    }
     return TILE_LENGTH;
 }
-inline uint8_t styleOfTile(const LevelData& lv, int64_t i) {
-    const LevelData::ColorEvent* e = lv.colorEventAt(i);
-    return styleIdOf(e ? e->cfg.style : lv.settings.trackStyle);
+inline uint8_t styleOfTile(const LevelData& lv, int64_t i, const Timeline* timeline) {
+    // 必须走 trackStyleAt：trackStyle 只出现在 RecolorTrack 上，而 colorEventAt 跳过
+    // 所有 kColorIsRecolor → 直接用它会全谱退化成 Standard（2025 的 1793 条 Neon 全丢，
+    // 接缝处露白 + 邻砖圆角啃掉一角）。形状表是静态的 → 取该砖的最终样式。
+    return styleIdOf(lv.trackStyleAt(i, std::numeric_limits<double>::infinity(), timeline));
 }
 
 struct GeoKey { int sa, ea; bool mid; uint8_t style; };
@@ -160,7 +179,17 @@ void TileMesh::deriveRange(const LevelData& level, int64_t i0, int64_t i1, Deriv
         out.posY[k] = (float)(p[1] - m_chunkY[c]);
         float sa, ea; bool mid;
         TileShape::keyForTile(level, (int)i, sa, ea, mid, wc);
-        const auto it = m_shapeIndex.find(packShapeKey(sa, ea, mid, styleOfTile(level, i)));
+        const auto it = m_shapeIndex.find(packShapeKey(sa, ea, mid, styleOfTile(level, i, m_timeline)));
+        if (it == m_shapeIndex.end()) {
+            // **不能**静默退回形状 0：那会画出一块完全不相干的砖（同一族"为了安全其实错了"）。
+            // 真出现说明 build 期与派生期的 (sa, ea, mid, style) 不一致 —— 喊出来（每次运行一次）。
+            static std::atomic<bool> warned{false};
+            if (!warned.exchange(true)) {
+                LOG_E("TileMesh: 砖 %lld 的形状键在表里找不到（sa=%.2f ea=%.2f mid=%d style=%u）——"
+                      "退回形状 0，画面会错；build 与 deriveRange 的键必须逐位一致",
+                      (long long)i, sa, ea, (int)mid, (unsigned)styleOfTile(level, i, m_timeline));
+            }
+        }
         out.shape[k] = (it != m_shapeIndex.end()) ? it->second : 0u;
         // 图标位：与 buildIcons 的判据逐字相同（Twirl / SetSpeed 的 1.05、0.95 阈值）
         const bool ht = i < (int64_t)level.tileHasTwirl.size() && level.tileHasTwirl[(size_t)i];
@@ -175,8 +204,9 @@ void TileMesh::deriveRange(const LevelData& level, int64_t i0, int64_t i1, Deriv
 }
 
 void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
-                     const std::string& strokeColorHex) {
+                     const std::string& strokeColorHex, const Timeline* timeline) {
     destroy();
+    m_timeline = timeline;
     hexToColor3(fillColorHex, m_fill);
     hexToColor3(strokeColorHex, m_stroke);
 
@@ -194,7 +224,7 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     for (int i = 0; i < n; i++) {
         float sa, ea; bool mid;
         TileShape::keyForTile(level, i, sa, ea, mid);
-        const uint8_t style = styleOfTile(level, i);
+        const uint8_t style = styleOfTile(level, i, m_timeline);
         GeoKey k{(int)std::round(sa * 100.0f), (int)std::round(ea * 100.0f), mid, style};
         shapeGroups[k].push_back(i);
     }
@@ -218,9 +248,10 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     for (auto& kv : shapeGroups) {
         const GeoKey& key = kv.first;
         const uint32_t shapeIdx = (uint32_t)m_shapes.size();
-        m_shapes.push_back(TileShape::buildShape(key.sa / 100.0f, key.ea / 100.0f, key.mid,
-                                                 styleWidthOf(key.style), styleLengthOf(key.style),
-                                                 key.style == 4));   // 4 = Gems
+        Shape sh = TileShape::buildShape(key.sa / 100.0f, key.ea / 100.0f, key.mid,
+                                         styleWidthOf(key.style), styleLengthOf(key.style),
+                                         key.style == 4);   // 4 = Gems
+        m_shapes.push_back(sh);
         m_shapeIndex[packShapeKey(key.sa / 100.0f, key.ea / 100.0f, key.mid, key.style)] = shapeIdx;
     }
     // 绘制顺序 = **按砖号（= 层号）升序**（2026-10-15 起）：所以不再需要 `m_drawOrder` 那支
@@ -816,13 +847,26 @@ void TileMesh::uploadIfNeeded() const {
     }
     // 交错：5 float 几何/形状 + 6 float 颜色（颜色数组与可见列表同序）
     m_instData.resize(count * 19);
+    // 开关：`ADOCAO_DRAW_ORDER=ascending`（或 `asc`）回到旧升序（A/B 用）。**默认 = 倒序**。
+    // 倒序 = Re_ADOJAS 的 `renderOrder = -tileIndex`：楼层大的先画、早的后画压在邻居上面，
+    // Neon 那种"黑填充 + 亮描边"在接缝处才不会断成一段段（用户说的"被狗啃"）。
+    static const bool revOrder = [] {
+        const char* e = std::getenv("ADOCAO_DRAW_ORDER");
+        return !(e && (std::strcmp(e, "ascending") == 0 || std::strcmp(e, "asc") == 0));
+    }();
+    // 默认**倒序提交**（砖号大 → 小），与 Re_ADOJAS 的 `instancedMesh.renderOrder = -tileIndex` 一致：
+    // 早的砖后画、压在晚的砖上面，Neon 接缝的描边才连续（升序会让后画的黑填充盖掉前一块的亮描边，
+    // 就是"被狗啃"）。代价是与 2026-10-18 的录制版在重叠接缝处差一圈描边（t=118 s 逐像素 2,207），
+    // 但那是旧版行为、不是参考语义 —— 裁决权在 Re_ADOJAS。
+    // 升序保留为 A/B：`ADOCAO_DRAW_ORDER=ascending`。
     for (size_t k = 0; k < count; k++) {
+        const size_t src = revOrder ? (count - 1 - k) : k;
         float* d = &m_instData[k * 19];
-        const float* g = &m_listAttr[k * 5];
+        const float* g = &m_listAttr[src * 5];
         for (int i = 0; i < 5; i++) d[i] = g[i];
-        const float* c = &m_listColors[k * 6];
+        const float* c = &m_listColors[src * 6];
         for (int i = 0; i < 6; i++) d[5 + i] = c[i];
-        const float* x = &m_listXform[k * 8];
+        const float* x = &m_listXform[src * 8];
         for (int i = 0; i < 8; i++) d[11 + i] = x[i];
     }
     glBindBuffer(GL_ARRAY_BUFFER, m_instVbo);

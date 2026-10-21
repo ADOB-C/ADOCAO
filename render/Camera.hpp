@@ -28,6 +28,10 @@ public:
     glm::mat4 viewProj() const;
 
     float zoom() const { return m_zoom; }
+    // 一砖在屏幕上占多少像素（视野高 = 12 砖 × 100/zoom）——拖尾的 sagitta 判据要用
+    float pixelsPerTile(int framebufferHeight) const {
+        return framebufferHeight * m_zoom / 1200.0f;
+    }
     float rotation() const { return m_rotationDeg; }
     double targetX() const { return m_targetX; }
     double targetY() const { return m_targetY; }

@@ -37,6 +37,7 @@
 // 块按层号升序、块内按砖号升序输出即可，不需要为"恢复旧绘制序"付排序代价。
 
 namespace adofai {
+class Timeline;
 
 class FloorWindowCache;
 
@@ -47,8 +48,11 @@ public:
     TileMesh(const TileMesh&) = delete;
     TileMesh& operator=(const TileMesh&) = delete;
 
+    // `timeline` 只用于把 trackStyle 解析到"该砖被踩到的那一刻"（精确判据）。可空：
+    // 为空时退回按层号的估计（测试/无 Timeline 路径），正式渲染必须传。
     void build(const LevelData& level, const std::string& fillColorHex = "FFFFFF",
-               const std::string& strokeColorHex = "000000");
+               const std::string& strokeColorHex = "000000",
+               const Timeline* timeline = nullptr);
     // **一次 draw** 画完砖与图标（图标 part 紧跟在自己那块砖的填充之后）—— 指数的索引表
     // 顺序就是"描边 → 填充 → 三个图标 part"。
     //
@@ -153,6 +157,7 @@ private:
     // ③ 切片 4【二分实验】：数组**保留**，额外建"按块窗口"，只让 cullRange 从窗口读 ——
     // 用来判定"派生值不对"还是"读路径不等价"。
     const LevelData* m_level = nullptr;
+    const Timeline*  m_timeline = nullptr;   // 只在解析 trackStyle 时用（见 build）
     // ⑦ 容量边界（2026-10-16）：极端视距下"整张一帧"会让主线程卡死几十秒
     // （实测：1055 万砖全进视锥 → 逐块剔除 + 211 MB 实例上传 = **一帧 36.2 s**，macOS 转沙滩球）。
     // 两道闸：① 候选砖超过 kMaxCullCandidates 就**跳过本帧重建**（保留上一帧的列表）；

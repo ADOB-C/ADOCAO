@@ -1691,6 +1691,7 @@ void LevelData::buildRecolorIndex(const Timeline& timeline) {
         rt.trigger = (double)timeline.startTimeAt(ev.floor) +
                      ((double)ev.angleOffset / 180.0) * rt.beat;
         rt.duration = ev.duration;
+        rt.angleOffset = ev.angleOffset;
         rt.ease = ev.ease;
         rt.order = ev.order;
         rt.cfg = ev.cfg;
@@ -1727,6 +1728,40 @@ void LevelData::buildRecolorIndex(const Timeline& timeline) {
     }
     LOG_D("RecolorTrack: %zu 条事件，块表 %zu 块 / %zu 条目", m_recolorTriggers.size(),
           m_recolorBlocks.size(), total);
+}
+
+std::string LevelData::trackStyleAt(int64_t floor, double timeSec, const Timeline* timeline) const {
+    // 第一步与 baseColorConfig()/baseColorsAt() 同源：settings 默认 + colorEventAt 的静态段。
+    std::string style = settings.trackStyle;
+    if (const ColorEvent* e = colorEventAt(floor))
+        if (!e->cfg.style.empty()) style = e->cfg.style;
+    if (!m_recolorReady || m_recolorBlocks.empty() || floor < 0) return style;
+    const size_t blk = (size_t)floor / kRecolorBlock;
+    if (blk >= m_recolorBlocks.size()) return style;
+    // 第二步与 tileColorsAt 的后半段逐字同构（同样的覆盖/gap/trigger 判据），
+    // 只是取 cfg.style 而不是颜色。timeSec = +inf 就是"最终状态"（静态形状表用的口径）。
+    const RecolorTrigger* last = nullptr;
+    for (uint32_t idx : m_recolorBlocks[blk]) {
+        const RecolorTrigger& e = m_recolorTriggers[idx];
+        if (e.lo > floor || e.hi < floor) continue;
+        if (e.gap > 0 && ((floor - e.lo) % ((int64_t)e.gap + 1)) != 0) continue;
+        if (e.trigger > timeSec + 1e-9) break;   // 列表按 trigger 升序
+        // 事件**自己那一层**还没走到就不算数 —— 否则末尾一条覆盖到前面的 RecolorTrack 会
+        // **追溯**改掉已经过去的砖（The Moon 的 64 条 Minimal 就会把前面已定型的 Neon 改小 0.03）。
+        // 但 angleOffset 是**度**：负值可以提前触发（-99999 ≈ 负 555 拍 = 从开头就生效），
+        // 所以门槛不是"层号 <= 砖号"，而是"这条的提前量够不够跨过这两层"。
+        // 精确判据：该砖自己的起始时刻。**别用"每层 1 拍"去估** —— 一层 = 该砖走过的角度
+        // /180 拍，90° 砖只有半拍、360° 砖是两拍，层号差和拍数根本不成正比（2026-10-18 用户指出）。
+        if (timeline) {
+            if (e.trigger > timeline->startTimeAt(floor) + 1e-9) continue;
+        } else if (e.cfg.startFloor > floor &&
+                   (double)e.angleOffset > -180.0 * (double)(e.cfg.startFloor - floor) - 1e-6) {
+            continue;
+        }
+        last = &e;
+    }
+    if (last && !last->cfg.style.empty()) style = last->cfg.style;
+    return style;
 }
 
 TileColors LevelData::tileColorsAt(int64_t floor, double timeSec, float amplitude,

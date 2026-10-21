@@ -244,6 +244,7 @@ struct LevelData {
         int32_t lo = 0, hi = 0, gap = 0;
         double  trigger = 0.0;    // 秒
         double  beat = 0.0;       // 该事件 floor 的一拍（秒）
+        float   angleOffset = 0.0f;  // 度：负值 = 提前触发（-99999 这类极端值 = 从开头就生效）
         float   duration = 0.0f;  // 拍
         uint8_t ease = 0;
         uint32_t order = 0;
@@ -281,6 +282,18 @@ struct LevelData {
     // 基础色（settings + ColorTrack；不含 RecolorTrack）—— tileColorsAt 的第一步。
     TileColors baseColorsAt(int64_t floor, double timeSec, float amplitude = 0.0f,
                             const Timeline* timeline = nullptr) const;
+
+    // 该砖在 `timeSec` 时刻的 trackStyle（几何档位）。
+    // 规则的**另一半**与 tileColorsAt 相同：先取 colorEventAt 的静态段（settings 或 ColorTrack），
+    // 再叠加最后一条 `trigger <= timeSec` 且范围覆盖该层的 RecolorTrack 的 cfg.style。
+    // 为什么必须走这条：trackStyle **只**出现在 RecolorTrack / ColorTrack 事件里，而
+    // colorEventAt 刻意跳过 kColorIsRecolor —— 只用它会让所有砖退化成 Standard，
+    // 于是 Neon/Basic 少了"放大半宽 +0.025 / 半长 +0.02"的搭接，接缝直接露背景
+    // （2025 全曲 1793 条 Neon 全中招，画面里是一圈白框 + 被邻砖圆角啃掉一角）。
+    // `timeline` 非空时用**精确**判据：事件的 trigger 必须早于该砖自己的起始时刻；
+    // 为空时退回"每层 1 拍"的估计（只用于测试/无 Timeline 的路径，别当正式语义）。
+    std::string trackStyleAt(int64_t floor, double timeSec,
+                             const Timeline* timeline = nullptr) const;
 
     // 某层处生效的**持久段**（忽略 justThisTile / inactive / editorOnly）；没有 → nullptr。
     const ColorEvent* persistentColorAtOrBefore(int64_t floor) const;

@@ -13,3 +13,6 @@ ADOCAO.log
 /build-win/
 
 build-audit/
+
+# 像素门槛基线（驱动相关、不入库；见 scripts/capture-gate.sh 头注释）
+.gate/

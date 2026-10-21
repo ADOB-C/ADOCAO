@@ -39,12 +39,13 @@ cp -f build/ADOCAO build/gate/adocao
 BIN=build/gate/adocao
 STATES=tests/capture_states.txt
 LOG=build/gate/adocao.log
-# 长期保留的产物放 `~/Projects/.ADOCAO/`（ADOCAO 系的仓库与镜像都在 `~/Projects` 下，一处收齐）。
-# 两条硬约束：① **别放 `/tmp`** —— 会被系统定期清掉，基线丢了就得重存（真发生过）；
-#            ② **也别放仓库里** —— `git clean -xdf` / `rm -rf build` 会把基线一起删掉，
-#               而基线是**驱动相关、不入库**的东西，重存只会拿"当前输出"当基准，
-#               等于把"改动前"的参照弄丢，门槛就失效了。
-GATE_HOME="${ADOFAO_GATE_HOME:-$HOME/Projects/.ADOCAO/gate}"
+# 基线默认放在**工作区内**的 `.gate/baseline`（2026-10-21 用户拍板：别再放工作区外的
+# `~/Projects/.ADOCAO/`，写起来要权限、路径还绕）。两条保持不变的约束：
+#   ① 别放 `/tmp`（会被系统清掉）；
+#   ② **必须进 .gitignore**（基线是驱动相关、不入库的；一旦入库，`git clean -xdf` 或
+#      换机器时会拿"当前输出"当基准，"改动前"的参照就丢了，门槛等于失效）。
+# 备份/长期归档仍可指到工作区外：`ADOFAO_GATE_HOME=~/Projects/.ADOCAO/gate`。
+GATE_HOME="${ADOFAO_GATE_HOME:-$PWD/.gate}"
 PY="${ADOCAO_GATE_PY:-python3}"
 if /usr/bin/time -l true >/dev/null 2>&1; then TIME_FLAG=-l; else TIME_FLAG=-v; fi
 

@@ -16,11 +16,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   （真做过一次：`git filter-repo` 会**移除 origin** 并让分支失去 upstream —— 重写后要
   `git remote add origin …` + `git branch --set-upstream-to=origin/master master`，否则
   `scripts/push-ci.sh` 里的无参 `git push` 会报 "no upstream branch"）。
-- **长期保留的产物统一放 `~/Projects/.ADOCAO/`**（ADOCAO 系的仓库与镜像都在 `~/Projects` 下，一处收齐），
-  两条硬约束：**别放 `/tmp`**（系统会定期清，像素基线就这么丢过一次）；**也别放仓库里** ——
-  `git clean -xdf` / `rm -rf build` 会把基线一起删掉，而基线是**驱动相关、不入库**的，重存只会拿
-  "当前输出"当基准，等于把"改动前"的参照弄丢，门槛就失效了。布局：
-  `gate/baseline`（像素门槛基线，`ADOFAO_GATE_HOME` 可改）、`cache/gh`（gh CLI 缓存，
+- **像素门槛基线放工作区 `.gate/baseline`**（2026-10-21 用户拍板；`ADOFAO_GATE_HOME` 可改），
+  **必须留在 `.gitignore` 里**（`.gate/`）—— 它是驱动相关、不入库的，重存只会拿"当前输出"当基准，
+  等于把"改动前"的参照弄丢，门槛就失效了。**别放 `/tmp`**（系统会定期清，基线这么丢过一次）。
+  其余长期产物仍放 `~/Projects/.ADOCAO/`（ADOCAO 系仓库与镜像都在 `~/Projects` 下），布局：
+  `gate/baseline`（旧位置，仅备份用）、`cache/gh`（gh CLI 缓存，
   沙箱里要用 `XDG_CACHE_HOME=~/Projects/.ADOCAO/cache/gh`）、`tools/`（如 git-filter-repo）、`scratch/`（一次性文件）。
   重写历史前的镜像**单独放** `~/Projects/.ADOCAO-Backup-1`（352 提交 / 21 标签，**里面仍含用户名**，
   这正是它作为回退手段的意义）：它的 origin 已被移除，**不要**把它 fetch/pull 回主仓库 ——
@@ -143,6 +143,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   * **日志前缀**：抓帧块里新增的日志**不许**以 `capture:` 开头 ✗（`capture-gate.sh` 用"日志里最后一条
     `capture:` 行"核对本次的 `tile=`/`req=`；自检日志一开始也叫 `capture:` → 51 个状态全判 FAIL，
     门槛**自己**抓住了这个疏忽 ✓）。自检统一用 `capture-selfcheck:` 前缀。
+  * **“和参考实现是否一致”用 `scripts/ref-ab.sh` 动态验**：它真跑 `~/Repos/Re_ADOJAS`（vite dev server + playwright）播放到同一时刻抓帧，并排拼 `build/ref-ab/<name>_ab.png`。2026-10-18 用它确认 2025 里“砖被狗啃”参考实现**也有**（Neon 的黑填充 + 亮描边 + 该段颜色事件本身），不是我们几何/深度的锅。坑见 `docs/rendering.md`「动态 A/B」。
 - **剔除（④）与绘制顺序（2026-10-15）**：
   * `m_drawOrder` = **按层号升序**（原来是"按形状分组 + 组内降序"）。像素门槛 51/51 + 巨谱 A/B
     16 帧（三种 Won't You、TNR、primer-final，含整张一帧 6,841 万块）**逐字节相同** →
@@ -241,6 +242,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `docs/audio.md` | 动音频、hitsound 混音、导出 WAV、audio-as-chart |
 | `docs/image-export.md` | 动 `adocao image`（真无头出图）、瓦片与拼接 |
 | `docs/cli.md` | 加/改命令行开关、拖尾采样参数 |
+| `docs/mac-recovery.md` | macOS 上被 ADOCAO 弄坏过系统状态时读：`scripts/mac-recover.sh` 怎么用、哪三个系统级调用**禁止再写** |
 | `docs/adocao-format.md` | `.adocao` 容器规范与逐项实测 |
 | `docs/ilytx.md` | Re_ADOJAS 的 `.ilytx` 容器（xz(tar(ilybin))）规范摘要 + 我们只翻译成明文、不建第二条解析链 |
 | `docs/2e9.md` | **项目当前目标**：21 亿层的 DoD（内存与 n 解耦/seek/不掉帧）+ 阶段顺序 + 纪律 —— 动手前先读这份 |

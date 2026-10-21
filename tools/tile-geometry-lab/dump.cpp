@@ -45,6 +45,8 @@ int main() {
     caseOf("新：createMidSpinMesh(30°)", "斜向", [&] { createMidSpinMesh(30, sc); });
     // 对照：普通 60° 弯砖（未改动的路径）
     caseOf("普通 createTileMesh(0,60)", "参照：普通弯砖", [&] { createTileMesh(0, 60, sc); });
+    caseOf("TURN createTileMesh(-180,150)", "tile 2066 的 sa/ea（330° 拐点）", [&] { createTileMesh(-180, 150, sc); });
+    caseOf("TURN createTileMesh(-30,270)", "tile 2067 的 sa/ea（300° 拐点）", [&] { createTileMesh(-30, 270, sc); });
 
     std::printf("]\n");
     return 0;

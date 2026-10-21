@@ -37,6 +37,17 @@
 * **默认可视化 = 谱面颜色**（settings + ColorTrack），`--fill/--stroke` 仍可整体覆盖（CLI 显式给才生效）。
   像素门槛 54 个状态因此按新行为**重存**（原基线的描边是启动器默认 0.5×，现在是 chart 的 0.7×）。
 
+**动态 A/B 跑参考实现（2026-10-18 起）**：`scripts/ref-ab.sh <chart> --time 44 [--no-camera]`
+把 `~/Repos/Re_ADOJAS` 的 vite dev server 起起来，用 playwright 驱动它**真的播放到同一时刻**抓帧，
+再用 `./build/adocao --capture-time 44 --capture-camera` 抓同一帧，最后并排拼成
+`build/ref-ab/<name>_ab.png`（上=参考、下=我们）。用途：像素门槛只证明"和上一版一致"，
+它证明"**和权威实现一致**"——两边都"有"的怪相说明那是谱面/样式本身的几何，不是我们的 bug。
+
+三条踩过的坑：① DSH 自带的 node 带 hardened runtime，rolldown 的原生绑定会因 Team ID 不同被
+dyld 拒绝（报 "Cannot find native binding"）→ 用 `/opt/homebrew/bin/node`（`REF_NODE` 可覆盖）；
+② 参考仓库要在**自己目录**写 vite 缓存（`node_modules/.vite-temp`），沙箱里要先放开写权限；
+③ 大谱（2025，3.4 MB / 1 万砖）解析约 25 s，之后才是"按空格开始播放"的起点，等帧时间要按这个基准算。
+
 **RecolorTrack（2026-10-17 已落地）**：新版 ADOFAI 的换色事件（`RecolorTrack`，与旧的
 `ColorTrack` 并存）。它**不是**"从 floor 起持续"的段，而是"**触发时改一段**"：
 
@@ -333,7 +344,10 @@ SIMD 剔除（按绘制序切块并行，`render/TileMesh.cpp` 的 `getPool()`�
 上做了 16 帧 A/B（含"整张一帧"6,841 万块）**全部逐字节相同**。
 **（2026-10-15 后续：该 A/B 的钩子随 `m_drawOrder` 一起删除了** —— 绘制顺序既然对出图不可观测，
 那支 4 B/砖 的排列数组就是纯冗余（MYC 实测常驻 **−26.3 MB**、2³¹−1 外推 8.6 GB），
-`ADOCAO_DRAW_ORDER=grouped` 与 `scripts/order-ab.sh` 一并移除。**要重做这个 A/B，就临时改
+**绘制顺序（2026-10-21 定案）**：**默认倒序**（`renderOrder = -tileIndex`，与 Re_ADOJAS 一致）：
+楼层大的先画、早的后画压在邻居上面，Neon 的「黑填充 + 亮描边」在接缝处才连续（修「被狗啃」）。
+与 2026-10-18 的录制版（旧升序）在重叠接缝处差一圈描边（t=118 s 逐像素 2,207），但**裁决权在
+Re_ADOJAS**，不是旧版行为。A/B：`ADOCAO_DRAW_ORDER=ascending`。历史：`ADOCAO_DRAW_ORDER=grouped` 与 `scripts/order-ab.sh` 已移除。**要重做这个 A/B，就临时改
 `TileMesh` 的提交顺序**（把下标换成"按形状分组 + 组内降序"的排列）再抓帧比对 —— 别留一个
 "设了环境变量但没人读"的钩子，那会变成永远绿的假对照。**）**
 残留的理论情形只有"极端广角 + 屏幕上真的重合但颜色/图标不同的砖"（那 16 帧没造出来），

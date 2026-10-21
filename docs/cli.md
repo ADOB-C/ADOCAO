@@ -19,12 +19,13 @@ adocao stitch <dir> <out.png>           [--scale N] [--threads N]
 播放选项（不带子命令时）：
   --level <file> --music <file> --width N --height N --fullscreen
   --fill HEX --stroke HEX --bg HEX --no-auto-stroke --no-hitsound --no-trail
-  --force-hitsound [TYPE] --auto-play --msaa N --windowed/--borderless/--exclusive
+  --force-hitsound [TYPE] --auto-play --msaa N(默认 4) --windowed/--borderless
   --cull-block N    剔除粗块粒度（层/块，默认 4096；0 = 关闭索引走全扫）。只影响剔除成本与
                     索引内存，**不改画面**（8 种粒度实测 PNG 逐字节相同）—— 见 docs/rendering.md
   --trail-duration SEC | --trail-tiles N
   --trail-sample-rate N | --trail-target-fps N
   --trail-rate-min N --trail-rate-max N --trail-samples-per-tile N
+  --trail-sagitta PX
   --debug（开发）
 
   adocao --help [--all]
@@ -42,9 +43,8 @@ adocao stitch <dir> <out.png>           [--scale N] [--threads N]
 `--debug`/`--capture*` 与环境变量钩子）。`scripts/check-cli-help.sh` 机械校验"main.cpp 解析的每个
 `--flag` 都出现在 printHelp 里"，防止帮助漂移。未知的 `--flag` 现在**直接报错退出（码 2）**而不是像以前
 那样静默忽略（打错字会悄悄开 GUI）；单横线参数（macOS 的 `-psn_...`）与单独的 `--` 仍然忽略。
-`--exclusive` / `--no-exclusive` 也翻过两次：先删成 no-op，2026-10-18 一度改成"默认无边框、
-`--exclusive` 开独占"，最后按"大多数人只玩不录"定成 **默认独占、`--no-exclusive` 关掉**
-（见下节"全屏与录屏"）。把 `--export` 并入 `export` 子命令，`--stitch-scale` 先是改名
+`--exclusive` / `--no-exclusive` 已经**整体删除**（2026-10-19 用户拍板）：全屏一律用 osu! 的
+Borderless 语义，见下节"窗口模式"与 `docs/mac-recovery.md` 里的事故记录。把 `--export` 并入 `export` 子命令，`--stitch-scale` 先是改名
 `--map-stitch-scale`、现在随子命令简化成 `stitch --scale`。
 
 Trail sampling — two independent axes, both optional and **off by default** (wizard
@@ -74,22 +74,41 @@ ADOCAO_VSYNC=1 ./build/adocao "谱面"
 
 或改用 **Display Capture**。确定性抓帧（`--capture`）始终走单帧渲染，不受此影响。
 
-### 窗口模式（`--windowed` / `--borderless` / `--exclusive` / Alt+Enter）
+### 窗口模式（`--windowed` / `--borderless`）
 
-和 osu! / SDL 一样是**三档**（`cfg.windowMode`：0/1/2），默认 **Borderless**：
+**两档**（`cfg.windowMode`：0/1），默认 **Borderless**。语义就是 osu! 的 Borderless
+（SDL 的 `SDL_WINDOW_FULLSCREEN_DESKTOP`）：
 
-| 模式 | Windows | macOS / Linux | 抓屏（WGC/OBS） |
-|---|---|---|---|
-| **Windowed**（`--windowed`） | 带边框的普通窗口，`--width×--height` | 同左 | 能 |
-| **Borderless**（`--borderless`，默认；`--no-exclusive` 是它的旧别名） | `GLFW_DECORATED=false` + 铺满显示器，**不** acquireMonitor | 无边框、铺满显示器的普通窗口（合成器全程在链上） | **能** |
-| **Exclusive**（`--exclusive`） | `glfwSetWindowMonitor(monitor)` → `acquireMonitor()`：`CDS_FULLSCREEN` + `WS_POPUP` + `HWND_TOPMOST`，可翻页 → **帧数通常更高** | `glfwSetWindowMonitor(monitor)` → Cocoa 无边框 + level 抬到菜单栏之上（原生全屏） | Windows **抓不到**；macOS 仍可抓（没有真正的独占路径） |
+| 模式 | 行为 | 抓屏（WGC/OBS） |
+|---|---|---|
+| **Windowed**（`--windowed`） | 带边框的普通窗口，`--width×--height` | 能 |
+| **Borderless**（`--borderless`，默认） | `GLFW_DECORATED=false` 的无边框窗口 + macOS 上 `toggleFullScreen:` 进**自己的 Space**（= SDL `SDL_WINDOW_FULLSCREEN_DESKTOP` / osu! 的 Borderless）：**不切显示模式**（HiDPI 保持）、**不改 presentation options**；app 退出时 Space 自动消失。两个前置条件（都踩过）：① 先补 `styleMask` 的 `Resizable｜Titled`（GLFW 的无边框窗口没有这两位，不补 `toggleFullScreen:` 会被静默拒绝）；② 过场期间不要改窗口尺寸/位置（否则被当成"用户拖窗口"，把全屏踢掉） | **能** |
 
-* 向导 **Graphics 页**是同一个三档下拉（`Window mode`），选完即写入 `cfg.windowMode`。
-* **要录屏/AdoFrame 测就用 Borderless**：Windows 的 Exclusive 不在 DWM 合成链上，OBS 窗口捕获、
-  WGC、AdoFrame 都拿不到（用户 2026-10 报的"ADOCAO 是唯一一个没有全屏录制的播放器"就是这个）。
-* Windows 的 Exclusive 会顺带挑一个视频模式（同分辨率里刷新率最高的）；Borderless 完全不碰显示模式。
-* Alt+Enter 在 **Windowed ↔ 当前 fullscreen 模式**之间切（记住 `cfg.windowMode`）。
-* `--width/--height` 只对 **Windowed** 有意义（两种全屏都铺满显示器）。
+* 向导 **Graphics 页**是同一个两档下拉（`Window mode`），选完即写入 `cfg.windowMode`。
+* **模式在启动时定死，运行期不允许更改**（2026-10-19 用户拍板）：`Alt+Enter` 不再是快捷键。
+  理由：运行期切全屏要在 Space 过场里改窗口几何，会把全屏踢掉/留下可拖窗口，属于纯风险无收益。
+* `--width/--height` 只对 **Windowed** 有意义（全屏铺满显示器）。
+* **Windowed 只有关闭按钮**（红）：没有最小化/缩放，也不可拖边框改大小 —— 窗口大小由启动参数决定。
+
+#### 为什么没有 "Exclusive"（2026-10-19 的事故）
+
+曾经照 osu! 的 Fullscreen 实现过"独占"：切显示模式 + `NSApplicationPresentationFullScreen`
+（kiosk）+ 藏光标。实测后果：桌面从 2x 掉成 1x、所有窗口重排（"退出卡一下、桌面缩放还动"），
+而且 kiosk presentation options 会**禁用 Mission Control / ⌘Tab** —— app 一旦卡住或被杀，
+用户就被困在它的全屏 Space 里，只能在别的 app 里写字求救。**整档删除**，详见
+`docs/mac-recovery.md` 的禁令清单。
+
+### 抗锯齿：为什么默认 MSAA 4x（而不是 2×128 条带纹理）
+
+砖的边缘是**解析几何**（`tile.vert/frag` 里按 `v` 坐标算出来的），MSAA 只抗"几何覆盖率"，
+正好覆盖这种情况：超远视距下细于 1 px 的轨道描边，不开 MSAA 会碎成**虚线**，开 4x 后是连续实线
+（2026-10-21 与录制版逐帧对比实测）。
+
+这也是**不用 Re_ADOJAS 的 2×128 条带纹理**（`uTrackEdge`）的原因：条带的边缘靠**纹理 alpha**，
+MSAA 抗不到，只能靠超采样；而解析几何 + MSAA 更便宜也更稳。日志里有一行
+`MSAA: 请求 4x，实际 4x` —— 实际采样数被驱动降级时能看见。
+
+注意：换 MSAA 默认值会让**像素门槛基线失效**（逐字节比较），必须用同一 MSAA 设置重存。
 
 想量真实帧率，先确认日志里的 `swap interval:` 一行：`0` 才是无 vsync（默认），`1` 是
 `ADOCAO_VSYNC=1` 打开的、上限就是显示器刷新率。另外注意 **WGC / DXGI 复制类抓屏只能看见
@@ -149,7 +168,7 @@ to N tiles: the same moment with `--trail-tiles 8` spans 2 tiles and nothing ahe
 Sampling rate cannot fix that — it changes the polyline's resolution, never where the
 history lies.
 
-**Rate** — the fixed Hz rate (`--trail-sample-rate`, governor-adjusted when adaptive)
+**Rate** — the fixed Hz rate (`--trail-sample-rate`, **默认 800**；governor-adjusted when adaptive)
 by default, optionally raised with the track covered per second
 (`--trail-samples-per-tile N` / wizard "Speed-aware sampling"): rate =
 `max(fixedRate, trackCoveredPerSecond x N)`, clamped to
@@ -160,6 +179,25 @@ advancing. In tiles-length mode the rate is derived from the window instead
 (`tiles x samplesPerTile / windowSeconds`), so the point count is exactly
 `tiles x samplesPerTile` at any BPM (measured: 34 / 65 / 129 points for 8 / 16 / 32
 tiles at BPM 1.5M) and the sample-count cap `maxPoints` (8192) is the only backstop.
+
+**Sagitta 判据**（`--trail-sagitta PX`，默认 0=关）：按**屏幕像素**反推采样率，而不是按 BPM。
+圆弧上每步 `s`（砖）的折线偏离 ≈ `s²/(8R)` 砖 → 换算成像素是 `s²·pxPerTile/(8R)`；令其 ≤ PX：
+
+```
+rate = max(base, tilePathSpeed(t) / sqrt(8·R·PX/pxPerTile))
+R = max(tileStartDist, tileEndDist)（砖，行星轨道半径）
+pxPerTile = 视口高 / 视野高（=12 砖 × 100/zoom）
+```
+
+它**随 zoom 变**：拉近看曲线才需要更密，远看不白烧点数。实测（BPM 1200、1.0 s 拖尾、
+`pxPerTile=90`）：`PX=0.2` → 385 Hz；`PX=1` → 仍取 base 200 Hz（亚像素，看不出折线）；
+`PX=4` → 200 Hz。判据只**抬高**采样率，从不压低用户给的 fixedRate。
+
+默认值 800 Hz（2026-10-21 起，原 200）：按 sagitta ≈0.5 px 判据，默认视距下覆盖到 BPM 2000 左右；
+0.4 s 拖尾只有 320 点（上限 8192），帧时间影响可忽略。
+
+经验值：**粗拖尾（带宽 ~ 0.1 砖）在 PX≈1 时已经看不出多边形**；BPM 1200 下 60 Hz 那种
+（≈30°/样本、sagitta≈7 px）是唯一肉眼可见的失真。
 
 The window/rate maths lives in core (`PositionSolver::trailWindow`,
 `sampleTrailRange`) so it can be exercised headlessly.

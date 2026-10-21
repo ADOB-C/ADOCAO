@@ -13,6 +13,7 @@ add_library(adocao_core STATIC
     util/DataFile.cpp
     timeline/Timeline.cpp
     timeline/Keyframes.cpp
+    timeline/TileAnimation.cpp
     timeline/PositionSolver.cpp
     timeline/PlaybackClock.cpp
     camera/CameraTimeline.cpp

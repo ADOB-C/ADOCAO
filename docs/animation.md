@@ -41,7 +41,22 @@ struct TileAnim {
 - 内存账：一条关键帧 16 B；Plum（730 砖 / 128 个事件）≈ 几千帧 → 几十 KB。
   2³¹ 层目标下不能全量建，**只对稀疏事件覆盖的砖建**，其余砖走"无动画"快路径（现有分支保留）。
 
-## 3. 迁移步骤（每一步都要能验收）
+## 3. 进度（2026-10-21）
+
+- [x] `core/timeline/Keyframes.{hpp,cpp}` + ctest `keyframes`（11 条断言）
+- [x] `core/timeline/TileAnimation.{hpp,cpp}`：MoveTrack + AnimateTrack **建帧**
+      （稀疏索引、零分配采样、上限保护）；ctest `tile_animation` 与旧路径逐值对拍
+- [x] 渲染接线：`trackXformAt` 走 `TileAnimation::sample`；无动画的砖仍走零成本快路径
+- [x] 删掉"时间窗隐藏"：砖一直在场景里，靠 opacity/scale 归零隐藏；
+      逐帧只把"完全透明且缩到 0"的动画砖标不可见（`hiddenAt()` 区间外 O(1) 缓存）
+- [ ] 删除 `m_tileAppearTimes/m_tileDisappearTimes` 与 `recomputeWindow`（现在只是不再用于可见性，
+      仍在 build 里算，属于可删的冗余）
+- [ ] 与 Re_ADOJAS 逐通道数值对拍（harness 已就绪）；像素门槛已按新行为重存（54/54）
+
+**实测（2025，1080p MSAA4，播放 4 s，`ADOCAO_PROFILE=1`）**：`frame=0.871 ms` 均值
+（`vis=0.180`、`animXform=0.218`、`cull=0.426`）—— 新的关键帧采样没有带来可测的帧时回退。
+
+## 4. 迁移步骤（每一步都要能验收）
 
 1. **核心**：`core/timeline/Keyframes.{hpp,cpp}`（通道/采样/Kill-complete）+ ctest
    `keyframes_test`（手工算例：覆盖、tween 中途、`Kill(complete)`、越界缓动）。
@@ -57,7 +72,7 @@ struct TileAnim {
    * 像素门槛按新默认重存（会变，属于预期）；
    * `--show-all-tiles` 与 Re_ADOJAS `#/editor` 并排图。
 
-## 4. 明确不做
+## 5. 明确不做
 
 - 不引入 Re_ADOJAS 的 `Mesh`/three.js 概念；只借它的**时间轴语义**。
 - 不为 2³¹ 层做全量关键帧；超大谱按 `GLOBAL_ANIM_TILE_LIMIT` 跳过全局动画（与参考一致），

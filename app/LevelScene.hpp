@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/timeline/TileAnimation.hpp"
 #include "core/util/Scheduler.hpp"   // Handle 是**按值**成员 → 需要完整类型
 
 #include <future>
@@ -26,6 +27,9 @@ namespace adofai { class Timeline; }   // 库侧类型：前置声明也要在 a
 // windows, audio or input directly.
 class LevelScene {
 public:
+    // 逐砖关键帧时间轴（MoveTrack+AnimateTrack）；没建帧时为 nullptr。
+    const adofai::TileAnimation* animation() const { return m_tileAnim.get(); }
+
     LevelScene();
     ~LevelScene();
 
@@ -64,6 +68,7 @@ public:
 
 private:
     bool compileShaders();
+    void buildTileAnimation(const adofai::Timeline& timeline);
     void updateTileVisibility(const adofai::Timeline& timeline, double t, bool playing);
 
     // Shaders (heap-allocated, freed on destruction)
@@ -113,4 +118,12 @@ private:
 
     bool m_meshReady = false;
     int m_viewportHpx = 720;
+    // 逐砖关键帧时间轴（MoveTrack + AnimateTrack）；谱面没有动画时为空。
+    std::unique_ptr<adofai::TileAnimation> m_tileAnim;
+    bool m_tileAnimBuilt = false;
+    bool m_animVisDirty = true;                    // 时间变了才重算"动画砖是否全透明"
+    mutable adofai::TileAnimSample m_scratchAnim;
+    std::vector<uint8_t> m_animVisState;          // 每块动画砖上一帧的"隐藏"状态（2 = 未知）
+    bool m_visBuilt = false;
+    bool m_timeChangedSinceVis = true;
 };

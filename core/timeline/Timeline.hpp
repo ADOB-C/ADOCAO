@@ -100,6 +100,14 @@ public:
         float alpha = 1;            // 透明度乘数
     };
     bool animAt(int64_t i, double time, AnimSample& out) const;
+
+    // 逐砖动画窗口（Phase 5 已按 Re_ADOJAS 规则算好）：TileAnimation 用它们建关键帧。
+    const std::vector<uint8_t>& animAppearType() const { return m_animAppearType; }
+    const std::vector<uint8_t>& animDisappearType() const { return m_animDisappearType; }
+    const std::vector<double>& animAppearStart() const { return m_animAppearStart; }
+    const std::vector<double>& animAppearEnd() const { return m_animAppearEnd; }
+    const std::vector<double>& animDisappearStart() const { return m_animDisappearStart; }
+    const std::vector<double>& animDisappearEnd() const { return m_animDisappearEnd; }
     // 丢掉两支密集 double（只有 blocksRecomputable() 时才允许；丢之前先建粗索引）
     bool dropTrackVisArrays();
     // **仅测试用**：给"按块重算"做反面对照 —— 直接把某一层的 BPM 改掉（时长随之变，

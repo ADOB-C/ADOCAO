@@ -158,10 +158,10 @@ bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level, const T
     m_trailTiles = cfg.trailTiles;
     if (m_trailRateMax < m_trailRateMin) m_trailRateMax = m_trailRateMin;
 
-    m_tileVisEnabled = !cfg.showAllTiles &&
-                       (level.settings.trackDisappearAnimation != "None" ||
-                        level.settings.trackAnimation != "None" ||
-                        level.hasAtStates);
+    // **不再用"时间窗"隐藏砖**：Re_ADOJAS 的模型里砖一直在场景里，靠关键帧把 opacity/scale
+    // 收到 0（Scatter/Shrink/Fade…）。时间窗会在动画**开始**就把砖删掉，整段消失动画看不见
+    // （2026-10-21 Plum - R 结尾 Scatter_Far 就是这么丢的）。
+    m_tileVisEnabled = false;
     LOG_D("TrackVis: enabled=%d da=%s aa=%s atStates=%d(size=%zu)", m_tileVisEnabled,
           level.settings.trackDisappearAnimation.c_str(),
           level.settings.trackAnimation.c_str(),
@@ -263,7 +263,17 @@ static float camera_pixelsPerTile(int fbHeight, float zoom) {
     return fbHeight > 0 ? (float)fbHeight * zoom / 1200.0f : 0.0f;
 }
 
+void LevelScene::buildTileAnimation(const Timeline& timeline) {
+    if (m_tileAnimBuilt) return;
+    m_tileAnimBuilt = true;
+    if (!timeline.hasTrackVisTimes() && m_level->moveEvents().empty()) return;   // 没动画：不建
+    m_tileAnim = std::make_unique<adofai::TileAnimation>();
+    m_tileAnim->build(*m_level, timeline);
+}
+
 void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline) {
+    buildTileAnimation(timeline);
+    m_animVisDirty = true;   // 时间推进 → 重新判定"哪些动画砖已经全透明/缩到 0" 
     if (!m_redPlanet || !m_bluePlanet) return;
 
     // **不要**在这里窄化成 float：绝对世界坐标到 6.84e7 时 float ulp = 8 砖（primer-final），
@@ -339,7 +349,23 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
 }
 
 void LevelScene::updateTileVisibility(const Timeline& timeline, double t, bool playing) {
-    if (!m_tileVisEnabled) return;
+    if (!m_tileVisEnabled) {
+        // 关键帧模型：砖一直在场景里；只把"完全透明且缩到 0"的动画砖标成不可见（纯性能）。
+        // 成本 O(动画砖数)（Plum 730 / 2025 数千），并且只在时间变化时做。
+        if (!m_tileAnim) return;
+        if (!m_animVisDirty) return;
+        m_animVisDirty = false;
+        const double tt = (t < 0.0) ? 0.0 : t;
+        const auto& entries = m_tileAnim->entries();
+        if (m_animVisState.size() != entries.size()) m_animVisState.assign(entries.size(), 2);
+        for (size_t i = 0; i < entries.size(); ++i) {
+            const uint8_t hidden = m_tileAnim->hiddenAt(entries[i].tile, tt) ? 1 : 0;
+            if (m_animVisState[i] == hidden) continue;   // 只在状态翻转时才动实例缓冲
+            m_animVisState[i] = hidden;
+            m_tileMesh->updateVisibleRange((int)entries[i].tile, (int)entries[i].tile, hidden == 0);
+        }
+        return;
+    }
     // 倒计时（timeInLevel < 0）期间按 t=0 处理：原版在 countdown 里**看得到开头那段轨道**，
     // 而 TrackVis 的 appear 时间是以 0 为基准的，直接拿负时间去比会把砖全藏掉 → 开头黑屏
     // 直到 countdown 结束（2026-10-17 用户实测"快半秒"。）
@@ -391,7 +417,7 @@ struct TrackColorCtx {
     double time;
     float amplitude;   // Volume 类型用（音乐 RMS）
 };
-struct TrackXformCtx { const LevelData* level; const Timeline* timeline; double time; };
+struct TrackXformCtx { const LevelData* level; const Timeline* timeline; const adofai::TileAnimation* anim; double time; };
 void trackXformAt(void* ctx, uint32_t tile, float out[8]) {
     static const long g_dbgTile = [] {
         const char* e = std::getenv("ADOCAO_XFORM_DEBUG");
@@ -405,22 +431,22 @@ void trackXformAt(void* ctx, uint32_t tile, float out[8]) {
     }();
     const auto* c = static_cast<const TrackXformCtx*>(ctx);
     const LevelData::MoveTransform tr = c->level->moveTransformAt((int64_t)tile, c->time);
-    // AnimateTrack 的 appear/disappear 动画（Re_ADOJAS 的 keyframe 语义）：位置/旋转/缩放/透明度增量
-    Timeline::AnimSample an;
-    if (c->timeline && c->timeline->animAt((int64_t)tile, c->time, an)) {
-        out[0] = tr.rotDelta + an.rot;
-        out[1] = tr.scaleX * an.scaleX;
-        out[2] = tr.scaleY * an.scaleY;
-        out[3] = tr.alpha * an.alpha;
-        out[4] = tr.moveX + an.posX;
-        out[5] = tr.moveY + an.posY;
+    // 逐砖关键帧时间轴（Re_ADOJAS 模型）：MoveTrack + AnimateTrack 建在同一条时间轴上。
+    adofai::TileAnimSample an;
+    if (c->anim && c->anim->sample((int64_t)tile, c->time, an)) {
+        out[0] = an.rot;  out[1] = an.scaleX; out[2] = an.scaleY;
+        out[3] = an.opacity;
+        out[4] = an.posX; out[5] = an.posY;
     } else {
         out[0] = tr.rotDelta; out[1] = tr.scaleX; out[2] = tr.scaleY;
         out[3] = tr.alpha;    out[4] = tr.moveX;  out[5] = tr.moveY;
     }
     if (g_dbgTile >= 0 && (long)tile >= g_dbgTile && (long)tile <= g_dbgTileHi) {
-        LOG_I("xform[tile=%u t=%.4f] move=(%.4f,%.4f) rot=%.4f scale=(%.4f,%.4f) alpha=%.4f",
-              tile, c->time, out[4], out[5], out[0], out[1], out[2], out[3]);
+        const float dir = c->level->tileDirectionAt((int64_t)tile);
+        const float sa = c->timeline ? c->timeline->startAngleAt((int64_t)tile) : 0.0f;
+        LOG_I("xform[tile=%u t=%.4f] move=(%.4f,%.4f) rot=%.4f scale=(%.4f,%.4f) alpha=%.4f | dir=%.2f sa=%.2f",
+              tile, c->time, out[4], out[5], out[0], out[1], out[2], out[3],
+              (double)dir, (double)sa);
     }
     // 砖心相对砖起点的偏移（Re_ADOJAS 的几何以砖心为原点：旋转/缩放绕砖心）
     const double dir = (double)c->level->tileDirectionAt((int64_t)tile) * 3.14159265358979323846 / 180.0;
@@ -482,7 +508,7 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     m_tileShader->setVec3("uFillColor", m_fillRGB[0], m_fillRGB[1], m_fillRGB[2]);
     m_tileShader->setVec3("uStrokeColor", m_strokeRGB[0], m_strokeRGB[1], m_strokeRGB[2]);
     m_tileShader->setFloat("uOpacity", 1.0f);
-    TrackXformCtx xctx{m_level, &timeline, timeInLevel};
+    TrackXformCtx xctx{m_level, &timeline, m_tileAnim.get(), timeInLevel};
     m_tileMesh->setTime(timeInLevel);   // 时间驱动颜色/变换：相机静止时也要重算
     if (m_trackColorOverride) {
         m_tileShader->setFloat("uUseInstColor", 0.0f);

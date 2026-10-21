@@ -247,3 +247,7 @@ add_executable(adocao_camera_zoom_test camera_zoom_test.cpp)
 target_include_directories(adocao_camera_zoom_test PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(adocao_camera_zoom_test PRIVATE adocao_render)
 add_test(NAME camera_zoom COMMAND adocao_camera_zoom_test)
+
+add_executable(adocao_keyframes_test keyframes_test.cpp)
+target_link_libraries(adocao_keyframes_test PRIVATE adocao_core)
+add_test(NAME keyframes COMMAND adocao_keyframes_test)

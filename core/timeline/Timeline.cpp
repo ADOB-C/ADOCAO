@@ -646,6 +646,13 @@ bool Timeline::dropStartTimesArray() {
 }
 
 double Timeline::disappearTimeAt(int64_t i) const {
+    // **有消失动画时返回"动画结束"**，不是动画开始：可见性判定是 `disappear <= t → 隐藏`，
+    // 用开始时刻会把整段 Scatter/Shrink/Fade*（0.3~0.5 s）直接跳掉 —— 表现就是
+    // "该散开的砖根本看不见"（2026-10-21 R=Plum - R 结尾 Scatter_Far）。
+    if ((size_t)i < m_animDisappearType.size() && m_animDisappearType[(size_t)i] != 0 &&
+        (size_t)i < m_animDisappearEnd.size() && m_animDisappearEnd[(size_t)i] > 0.0) {
+        return m_animDisappearEnd[(size_t)i];
+    }
     if (!m_visWindowed) {
         return (i >= 0 && (size_t)i < m_tileDisappearTimes.size()) ? m_tileDisappearTimes[(size_t)i]
                                                                    : std::numeric_limits<double>::infinity();

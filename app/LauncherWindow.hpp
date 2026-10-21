@@ -39,6 +39,8 @@ struct LauncherConfig {
     int  resolutionH = 1080;
     bool fullscreen = false;
     bool showTrail = true;
+    // 诊断/对拍用：忽略 appear/disappear（= Re_ADOJAS `#/editor` 的全图视角），显示全部砖。
+    bool showAllTiles = false;
     float trailDuration = 0.4f;    // seconds of trail history
     // 默认 800：按 sagitta 判据（每样本偏离 ≈0.5 px）在默认视距下大约覆盖到 BPM 2000 以上；
     // 0.4 s 拖尾是 320 个点（上限 8192），实测对帧时间影响可忽略（2026-10-21 用户拍板）。
@@ -69,6 +71,8 @@ struct LauncherConfig {
     float  captureTime = 0.0f;     // 关卡时间（秒）
     int    captureTile = -1;       // ≥0 = 用该砖的起始时刻（谱面再长也不会漂；与 captureTime 二选一）
     float  captureZoom = 100.0f;   // 相机缩放（100 = 视野高 12 单位）
+    // 抓帧时把相机拉到"包住全部砖"（含 MoveTrack 位移外扩）—— 用来复现编辑器的全图视角
+    bool   captureFitAll = false;
     // true = 抓帧也走**关卡相机**（settings.relativeTo/position + MoveCamera 时间线）。
     // 默认 false：保住既有 51 个像素基线的口径（它们的谱面没有运镜，且 The Moon 的
     // settings.relativeTo=Tile 会让整幅画面平移）。新加的运镜抓帧状态用这个开关 opt-in。

@@ -635,7 +635,24 @@ void GameWindow::captureAndExit() {
     }
     // `--capture-camera` 下 **zoom 由关卡相机说了算**（`--capture-zoom` 被忽略）——
     // 否则运镜的 zoom 事件会被 CLI 覆盖掉，等于没测。普通抓帧仍走 --capture-zoom。
-    if (m_cfg->captureCamera) m_camera.setAdoZoom((float)m_cameraDirector.zoom());
+    if (m_cfg->captureFitAll) {
+        // 包住全部砖：用所有砖的原始位置 + MoveTrack 位移外扩，取较大的一边换算 zoom。
+        double minX = 1e300, maxX = -1e300, minY = 1e300, maxY = -1e300;
+        const auto& tls = m_level->tiles;
+        for (const auto& t : tls) {
+            minX = std::min(minX, t.position[0]); maxX = std::max(maxX, t.position[0]);
+            minY = std::min(minY, t.position[1]); maxY = std::max(maxY, t.position[1]);
+        }
+        const float pad = m_level->movePad() + 2.0f;
+        minX -= pad; maxX += pad; minY -= pad; maxY += pad;
+        const double w = std::max(1e-6, maxX - minX), h = std::max(1e-6, maxY - minY);
+        m_camCtrl.snapTo((minX + maxX) * 0.5, (minY + maxY) * 0.5);
+        const int fbW2 = 1280, fbH2 = 720;
+        (void)fbW2;
+        const double aspect = (double)fbH2 > 0 ? 16.0 / 9.0 : 1.0;
+        const double needH = std::max(h, w / aspect);
+        m_camera.setZoom((float)(1200.0 / std::max(1e-6, needH)));
+    } else if (m_cfg->captureCamera) m_camera.setAdoZoom((float)m_cameraDirector.zoom());
     else                      m_camera.setZoom(m_cfg->captureZoom);   // 本类口径：100 = 视野高 12 砖
 
     int fbW = 0, fbH = 0;

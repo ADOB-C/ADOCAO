@@ -2050,7 +2050,12 @@ LevelData::MoveTransform LevelData::moveTransformAt(int64_t floor, double timeSe
         };
         if (e.flags & kMoveOffX) set(px, e.offX);
         if (e.flags & kMoveOffY) set(py, e.offY);
-        if (e.flags & kMoveRot) set(rot, e.rotDeg * 3.14159265358979323846f / 180.0f);
+        // **旋转是绝对角**（Re_ADOJAS `buildTileMoveTrack`：`mesh.rotation.z = rotationOffset`，
+        // 覆盖砖自身的朝向），而我们的几何已经把砖的方向烘进去了 → 增量 = 目标角 − 砖自身方向。
+        // 写成"在自身方向上再转 rotationOffset"会让每块砖保留各自的方向，整张图的相对排布完全不同
+        // （2026-10-21 Plum - R 结尾那一大片散砖就是这么对不上的）。
+        if (e.flags & kMoveRot)
+            set(rot, (e.rotDeg - tileDirectionAt(floor)) * 3.14159265358979323846f / 180.0f);
         if (e.flags & kMoveScale) { set(sx, e.scaleX); set(sy, e.scaleY); }
         if (e.flags & kMoveOpacity) set(op, e.opacity);
     }

@@ -1,5 +1,6 @@
 #include "archive/AdocaoEventColumns.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>

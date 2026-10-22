@@ -18,25 +18,24 @@
 // 后端：NEON（arm64，本机实测路径）/ AVX2（32 B 块）/ SSE2（16 B 块）/ 标量兜底。
 // 向量只在 `e - p >= kVecBytes` 时加载，绝不读到 e 之后 —— mmap 出来的文件末尾并不
 // 终止于 e（见 LevelData.cpp 里 parseNumber 的那段注释），尾部一律交给逐字节循环。
+//
+// 只认 GCC/Clang 的宏（`__aarch64__` / `__SSE2__` / `__AVX2__`）。**不为 MSVC 做优化**：
+// 它不定义这些宏时会直接落到标量兜底（仍能编译、只是慢），所以这里不保留 `_M_*` 分支和
+// `<intrin.h>` / `_BitScanForward` 那套不可验证的路径（Windows 侧统一用 MinGW/GCC）。
 
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 
-#if (defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(_M_ARM64)) && \
-    (defined(__aarch64__) || defined(_M_ARM64))
+#if (defined(__ARM_NEON) || defined(__ARM_NEON__)) && defined(__aarch64__)
 #  define ADOCAO_JSONSCAN_NEON 1
 #  include <arm_neon.h>
 #elif defined(__AVX2__)
 #  define ADOCAO_JSONSCAN_AVX2 1
 #  include <immintrin.h>
-#elif defined(__SSE2__) || (defined(_M_X64) && !defined(_M_ARM64))
+#elif defined(__SSE2__)
 #  define ADOCAO_JSONSCAN_SSE2 1
 #  include <emmintrin.h>
-#endif
-
-#if defined(_MSC_VER) && !defined(__clang__)
-#  include <intrin.h>
 #endif
 
 namespace adofai {
@@ -46,15 +45,8 @@ namespace jsonscan {
 #  define ADOCAO_JSONSCAN_HAVE_VEC 1
 #endif
 
-inline unsigned ctz32(uint32_t x) {
-#if defined(_MSC_VER) && !defined(__clang__)
-    unsigned long i = 0;
-    _BitScanForward(&i, x);
-    return (unsigned)i;
-#else
-    return (unsigned)__builtin_ctz(x);
-#endif
-}
+// 只在掩码非零时调用（调用点都有 `while (b)` / `if (m != 0)` 守卫）。
+inline unsigned ctz32(uint32_t x) { return (unsigned)__builtin_ctz(x); }
 
 // ---------------------------------------------------------------------------
 // 后端：16/32 字节块的 load / or / eq / movemask

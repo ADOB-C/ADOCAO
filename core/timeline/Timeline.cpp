@@ -312,12 +312,24 @@ void Timeline::precalculateTiming() {
     m_distCount = (size_t)n;
 
     // Phase 0: Build sorted flat action index (O(m) space instead of O(n))
+    //
+    // 绝大多数谱的 action 本来就按 floor 升序写出（实测：Won't You 638 万层 / 578.9 万个
+    // in-range 动作 **0 个逆序**，The Moon 31.4 万、Singularity 4.6 万也全序；只有 14 个动作的
+    // angles360 有 2 个逆序）。对这些谱 `std::stable_sort` 排的是一段**已经有序**的序列，却仍要
+    // O(m log m) 次比较 + 归并缓冲 —— 6.4M 层上实测约 100~140 ms，占 `Timeline::build` 的大头。
+    //
+    // 这里在**建表时就**记下"是否已序"（零额外遍历：数据本来就在缓存里），已序就跳过排序。
+    // 对已序输入，稳定排序的输出与原序列逐位相同，所以结果不变（`floorSorted` 为假时才走原路径）。
     std::vector<std::pair<int, size_t>> flatActions;
+    bool floorSorted = true;
     for (size_t j = 0; j < m_level->actions.size(); j++) {
         auto& a = m_level->actions[j];
-        if (a.floor >= 0 && a.floor < n) flatActions.push_back({a.floor, j});
+        if (a.floor >= 0 && a.floor < n) {
+            if (!flatActions.empty() && a.floor < flatActions.back().first) floorSorted = false;
+            flatActions.push_back({a.floor, j});
+        }
     }
-    std::stable_sort(flatActions.begin(), flatActions.end());
+    if (!floorSorted) std::stable_sort(flatActions.begin(), flatActions.end());
 
     // Phase 1 (sequential): Write directly to m_tileIsCW/m_tileBPM
 

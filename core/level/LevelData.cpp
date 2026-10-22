@@ -1748,6 +1748,44 @@ std::string LevelData::trackStyleAt(int64_t floor, double timeSec, const Timelin
     return style;
 }
 
+int64_t LevelData::trackStyleRunEnd(int64_t floor, double timeSec, const Timeline* timeline) const {
+    constexpr int64_t kNever = std::numeric_limits<int64_t>::max();
+    (void)timeSec;
+    (void)timeline;   // 见下面第 3) 条：块内有触发时本函数不猜，直接不做重用
+    int64_t next = kNever;
+
+    // 1) 静态段（settings + colorEventAt）。colorEvents 在 finishLoad 里按 (floor, order) 排好；
+    //    colorEventAt 的结果只在"事件层号"处变化，而且：
+    //      * 本层有自己的事件 → justThisTile 只覆盖这一层，**下一层**就可能换段；
+    //      * 否则 → 下一个事件层号（之前没有任何事件，持久段不变）。
+    {
+        const auto lb = std::lower_bound(colorEvents.begin(), colorEvents.end(), (int32_t)floor,
+                                         [](const ColorEvent& e, int32_t f) { return e.floor < f; });
+        const auto ub = std::upper_bound(colorEvents.begin(), colorEvents.end(), (int32_t)floor,
+                                         [](int32_t f, const ColorEvent& e) { return f < e.floor; });
+        if (lb != ub) next = floor + 1;
+        else if (ub != colorEvents.end()) next = (int64_t)ub->floor;
+    }
+    if (floor < 0 || !m_recolorReady || m_recolorBlocks.empty()) return next;
+    const size_t blk = (size_t)floor / kRecolorBlock;
+    if (blk >= m_recolorBlocks.size()) return next;
+
+    // 2) 换块：trackStyleAt 只读当前块的触发列表，块号一变换的就是整张表。
+    const int64_t blkEnd = (int64_t)(blk + 1) * (int64_t)kRecolorBlock;
+    if (blkEnd < next) next = blkEnd;
+
+    // 3) 块里有 RecolorTrack 触发：样式还取决于 `e.trigger` 与 `startTimeAt(floor)` 的比较
+    //    （以及 lo/hi/gap）。lo/hi/gap 是精确的整数边界，但**层起始时刻不保证随层号单调** ——
+    //    Timeline 对 SetSpeed 的 `bpmMultiplier` 没有钳制（`durationAt` 直接除 BPM），
+    //    ≤0 时层起始时刻会原地/倒退；停靠在这上面的"二分找跨越层"就不是可证的。
+    //    所以这里**不猜**：返回 `-blkEnd`（"本块不可复用，到 blkEnd 为止"）。调用方在块内
+    //    逐砖查询（与改造前完全一样），**不会**再进这个函数 —— 否则每砖两次查询，有触发的
+    //    谱反而变慢（实测 2026：56 → 70 ns/砖）。
+    //    代价：RecolorTrack 覆盖的块没有收益；收益落在"没有触发的块"（实谱里绝大多数）。
+    if (!m_recolorBlocks[blk].empty()) return -blkEnd;
+    return next;
+}
+
 TileColors LevelData::tileColorsAt(int64_t floor, double timeSec, float amplitude,
                                    const Timeline* timeline) const {
     const TileColors base = baseColorsAt(floor, timeSec, amplitude, timeline);

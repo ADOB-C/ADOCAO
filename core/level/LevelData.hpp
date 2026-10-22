@@ -299,6 +299,16 @@ struct LevelData {
     std::string trackStyleAt(int64_t floor, double timeSec,
                              const Timeline* timeline = nullptr) const;
 
+    // **样式段**查询（只用于跳过重复计算，不改变语义）：
+    //   * 返回 > floor：对 `f ∈ [floor, 返回值)`，`trackStyleAt(f, timeSec, timeline)` 与
+    //     `trackStyleAt(floor, ...)` 逐位相同；`INT64_MAX` = 再也不会变。
+    //   * 返回 < 0：**本 4096 层块内不可复用**；`-返回值` = 本块结束层号（不含）。调用方在
+    //     `[floor, -返回值)` 内照旧逐层查询，且**不要**重复调用本函数（否则每砖两次查询）。
+    // 当前实现只覆盖"块内没有 RecolorTrack 触发"的情形（那时样式只由 settings + colorEventAt
+    // 决定，变化点就是 ColorTrack 事件的层号）；块内有触发时走上面的负值路径，论证见 .cpp。
+    int64_t trackStyleRunEnd(int64_t floor, double timeSec,
+                             const Timeline* timeline = nullptr) const;
+
     // 某层处生效的**持久段**（忽略 justThisTile / inactive / editorOnly）；没有 → nullptr。
     const ColorEvent* persistentColorAtOrBefore(int64_t floor) const;
     // 严格早于 floor 的最后一条持久段（TweenColor 的 "from" 色）。

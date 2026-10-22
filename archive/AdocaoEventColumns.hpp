@@ -53,12 +53,18 @@ bool buildEventColumns(const Schema& schema,
                        EventColumns& out, std::string& err);
 
 // 解列：还原成每个事件的 JSON 文本（字段顺序 = schema 顺序，即"首次出现顺序"）。
-// `outFields` 非空时**同时**产出结构化字段（v7 → LevelData 直灌用，不再拼 JSON 文本）；
-// `wantJson=false` 且给了 `outFields` 时连 JSON 都不生成。
+// 结构化字段的**扁平批**（offsets[e]..offsets[e+1] 是第 e 个事件的字段）。
+// 用扁平数组而不是"每事件一个 vector"：11k 事件就是 11k 次小分配，实测占掉可观时间。
+struct FieldBatch {
+    std::vector<LevelData::EventFieldValue> values;
+    std::vector<uint32_t> offsets;   // size = eventCount + 1
+};
+
+// `outBatch` 非空时**同时**产出结构化字段（v7 → LevelData 直灌用，不再拼 JSON 文本）；
+// `wantJson=false` 且给了 `outBatch` 时连 JSON 都不生成。
 bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t eventCount,
                         std::vector<std::string>& eventsJson, std::string& err,
-                        std::vector<std::vector<LevelData::EventFieldValue>>* outFields = nullptr,
-                        bool wantJson = true);
+                        FieldBatch* outBatch = nullptr, bool wantJson = true);
 
 // 列集的字节化（容器段用；也是"体积报告"的口径）。不含 schema —— schema 单独一段。
 std::vector<uint8_t> serializeEventColumns(const Schema& schema, const EventColumns& cols);
@@ -78,10 +84,12 @@ bool decodeEventColumnsRange(const Schema& schema, const uint8_t* p, size_t n,
                              std::vector<std::string>& outEvents, std::string& err,
                              uint32_t* outBlocks = nullptr, std::vector<uint16_t>* outTypeIds = nullptr);
 // 解全部（等价于解所有块再拼接）。
-// 结构化版本：直接产出 `EventFieldValue`（不经 JSON 文本），供 v7 → LevelData 直灌。
-bool decodeEventFieldsBlockedAll(const Schema& schema, const uint8_t* p, size_t n,
-                                 std::vector<std::vector<LevelData::EventFieldValue>>& outFields,
-                                 std::vector<uint16_t>* outTypeIds, std::string& err);
+// 结构化版本（逐块回调，**不缓存全部事件**）：每解完一个事件就回调一次，
+// 这样整个加载只需要一块的 `FieldBatch` 内存，也不会给每个事件建 vector。
+using EventFieldsFn = bool (*)(void* ctx, const LevelData::EventFieldValue* v, size_t n,
+                               uint16_t typeId, std::string& err);
+bool decodeEventFieldsBlockedEach(const Schema& schema, const uint8_t* p, size_t n,
+                                  EventFieldsFn fn, void* ctx, std::string& err);
 bool decodeEventColumnsBlockedAll(const Schema& schema, const uint8_t* p, size_t n,
                                   std::vector<std::string>& outEvents, std::string& err,
                                   std::vector<uint16_t>* outTypeIds = nullptr);

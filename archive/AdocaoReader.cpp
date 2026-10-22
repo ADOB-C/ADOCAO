@@ -629,10 +629,17 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
         // **直接字段**：容器解出结构化字段，交给 `ingestEventFields`（与 JSON 路径共用路由），
         // 不再把每条事件拼成 JSON 文本。`ADOCAO_V7_JSON_EVENTS=1` 可退回旧路做 A/B。
         const bool direct = !env::flag("ADOCAO_V7_JSON_EVENTS");
-        std::vector<std::vector<LevelData::EventFieldValue>> fields;
         if (direct) {
-            if (!decodeEventFieldsBlockedAll(schema, out.v7ColumnsBytes.data(), out.v7ColumnsBytes.size(),
-                                             fields, &typeIds, err)) {
+            struct Ctx { LevelData* lv; const Schema* schema; };
+            Ctx ctx{&out, &schema};
+            auto fn = [](void* c, const LevelData::EventFieldValue* v, size_t n, uint16_t typeId,
+                         std::string& ferr) -> bool {
+                Ctx* cc = (Ctx*)c;
+                if (cc->schema->types[typeId].source != (uint8_t)EventSource::Actions) return true;
+                return cc->lv->ingestEventFields(v, n, ferr);
+            };
+            if (!decodeEventFieldsBlockedEach(schema, out.v7ColumnsBytes.data(), out.v7ColumnsBytes.size(),
+                                              fn, &ctx, err)) {
                 err = "v7 事件库: " + err;
                 return false;
             }
@@ -650,22 +657,14 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
         if (!direct && !out.v7ColumnsBlocked) typeIds = cols.typeIds;
         // 只还原 **actions**（source=Actions）；decorations 数组里的类型（AddDecoration/AddParticle…）
         // 在 JSON 路径里本来就不进 LevelData（它们由 decorations 数组承载），这里同样跳过。
-        const size_t count = direct ? fields.size() : events.size();
-        for (size_t i = 0; i < count; ++i) {
+        for (size_t i = 0; i < events.size() && !direct; ++i) {
             if (i >= typeIds.size()) { err = "v7: 类型列与事件数不一致"; return false; }
             const auto& td = schema.types[typeIds[i]];
             if (td.source != (uint8_t)EventSource::Actions) continue;
-            if (direct) {
-                if (!out.ingestEventFields(fields[i].data(), fields[i].size(), err)) {
-                    err = "v7 事件还原: " + err;
-                    return false;
-                }
-            } else {
-                const auto& js = events[i];
-                if (!out.ingestEventJson(js.data(), js.data() + js.size(), err)) {
-                    err = "v7 事件还原: " + err;
-                    return false;
-                }
+            const auto& js = events[i];
+            if (!out.ingestEventJson(js.data(), js.data() + js.size(), err)) {
+                err = "v7 事件还原: " + err;
+                return false;
             }
         }
     }

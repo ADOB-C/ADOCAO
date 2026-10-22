@@ -433,20 +433,21 @@ bool buildEventColumns(const Schema& schema, const std::vector<std::string>& eve
 
 bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t eventCount,
                         std::vector<std::string>& eventsJson, std::string& err,
-                        std::vector<std::vector<LevelData::EventFieldValue>>* outFields,
-                        bool wantJson) {
+                        FieldBatch* outBatch, bool wantJson) {
     err.clear();
     eventsJson.clear();
-    if (wantJson || !outFields) eventsJson.resize(eventCount);
+    if (wantJson || !outBatch) eventsJson.resize(eventCount);
     // 字段角色只在 schema 上算一次（名字 → FieldRole）
     std::vector<LevelData::FieldRole> roles;
-    if (outFields) {
+    if (outBatch) {
         roles.resize(schema.fields.size());
         for (size_t f = 0; f < schema.fields.size(); ++f) {
             const auto& nm = schema.name(schema.fields[f].nameId);
             roles[f] = LevelData::fieldRoleForName(nm.data(), nm.size());
         }
-        outFields->assign(eventCount, {});
+        outBatch->values.clear();
+        outBatch->offsets.assign(1, 0);
+        outBatch->offsets.reserve(eventCount + 1);
     }
     if (cols.typeIds.size() != eventCount) { err = "类型列与事件数不一致"; return false; }
     if (cols.fields.size() != schema.fields.size()) { err = "字段列数与 schema 不一致"; return false; }
@@ -645,18 +646,19 @@ bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t e
             }
         }
         w.EndObject();
-        if (wantJson || !outFields) eventsJson[e].assign(buf.GetString(), buf.GetSize());
+        if (wantJson || !outBatch) eventsJson[e].assign(buf.GetString(), buf.GetSize());
     }
 
     // ── 第二遍：产出结构化字段（v7 → LevelData 直灌，不再经过 JSON 文本）──
-    if (outFields) {
+    if (outBatch) {
         for (auto& d : dec) d.cursor = 0;
         std::vector<uint32_t> seen2(schema.types.size(), 0);
         for (size_t e = 0; e < eventCount; ++e) {
             const uint16_t t = cols.typeIds[e];
             const auto& td = schema.types[t];
             const uint32_t within = seen2[t]++;
-            auto& fv = (*outFields)[e];
+            auto& values = outBatch->values;
+            const size_t firstIdx = values.size();
             {
                 LevelData::EventFieldValue et;
                 et.role = LevelData::FieldRole::EventType;
@@ -664,7 +666,7 @@ bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t e
                 const auto& tn = schema.name(td.nameId);
                 et.str = tn.data();
                 et.len = (uint32_t)tn.size();
-                fv.push_back(et);
+                values.push_back(et);
             }
             for (uint16_t fi = 0; fi < td.fieldCount; ++fi) {
                 const uint32_t f = td.firstField + fi;
@@ -722,7 +724,7 @@ bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t e
                         const size_t k = d.cursor++;
                         v.type = LevelData::EventFieldValue::Pair;
                         if (blob.subFlags & kPairRaw) {   // 不支持结构化：跳过（与"没写"不同，但这类很少）
-                            fv.pop_back();
+                            (void)firstIdx;
                             continue;
                         }
                         v.nullA = bitGet(blob.nulls0, within) ? 1 : 0;
@@ -739,7 +741,6 @@ bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t e
                         }
                         if ((blob.subFlags & kPairStr0) && k < d.pair0s.size()) {
                             // 第一分量也是字符串（罕见）：用 num 无从表达 → 跳过该字段
-                            fv.pop_back();
                             continue;
                         }
                         break;
@@ -753,8 +754,9 @@ bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t e
                         break;
                     }
                 }
-                fv.push_back(v);
+                values.push_back(v);
             }
+            outBatch->offsets.push_back((uint32_t)values.size());
         }
     }
     return true;
@@ -965,11 +967,9 @@ bool decodeEventColumnsRange(const Schema& schema, const uint8_t* p, size_t n,
     return true;
 }
 
-bool decodeEventFieldsBlockedAll(const Schema& schema, const uint8_t* p, size_t n,
-                                 std::vector<std::vector<LevelData::EventFieldValue>>& outFields,
-                                 std::vector<uint16_t>* outTypeIds, std::string& err) {
+bool decodeEventFieldsBlockedEach(const Schema& schema, const uint8_t* p, size_t n,
+                                  EventFieldsFn fn, void* ctx, std::string& err) {
     err.clear();
-    outFields.clear();
     if (n < kBlockedHeaderBytes) { err = "分块事件列：段头截断"; return false; }
     const uint32_t version = (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
     if (version != kBlockedVersion) { err = "分块事件列：版本不认识"; return false; }
@@ -987,15 +987,18 @@ bool decodeEventFieldsBlockedAll(const Schema& schema, const uint8_t* p, size_t 
             err = "分块事件列：块 " + std::to_string(b) + " 解码失败: " + cerr;
             return false;
         }
-        std::vector<std::vector<LevelData::EventFieldValue>> blockFields;
+        FieldBatch batch;
         std::vector<std::string> unused;
-        if (!decodeEventColumns(schema, cols, cols.typeIds.size(), unused, cerr, &blockFields, false)) {
+        if (!decodeEventColumns(schema, cols, cols.typeIds.size(), unused, cerr, &batch, false)) {
             err = "分块事件列：块 " + std::to_string(b) + " 字段还原失败: " + cerr;
             return false;
         }
-        for (size_t i = 0; i < blockFields.size(); ++i) {
-            outFields.push_back(std::move(blockFields[i]));
-            if (outTypeIds) outTypeIds->push_back(cols.typeIds[i]);
+        for (size_t i = 0; i + 1 < batch.offsets.size(); ++i) {
+            const uint32_t o0 = batch.offsets[i], o1 = batch.offsets[i + 1];
+            if (!fn(ctx, batch.values.data() + o0, (size_t)(o1 - o0), cols.typeIds[i], cerr)) {
+                err = "分块事件列：块 " + std::to_string(b) + " 直灌失败: " + cerr;
+                return false;
+            }
         }
     }
     return true;

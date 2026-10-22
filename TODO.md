@@ -61,9 +61,13 @@
       → `buildAction`/`decodeSpecialEvent`（**与 JSON 路径共用路由**，不重写第二套）。
       对拍用例 `tests/adocao_direct_fields_test.cpp`：同一批事件走 JSON 与走字段，产出逐字段一致。
       实测动机：v7-only 容器加载 **16.1 ms** vs 明文 **9.0 ms** —— 慢的正是每条事件的 JSON 重序列化。
-- [ ] **直接解码第二半**：archive 侧把 `EventColumns` 解成 `EventFieldValue[]`（现在只产出 JSON 文本），
-      然后 `unpackLevel` 走 `ingestEventFields` 而不是 `ingestEventJson`；量加载时间应从 16.1 ms
-      降到 ≤9 ms。
+- [x] **直接解码第二半（2026-10-22）**：`decodeEventFieldsBlockedEach` 逐块解成 `FieldBatch`
+      （扁平 values+offsets，不再每事件一个 vector）→ `ingestEventFields`（默认路径）。
+      实测（2025，稳定采样）：v7 直灌 **21.6~23.2 ms** vs v7 经 JSON **27.5~29.4 ms**（省 ~23%），
+      明文 JSON 12.7 ms。`ADOCAO_V7_JSON_EVENTS=1` 退回旧路做 A/B。
+- [ ] **v7 加载仍比明文慢 ~9 ms**：差在 lzma 解压 + 列解码本体（bit-unpack / 字典展开）。
+      下一步要么做"热列快解"（位打包按 64 位字批量取），要么让 `.adocao` 的段级压缩对**小文件**
+      改用 zstd（解压快一个量级；体积会涨几个百分点 —— 先量再定）。
 - [ ] 把窗口解码接进 `unpackLevel`（现在仍全量解码后再 ingest；要真正省时得让
       `LevelData` 持有"未解码的事件块 + 索引"，按窗口惰性 ingest）。
 - [ ] `Coverage` 在应用里提示（打开被裁剪的 `.adocao` 时说清缺了哪些类型）。

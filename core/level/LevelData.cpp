@@ -102,23 +102,9 @@ inline const char* skipWs(const char* p, const char* e) {
     return p;
 }
 
-// p 指向开引号；返回闭引号位置，失败返回 nullptr。
-inline const char* scanStringEnd(const char* p, const char* e) {
-    for (++p; p < e; ++p) {
-        if (*p == '\\') { if (p + 1 >= e) return nullptr; ++p; continue; }
-        if (*p == '"') return p;
-    }
-    return nullptr;
-}
-
-inline const char* scanStringEndExact(const char* p, const char* e) {
-    for (++p; p < e; ++p) {
-        char c = *p;
-        if (c == '\\' || c == '\r') return nullptr;
-        if (c == '"') return p;
-    }
-    return nullptr;
-}
+// 字符串扫描走 core/level/JsonScan.hpp（memchr + 转义回退），语义与逐字节版本相同。
+using jsonscan::scanStringEnd;
+using jsonscan::scanStringEndExact;
 
 // p 指向 '[' 或 '{'；返回配对的闭合符之后的位置。
 // 实现走 core/level/JsonScan.hpp：整块掩码抹掉字符串里的括号，只对括号做顺序配对。

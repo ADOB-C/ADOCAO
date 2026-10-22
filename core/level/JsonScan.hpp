@@ -102,6 +102,46 @@ inline Vec veq(Vec a, char c) { return _mm_cmpeq_epi8(a, _mm_set1_epi8(c)); }
 #endif
 
 // ---------------------------------------------------------------------------
+// 字符串：p 指向开引号；返回闭引号位置，失败返回 nullptr。
+//
+// 用 libc 的 memchr 找引号（它自己就是手写 SIMD），再看两者之间有没有需要特殊
+// 处理的字节。键名/字符串值在真实谱面里都很短（实测中位 ~8 字节），memchr 在这里
+// 仍比逐字节快（本机 microbench 1.6x）；带转义/裸 CR 的罕见字符串退回逐字节状态机，
+// 所以两个函数的接受集合与原实现逐字符相同。
+// ---------------------------------------------------------------------------
+// 语义 = `for (++p; p < e; ++p) { if (*p == '\\') { if (p+1 >= e) return nullptr; ++p; continue; }
+//                                  if (*p == '"') return p; } return nullptr;`
+inline const char* scanStringEnd(const char* p, const char* e) {
+    ++p;
+    if (p >= e) return nullptr;
+    const char* const q = (const char*)std::memchr(p, '"', (size_t)(e - p));
+    if (!q) return nullptr;
+    // 常见路径：闭引号之前没有反斜杠 —— 那它就是这个字符串的结束。
+    if (std::memchr(p, '\\', (size_t)(q - p)) == nullptr) return q;
+    // 有转义：交回逐字节状态机（从 p 开始，与原实现完全相同）。
+    for (; p < e; ++p) {
+        if (*p == '\\') { if (p + 1 >= e) return nullptr; ++p; continue; }
+        if (*p == '"') return p;
+    }
+    return nullptr;
+}
+
+// 同上，但字符串里出现转义或裸 CR 就直接放弃：
+//   * RapidJSON 非 in-situ 模式同样会解转义（"x\\y" -> x\y），快路径不去猜它的
+//     转义表（\uXXXX / 代理对 / 非法转义都有各自的细节），遇到就交回旧路径；
+//   * cleanJson 连字符串里的裸 CR 也删，那是快路径不该自己糊弄的语义差异。
+// 我们真正取用的字符串（键名 / eventType / hitsound / trackDisappearAnimation …）
+// 在真实谱面里从不含转义，所以这条放弃分支实际上不会触发。
+inline const char* scanStringEndExact(const char* p, const char* e) {
+    ++p;
+    if (p >= e) return nullptr;
+    const char* const q = (const char*)std::memchr(p, '"', (size_t)(e - p));
+    if (!q) return nullptr;
+    if (std::memchr(p, '\\', (size_t)(q - p)) || std::memchr(p, '\r', (size_t)(q - p))) return nullptr;
+    return q;
+}
+
+// ---------------------------------------------------------------------------
 // 容器：p 指向 '[' 或 '{'；返回配对闭括号之后的位置，失败返回 nullptr。
 // 语义 = 逐字节：`"` 走字符串（`\` 转义）、`[`/`{` ++depth、`]`/`}` --depth（到 0 即返回）。
 // ---------------------------------------------------------------------------

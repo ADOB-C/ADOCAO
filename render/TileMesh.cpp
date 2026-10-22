@@ -171,7 +171,7 @@ void TileMesh::deriveRange(const LevelData& level, int64_t i0, int64_t i1, Deriv
     const size_t cnt = (size_t)(i1 - i0);
     out.first = i0;
     out.posX.resize(cnt); out.posY.resize(cnt); out.shape.resize(cnt); out.icon.resize(cnt);
-    // 样式按 **run** 复用：`trackStyleRunEnd()` 保证 [i, 返回值) 内 trackStyleAt 逐位相同
+    // 样式按 **run** 复用：`trackStyleRunEnd()` 保证 [i, run.end) 内 trackStyleAt 逐位相同
     // （只覆盖"块内没有 RecolorTrack 触发"的区间，见 LevelData.cpp 的论证）。
     // 本窗口内 i 单调递增，所以一个游标就够；到边界重新查一次。
     uint8_t style = 0;
@@ -186,14 +186,14 @@ void TileMesh::deriveRange(const LevelData& level, int64_t i0, int64_t i1, Deriv
         float sa, ea; bool mid;
         TileShape::keyForTile(level, (int)i, sa, ea, mid, wc);
         if (i >= styleEnd) {
-            const int64_t r =
+            const LevelData::StyleRun r =
                 level.trackStyleRunEnd(i, std::numeric_limits<double>::infinity(), m_timeline);
-            if (r < 0) {                     // 本块不可复用：逐砖查询到块尾，别再进本函数
-                styleEnd = -r;
+            if (!r.reusable) {               // 本块不可复用：逐砖查询到块尾，别再进本函数
+                styleEnd = r.end;
                 styleNoReuse = true;
             } else {
                 style = styleOfTile(level, i, m_timeline);
-                styleEnd = r;
+                styleEnd = r.end;
                 styleNoReuse = false;
             }
         }

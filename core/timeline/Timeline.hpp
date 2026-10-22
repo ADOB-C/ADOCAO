@@ -68,6 +68,9 @@ public:
     // （`LevelScene` 的 disappear 粗索引二分、`tests/timeline_anchor_test.cpp` 都依赖它，不能动）。
     // p90：块越小越低（4096 → 1024 实测 recomputeBlock p90 约 1/4，总工作量几乎不变）。
     static constexpr int64_t kBlockStride = 1024;
+    // 隐含前提：块粒度不得大于锚点粒度（`m_anchors` 是 4096 层一份的粗索引，窗口化路径假定
+    // "一个锚点区间里至少有一个完整块"）。单独调大 kBlockStride 会让这个前提失效。
+    static_assert(kBlockStride <= kAnchorStride, "块粒度必须 <= 锚点粒度");
     // 每 kBlockStride 层一条起始时间（== m_tileStartTimes[b*kBlockStride]，同一个 double，
     // 由 precalculateTiming 从全量数组里**原样抄下**，所以逐位相同）。
     const std::vector<double>& blockStartTimes() const { return m_blockStartTimes; }

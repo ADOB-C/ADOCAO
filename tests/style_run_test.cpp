@@ -66,15 +66,17 @@ int64_t checkChart(const char* path, bool withTimeline, bool* allowSingleRun) {
     int64_t longest = 1;
     for (int64_t i = 0; i < n; ++i) {
         const std::string a = lv.trackStyleAt(i, kInf, tp);
-        const int64_t r = lv.trackStyleRunEnd(i, kInf, tp);
-        const int64_t end = (r < 0) ? -r : r;   // 负值 = 本块不可复用，逐层验到块尾
+        const LevelData::StyleRun run = lv.trackStyleRunEnd(i, kInf, tp);
+        // `end` 在两种情况下都只是"边界"：reusable=true 时是**可复用区间**的上界，
+        // reusable=false 时是**本块结束层号**（本块不可复用，调用方逐层查询）。
+        const int64_t end = run.end;
         if (end <= i) {
             std::printf("FAIL %s（tl=%d）floor=%lld: runEnd=%lld <= floor\n", path, (int)withTimeline,
                         (long long)i, (long long)end);
             ++g_fail;
             continue;
         }
-        if (r > i) {
+        if (run.reusable && end > i) {
             // 真正可复用的区间：区间内每一层都必须与起点逐字符相同。
             if (end - i > longest) longest = end - i;
             for (int64_t f = i + 1; f < end && f < n; ++f) {
@@ -87,7 +89,7 @@ int64_t checkChart(const char* path, bool withTimeline, bool* allowSingleRun) {
             }
             i = end - 1;   // 区间已整体验过
         }
-        // r < 0 = "本块不可复用"：调用方逐层查询，没有需要验证的常量区间。
+        // reusable=false = 本块不可复用：调用方逐层查询，没有需要验证的常量区间。
     }
     return longest;
 }

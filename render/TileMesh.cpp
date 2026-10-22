@@ -171,6 +171,12 @@ void TileMesh::deriveRange(const LevelData& level, int64_t i0, int64_t i1, Deriv
     const size_t cnt = (size_t)(i1 - i0);
     out.first = i0;
     out.posX.resize(cnt); out.posY.resize(cnt); out.shape.resize(cnt); out.icon.resize(cnt);
+    // 样式按 **run** 复用：`trackStyleRunEnd()` 保证 [i, 返回值) 内 trackStyleAt 逐位相同
+    // （只覆盖"块内没有 RecolorTrack 触发"的区间，见 LevelData.cpp 的论证）。
+    // 本窗口内 i 单调递增，所以一个游标就够；到边界重新查一次。
+    uint8_t style = 0;
+    int64_t styleEnd = i0;   // 有效期（不含）；= i0 → 第一块砖必定查询
+    bool styleNoReuse = false;   // runEnd 返回负值：本块不可复用，逐砖查询
     for (int64_t i = i0; i < i1; ++i) {
         const size_t k = (size_t)(i - i0);
         const size_t ti = (size_t)i, c = ti >> kPosChunkShift;
@@ -179,7 +185,20 @@ void TileMesh::deriveRange(const LevelData& level, int64_t i0, int64_t i1, Deriv
         out.posY[k] = (float)(p[1] - m_chunkY[c]);
         float sa, ea; bool mid;
         TileShape::keyForTile(level, (int)i, sa, ea, mid, wc);
-        const auto it = m_shapeIndex.find(packShapeKey(sa, ea, mid, styleOfTile(level, i, m_timeline)));
+        if (i >= styleEnd) {
+            const int64_t r =
+                level.trackStyleRunEnd(i, std::numeric_limits<double>::infinity(), m_timeline);
+            if (r < 0) {                     // 本块不可复用：逐砖查询到块尾，别再进本函数
+                styleEnd = -r;
+                styleNoReuse = true;
+            } else {
+                style = styleOfTile(level, i, m_timeline);
+                styleEnd = r;
+                styleNoReuse = false;
+            }
+        }
+        if (styleNoReuse) style = styleOfTile(level, i, m_timeline);
+        const auto it = m_shapeIndex.find(packShapeKey(sa, ea, mid, style));
         if (it == m_shapeIndex.end()) {
             // **不能**静默退回形状 0：那会画出一块完全不相干的砖（同一族"为了安全其实错了"）。
             // 真出现说明 build 期与派生期的 (sa, ea, mid, style) 不一致 —— 喊出来（每次运行一次）。

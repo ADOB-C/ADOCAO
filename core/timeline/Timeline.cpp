@@ -280,9 +280,13 @@ bool Timeline::animAt(int64_t i, double time, AnimSample& out) const {
 }
 
 float Timeline::durationAt(int64_t i) const {
+    return durationFromTotalAngle(i, totalAngleAt(i));
+}
+
+float Timeline::durationFromTotalAngle(int64_t i, float totalAngle) const {
     const int64_t n = (int64_t)m_tileBPM.size();
     if (i >= n - 1) return m_exportOnly ? 0.1f : 0.0f;
-    const float rotationAmount = std::abs(totalAngleAt(i)) / (2.0f * 3.14159265f);
+    const float rotationAmount = std::abs(totalAngle) / (2.0f * 3.14159265f);
     return rotationAmount * 2.0f * (60.0f / m_tileBPM[(size_t)i]);
 }
 void Timeline::precalculateTiming() {

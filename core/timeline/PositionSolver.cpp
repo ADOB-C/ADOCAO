@@ -253,9 +253,12 @@ inline void loadTrailTileConsts(const Timeline& timeline, int tileIdx, int n, do
     c.pivotX = pivot[0];
     c.pivotY = pivot[1];
     c.startTime = startTime;
-    c.duration = (double)timeline.durationAt(tileIdx);
     c.startAngle = (double)timeline.startAngleAt(tileIdx);
-    c.totalAngle = (double)timeline.totalAngleAt(tileIdx);
+    // totalAngle 只取一次：`durationAt` 内部会再算一遍 `totalAngleAt`，而它要读 angle 紧凑存储 +
+    // `angleDirBefore` + `extraRotAt`（lower_bound）—— 极密谱里每次采样点各一遍，是主要成本。
+    const float totalAngle = timeline.totalAngleAt(tileIdx);
+    c.totalAngle = (double)totalAngle;
+    c.duration = (double)timeline.durationFromTotalAngle(tileIdx, totalAngle);
     c.startDist = (double)timeline.tileStartDist(tileIdx);
     c.endDist = (double)timeline.tileEndDist(tileIdx);
     c.isRed = (tileIdx % 2 == 0);

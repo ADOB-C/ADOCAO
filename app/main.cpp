@@ -67,8 +67,11 @@ void printHelp(Mode mode, bool all) {
             "\n"
             "  --codec-report            打印每列的编码、元素数、朴素/编码后字节、字典项数、位宽\n"
             "  --checkpoints             额外写 Derived 段（每 4096 层的续算快照，默认关）\n"
+            "  --schema-report           打印 v7 自描述 schema（类型/字段/kind 分布）与事件列体积\n"
+            "  --events=all|playable|minimal  裁剪导出：playable = v5 能力面，minimal = 只留影响几何/计时的\n"
             "\n"
-            "  例：adocao pack \"<谱>\" out.adocao --codec-report\n");
+            "  例：adocao pack \"<谱>\" out.adocao --codec-report\n"
+            "      adocao pack \"<谱>\" out.adocao --schema-report --events=playable\n");
         return;
     case Mode::Image:
         std::fprintf(stderr,

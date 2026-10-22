@@ -213,6 +213,12 @@ bool parseSettings(const std::vector<std::string>& pool, const uint8_t* p, size_
     if (off + 4 <= n) { if (!f32(s.trackColorAnimDuration)) return false; }
     if (off + 4 <= n) { if (!f32(s.trackPulseLength)) return false; }
     if (off + 4 <= n) { if (!f32(s.trackGlowIntensity)) return false; }
+    // 2026-10-22 追加（**真正的末尾**）：separateCountdownTime。旧文件没有这个字节 → 默认 false。
+    if (off + 1 <= n) {
+        uint8_t sc = 0;
+        if (!u8(sc)) return false;
+        s.separateCountdownTime = (sc != 0);
+    }
     return true;
 }
 
@@ -577,6 +583,9 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
         }
         if (const Sec* s16 = findSec(secs, SectionId::Coverage)) {
             out.v7CoverageBytes.assign(s16->p, s16->p + s16->size);
+        }
+        if (const Sec* pre = findSec(secs, SectionId::Preserved)) {
+            out.rawSettingsJson.assign((const char*)pre->p, pre->size);
         }
         if (!out.v7SchemaBytes.empty() != !out.v7ColumnsBytes.empty()) {
             err = "v7: EventSchema 与 EventColumns 必须同时存在";

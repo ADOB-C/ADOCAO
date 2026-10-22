@@ -21,7 +21,9 @@ constexpr uint8_t kPairNull1 = 0x02;
 constexpr uint8_t kColorAlpha = 0x04;   // 8 位 hex（含 alpha）
 constexpr uint8_t kColorHash  = 0x08;   // 原串带 '#' 前缀
 constexpr uint8_t kGridAsDouble = 0x10; // GridFloat 实际上按 double 存（网格校验失败时兜底）
-constexpr uint8_t kPairAsInt   = 0x20; // Pair 的两个分量都是整数 → 存 int64（差分更省）
+constexpr uint8_t kPairRaw     = 0x20;   // 整对退回原始 JSON（分量不是标量时）
+constexpr uint8_t kPairStr0    = 0x40;   // Pair 分量0 是字符串（startTile 的 "ThisTile"）
+constexpr uint8_t kPairStr1    = 0x80;   // Pair 分量1 是字符串 // Pair 的两个分量都是整数 → 存 int64（差分更省）
 
 inline void bitSet(std::vector<uint8_t>& bm, size_t i) {
     if (bm.size() <= i / 8) bm.resize(i / 8 + 1, 0);
@@ -124,6 +126,9 @@ bool buildEventColumns(const Schema& schema, const std::vector<std::string>& eve
         std::vector<std::string> strv;
         std::vector<std::string> rawv;
         std::vector<double> pair0, pair1;
+        std::vector<std::string> pair0s, pair1s;       // 字符串分量（startTile 的 "ThisTile"）
+        std::vector<std::string> pairRaw;              // 整对原样（分量不是标量时兜底）
+        bool pair0IsStr = false, pair1IsStr = false;
         std::vector<uint32_t> dictIds;
         std::unordered_map<std::string, uint32_t> dictIndex;
         std::vector<std::string> dictStrings;
@@ -233,19 +238,40 @@ bool buildEventColumns(const Schema& schema, const std::vector<std::string>& eve
                         err = msg;
                         return false;
                     }
-                    if (a[0].IsNull()) { bitSet(out.fields[f].nulls0, within); c.pair0.push_back(0.0); }
-                    else {
-                        const double d0 = a[0].GetDouble();
-                        if (d0 != std::floor(d0) || std::fabs(d0) > 9e15)
-                            out.fields[f].subFlags |= 0x80;   // 非整数 → 不能按 int 存
-                        c.pair0.push_back(d0);
+                    // 分量可以是数字**或字符串**（`startTile: [3333, "ThisTile"]`）——
+                    // 逐分量决定列类型，别硬当数字读（踩过：字符串被 GetDouble 成 7.3e18）。
+                    // 分量若是对象/数组（如 AddParticle.velocity），整对退回原始 JSON。
+                    if ((!a[0].IsNumber() && !a[0].IsString() && !a[0].IsNull()) ||
+                        (!a[1].IsNumber() && !a[1].IsString() && !a[1].IsNull())) {
+                        rapidjson::StringBuffer buf;
+                        rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+                        v.Accept(w);
+                        c.pairRaw.emplace_back(buf.GetString(), buf.GetSize());
+                        out.fields[f].subFlags |= kPairRaw;
+                        break;
                     }
-                    if (a[1].IsNull()) { bitSet(out.fields[f].nulls1, within); c.pair1.push_back(0.0); }
-                    else {
-                        const double d1 = a[1].GetDouble();
-                        if (d1 != std::floor(d1) || std::fabs(d1) > 9e15)
-                            out.fields[f].subFlags |= 0x80;
-                        c.pair1.push_back(d1);
+                    for (int comp = 0; comp < 2; ++comp) {
+                        const bool isStr = a[comp].IsString();
+                        if (a[comp].IsNull()) {
+                            if (comp == 0) bitSet(out.fields[f].nulls0, within);
+                            else bitSet(out.fields[f].nulls1, within);
+                        } else if (isStr) {
+                            (comp == 0 ? c.pair0IsStr : c.pair1IsStr) = true;
+                        } else if (!a[comp].IsNumber()) {
+                            char m[192];
+                            std::snprintf(m, sizeof m, "Pair 分量既不是数字也不是字符串（%s.%s comp%d）",
+                                          schema.name(schema.types[typeIdx].nameId).c_str(),
+                                          schema.name(fd.nameId).c_str(), comp);
+                            err = m;
+                            return false;
+                        }
+                        if (comp == 0) {
+                            if (isStr) c.pair0s.emplace_back(a[0].GetString(), a[0].GetStringLength());
+                            else c.pair0.push_back(a[0].IsNumber() ? a[0].GetDouble() : 0.0);
+                        } else {
+                            if (isStr) c.pair1s.emplace_back(a[1].GetString(), a[1].GetStringLength());
+                            else c.pair1.push_back(a[1].IsNumber() ? a[1].GetDouble() : 0.0);
+                        }
                     }
                     break;
                 }
@@ -334,23 +360,46 @@ bool buildEventColumns(const Schema& schema, const std::vector<std::string>& eve
                 break;
             }
             case Kind::Pair: {
-                std::vector<uint8_t> a, b;
-                if ((blob.subFlags & 0x80) == 0) {
-                    // 两个分量都是整数：按 int64 存（差分后通常只剩几 B/值）
-                    std::vector<int64_t> i0, i1;
-                    i0.reserve(c.pair0.size());
-                    i1.reserve(c.pair1.size());
-                    for (double d : c.pair0) i0.push_back((int64_t)d);
-                    for (double d : c.pair1) i1.push_back((int64_t)d);
-                    if (!encodeIntColumn(i0, a) || !encodeIntColumn(i1, b)) {
-                        err = "pair 整型分量编码失败"; return false;
+                if (blob.subFlags & kPairRaw) {
+                    std::vector<uint8_t> raw;
+                    for (const auto& str : c.pairRaw) {
+                        putVarU32(raw, (uint32_t)str.size());
+                        raw.insert(raw.end(), str.begin(), str.end());
                     }
-                    blob.subFlags |= kPairAsInt;
-                } else {
-                    if (!encodeDoubleColumn(c.pair0, a) || !encodeDoubleColumn(c.pair1, b)) {
-                        err = "pair 分量编码失败"; return false;
-                    }
+                    blob.payload = std::move(raw);
+                    blob.valueCount = (uint32_t)c.pairRaw.size();
+                    break;
                 }
+                std::vector<uint8_t> a, b;
+                auto encodeComp = [&](bool second, std::vector<uint8_t>& dst) -> bool {
+                    if (second ? c.pair1IsStr : c.pair0IsStr) {
+                        const auto& vals = second ? c.pair1s : c.pair0s;
+                        std::unordered_map<std::string, uint32_t> idx;
+                        std::vector<uint32_t> ids;
+                        std::vector<std::string> dict;
+                        for (const auto& str : vals) {
+                            auto it = idx.find(str);
+                            if (it == idx.end()) {
+                                const uint32_t id = (uint32_t)dict.size();
+                                dict.push_back(str);
+                                idx.emplace(str, id);
+                                ids.push_back(id);
+                            } else ids.push_back(it->second);
+                        }
+                        std::vector<uint8_t> enc;
+                        if (!encodeU32Column(ids, enc)) return false;
+                        putU32(dst, (uint32_t)dict.size());
+                        for (const auto& ds : dict) {
+                            putVarU32(dst, (uint32_t)ds.size());
+                            dst.insert(dst.end(), ds.begin(), ds.end());
+                        }
+                        dst.insert(dst.end(), enc.begin(), enc.end());
+                        return true;
+                    }
+                    return encodeDoubleColumn(second ? c.pair1 : c.pair0, dst);
+                };
+                if (!encodeComp(0, a) || !encodeComp(1, b)) { err = "pair 分量编码失败"; return false; }
+                blob.subFlags |= (c.pair0IsStr ? kPairStr0 : 0) | (c.pair1IsStr ? kPairStr1 : 0);
                 putU32(blob.payload, (uint32_t)a.size());
                 blob.payload.insert(blob.payload.end(), a.begin(), a.end());
                 blob.payload.insert(blob.payload.end(), b.begin(), b.end());
@@ -391,7 +440,10 @@ bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t e
         std::vector<int64_t> i64v;
         std::vector<double> dblv;
         std::vector<std::string> strv;   // 已展开成字符串（Enum/Tag/String/RawJSON）
-        std::vector<double> pair0, pair1;
+        std::vector<double> pair0, pair1;              // 数字分量
+        std::vector<std::string> pair0s, pair1s;       // 字符串分量（startTile 的 "ThisTile"）
+        std::vector<std::string> pairRaw;              // 整对原样（分量不是标量时兜底）
+        bool pair0IsStr = false, pair1IsStr = false;
         size_t cursor = 0;
         bool ok = true;
     };
@@ -442,23 +494,46 @@ bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t e
                 break;
             }
             case Kind::Pair: {
+                if (blob.subFlags & kPairRaw) {
+                    const uint8_t* q = p;
+                    while (q < e) {
+                        uint32_t len = 0;
+                        if (!getVarU32(q, e, len) || (size_t)(e - q) < len) { err = "pair 原始列截断"; return false; }
+                        d.strv.emplace_back((const char*)q, len);
+                        q += len;
+                    }
+                    break;
+                }
                 if (blob.payload.size() < 4) { err = "pair 列截断"; return false; }
                 uint32_t la = 0;
                 if (!getU32(p, e, la) || (size_t)(e - p) < la) { err = "pair 列截断"; return false; }
-                if (blob.subFlags & kPairAsInt) {
-                    std::vector<int64_t> i0, i1;
-                    if (!decodeIntColumn(p, la, i0)) { err = "pair 分量0(整型)解码失败"; return false; }
-                    p += la;
-                    if (!decodeIntColumn(p, (size_t)(e - p), i1)) { err = "pair 分量1(整型)解码失败"; return false; }
-                    d.pair0.reserve(i0.size());
-                    d.pair1.reserve(i1.size());
-                    for (int64_t v : i0) d.pair0.push_back((double)v);
-                    for (int64_t v : i1) d.pair1.push_back((double)v);
-                } else {
-                    if (!decodeDoubleColumn(p, la, d.pair0)) { err = "pair 分量0解码失败"; return false; }
-                    p += la;
-                    if (!decodeDoubleColumn(p, (size_t)(e - p), d.pair1)) { err = "pair 分量1解码失败"; return false; }
-                }
+                auto decodeComp = [&](bool second, const uint8_t* data, size_t n) -> bool {
+                    if ((second ? (blob.subFlags & kPairStr1) : (blob.subFlags & kPairStr0)) != 0) {
+                        const uint8_t* q = data;
+                        const uint8_t* qe = data + n;
+                        uint32_t dn = 0;
+                        if (!getU32(q, qe, dn)) return false;
+                        std::vector<std::string> dict;
+                        dict.reserve(dn);
+                        for (uint32_t i = 0; i < dn; ++i) {
+                            uint32_t len = 0;
+                            if (!getVarU32(q, qe, len) || (size_t)(qe - q) < len) return false;
+                            dict.emplace_back((const char*)q, len);
+                            q += len;
+                        }
+                        std::vector<uint32_t> ids;
+                        if (!decodeU32Column(q, (size_t)(qe - q), ids)) return false;
+                        for (uint32_t id : ids) {
+                            if (id >= dict.size()) return false;
+                            (second ? d.pair1s : d.pair0s).push_back(dict[id]);
+                        }
+                        return true;
+                    }
+                    return decodeDoubleColumn(data, n, second ? d.pair1 : d.pair0);
+                };
+                if (!decodeComp(0, p, la)) { err = "pair 分量0解码失败"; return false; }
+                p += la;
+                if (!decodeComp(1, p, (size_t)(e - p))) { err = "pair 分量1解码失败"; return false; }
                 break;
             }
             case Kind::Nested:
@@ -528,12 +603,18 @@ bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t e
                     break;
                 }
                 case Kind::Pair: {
-                    if (!take(d.pair0.size())) { err = "pair 列取值越界"; return false; }
-                    const size_t k = d.cursor - 1;
+                    const size_t k = d.cursor++;
+                    if (blob.subFlags & kPairRaw) {
+                        const std::string& raw = d.strv[k];
+                        w.RawValue(raw.c_str(), (rapidjson::SizeType)raw.size(), rapidjson::kArrayType);
+                        break;
+                    }
                     w.StartArray();
                     if (bitGet(blob.nulls0, within)) w.Null();
+                    else if (blob.subFlags & kPairStr0) w.String(d.pair0s[k].c_str());
                     else w.Double(d.pair0[k]);
                     if (bitGet(blob.nulls1, within)) w.Null();
+                    else if (blob.subFlags & kPairStr1) w.String(d.pair1s[k].c_str());
                     else w.Double(d.pair1[k]);
                     w.EndArray();
                     break;

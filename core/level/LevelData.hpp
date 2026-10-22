@@ -40,6 +40,7 @@ struct LevelData {
     bool preserveRawJson = false;
     std::vector<std::string> rawActionsJson;
     std::string rawDecorationsJson;
+    std::string rawSettingsJson;   // settings 对象原样（回写时用它，避免逐键建模）
     // 解析原始成员；失败只警告（pack 会退回旧段），不影响已经解析好的数据。
     bool captureRawMembers(const char* data, size_t length);
     // v7 段（读 `.adocao` v7 时填；写出来给 `adocao json` 回写与"裁剪/丢失"诊断用）

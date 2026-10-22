@@ -62,6 +62,7 @@ struct PackOptions {
     // 按自描述 schema 写成 EventSchema + EventColumns 两段。v6 会丢掉的类型（MoveDecorations /
     // SetFilter / decorations …）由此无损存进容器。裁剪由调用方先过滤 raw 切片完成。
     bool withV7Events = false;
+    bool v7IncludeLegacy = false;   // true = 不去重（v6 段已有的类型也进 v7；`adocao json` 回写需要）
     uint32_t droppedEvents = 0;   // 可选：写进 Coverage（裁剪导出时用；0 = 没裁）
 };
 

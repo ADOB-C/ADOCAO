@@ -7,6 +7,7 @@
 #include "archive/AdocaoEventColumns.hpp"
 #include <set>
 
+#include "archive/AdocaoJsonWriter.hpp"
 #include "archive/AdocaoReader.hpp"
 #include "archive/AdocaoSchema.hpp"
 #include "archive/AdocaoWriter.hpp"     // `adocao pack`：把已加载的谱打成 .adocao
@@ -42,7 +43,7 @@ namespace {
 // 子命令：不带 = 播放/向导（这一条语法**不变**，外部 launcher 就靠它）。
 // 无头那一族（今晚才加、没有外部用户）折进子命令，于是每个模式一屏帮助、
 // 且模式内可以把 --map- 前缀去掉（--map-size → map --size）。
-enum class Mode { Play, Image, Tiles, Stitch, Export, Pack };
+enum class Mode { Play, Image, Tiles, Stitch, Export, Pack, Json };
 
 const char* modeName(Mode m) {
     switch (m) {
@@ -51,6 +52,7 @@ const char* modeName(Mode m) {
         case Mode::Stitch: return "stitch";
         case Mode::Export: return "export";
         case Mode::Pack:   return "pack";
+        case Mode::Json:   return "json";
         default:           return "";
     }
 }
@@ -69,6 +71,7 @@ void printHelp(Mode mode, bool all) {
             "  --codec-report            打印每列的编码、元素数、朴素/编码后字节、字典项数、位宽\n"
             "  --checkpoints             额外写 Derived 段（每 4096 层的续算快照，默认关）\n"
             "  --v7                      写 v7 事件库段（自描述 schema + 列；v6 会丢的类型也能无损装下）\n"
+            "  --v7-all                  同上但**不去重**（全部事件进 v7，供 `adocao json` 无损回写）\n"
             "  --compress=auto|zstd|lzma|none  段级压缩器（auto = 两者都试、取更小；默认 auto）\n"
             "  --level=N                 压缩级别（0 = 编码器默认：zstd 19 / lzma 9|EXTREME；取 0..22）\n"
             "  --schema-report           打印 v7 自描述 schema（类型/字段/kind 分布）与事件列体积\n"
@@ -76,6 +79,13 @@ void printHelp(Mode mode, bool all) {
             "\n"
             "  例：adocao pack \"<谱>\" out.adocao --codec-report\n"
             "      adocao pack \"<谱>\" out.adocao --schema-report --events=playable\n");
+        return;
+    case Mode::Json:
+        std::fprintf(stderr,
+            "adocao json <in.adocao> <out.adofai>     把 v7 容器回写成明文 .adofai\n"
+            "\n"
+            "  需要文件里有 v7 事件库段（`pack --v7-all` 打的包）；只搬运 v7 段与 settings 原文，\n"
+            "  不做任何语义改写。旧格式（没有 v7 段）会**明确报错**，不输出残缺谱面。\n");
         return;
     case Mode::Image:
         std::fprintf(stderr,
@@ -138,6 +148,7 @@ void printHelp(Mode mode, bool all) {
         "  adocao                                   打开向导\n"
         "  adocao <谱.adofai> [选项]                 直接播放\n"
         "  adocao export --level <谱>                导出 hitsound WAV\n"
+        "  adocao json <in.adocao> <out.adofai>       把 v7 容器回写成明文（无损）\n"
         "  adocao image  <out.png>    --level <谱>   导出一张图（默认矢量；--1px 瓦片路线）\n"
         "  adocao tiles  <dir>        --level <谱>   只出瓦片（进阶）\n"
         "  adocao stitch <dir> <out.png>             只拼瓦片（进阶）\n"
@@ -230,6 +241,7 @@ int main(int argc, char* argv[]) {
         else if (std::strcmp(a, "stitch") == 0) { mode = Mode::Stitch; argStart = 2; }
         else if (std::strcmp(a, "export") == 0) { mode = Mode::Export; argStart = 2; }
         else if (std::strcmp(a, "pack") == 0)   { mode = Mode::Pack;   argStart = 2; }
+        else if (std::strcmp(a, "json") == 0)   { mode = Mode::Json;   argStart = 2; }
         else if (std::strcmp(a, "map") == 0 || std::strcmp(a, "mono") == 0) {
             std::fprintf(stderr, "`%s` 已并入 image：\n  adocao image <out.png> --level <谱>%s\n",
                          a, std::strcmp(a, "mono") == 0 ? " --1px --1bit" : "");
@@ -248,6 +260,7 @@ int main(int argc, char* argv[]) {
     bool packCheckpoints = false;
     bool packSchemaReport = false;   // pack --schema-report：打印 v7 自描述 schema 的统计
     bool packV7 = false;             // pack --v7：写 v7 事件库段（EventSchema/EventColumns/Coverage）
+    bool packV7All = false;          // pack --v7-all：不去重（`adocao json` 回写需要全部事件）
     std::string packEventsPreset = "all";   // pack --events=all|playable|minimal（裁剪导出）
     adocao::Compress packCompress = adocao::Compress::Auto;   // pack --compress=auto|zstd|lzma|none
     int packLevel = 0;                                        // pack --level=N（0 = 编码器默认）   // pack --checkpoints：写 Derived 段（每 4096 层的续算快照）                    // pack：打印每列的体积明细
@@ -334,6 +347,7 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--checkpoints") == 0) packCheckpoints = true;
             else if (std::strcmp(a, "--schema-report") == 0) packSchemaReport = true;
             else if (std::strcmp(a, "--v7") == 0) packV7 = true;
+            else if (std::strcmp(a, "--v7-all") == 0) { packV7 = true; packV7All = true; }
             else if (std::strncmp(a, "--events=", 9) == 0) packEventsPreset = a + 9;
             else if (std::strncmp(a, "--compress=", 11) == 0) {
                 const char* v = a + 11;
@@ -410,6 +424,27 @@ int main(int argc, char* argv[]) {
         tty = isatty(fileno(stderr)) != 0;
 #endif
         progress::enable(progressForce > 0 || (progressForce == 0 && tty));
+    }
+
+    // adocao json <in.adocao> <out.adofai>：把 v7 容器回写成明文（ADOCAO-E 无损回写的基础）
+    if (mode == Mode::Json) {
+        if (pos.size() < 2) return usageErr(mode, "adocao json 需要 <in.adocao> <out.adofai>");
+        LevelData lv;
+        if (!lv.loadFromFile(resolveLevelPath(pos[0]))) {
+            std::fprintf(stderr, "加载失败: %s\n", pos[0].c_str());
+            return 1;
+        }
+        std::string out;
+        std::string err;
+        if (!adocao::writeLevelJson(lv, out, err)) {
+            std::fprintf(stderr, "回写失败: %s\n", err.c_str());
+            return 1;
+        }
+        std::ofstream f(pos[1], std::ios::binary);
+        if (!f) { std::fprintf(stderr, "无法写入: %s\n", pos[1].c_str()); return 1; }
+        f.write(out.data(), (std::streamsize)out.size());
+        std::printf("json: %s → %s（%zu B）\n", pos[0].c_str(), pos[1].c_str(), out.size());
+        return 0;
     }
 
     // ── 子命令分发（都在任何 GL 初始化之前）
@@ -551,6 +586,7 @@ int main(int argc, char* argv[]) {
         popts.compress = packCompress;
         popts.level = packLevel;
         popts.withV7Events = packV7;
+        popts.v7IncludeLegacy = packV7All;
         popts.droppedEvents = droppedForV7;
         if (!adocao::packLevel(lv, bytes, err, &rep, popts)) {
             std::fprintf(stderr, "打包失败: %s\n", err.c_str());

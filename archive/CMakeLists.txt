@@ -10,6 +10,7 @@ add_library(adocao_archive STATIC
     AdocaoKinds.cpp
     AdocaoSchema.cpp
     AdocaoEventColumns.cpp
+    AdocaoJsonWriter.cpp
     # v3 的分块列容器（4096 一块、块内自选编码、帧级 zstd 与 seek 粒度解耦，§8.3）。
     # 这个文件用 zstd（帧），所以它和 Columns 不同 —— 帧是 seek 的单位，必须能单独解压。
     AdocaoBlocked.cpp

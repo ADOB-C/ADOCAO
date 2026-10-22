@@ -2211,6 +2211,7 @@ static std::vector<double> parseAngleDataFast(const char* json, size_t len, size
 bool LevelData::captureRawMembers(const char* data, size_t length) {
     rawActionsJson.clear();
     rawDecorationsJson.clear();
+    rawSettingsJson.clear();
     if (!data || length == 0) return false;
     rapidjson::Document d;
     d.Parse<rapidjson::kParseTrailingCommasFlag | rapidjson::kParseCommentsFlag>(data, length);
@@ -2224,6 +2225,13 @@ bool LevelData::captureRawMembers(const char* data, size_t length) {
             if (!v.Accept(w)) return false;
             rawActionsJson.emplace_back(buf.GetString(), buf.GetSize());
         }
+    }
+    auto si = d.FindMember("settings");
+    if (si != d.MemberEnd() && si->value.IsObject()) {
+        rapidjson::StringBuffer buf;
+        rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+        if (!si->value.Accept(w)) return false;
+        rawSettingsJson.assign(buf.GetString(), buf.GetSize());
     }
     auto di = d.FindMember("decorations");
     if (di != d.MemberEnd() && di->value.IsArray()) {

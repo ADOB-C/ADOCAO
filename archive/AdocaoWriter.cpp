@@ -232,6 +232,9 @@ void writeSettings(const LevelData::Settings& s, Pool& pool, std::vector<uint8_t
     putF32(b, s.trackColorAnimDuration);
     putF32(b, s.trackPulseLength);
     putF32(b, s.trackGlowIntensity);
+    // 2026-10-22 **真正的末尾**追加：separateCountdownTime（决定性影响时间基准）。
+    // 旧读者读完原字段就返回、尾部多余字节被忽略；读侧"尾部还在才读"。
+    putU8(b, s.separateCountdownTime ? 1 : 0);
 }
 
 }  // namespace
@@ -645,7 +648,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
             rapidjson::Document d;
             d.Parse(js.c_str(), js.size());
             const char* t = (d.HasParseError() || !d.HasMember("eventType")) ? "" : d["eventType"].GetString();
-            if (kLegacyStored.count(t)) continue;   // 已由 v6 段承载
+            if (!opts.v7IncludeLegacy && kLegacyStored.count(t)) continue;   // 已由 v6 段承载
             evs.push_back(js);
         }
         std::vector<uint8_t> srcs(evs.size(), 0);
@@ -677,6 +680,11 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         if (!buildEventColumns(sb.schema(), evs, srcs, cols, cerr)) {
             err = "v7: 建列失败: " + cerr;
             return false;
+        }
+        if (!level.rawSettingsJson.empty()) {
+            Section pre; pre.id = (uint8_t)SectionId::Preserved;
+            pre.blob.assign(level.rawSettingsJson.begin(), level.rawSettingsJson.end());
+            secs.push_back(std::move(pre));
         }
         Section sch; sch.id = (uint8_t)SectionId::EventSchema;
         sch.blob = sb.serialize();

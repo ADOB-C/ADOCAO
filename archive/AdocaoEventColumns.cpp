@@ -9,6 +9,8 @@
 
 #include "archive/AdocaoColumns.hpp"
 
+#include <zstd.h>
+
 namespace adofai {
 namespace adocao {
 namespace {
@@ -18,6 +20,7 @@ constexpr uint8_t kPairNull1 = 0x02;
 constexpr uint8_t kColorAlpha = 0x04;   // 8 位 hex（含 alpha）
 constexpr uint8_t kColorHash  = 0x08;   // 原串带 '#' 前缀
 constexpr uint8_t kGridAsDouble = 0x10; // GridFloat 实际上按 double 存（网格校验失败时兜底）
+constexpr uint8_t kPairAsInt   = 0x20; // Pair 的两个分量都是整数 → 存 int64（差分更省）
 
 inline void bitSet(std::vector<uint8_t>& bm, size_t i) {
     if (bm.size() <= i / 8) bm.resize(i / 8 + 1, 0);
@@ -222,9 +225,19 @@ bool buildEventColumns(const Schema& schema, const std::vector<std::string>& eve
                     const rapidjson::Value& a = v;
                     if (!a.IsArray() || a.Size() != 2) { err = "Pair 字段不是二元数组"; return false; }
                     if (a[0].IsNull()) { bitSet(out.fields[f].nulls0, within); c.pair0.push_back(0.0); }
-                    else c.pair0.push_back(a[0].GetDouble());
+                    else {
+                        const double d0 = a[0].GetDouble();
+                        if (d0 != std::floor(d0) || std::fabs(d0) > 9e15)
+                            out.fields[f].subFlags |= 0x80;   // 非整数 → 不能按 int 存
+                        c.pair0.push_back(d0);
+                    }
                     if (a[1].IsNull()) { bitSet(out.fields[f].nulls1, within); c.pair1.push_back(0.0); }
-                    else c.pair1.push_back(a[1].GetDouble());
+                    else {
+                        const double d1 = a[1].GetDouble();
+                        if (d1 != std::floor(d1) || std::fabs(d1) > 9e15)
+                            out.fields[f].subFlags |= 0x80;
+                        c.pair1.push_back(d1);
+                    }
                     break;
                 }
                 case Kind::Nested:
@@ -313,8 +326,21 @@ bool buildEventColumns(const Schema& schema, const std::vector<std::string>& eve
             }
             case Kind::Pair: {
                 std::vector<uint8_t> a, b;
-                if (!encodeDoubleColumn(c.pair0, a) || !encodeDoubleColumn(c.pair1, b)) {
-                    err = "pair 分量编码失败"; return false;
+                if ((blob.subFlags & 0x80) == 0) {
+                    // 两个分量都是整数：按 int64 存（差分后通常只剩几 B/值）
+                    std::vector<int64_t> i0, i1;
+                    i0.reserve(c.pair0.size());
+                    i1.reserve(c.pair1.size());
+                    for (double d : c.pair0) i0.push_back((int64_t)d);
+                    for (double d : c.pair1) i1.push_back((int64_t)d);
+                    if (!encodeIntColumn(i0, a) || !encodeIntColumn(i1, b)) {
+                        err = "pair 整型分量编码失败"; return false;
+                    }
+                    blob.subFlags |= kPairAsInt;
+                } else {
+                    if (!encodeDoubleColumn(c.pair0, a) || !encodeDoubleColumn(c.pair1, b)) {
+                        err = "pair 分量编码失败"; return false;
+                    }
                 }
                 putU32(blob.payload, (uint32_t)a.size());
                 blob.payload.insert(blob.payload.end(), a.begin(), a.end());
@@ -410,9 +436,20 @@ bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t e
                 if (blob.payload.size() < 4) { err = "pair 列截断"; return false; }
                 uint32_t la = 0;
                 if (!getU32(p, e, la) || (size_t)(e - p) < la) { err = "pair 列截断"; return false; }
-                if (!decodeDoubleColumn(p, la, d.pair0)) { err = "pair 分量0解码失败"; return false; }
-                p += la;
-                if (!decodeDoubleColumn(p, (size_t)(e - p), d.pair1)) { err = "pair 分量1解码失败"; return false; }
+                if (blob.subFlags & kPairAsInt) {
+                    std::vector<int64_t> i0, i1;
+                    if (!decodeIntColumn(p, la, i0)) { err = "pair 分量0(整型)解码失败"; return false; }
+                    p += la;
+                    if (!decodeIntColumn(p, (size_t)(e - p), i1)) { err = "pair 分量1(整型)解码失败"; return false; }
+                    d.pair0.reserve(i0.size());
+                    d.pair1.reserve(i1.size());
+                    for (int64_t v : i0) d.pair0.push_back((double)v);
+                    for (int64_t v : i1) d.pair1.push_back((double)v);
+                } else {
+                    if (!decodeDoubleColumn(p, la, d.pair0)) { err = "pair 分量0解码失败"; return false; }
+                    p += la;
+                    if (!decodeDoubleColumn(p, (size_t)(e - p), d.pair1)) { err = "pair 分量1解码失败"; return false; }
+                }
                 break;
             }
             case Kind::Nested:
@@ -504,6 +541,85 @@ bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t e
         eventsJson[e].assign(buf.GetString(), buf.GetSize());
     }
     return true;
+}
+
+std::vector<uint8_t> serializeEventColumns(const Schema& schema, const EventColumns& cols) {
+    std::vector<uint8_t> b;
+    // 字典策略：**每列自带**（实测在整段 zstd 面前，全局池/前置编码都没有净收益：
+    // 2025 上 72.3 KB → 74.4 KB，反而变大 —— zstd 已经跨列吃到重复前缀，别再叠一层映射开销）。
+    putU32(b, (uint32_t)cols.typeIds.size());
+    for (uint16_t t : cols.typeIds) { b.push_back((uint8_t)(t & 0xFF)); b.push_back((uint8_t)(t >> 8)); }
+    putU32(b, (uint32_t)cols.fields.size());
+    for (size_t f = 0; f < cols.fields.size(); ++f) {
+        const ColumnBlob& c = cols.fields[f];
+        b.push_back((uint8_t)schema.fields[f].kind);
+        b.push_back(c.subFlags);
+        putU32(b, c.valueCount);
+        auto putBlob = [&](const std::vector<uint8_t>& v) {
+            putU32(b, (uint32_t)v.size());
+            b.insert(b.end(), v.begin(), v.end());
+        };
+        putBlob(c.present); putBlob(c.nulls); putBlob(c.nulls0); putBlob(c.nulls1); putBlob(c.payload);
+        const uint32_t dn = (uint32_t)c.dictStrings.size();
+        putU32(b, dn);
+        for (const auto& ds : c.dictStrings) {
+            putVarU32(b, (uint32_t)ds.size());
+            b.insert(b.end(), ds.begin(), ds.end());
+        }
+    }
+    return b;
+}
+
+bool deserializeEventColumns(const Schema& schema, const uint8_t* p, size_t n, EventColumns& out,
+                             std::string& err) {
+    err.clear();
+    out = EventColumns{};
+    const uint8_t* e = p + n;
+    uint32_t eventCount = 0;
+    if (!getU32(p, e, eventCount) || (size_t)(e - p) < (size_t)eventCount * 2) { err = "事件列：类型列截断"; return false; }
+    out.typeIds.resize(eventCount);
+    for (uint32_t i = 0; i < eventCount; ++i) {
+        out.typeIds[i] = (uint16_t)(p[0] | (p[1] << 8));
+        p += 2;
+        if (out.typeIds[i] >= schema.types.size()) { err = "事件列：类型下标越界"; return false; }
+    }
+    uint32_t fieldCount = 0;
+    if (!getU32(p, e, fieldCount) || fieldCount != schema.fields.size()) { err = "事件列：字段数与 schema 不一致"; return false; }
+    out.fields.resize(fieldCount);
+    for (uint32_t f = 0; f < fieldCount; ++f) {
+        ColumnBlob& c = out.fields[f];
+        if (e - p < 2) { err = "事件列：字段头截断"; return false; }
+        const uint8_t kind = *p++;
+        c.subFlags = *p++;
+        if (kind != (uint8_t)schema.fields[f].kind) { err = "事件列：kind 与 schema 不一致"; return false; }
+        if (!getU32(p, e, c.valueCount)) { err = "事件列：字段头截断"; return false; }
+        auto getBlob = [&](std::vector<uint8_t>& v) {
+            uint32_t len = 0;
+            if (!getU32(p, e, len) || (size_t)(e - p) < len) return false;
+            v.assign(p, p + len);
+            p += len;
+            return true;
+        };
+        if (!getBlob(c.present) || !getBlob(c.nulls) || !getBlob(c.nulls0) || !getBlob(c.nulls1) ||
+            !getBlob(c.payload)) { err = "事件列：字段数据截断"; return false; }
+        uint32_t dictCount = 0;
+        if (!getU32(p, e, dictCount)) { err = "事件列：字典头截断"; return false; }
+        c.dictStrings.reserve(dictCount);
+        for (uint32_t i = 0; i < dictCount; ++i) {
+            uint32_t len = 0;
+            if (!getVarU32(p, e, len) || (size_t)(e - p) < len) { err = "事件列：字典截断"; return false; }
+            c.dictStrings.emplace_back((const char*)p, len);
+            p += len;
+        }
+    }
+    return true;
+}
+
+size_t zstdEstimate(const std::vector<uint8_t>& raw) {
+    if (raw.empty()) return 0;
+    std::vector<uint8_t> z(ZSTD_compressBound(raw.size()));
+    const size_t got = ZSTD_compress(z.data(), z.size(), raw.data(), raw.size(), 19);
+    return ZSTD_isError(got) ? raw.size() : got;
 }
 
 }  // namespace adocao

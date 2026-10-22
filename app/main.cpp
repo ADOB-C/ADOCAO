@@ -428,9 +428,28 @@ int main(int argc, char* argv[]) {
                         for (const auto& s : c.dictStrings) dicts += s.size() + 2;
                     }
                     const size_t schemaBytes = sb.serialize().size();
-                    std::printf("事件列: %zu 条 → payload %zu B + 位图 %zu B + 字典 %zu B + schema %zu B = %.1f KB\n",
+                    const std::vector<uint8_t> blob = adocao::serializeEventColumns(sb.schema(), cols);
+                    const size_t z = adocao::zstdEstimate(blob);
+                    {
+                        static const char* kn[] = {"Bool","Int","Float","GridFloat","Enum","Color",
+                                                   "String","Tag","Pair","Nested","RawJSON"};
+                        size_t byKind[11] = {0};
+                        size_t dictByKind[11] = {0};
+                        for (size_t f = 0; f < cols.fields.size(); ++f) {
+                            const size_t k = (size_t)adocao::Kind(sb.schema().fields[f].kind);
+                            byKind[k] += cols.fields[f].payload.size();
+                            for (const auto& ds : cols.fields[f].dictStrings) dictByKind[k] += ds.size() + 2;
+                        }
+                        for (int k = 0; k < 11; ++k)
+                            if (byKind[k] || dictByKind[k])
+                                std::printf("   kind %-9s payload %7zu B  字典 %7zu B\n", kn[k], byKind[k], dictByKind[k]);
+                    }
+                    std::printf("事件列: %zu 条 → payload %zu B + 位图 %zu B + 字典 %zu B + schema %zu B = %.1f KB；"
+                                "整段 zstd-19 → %.1f KB（含 schema %.1f KB）\n",
                                 evs.size(), payload, bitmaps, dicts, schemaBytes,
-                                (double)(payload + bitmaps + dicts + schemaBytes) / 1024.0);
+                                (double)(payload + bitmaps + dicts + schemaBytes) / 1024.0,
+                                (double)(z + adocao::zstdEstimate(sb.serialize())) / 1024.0,
+                                (double)(z + adocao::zstdEstimate(sb.serialize())) / 1024.0);
                 } else {
                     std::fprintf(stderr, "事件列构建失败: %s\n", cerr.c_str());
                 }

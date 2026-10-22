@@ -36,6 +36,8 @@ struct ColumnBlob {
 struct EventColumns {
     std::vector<uint16_t> typeIds;      // 与输入事件一一对应（原顺序）
     std::vector<ColumnBlob> fields;     // 与 schema.fields 平行
+    // 全局字符串池：序列化时跨列去重（同一张图/同一个 tag 只存一次），反序列化时填回。
+    std::vector<std::string> globalStrings;
 };
 
 // 建列。`events` 与 `sources` 一一对应（同一批事件的来源）。
@@ -47,6 +49,14 @@ bool buildEventColumns(const Schema& schema,
 // 解列：还原成每个事件的 JSON 文本（字段顺序 = schema 顺序，即"首次出现顺序"）。
 bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t eventCount,
                         std::vector<std::string>& eventsJson, std::string& err);
+
+// 列集的字节化（容器段用；也是"体积报告"的口径）。不含 schema —— schema 单独一段。
+std::vector<uint8_t> serializeEventColumns(const Schema& schema, const EventColumns& cols);
+bool deserializeEventColumns(const Schema& schema, const uint8_t* p, size_t n, EventColumns& out,
+                             std::string& err);
+
+// 诊断：整段 zstd-19 之后的字节数（报告用；真正写文件时由段级压缩决定）。
+size_t zstdEstimate(const std::vector<uint8_t>& raw);
 
 }  // namespace adocao
 }  // namespace adofai

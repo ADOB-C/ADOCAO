@@ -1245,7 +1245,20 @@ schema: 36 类型 / 388 字段；rawJSON 字段 0/388（0%）
 即：**没有一个字段落到 RawJSON 兜底** —— 全部进入了有专用变换的 kind，且这张谱里
 `MoveDecorations`(23 字段)/`SetFilterAdvanced`/`Bloom` 等 v6 会整体丢弃的类型都在 schema 里。
 
-### 9.3 待做
+### 9.3 事件列实测（未压缩 vs 整段 zstd-19，`pack --schema-report`）
+
+| 谱 | 事件数 | 列字节（payload+位图+字典+schema） | 整段 zstd-19 |
+|---|---|---|---|
+| Hello 2025 | 12,466（含 1,233 装饰） | 213.9 KB | **72.3 KB** |
+| HELLO_BPM_2021 | 3,479 | 24.9 KB | 10.7 KB |
+| Hello 2026 | 127 | 11.3 KB | 3.5 KB |
+
+2025 的列字节分布：Pair 37.7 KB、Int 29.0 KB、Nested 24.7 KB、String 13.6 KB（字典另 45.5 KB）、
+GridFloat 10.2 KB、Enum 10.6 KB、Color 5.2 KB、Float 5.8 KB、Bool 1.8 KB、Tag 0.9 KB。
+**实测否掉的两条**（都试过、都变差）：字典串前置编码（+2.1 KB）、全局字符串池（+2.1 KB）——
+整段 zstd 已经跨列吃到重复前缀，再叠映射只会变贵。
+
+### 9.4 待做
 
 列编码（按 kind 建列/解列）、`EventIndex` 块内 seek、`Coverage` 段与裁剪导出
 （`--events=playable` 回到 v5 体积）、`adocao json` 回写、`PeriodicResidual` 变换。

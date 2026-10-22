@@ -1,163 +1,88 @@
-# ADOCAO - A Dance of C++ and OpenGL
+# ADOCAO
 
-A native high-performance viewer for [A Dance of Fire and Ice](https://store.steampowered.com/app/977950/A_Dance_of_Fire_and_Ice/) custom levels (`.adofai` format), written in C++20 and OpenGL 4.3.
+用 **C++20 + OpenGL 4.3** 从零写的 [A Dance of Fire and Ice](https://store.steampowered.com/app/977950/A_Dance_of_Fire_and_Ice/) 谱面播放器。
 
-![C++20](https://img.shields.io/badge/C%2B%2B-20-blue)
-![OpenGL](https://img.shields.io/badge/OpenGL-4.3-red)
-![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
+打开 `.adofai` 就能看谱、听歌、跟着行星踩格子 —— 几千万层的谱面也拖得动。
+Windows / Linux / macOS 全平台，没有 Unity，也没有浏览器内核。
 
-A [Vulkan 1.2 port](https://github.com/CHT-1192/ADOCAV) is also available.
+> 同源的 Vulkan 版本：[ADOCAV](https://github.com/CHT-1192/ADOCAV)
 
-> **当前目标：`docs/2e9.md`** —— 约 21 亿层（2³¹−1）的谱面要能加载、能 seek、不掉帧，
-> 而且**常驻内存与层数解耦**（n 从 1e6 长到 2³¹，RSS 基本不变）。目标的可测定义（DoD）、
-> 阶段顺序与纪律都在那份文档里；`docs/scale-1e8-to-2e9.md` 是它的实测分析长文。
+## 能做什么
 
-## Features
+- **播放**：相对角度、`SetSpeed` / `Twirl` / `Pause` / `Midspin`、MoveCamera、MoveTrack、
+  AnimateTrack、颜色与闪屏事件、书签跳转
+- **听歌**：AIFF / OGG / WAV / FLAC；27 种打击音色按谱面预合成，16-bit 硬削波混音
+- **超大谱面**：视锥剔除 + 可见性缓存 + 实例化渲染，实测 6,800 万层的谱面照样能拖能跳
+  （[目标](docs/2e9.md) 是 21 亿层）
+- **无头出图**：`adocao image` 直接渲染成 PNG，不弹窗
+- **命令行工具**：`adocao pack` 把谱面压成自研 `.adocao` 容器（MYC 611 MB → **6 KB**，逐位无损），
+  `adocao json` 再还原成明文
+- **启动器**：拖进谱面、选音色、调分辨率与缩放；也可以纯命令行
 
-- Full ADOFAI playback engine with relative angle computation (matches [ADOFAI-JS](https://github.com/adofaiex/ADOFAI-JS))
-- Music playback via miniaudio (WASAPI/PulseAudio): AIFF, OGG, WAV, FLAC
-- Pre-synthesized hitsound tracks (27 hit types) with 16-bit hard-clip mixing
-- Instanced GPU rendering with frustum culling and visibility cache
-- Per-instance fill and stroke colors via vertex attributes
-- Planet movement with trail rendering (Catmull-Rom spline)
-- Event icons: Twirl (purple), SetSpeed (red/blue)
-- Z-depth rendering (far-to-near tile ordering, supports 7M-tile levels)
-- Bookmark navigation (Ctrl+Left/Right) + track selection (click to play from tile)
-- DPI-aware launcher with auto-stroke color, background color, and resolution selection
-- `SetSpeed`, `Twirl`, `Pause`, `Midspin` event support
-- `--auto-play` for automatic playback
-- `--force-hitsound` to override level hitsound type
-- `--legacy-culling` for legacy per-instance culling (vs SoA SIMD culling)
+## 快速开始
 
-## Quick Start
+**下载**：到 [Releases](../../releases) 取对应平台的压缩包，解压即用（macOS 是 `.app`）。
 
-### Windows
+**从源码构建**：
+
 ```bash
-build.bat                     # default: Ultra zoom (min 1x), dynamic link
-build.bat -Hyper              # Hyper zoom (min 0.5x)
-build.bat -Portable           # static-linked portable build
-build.bat -P -H               # short form: portable + Hyper
-```
-All arguments skip interactive mode. Run without arguments for prompts.
+# Windows
+build.bat                 # 默认 Ultra 缩放；build.bat -Portable 静态链接
 
-### Linux / macOS
+# Linux / macOS
+chmod +x build.sh && ./build.sh
+```
+
+首次运行会问几个选项（缩放档位、是否静态链接）；之后不带参数重跑就是**增量构建**。
+依赖（GLFW / glm / RapidJSON / Dear ImGui / miniaudio / liblzma / libzstd …）由 CMake 自动拉取。
+
+## 用法
+
+双击打开启动器，把 `.adofai` 拖进去即可。也支持命令行：
+
 ```bash
-chmod +x build.sh
-./build.sh                    # default: Ultra zoom (min 1x)
-./build.sh -Hyper             # Hyper zoom (min 0.5x)
-./build.sh -Extreme -Portable # Extreme zoom + portable
-```
-Re-running `./build.sh` without arguments when `build/` already has a cache: rebuilds **incrementally** — no prompts, no re-configure. Pass options (e.g. `-U -Portable`) to reconfigure.
-
-### Zoom Levels
-
-Zoom controls how far out you can scroll. Smaller = further out, good for huge levels.
-
-| Level | Min Zoom | Long Arg | Short | Description |
-|-------|----------|----------|-------|-------------|
-| Normal | 10× | `-Normal` | `-N` | Standard zoom range |
-| Extra | 5× | `-Extra` | `-T` | Slightly wider view |
-| Super | 2.5× | `-Super` | `-S` | Good for medium-large levels |
-| **Ultra** | **1×** | **`-Ultra`** | **`-U`** | **Default. Covers most extreme levels** |
-| Hyper | 0.5× | `-Hyper` | `-H` | Very wide, 2× further than Ultra |
-| Extreme | 0.25× | `-Extreme` | `-X` | 4× further than Ultra |
-| Unimaginable | 0.1× | `-Unimaginable` | `-I` | Maximum zoom-out, 10× further than Ultra |
-
-### Build Script Arguments
-
-| Argument | Short | Description |
-|----------|-------|-------------|
-| `-Portable` | `-P` | Static-link MinGW DLLs (no runtime dependency) |
-| `-Normal` | `-N` | Min zoom 10× |
-| `-Extra` | `-T` | Min zoom 5× |
-| `-Super` | `-S` | Min zoom 2.5× |
-| `-Ultra` | `-U` | Min zoom 1× (default) |
-| `-Hyper` | `-H` | Min zoom 0.5× |
-| `-Extreme` | `-X` | Min zoom 0.25× |
-| `-Unimaginable` | `-I` | Min zoom 0.1× |
-
-Arguments can be combined and are case-insensitive. Any argument skips interactive prompts.
-
-### CMake Options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `ADOCAO_PORTABLE` | BOOL | OFF | Static-link portable build |
-| `ADOCAO_ZOOM_LEVEL` | STRING | Ultra | Min zoom level. One of: `Normal`, `Extra`, `Super`, `Ultra`, `Hyper`, `Extreme`, `Unimaginable` |
-
-Manual CMake example:
-```bash
-cmake .. -DADOCAO_PORTABLE=ON -DADOCAO_ZOOM_LEVEL=Hyper
+adocao --level "chart.adofai" --music "song.ogg"          # 直接播放
+adocao                                                    # 不带参数 → 启动器
+adocao image out.png --level "chart.adofai"               # 无头出图
+adocao pack "chart.adofai" chart.adocao --compress=auto   # 打成 .adocao 容器
+adocao json chart.adocao back.adofai                      # 容器还原成明文
+adocao --help                                             # 全部开关
 ```
 
-## Build Dependencies
+### 操作
 
-All dependencies are fetched automatically via CMake `FetchContent`:
+| 按键 | 作用 |
+|------|------|
+| `Space` | 播放 / 暂停 |
+| 鼠标拖动 | 平移视角（暂停时） |
+| 滚轮 | 缩放 |
+| `Ctrl` + `←` / `→` | 上一个 / 下一个书签 |
+| 点击砖块 | 从那一块开始播 |
+| `Esc` | 退出 |
 
-| Library | Version | Purpose |
-|---------|---------|---------|
-| GLFW | 3.4 | Window + input |
-| glm | 1.0.1 | Math |
-| RapidJSON | master | .adofai parsing |
-| Dear ImGui | 1.92.9b | Launcher UI (`v` 前缀是上游 tag，见 `CMakeLists.txt`) |
-| miniaudio | 0.11.22 | Audio playback |
-| stb_vorbis | latest | OGG decoding |
-| miniz | 3.0.2 | Zip archive reading (DataFile) |
-| liblzma (xz) | 5.6.3 | `.adofai.xz` level containers (multi-threaded decode) |
-| libzstd | 1.5.6 | `.adofai.zst` level containers |
-| tinyfiledialogs | 2.9.3 | File open dialogs |
+## 文档
 
-## CLI Usage
+| 想了解 | 看这里 |
+|---|---|
+| 命令行全部开关 | [`docs/cli.md`](docs/cli.md) |
+| 渲染与几何约定、像素门槛 | [`docs/rendering.md`](docs/rendering.md) |
+| 解析器、加载路径、Timeline | [`docs/level-loading.md`](docs/level-loading.md) |
+| `.adocao` 容器规范 | [`docs/adocao-format.md`](docs/adocao-format.md) |
+| 项目目标（21 亿层）与阶段 | [`docs/2e9.md`](docs/2e9.md) |
+| 目录结构、历史决策 | [`docs/project-structure.md`](docs/project-structure.md) |
 
-```
-adocao.exe --level <file> --music <file> [--width N] [--height N]
-           [--fullscreen] [--no-exclusive] [--fill HEX] [--stroke HEX] [--bg HEX]
-           [--no-auto-stroke] [--no-hitsound] [--no-trail] [--debug]
-           [--force-hitsound [TYPE]] [--auto-play] [--export] [--legacy-culling]
-           [--msaa N]
-           [--trail-duration SEC] [--trail-sample-rate N]
-```
+## 说明
 
-Without `--level`, falls through to the ImGui launcher.
+- 这是**播放器**，不是编辑器；谱面语义以 [Re_ADOJAS](https://github.com/adofaiex/Re_ADOJAS) 为最权威参考。
+- 不支持装饰物渲染（装饰系统深度依赖 Unity），但 `.adocao` 会**无损保存**装饰数据。
+- 不含歌曲 —— 请自备音源与谱面。
 
-## Project Structure
+## 致谢
 
-Libraries are directories: each has its own `CMakeLists.txt` STATIC target and the
-dependency direction is enforced by `target_link_libraries`. `core/` is the pure-logic
-layer (no GL/window/audio-device) and may be exported/reused by other engines.
+- [Re_ADOJAS](https://github.com/adofaiex/Re_ADOJAS) —— Three.js 实现，语义上的权威参考
+- [ADOFAI-JS](https://github.com/adofaiex/ADOFAI-JS) —— 角度解析
+- [ADOFAI_HitSound](https://github.com/Maicy0609/ADOFAI_HitSound) —— 打击音色合成
 
-```
-core/        Pure logic: level/ (.adofai parser), timeline/ (Timeline/PositionSolver/PlaybackClock), util/
-render/      GL rendering: Shader, TileMesh, Planet (+trail), Camera, TileGeometry (transitional)
-audio/       Music playback + hitsound synthesis (miniaudio; core::timeline timestamps in)
-glad/        OpenGL 4.3 Core loader (custom minimal loader, own STATIC target)
-app/         Executable (adocao): main/Application, GameWindow (+ CameraController/LevelScene), launcher
-app/wizard/  Launcher wizard pages (one file per page) + shared wizard state/chrome
-assets/      Runtime assets: assets/shaders/ (.vert/.frag), assets/hitsounds/ (27 .wav files)
-docs/        Architecture blueprint & phase decisions (project-structure.md)
-scripts/     Build/dev pipeline helpers + core-purity check
-```
-
-Build/run the binary from the repo or build root (assets are resolved relative to the
-working directory, the executable directory, or up to 3 parents above it).
-
-## Controls
-
-| Key | Action |
-|-----|--------|
-| Space | Start/stop playback |
-| Esc | Close game window |
-| Mouse drag | Pan camera (when stopped) |
-| Scroll | Zoom in/out (5–1000) |
-
-## Acknowledgements
-
-This project draws heavily from:
-- [Re_ADOJAS](https://github.com/adofaiex/Re_ADOJAS) — Three.js web player
-- [ADOFAN_PIXI](https://github.com/AnStartist/ADOFAN_PIXI) — PixiJS web player
-
-Thank you to their authors for the reference implementations.
-
-## License
+## 许可证
 
 Apache 2.0

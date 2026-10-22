@@ -34,6 +34,22 @@
 - 参考数据（MEGAMIX_2）：1,406 张唯一 PNG（磁盘 797 MiB）→ RGBA8 **10.55 GiB**（13.5×），
       BC7 2.64 GiB / ASTC 1.32 GiB；原版据报 ≥64 GB（≈ 物理下限的 6×）。
 
+### `.adocao` v7（2026-10-22 状态）
+
+- [x] **自描述事件库**：`EventSchema`(14) / `EventColumns`(15) / `Coverage`(16) / `EventIndex`(17)；
+      全部 33 类事件 + decorations 无损，语料实测 rawJSON 占比 0%。
+- [x] **v7 唯一存储** `pack --v7-only`：不写 v6 事件段，读侧走 `LevelData::ingestEventJson()`
+      （复用 JSON 路径的 `parseActionObject`/`buildAction`/`decodeSpecialEvent`，不重写第二套）。
+      实测 2025 73,256 B / MEGAMIX_2 173,568 B，出图与明文逐字节相同。
+- [x] **`adocao json`**：v7 容器 → 明文，`--v7-all` 的包才能回写全部事件；
+      2025 往返 0 差异、回写再打包**逐字节相同**。
+- [ ] **事件列按块分块**（下一步的地基）：现在 `EventColumns` 是整列一体的，`EventIndex`
+      给出了"块 → 事件下标"，但解码一个窗口仍要**解整列**。要真正 O(1) 窗口解码，
+      得让每列的 payload 按 4096 事件分块（每块独立可解，块内自选编码），
+      与 `AdocaoBlocked` 已有的"块容器"同一套思路。
+- [ ] `Coverage` 在应用里提示（打开被裁剪的 `.adocao` 时说清缺了哪些类型）。
+- [ ] 体积：2025 `all` 72.9 KB，目标 60 KB；已实测否掉的优化见 `docs/adocao-format.md` §9.3。
+
 ### 容器 / 格式
 - [x] **`.ilytx` 读取**（Re_ADOJAS 自研容器，2026-10-16，见 `docs/ilytx.md`）：xz(tar(ilybin)) →
   翻译成等价 `.adofai` 明文，复用唯一解析路径；ctest `ilytx` 逐位比对 + 出图逐字节相同。

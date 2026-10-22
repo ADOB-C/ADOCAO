@@ -216,6 +216,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `assets/shaders/*` 逐字相同）
 - 待办（已筛选）：`TODO.md`（未完成清单 + 遥远的未来：MoveTrack）
 - 已彻底删除：GPU compute culling（2.0.0 起不需要，勿再引入）
+- **不要盯 CI**（2026-10-22 用户明确）：push 之后**不必**跑 `gh run watch` / 轮询 `gh run list`。
+  用户会收到失败邮件并主动告知；提前盯 CI 只是白等（Linux 那格常跑 10 分钟）。
 - 脚本：`scripts/push-ci.sh`（push → gh run watch；`--watch` 默认输出平台耗时/产物）
   `scripts/run.sh --debugger` | `scripts/release.sh`（支持 x.y.z-AlphaN/-BetaN/-RcN）
   `scripts/make-app.sh`（macOS：把 `build/adocao` + `assets/` 打成自包含的 `build/adocao.app`，含 ad-hoc 签名；CI 的 macOS job 也用同一个脚本）

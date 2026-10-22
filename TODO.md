@@ -22,6 +22,18 @@
 
 ## 未完成
 
+### 装饰物（2026-10-22 拍板：**不做渲染**）
+
+- [x] 容器 v7 **只存数据**：`MoveDecorations` / `AddDecoration` / `decorations` 数组已经无损装进
+      `EventColumns`（MEGAMIX_2：23,198 + 1,944 + 2,946 条，容器 165 KB），`adocao json` 能原样回写。
+- [ ] **不做装饰物渲染**。理由（用户 2026-10-22）：装饰系统深度依赖 Unity 的 shader/材质/timeline，
+      Re_ADOJAS 死磕 3 个月也只能做到"看得出有装饰"；目前唯一接近原版的播放器是 Unity 实现，
+      且因大量借鉴原版代码要求后台挂正版 Steam 验证。
+- [ ] 因此 `DecorationManifest`（唯一路径/尺寸/哈希/显存预算）**暂缓** —— 没有渲染消费方，
+      等真要做装饰渲染再进格式（数据已经在 v7 里，不会丢）。
+- 参考数据（MEGAMIX_2）：1,406 张唯一 PNG（磁盘 797 MiB）→ RGBA8 **10.55 GiB**（13.5×），
+      BC7 2.64 GiB / ASTC 1.32 GiB；原版据报 ≥64 GB（≈ 物理下限的 6×）。
+
 ### 容器 / 格式
 - [x] **`.ilytx` 读取**（Re_ADOJAS 自研容器，2026-10-16，见 `docs/ilytx.md`）：xz(tar(ilybin)) →
   翻译成等价 `.adofai` 明文，复用唯一解析路径；ctest `ilytx` 逐位比对 + 出图逐字节相同。

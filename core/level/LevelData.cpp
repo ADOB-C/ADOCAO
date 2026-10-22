@@ -3,6 +3,7 @@
 #include "FloorWindow.hpp"   // ③ 切片 4：按块物化缓存（~LevelData 需要完整类型）
 #include "JsonCleaner.hpp"
 #include "ByteSource.hpp"   // 容器识别 + 解压后端接口（实现见 archive/）
+#include "JsonScan.hpp"     // 结构扫描的 SIMD 字节分类（纯结构，不碰数值）
 #include "core/util/Logger.hpp"
 #include "core/util/Env.hpp"
 #include "core/util/Scheduler.hpp"
@@ -110,12 +111,6 @@ inline const char* scanStringEnd(const char* p, const char* e) {
     return nullptr;
 }
 
-// 与 scanStringEnd 相同，但字符串里出现转义或裸 CR 就直接放弃：
-//   * RapidJSON 非 in-situ 模式同样会解转义（"x\\y" -> x\y），快路径不去猜它的
-//     转义表（\uXXXX / 代理对 / 非法转义都有各自的细节），遇到就交回旧路径；
-//   * cleanJson 连字符串里的裸 CR 也删，那是快路径不该自己糊弄的语义差异。
-// 我们真正取用的字符串（键名 / eventType / hitsound / trackDisappearAnimation …）
-// 在真实谱面里从不含转义，所以这条放弃分支实际上不会触发。
 inline const char* scanStringEndExact(const char* p, const char* e) {
     for (++p; p < e; ++p) {
         char c = *p;
@@ -126,17 +121,9 @@ inline const char* scanStringEndExact(const char* p, const char* e) {
 }
 
 // p 指向 '[' 或 '{'；返回配对的闭合符之后的位置。
-inline const char* skipContainer(const char* p, const char* e) {
-    int depth = 0;
-    while (p < e) {
-        char c = *p;
-        if (c == '"') { const char* q = scanStringEnd(p, e); if (!q) return nullptr; p = q + 1; continue; }
-        if (c == '[' || c == '{') ++depth;
-        else if (c == ']' || c == '}') { if (--depth == 0) return p + 1; }
-        ++p;
-    }
-    return nullptr;
-}
+// 实现走 core/level/JsonScan.hpp：整块掩码抹掉字符串里的括号，只对括号做顺序配对。
+// 返回指针与原来的逐字节版本逐字节相同（见该文件开头的说明）。
+using jsonscan::skipContainer;
 
 // 跳过任意一个 JSON 值。不读的值也要挡住明显非法的 token（True / None / +1 / 裸词…）：
 // 那些文件 DOM 会拒绝，快路径不能反而把它放过去。

@@ -278,7 +278,13 @@ inline bool scanRootMembers(const char* s, const char* e, Regions& r,
             continue;
         }
         setFastStage("scanRootMembers/value", (long long)(p - s));
-        const char* vEnd = skipValue(p, e);
+        // angleData 是几十 MB 的数字数组，而这里只需要它的结尾位置：先找第一个
+        // {']', '"', '[', '{'}，没有引号/嵌套时那个 ']' 就是配对的那个（与 skipValue
+        // 返回同一个指针）；出现引号或嵌套容器就整段交回 skipValue。
+        // 数值本身仍由 parseAngleDataRegion 逐位解析，这里一个数都不读。
+        const char* vEnd = (keyIs(key, "angleData") && *p == '[')
+                               ? jsonscan::skipSimpleArrayEnd(p, e)
+                               : skipValue(p, e);
         if (!vEnd) return false;
         // 重复键取第一个（RapidJSON 的 FindMember 也是第一个）
         if (keyIs(key, "angleData")) {

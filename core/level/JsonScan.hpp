@@ -197,5 +197,36 @@ inline const char* skipContainer(const char* p, const char* e) {
     return nullptr;
 }
 
+// ---------------------------------------------------------------------------
+// 朴素数字数组的结尾：p 指向 '['，返回配对 ']' 之后的位置；失败返回 nullptr。
+//
+// angleData 是几十 MB 的 "数字, 数字, ..."，用通用状态机做括号配对等于白扫一遍
+// （上层紧接着还要 parseAngleDataRegion 再扫一遍数字）。这里先找第一个
+// {']', '"', '[', '{', '}'}：**只要第一个结构字节就是 ']'**，它就是那个把 depth
+// 从 1 归零的闭括号（之前没有任何引号/嵌套/花括号），与 skipContainer 的返回值
+// 逐字节相同；一旦先出现引号、'['、'{' 或 '}'（`[}` 这种畸形输入也会被 skipContainer
+// 当成结束），立刻把整件事交回 skipContainer（语义完全一致，只是慢）。
+// ---------------------------------------------------------------------------
+inline const char* skipSimpleArrayEnd(const char* p, const char* e) {
+    const char* q = p + 1;
+    while (q < e) {
+#if defined(ADOCAO_JSONSCAN_HAVE_VEC)
+        if ((size_t)(e - q) >= kVecBytes) {
+            const Vec v = vload(q);
+            const uint32_t m = vmask(vor(vor(veq(v, ']'), veq(v, '"')),
+                                        vor(vor(veq(v, '['), veq(v, '{')), veq(v, '}'))));
+            if (m == 0) { q += kVecBytes; continue; }
+            q += ctz32(m);
+            break;
+        }
+#endif
+        while (q < e && *q != ']' && *q != '"' && *q != '[' && *q != '{' && *q != '}') ++q;
+        break;
+    }
+    if (q >= e) return nullptr;
+    if (*q == ']') return q + 1;
+    return skipContainer(p, e);       // 有字符串或嵌套：走通用路径
+}
+
 }  // namespace jsonscan
 }  // namespace adofai

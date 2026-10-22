@@ -299,11 +299,22 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
     blueOut.resize(base + (size_t)maxSamples + 1);
     size_t samples = 0;
 
+    // `tileStartTimes()` 非空 = 没被窗口化（Timeline 丢掉那支数组后它是空的）——
+    // 此时 `startTimeAt(i)` 就是读这条数组。极密谱（每采样点跨几十个砖）里推进循环是热点，
+    // 直接扫数组比每次调 `startTimeAt()` 少一层分支/窗口查询；值完全一样（同一条数组）。
+    const std::vector<double>& startArrVec = timeline.tileStartTimes();
+    const bool denseStarts = startArrVec.size() == (size_t)tsz;
+    const double* const startArr = denseStarts ? startArrVec.data() : nullptr;
+    // 第 idx 块砖的起始时间（窗口化时走访问器；越界 = +inf，表示"没有下一砖"）
+    auto startTimeOf = [&](int idx) -> double {
+        if (idx < 0 || idx >= tsz) return std::numeric_limits<double>::infinity();
+        return denseStarts ? startArr[idx] : timeline.startTimeAt(idx);
+    };
+
     TrailTileConsts c;
     int cTile = -1;              // c 对应的砖号（-1 = 还没有；推进后置 -1 变懒加载）
-    double tileStart = timeline.startTimeAt(tileIdx);
-    double nextStart = (tileIdx + 1 < tsz) ? timeline.startTimeAt(tileIdx + 1)
-                                           : std::numeric_limits<double>::infinity();
+    double tileStart = startTimeOf(tileIdx);
+    double nextStart = startTimeOf(tileIdx + 1);
 
     for (int i = 0; i < maxSamples; i++) {
         double tt = startTime + dt * (double)i;
@@ -313,8 +324,7 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
         while (tileIdx + 1 < tsz && tt >= nextStart) {
             tileIdx++;
             tileStart = nextStart;      // startTimeAt(旧 tileIdx + 1) == 新砖的 startTimeAt
-            nextStart = (tileIdx + 1 < tsz) ? timeline.startTimeAt(tileIdx + 1)
-                                            : std::numeric_limits<double>::infinity();
+            nextStart = startTimeOf(tileIdx + 1);
             cTile = -1;
         }
         if (cTile != tileIdx) {         // 每采样点最多一次

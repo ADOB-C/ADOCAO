@@ -18,6 +18,7 @@
 
 #include "archive/AdocaoKinds.hpp"
 #include "archive/AdocaoSchema.hpp"
+#include "core/level/LevelData.hpp"   // EventFieldValue（v7 → LevelData 直灌）
 
 namespace adofai {
 namespace adocao {
@@ -52,8 +53,12 @@ bool buildEventColumns(const Schema& schema,
                        EventColumns& out, std::string& err);
 
 // 解列：还原成每个事件的 JSON 文本（字段顺序 = schema 顺序，即"首次出现顺序"）。
+// `outFields` 非空时**同时**产出结构化字段（v7 → LevelData 直灌用，不再拼 JSON 文本）；
+// `wantJson=false` 且给了 `outFields` 时连 JSON 都不生成。
 bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t eventCount,
-                        std::vector<std::string>& eventsJson, std::string& err);
+                        std::vector<std::string>& eventsJson, std::string& err,
+                        std::vector<std::vector<LevelData::EventFieldValue>>* outFields = nullptr,
+                        bool wantJson = true);
 
 // 列集的字节化（容器段用；也是"体积报告"的口径）。不含 schema —— schema 单独一段。
 std::vector<uint8_t> serializeEventColumns(const Schema& schema, const EventColumns& cols);
@@ -73,6 +78,10 @@ bool decodeEventColumnsRange(const Schema& schema, const uint8_t* p, size_t n,
                              std::vector<std::string>& outEvents, std::string& err,
                              uint32_t* outBlocks = nullptr, std::vector<uint16_t>* outTypeIds = nullptr);
 // 解全部（等价于解所有块再拼接）。
+// 结构化版本：直接产出 `EventFieldValue`（不经 JSON 文本），供 v7 → LevelData 直灌。
+bool decodeEventFieldsBlockedAll(const Schema& schema, const uint8_t* p, size_t n,
+                                 std::vector<std::vector<LevelData::EventFieldValue>>& outFields,
+                                 std::vector<uint16_t>* outTypeIds, std::string& err);
 bool decodeEventColumnsBlockedAll(const Schema& schema, const uint8_t* p, size_t n,
                                   std::vector<std::string>& outEvents, std::string& err,
                                   std::vector<uint16_t>* outTypeIds = nullptr);

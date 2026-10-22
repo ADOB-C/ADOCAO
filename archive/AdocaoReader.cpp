@@ -10,6 +10,7 @@
 #include "archive/AdocaoFormat.hpp"
 #include "archive/LevelArchive.hpp"   // 段级解压复用现成的 decompressLevelArchive
 #include "core/level/LevelData.hpp"
+#include "core/util/Env.hpp"
 
 namespace adofai {
 namespace adocao {
@@ -625,7 +626,17 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
             err = "v7 事件库: " + err;
             return false;
         }
-        if (out.v7ColumnsBlocked) {
+        // **直接字段**：容器解出结构化字段，交给 `ingestEventFields`（与 JSON 路径共用路由），
+        // 不再把每条事件拼成 JSON 文本。`ADOCAO_V7_JSON_EVENTS=1` 可退回旧路做 A/B。
+        const bool direct = !env::flag("ADOCAO_V7_JSON_EVENTS");
+        std::vector<std::vector<LevelData::EventFieldValue>> fields;
+        if (direct) {
+            if (!decodeEventFieldsBlockedAll(schema, out.v7ColumnsBytes.data(), out.v7ColumnsBytes.size(),
+                                             fields, &typeIds, err)) {
+                err = "v7 事件库: " + err;
+                return false;
+            }
+        } else if (out.v7ColumnsBlocked) {
             if (!decodeEventColumnsBlockedAll(schema, out.v7ColumnsBytes.data(), out.v7ColumnsBytes.size(),
                                               events, err, &typeIds)) {
                 err = "v7 事件库: " + err;
@@ -636,17 +647,25 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
             err = "v7 事件库: " + err;
             return false;
         }
-        if (!out.v7ColumnsBlocked) typeIds = cols.typeIds;
+        if (!direct && !out.v7ColumnsBlocked) typeIds = cols.typeIds;
         // 只还原 **actions**（source=Actions）；decorations 数组里的类型（AddDecoration/AddParticle…）
         // 在 JSON 路径里本来就不进 LevelData（它们由 decorations 数组承载），这里同样跳过。
-        for (size_t i = 0; i < events.size(); ++i) {
+        const size_t count = direct ? fields.size() : events.size();
+        for (size_t i = 0; i < count; ++i) {
             if (i >= typeIds.size()) { err = "v7: 类型列与事件数不一致"; return false; }
             const auto& td = schema.types[typeIds[i]];
             if (td.source != (uint8_t)EventSource::Actions) continue;
-            const auto& js = events[i];
-            if (!out.ingestEventJson(js.data(), js.data() + js.size(), err)) {
-                err = "v7 事件还原: " + err;
-                return false;
+            if (direct) {
+                if (!out.ingestEventFields(fields[i].data(), fields[i].size(), err)) {
+                    err = "v7 事件还原: " + err;
+                    return false;
+                }
+            } else {
+                const auto& js = events[i];
+                if (!out.ingestEventJson(js.data(), js.data() + js.size(), err)) {
+                    err = "v7 事件还原: " + err;
+                    return false;
+                }
             }
         }
     }

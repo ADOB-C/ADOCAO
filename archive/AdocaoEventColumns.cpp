@@ -432,14 +432,26 @@ bool buildEventColumns(const Schema& schema, const std::vector<std::string>& eve
 }
 
 bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t eventCount,
-                        std::vector<std::string>& eventsJson, std::string& err) {
+                        std::vector<std::string>& eventsJson, std::string& err,
+                        std::vector<std::vector<LevelData::EventFieldValue>>* outFields,
+                        bool wantJson) {
     err.clear();
     eventsJson.clear();
-    eventsJson.resize(eventCount);
+    if (wantJson || !outFields) eventsJson.resize(eventCount);
+    // 字段角色只在 schema 上算一次（名字 → FieldRole）
+    std::vector<LevelData::FieldRole> roles;
+    if (outFields) {
+        roles.resize(schema.fields.size());
+        for (size_t f = 0; f < schema.fields.size(); ++f) {
+            const auto& nm = schema.name(schema.fields[f].nameId);
+            roles[f] = LevelData::fieldRoleForName(nm.data(), nm.size());
+        }
+        outFields->assign(eventCount, {});
+    }
     if (cols.typeIds.size() != eventCount) { err = "类型列与事件数不一致"; return false; }
     if (cols.fields.size() != schema.fields.size()) { err = "字段列数与 schema 不一致"; return false; }
 
-    // 每字段解码成值数组，然后按位图顺序消费
+    // 每字段解码成值数组，然后按位图顺序消费（JSON 与字段两条出口共用这段）
     struct Decoded {
         std::vector<uint32_t> u32v;
         std::vector<int64_t> i64v;
@@ -633,7 +645,117 @@ bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t e
             }
         }
         w.EndObject();
-        eventsJson[e].assign(buf.GetString(), buf.GetSize());
+        if (wantJson || !outFields) eventsJson[e].assign(buf.GetString(), buf.GetSize());
+    }
+
+    // ── 第二遍：产出结构化字段（v7 → LevelData 直灌，不再经过 JSON 文本）──
+    if (outFields) {
+        for (auto& d : dec) d.cursor = 0;
+        std::vector<uint32_t> seen2(schema.types.size(), 0);
+        for (size_t e = 0; e < eventCount; ++e) {
+            const uint16_t t = cols.typeIds[e];
+            const auto& td = schema.types[t];
+            const uint32_t within = seen2[t]++;
+            auto& fv = (*outFields)[e];
+            {
+                LevelData::EventFieldValue et;
+                et.role = LevelData::FieldRole::EventType;
+                et.type = LevelData::EventFieldValue::Str;
+                const auto& tn = schema.name(td.nameId);
+                et.str = tn.data();
+                et.len = (uint32_t)tn.size();
+                fv.push_back(et);
+            }
+            for (uint16_t fi = 0; fi < td.fieldCount; ++fi) {
+                const uint32_t f = td.firstField + fi;
+                const ColumnBlob& blob = cols.fields[f];
+                if (!bitGet(blob.present, within)) continue;
+                if (bitGet(blob.nulls, within)) continue;   // null = 没写（与 JSON 路径一致）
+                Decoded& d = dec[f];
+                LevelData::EventFieldValue v;
+                v.role = roles[f];
+                const auto& fd = schema.fields[f];
+                switch (fd.kind) {
+                    case Kind::Bool:
+                        v.type = LevelData::EventFieldValue::Bool;
+                        v.b = d.u32v[d.cursor++] != 0;
+                        break;
+                    case Kind::Int:
+                        v.type = LevelData::EventFieldValue::Num;
+                        v.num = (double)d.i64v[d.cursor++];
+                        break;
+                    case Kind::GridFloat: {
+                        v.type = LevelData::EventFieldValue::Num;
+                        if (blob.subFlags & kGridAsDouble) v.num = d.dblv[d.cursor++];
+                        else v.num = (double)d.i64v[d.cursor++] / pow10i(fd.gridK);
+                        break;
+                    }
+                    case Kind::Float:
+                        v.type = LevelData::EventFieldValue::Num;
+                        v.num = d.dblv[d.cursor++];
+                        break;
+                    case Kind::Enum:
+                    case Kind::Tag:
+                    case Kind::String: {
+                        const std::string& sv = d.strv[d.cursor++];
+                        v.type = LevelData::EventFieldValue::Str;
+                        v.str = sv.data();
+                        v.len = (uint32_t)sv.size();
+                        break;
+                    }
+                    case Kind::Color: {
+                        v.type = LevelData::EventFieldValue::Str;
+                        if (blob.subFlags & 0x40) {
+                            const std::string& sv = d.strv[d.cursor++];
+                            v.str = sv.data();
+                            v.len = (uint32_t)sv.size();
+                        } else {
+                            // 颜色：转成 "#RRGGBB" 字符串（core 侧按字符串比较/解析）
+                            static thread_local std::string hex;
+                            hex = colorToString(d.u32v[d.cursor++], blob.subFlags & 0x0C);
+                            v.str = hex.data();
+                            v.len = (uint32_t)hex.size();
+                        }
+                        break;
+                    }
+                    case Kind::Pair: {
+                        const size_t k = d.cursor++;
+                        v.type = LevelData::EventFieldValue::Pair;
+                        if (blob.subFlags & kPairRaw) {   // 不支持结构化：跳过（与"没写"不同，但这类很少）
+                            fv.pop_back();
+                            continue;
+                        }
+                        v.nullA = bitGet(blob.nulls0, within) ? 1 : 0;
+                        v.nullC = bitGet(blob.nulls1, within) ? 1 : 0;
+                        if (blob.subFlags & kPairStr0) {
+                            v.a = 0;
+                        } else if (k < d.pair0.size()) {
+                            v.a = d.pair0[k];
+                        }
+                        if (blob.subFlags & kPairStr1) {
+                            if (k < d.pair1s.size()) { v.str = d.pair1s[k].data(); v.len = (uint32_t)d.pair1s[k].size(); }
+                        } else if (k < d.pair1.size()) {
+                            v.c = d.pair1[k];
+                        }
+                        if ((blob.subFlags & kPairStr0) && k < d.pair0s.size()) {
+                            // 第一分量也是字符串（罕见）：用 num 无从表达 → 跳过该字段
+                            fv.pop_back();
+                            continue;
+                        }
+                        break;
+                    }
+                    case Kind::Nested:
+                    case Kind::RawJSON: {
+                        const std::string& sv = d.strv[d.cursor++];
+                        v.type = LevelData::EventFieldValue::Str;
+                        v.str = sv.data();
+                        v.len = (uint32_t)sv.size();
+                        break;
+                    }
+                }
+                fv.push_back(v);
+            }
+        }
     }
     return true;
 }
@@ -837,6 +959,42 @@ bool decodeEventColumnsRange(const Schema& schema, const uint8_t* p, size_t n,
             const uint32_t idx = blkFirst + (uint32_t)i;
             if (idx < firstEvent || idx >= lastEvent) continue;
             outEvents.push_back(std::move(evs[i]));
+            if (outTypeIds) outTypeIds->push_back(cols.typeIds[i]);
+        }
+    }
+    return true;
+}
+
+bool decodeEventFieldsBlockedAll(const Schema& schema, const uint8_t* p, size_t n,
+                                 std::vector<std::vector<LevelData::EventFieldValue>>& outFields,
+                                 std::vector<uint16_t>* outTypeIds, std::string& err) {
+    err.clear();
+    outFields.clear();
+    if (n < kBlockedHeaderBytes) { err = "分块事件列：段头截断"; return false; }
+    const uint32_t version = (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+    if (version != kBlockedVersion) { err = "分块事件列：版本不认识"; return false; }
+    const uint32_t blocks = (uint32_t)p[8] | ((uint32_t)p[9] << 8) | ((uint32_t)p[10] << 16) | ((uint32_t)p[11] << 24);
+    if (blocks == 0) { err = "分块事件列：块数为 0"; return false; }
+    if (n < kBlockedHeaderBytes + (size_t)(blocks + 1) * 8) { err = "分块事件列：块表截断"; return false; }
+    for (uint32_t b = 0; b < blocks; ++b) {
+        const uint64_t o0 = rdU64(p + kBlockedHeaderBytes + (size_t)b * 8);
+        const uint64_t o1 = rdU64(p + kBlockedHeaderBytes + (size_t)(b + 1) * 8);
+        if (o0 > o1 || o1 > n) { err = "分块事件列：块偏移越界"; return false; }
+        if (o1 == o0) continue;
+        EventColumns cols;
+        std::string cerr;
+        if (!deserializeEventColumns(schema, p + o0, (size_t)(o1 - o0), cols, cerr)) {
+            err = "分块事件列：块 " + std::to_string(b) + " 解码失败: " + cerr;
+            return false;
+        }
+        std::vector<std::vector<LevelData::EventFieldValue>> blockFields;
+        std::vector<std::string> unused;
+        if (!decodeEventColumns(schema, cols, cols.typeIds.size(), unused, cerr, &blockFields, false)) {
+            err = "分块事件列：块 " + std::to_string(b) + " 字段还原失败: " + cerr;
+            return false;
+        }
+        for (size_t i = 0; i < blockFields.size(); ++i) {
+            outFields.push_back(std::move(blockFields[i]));
             if (outTypeIds) outTypeIds->push_back(cols.typeIds[i]);
         }
     }

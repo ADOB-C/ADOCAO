@@ -2213,8 +2213,17 @@ bool LevelData::captureRawMembers(const char* data, size_t length) {
     rawDecorationsJson.clear();
     rawSettingsJson.clear();
     if (!data || length == 0) return false;
+    // **先过 cleanJson**：ADOFAI 谱面里广泛存在重复逗号/缺逗号（重特效谱尤其常见，
+    // 如 PLUM_MEGAMIX_2 的 `"requiredMods": [],,`），RapidJSON 会直接拒绝。
+    // 注意：cleanJson 是逐字符复现旧编辑器的容错行为，快路径与它必须等价（见 JsonCleaner.hpp）。
+    std::string cleaned;
     rapidjson::Document d;
     d.Parse<rapidjson::kParseTrailingCommasFlag | rapidjson::kParseCommentsFlag>(data, length);
+    if (d.HasParseError()) {
+        cleaned = cleanJson(std::string(data, length));
+        d.Parse<rapidjson::kParseTrailingCommasFlag | rapidjson::kParseCommentsFlag>(cleaned.data(),
+                                                                                    cleaned.size());
+    }
     if (d.HasParseError() || !d.IsObject()) return false;
     auto ai = d.FindMember("actions");
     if (ai != d.MemberEnd() && ai->value.IsArray()) {

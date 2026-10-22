@@ -50,8 +50,14 @@ struct PackResult {
 
 // 是否写 `Derived` 段（每 4096 层的续算快照，§8.8 ⑧）。**默认关**：它天生是 O(n/4096) 字节
 // （2³¹ 层 ≈ 19.4 MB），写进去就不再是"v3 文件大小 == v2"。要 ③ 的 O(1) seek / 窗口化就打开它。
+// 段级压缩器：Auto = 同时试 zstd 与 lzma 取更小（2026-10-22：不再死磕 zstd-19，
+// 两张编码器都允许、级别可调；解码侧 v2 起就同时支持 SectionZstd / SectionXz）。
+enum class Compress : uint8_t { Auto = 0, Zstd, Lzma, None };
+
 struct PackOptions {
     bool withCheckpoints = false;
+    Compress compress = Compress::Auto;
+    int level = 0;          // 0 = 各编码器默认（zstd 19 / lzma 9|EXTREME）
 };
 
 // 打包。out 是完整的文件字节（含头与段目录）；失败时 err 里是原因。

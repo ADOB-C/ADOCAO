@@ -91,8 +91,12 @@ Header (76 B) | SectionEntry × sectionCount (40 B each) | padding → 8 B 对�
 `id(u8) | codec(u8) | flags(u16) | offset(u64) | compSize(u64) | rawSize(u64) | elemCount(u64) | crc32c(u32)`
 
 * `crc32c` 覆盖该段 `compSize` 字节（Castagnoli；`"123456789"` 的标准检验值 `0xE3069283`）。
-* `codec` 是 `Raw` 或 `SectionZstd`（v2 起：段 ≥256 B 且 zstd-19 更小时才包一帧 zstd，
-  见 `AdocaoWriter.cpp:248-262`）；`Raw` 时段内是**自描述**的列流（每个列头带自己的 codec）。
+* `codec` 是 `Raw` / `SectionZstd` / `SectionXz`（v2 起支持两者）。2026-10-22 起打包器
+  **两种压缩器都允许、级别可调**：`--compress=auto|zstd|lzma|none`、`--level=N`
+  （0 = 编码器默认：zstd 19 / lzma 9|EXTREME）。`auto` 对每段**两个都试、取更小**；
+  段 <256 B 或压不小就存 `Raw`。实测 Hello 2025：zstd-19 19,344 B、lzma-9e **18,480 B**、
+  auto **18,352 B**、zstd-3 23,560 B、none 174,496 B —— lzma 在这张谱上又小又更快。
+  `Raw` 时段内是**自描述**的列流（每个列头带自己的 codec）。
 * 未知 `id` 一律跳过（前向兼容）。
 
 ### 2.3 段

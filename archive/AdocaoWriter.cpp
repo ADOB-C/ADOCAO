@@ -8,7 +8,8 @@
 #include "archive/AdocaoColumns.hpp"
 #include "core/level/LevelData.hpp"
 
-#include <zstd.h>   // 段级压缩（archive 的 PRIVATE 依赖；实测真实文件上 zstd 比 xz 更小）
+#include <zstd.h>
+#include <lzma.h>   // 段级压缩（archive 的 PRIVATE 依赖；实测真实文件上 zstd 比 xz 更小）
 
 namespace adofai {
 namespace adocao {
@@ -84,9 +85,46 @@ namespace {
 struct ZEntry {
     const uint8_t* data = nullptr;
     size_t size = 0;
-    bool smaller = false;          // zstd 确实更小 → z 有效
+    bool smaller = false;          // 压缩确实更小 → z 有效
+    uint8_t codec = 0;             // 实际选中的 Codec（Raw/SectionZstd/SectionXz）
     std::vector<uint8_t> z;
 };
+// 当前这次打包的压缩配置（决策阶段与落盘阶段共用同一份，保证"预估 == 实存"）
+thread_local Compress g_compress = Compress::Auto;
+thread_local int g_level = 0;
+// 段级压缩决策：按配置生成候选，**只保留比原样更小的那个**。
+// 返回 true 表示 out/codec 有效（压缩更小）；false 表示应当存原样。
+bool bestStore(const std::vector<uint8_t>& blob, Compress cfg, int level,
+               std::vector<uint8_t>& out, uint8_t* codec) {
+    if (blob.size() < 256 || cfg == Compress::None) return false;
+    out.clear();
+    if (cfg == Compress::Auto || cfg == Compress::Zstd) {
+        std::vector<uint8_t> z(ZSTD_compressBound(blob.size()));
+        const int lvl = level > 0 ? level : 19;
+        const size_t got = ZSTD_compress(z.data(), z.size(), blob.data(), blob.size(), lvl);
+        if (!ZSTD_isError(got) && got < blob.size()) {
+            z.resize(got);
+            out = std::move(z);
+            if (codec) *codec = (uint8_t)Codec::SectionZstd;
+        }
+    }
+    if (cfg == Compress::Auto || cfg == Compress::Lzma) {
+        // xz 容器（lzma_easy_buffer_encode）；解码侧走 LevelArchiveKind::Xz 那条既有路径
+        const uint32_t preset = (uint32_t)(level > 0 ? level : 9) | LZMA_PRESET_EXTREME;
+        std::vector<uint8_t> x(lzma_stream_buffer_bound(blob.size()));
+        size_t outPos = 0;
+        const lzma_ret r = lzma_easy_buffer_encode(preset, LZMA_CHECK_CRC64, nullptr,
+                                                   blob.data(), blob.size(),
+                                                   x.data(), &outPos, x.size());
+        if (r == LZMA_OK && outPos < blob.size() && (out.empty() || outPos < out.size())) {
+            x.resize(outPos);
+            out = std::move(x);
+            if (codec) *codec = (uint8_t)Codec::SectionXz;
+        }
+    }
+    return !out.empty();
+}
+
 struct ZCache {
     std::vector<ZEntry> v;
     void reset() { v.clear(); }
@@ -100,18 +138,16 @@ struct ZCache {
         if (const ZEntry* e = find(b)) return e->smaller ? e->z.size() : b.size();
         ZEntry e;
         e.data = b.data(); e.size = b.size();
-        e.z.resize(ZSTD_compressBound(b.size()));
-        const size_t got = ZSTD_compress(e.z.data(), e.z.size(), b.data(), b.size(), 19);
-        if (!ZSTD_isError(got) && got < b.size()) { e.z.resize(got); e.smaller = true; }
-        else e.z.clear();
+        e.smaller = bestStore(b, g_compress, g_level, e.z, &e.codec);
         v.push_back(std::move(e));
         return v.back().smaller ? v.back().z.size() : b.size();
     }
     // true = 决策已覆盖该 blob（out 非空表示用压缩结果，空表示明确存原样）
-    bool take(const std::vector<uint8_t>& b, std::vector<uint8_t>& out) const {
+    bool take(const std::vector<uint8_t>& b, std::vector<uint8_t>& out, uint8_t* codec = nullptr) const {
         const ZEntry* e = find(b);
         if (!e) return false;
         if (e->smaller) out = e->z;
+        if (codec) *codec = e->smaller ? e->codec : (uint8_t)Codec::Raw;
         return true;
     }
 };
@@ -197,6 +233,8 @@ void writeSettings(const LevelData::Settings& s, Pool& pool, std::vector<uint8_t
 bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& err,
                PackResult* result, const PackOptions& opts) {
     g_zcache.reset();   // 每次打包独立的决策缓存（同 blob 只压一次）
+    g_compress = opts.compress;
+    g_level = opts.level;
 
     out.clear();
     err.clear();
@@ -594,19 +632,19 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
     // 段级压缩：zstd 19（实测真实文件上比 xz 更小、解码更快、且 archive 本来就链着它）。
     // 太小的段不值得压；压不小就存原样。crc32c 覆盖**实际存储的字节**（读侧先校验再解压）。
     std::vector<std::vector<uint8_t>> stored(secs.size());
+    std::vector<uint8_t> secCodec(secs.size(), (uint8_t)Codec::Raw);
     for (size_t i = 0; i < secs.size(); ++i) {
         const std::vector<uint8_t>& blob = secs[i].blob;
         stored[i] = blob;
         if (!secs[i].preStored && blob.size() >= 256) {
             std::vector<uint8_t> z;
-            if (g_zcache.take(blob, z)) {
+            if (g_zcache.take(blob, z, &secCodec[i])) {
                 if (!z.empty()) stored[i] = std::move(z);   // 决策阶段已压过 → 直接复用
             } else {
-                z.resize(ZSTD_compressBound(blob.size()));
-                const size_t got = ZSTD_compress(z.data(), z.size(), blob.data(), blob.size(), 19);
-                if (!ZSTD_isError(got) && got < blob.size()) {
-                    z.resize(got);
+                uint8_t codec = (uint8_t)Codec::Raw;
+                if (bestStore(blob, g_compress, g_level, z, &codec)) {
                     stored[i] = std::move(z);
+                    secCodec[i] = codec;
                 }
             }
         }
@@ -616,8 +654,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         const std::vector<uint8_t>& st = stored[i];
         SectionEntry e{};
         e.id = s.id;
-        e.codec = (!s.preStored && st.size() < s.blob.size()) ? (uint8_t)Codec::SectionZstd
-                                                             : (uint8_t)Codec::Raw;
+        e.codec = (!s.preStored && st.size() < s.blob.size()) ? secCodec[i] : (uint8_t)Codec::Raw;
         e.flags = s.flags;
         e.offset = off;
         e.compSize = st.size();

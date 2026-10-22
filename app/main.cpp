@@ -67,6 +67,8 @@ void printHelp(Mode mode, bool all) {
             "\n"
             "  --codec-report            打印每列的编码、元素数、朴素/编码后字节、字典项数、位宽\n"
             "  --checkpoints             额外写 Derived 段（每 4096 层的续算快照，默认关）\n"
+            "  --compress=auto|zstd|lzma|none  段级压缩器（auto = 两者都试、取更小；默认 auto）\n"
+            "  --level=N                 压缩级别（0 = 编码器默认：zstd 19 / lzma 9|EXTREME；取 0..22）\n"
             "  --schema-report           打印 v7 自描述 schema（类型/字段/kind 分布）与事件列体积\n"
             "  --events=all|playable|minimal  裁剪导出：playable = v5 能力面，minimal = 只留影响几何/计时的\n"
             "\n"
@@ -243,7 +245,9 @@ int main(int argc, char* argv[]) {
     bool codecReport = false;
     bool packCheckpoints = false;
     bool packSchemaReport = false;   // pack --schema-report：打印 v7 自描述 schema 的统计
-    std::string packEventsPreset = "all";   // pack --events=all|playable|minimal（裁剪导出）   // pack --checkpoints：写 Derived 段（每 4096 层的续算快照）                    // pack：打印每列的体积明细
+    std::string packEventsPreset = "all";   // pack --events=all|playable|minimal（裁剪导出）
+    adocao::Compress packCompress = adocao::Compress::Auto;   // pack --compress=auto|zstd|lzma|none
+    int packLevel = 0;                                        // pack --level=N（0 = 编码器默认）   // pack --checkpoints：写 Derived 段（每 4096 层的续算快照）                    // pack：打印每列的体积明细
 
     // CLI-FLAGS-BEGIN —— scripts/check-cli-help.sh 只在这个区间里找开关名
     for (int i = argStart; i < argc; i++) {
@@ -327,6 +331,18 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--checkpoints") == 0) packCheckpoints = true;
             else if (std::strcmp(a, "--schema-report") == 0) packSchemaReport = true;
             else if (std::strncmp(a, "--events=", 9) == 0) packEventsPreset = a + 9;
+            else if (std::strncmp(a, "--compress=", 11) == 0) {
+                const char* v = a + 11;
+                if (!std::strcmp(v, "auto")) packCompress = adocao::Compress::Auto;
+                else if (!std::strcmp(v, "zstd")) packCompress = adocao::Compress::Zstd;
+                else if (!std::strcmp(v, "lzma") || !std::strcmp(v, "xz")) packCompress = adocao::Compress::Lzma;
+                else if (!std::strcmp(v, "none") || !std::strcmp(v, "raw")) packCompress = adocao::Compress::None;
+                else { std::fprintf(stderr, "--compress 只认 auto|zstd|lzma|none\n"); return 2; }
+            }
+            else if (std::strcmp(a, "--level") == 0 && i+1 < argc) {
+                packLevel = std::atoi(argv[++i]);
+                if (packLevel < 0 || packLevel > 22) { std::fprintf(stderr, "--level 取 0..22\n"); return 2; }
+            }
             else { std::fprintf(stderr, "未知选项: %s（pack 模式）\n", a); return 2; }
         }
         else if (mode == Mode::Image) {
@@ -500,6 +516,8 @@ int main(int argc, char* argv[]) {
         adocao::PackResult rep;
         adocao::PackOptions popts;
         popts.withCheckpoints = packCheckpoints;
+        popts.compress = packCompress;
+        popts.level = packLevel;
         if (!adocao::packLevel(lv, bytes, err, &rep, popts)) {
             std::fprintf(stderr, "打包失败: %s\n", err.c_str());
             return 1;

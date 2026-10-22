@@ -1288,7 +1288,26 @@ GridFloat 10.2 KB、Enum 10.6 KB、Color 5.2 KB、Float 5.8 KB、Bool 1.8 KB、T
 | v7 `--events=all`（含 v6 段 + 全部补全） | 12,466 | **72,056 B** |
 | v7 `--events=playable` | 7,439（v7 段几乎为空） | **18,504 B**（比 v6 小 4.3%） |
 
-### 9.6 待做
+### 9.6 无损回写（`adocao json`，2026-10-22）
+
+`adocao json <in.adocao> <out.adofai>` 把 v7 段解码回明文。只有 `--v7-all` 打的包才有
+"全部事件"（`--v7` 是去重版，v6 段已承载的类型不在 v7 里）——旧文件会**明确报错**，不输出残缺谱面。
+
+端到端（Hello 2025）暴露的三个真 bug，都已修：
+
+1. **Pair 分量可以是字符串**：`startTile: [3333, "ThisTile"]`。之前按 `GetDouble()` 读 →
+   字符串变成 `7.3e18`。现在逐分量选列（数字→double、字符串→字典），分量是对象/数组时
+   整对退回原始 JSON（`AddParticle.velocity`）。
+2. **`separateCountdownTime` 从未进容器**：它是 2026-10-22 新加的字段，导致 `.adocao`
+   的时间基准缺一个倒计时。现在追加在 Settings 记录的**真正末尾**（旧读者忽略尾部字节）。
+   第一次插在中间 → 读侧按旧顺序读到隔壁字段，回写出来是 `false`。
+3. **settings 只建模了几十个键**（ADOFAI 实际 50+：artist/bgImage/levelDesc/…）：
+   pack 期把 settings 原文存进 `Preserved` 段，回写时原样输出。
+
+验收结果（2025）：`angleData` 相同、`actions` **0/11,233** 差异、`decorations` **0/1,233**
+差异、`settings` 相同、**出图与原始 JSON 逐字节相同**。
+
+### 9.7 待做
 
 列编码（按 kind 建列/解列）、`EventIndex` 块内 seek、`Coverage` 段与裁剪导出
 （`--events=playable` 回到 v5 体积）、`adocao json` 回写、`PeriodicResidual` 变换。

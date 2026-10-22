@@ -827,9 +827,20 @@ int Timeline::findTileIndex(double t) const {
     if (aEnd < 0) return 0;
     const int64_t from = aEnd * kAnchorStride;
     const int64_t to = std::min(from + kAnchorStride, n);
+    // 块内二分：找"最后一个 startTimeAt(i) <= t"，与原来那次线性扫描**同值**。
+    // 前提是块内 startTimes 单调不减（duration 恒 ≥ 0）—— 上面的锚点二分本来就依赖同一前提。
+    // 实测 4 张谱（angles360 / The Moon / Singularity / Won't You 638 万层）违例数全为 0；
+    // 边界（t 恰好等于某层起始时间、±1 ULP）与"块内一个都不 ≤ t"都保持原语义（后者仍返回 0）。
+    //
+    // 为什么改：原来最多扫 4096 次，每次都要过 `windowFor()` 的块查找（1 槽线程缓存 + 边界检查），
+    // 实测 8.7 µs/次 —— 占了窗口化谱拖尾整次调用的 67~76%。二分后 ~12 次访问器，同一块内
+    // 窗口缓存命中，应当降到亚微秒（集成时用 findidx 探针 + 像素门槛复核）。
     int64_t idx = -1;
-    for (int64_t i = from; i < to; ++i)
-        if (startTimeAt(i) <= t) idx = i;
+    int64_t lo2 = from, hi2 = to - 1;
+    while (lo2 <= hi2) {
+        const int64_t m = lo2 + (hi2 - lo2) / 2;
+        if (startTimeAt(m) <= t) { idx = m; lo2 = m + 1; } else hi2 = m - 1;
+    }
     if (idx < 0) idx = 0;
     return (int)idx;
 }

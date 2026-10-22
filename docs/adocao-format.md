@@ -1288,9 +1288,9 @@ GridFloat 10.2 KB、Enum 10.6 KB、Color 5.2 KB、Float 5.8 KB、Bool 1.8 KB、T
 | v7 `--events=all`（含 v6 段 + 全部补全） | 12,466 | **72,056 B** |
 | v7 `--events=playable` | 7,439（v7 段几乎为空） | **18,504 B**（比 v6 小 4.3%） |
 
-### 9.6 无损回写（`adocao json`，2026-10-22）
+### 9.6 无损回写（`adocao debug json`，2026-10-22）
 
-`adocao json <in.adocao> <out.adofai>` 把 v7 段解码回明文。只有 `--v7-all` 打的包才有
+`adocao debug json <in.adocao> <out.adofai>` 把 v7 段解码回明文（**调试/验证工具**，不是给用户的导出）。只有 `--v7-all` 打的包才有
 "全部事件"（`--v7` 是去重版，v6 段已承载的类型不在 v7 里）——旧文件会**明确报错**，不输出残缺谱面。
 
 端到端（Hello 2025）暴露的三个真 bug，都已修：
@@ -1310,4 +1310,4 @@ GridFloat 10.2 KB、Enum 10.6 KB、Color 5.2 KB、Float 5.8 KB、Bool 1.8 KB、T
 ### 9.7 待做
 
 列编码（按 kind 建列/解列）、`EventIndex` 块内 seek、`Coverage` 段与裁剪导出
-（`--events=playable` 回到 v5 体积）、`adocao json` 回写、`PeriodicResidual` 变换。
+（`--events=playable` 回到 v5 体积）、`debug json` 回写、`PeriodicResidual` 变换。

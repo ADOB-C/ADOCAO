@@ -210,3 +210,11 @@ Without `--level`, falls through to the ImGui launcher.
 路径上的 `LOG_W`/`LOG_E` **整个丢掉**，失败时只剩一句 `Failed to load level`。现在没有 sink 时
 **Warning 及以上退回 stderr**（`core/util/Logger.cpp`，Debug/Info 不跟，免得刷屏）——
 `docs/2e9.md` §4 ① 的验收就靠这条能看见"流式窗口放弃（原因）—— 退回整份解压"。
+
+## 调试工具（不是用户功能）
+
+`adocao debug json <in.adocao> <out.adofai>`：把 v7 容器回写成明文，用于验证容器无损
+（"容器 → 明文 → 重新打包 → 与原谱逐字节相同"）。只有 `pack --v7-all` 的包能完整回写；
+普通 `--v7` 包对 v6 段已有的类型做了去重，回写会缺那些事件。
+
+放在 `debug` 下面是有意的：它不是导出功能（我们不做 `.ilytx` 导出，也不把 `.adofai` 回写当产品能力）。

@@ -18,7 +18,6 @@ Releases 里有各平台的包，解压直接用。macOS 是未签名的 `.app`�
 adocao --level chart.adofai --music song.ogg
 adocao image out.png --level chart.adofai            # 无头出图
 adocao pack chart.adofai chart.adocao                # 打成 .adocao 容器
-adocao json chart.adocao back.adofai                 # 容器还原成明文
 adocao --help
 ```
 

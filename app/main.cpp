@@ -71,7 +71,7 @@ void printHelp(Mode mode, bool all) {
             "  --codec-report            打印每列的编码、元素数、朴素/编码后字节、字典项数、位宽\n"
             "  --checkpoints             额外写 Derived 段（每 4096 层的续算快照，默认关）\n"
             "  --v7                      写 v7 事件库段（自描述 schema + 列；v6 会丢的类型也能无损装下）\n"
-            "  --v7-all                  同上但**不去重**（全部事件进 v7，供 `adocao json` 无损回写）\n"
+            "  --v7-all                  同上但**不去重**（全部事件进 v7，供 `debug json` 无损回写）\n"
             "  --v7-only                 **v7 唯一存储**：不写 v6 的 Actions/Camera/… 段（读侧从 v7 还原）\n"
             "  --compress=auto|zstd|lzma|none  段级压缩器（auto = 两者都试、取更小；默认 auto）\n"
             "  --level=N                 压缩级别（0 = 编码器默认：zstd 19 / lzma 9|EXTREME；取 0..22）\n"
@@ -83,7 +83,7 @@ void printHelp(Mode mode, bool all) {
         return;
     case Mode::Json:
         std::fprintf(stderr,
-            "adocao json <in.adocao> <out.adofai>     把 v7 容器回写成明文 .adofai\n"
+            "adocao debug json <in.adocao> <out.adofai>  把 v7 容器回写成明文（调试用）\n"
             "\n"
             "  需要文件里有 v7 事件库段（`pack --v7-all` 打的包）；只搬运 v7 段与 settings 原文，\n"
             "  不做任何语义改写。旧格式（没有 v7 段）会**明确报错**，不输出残缺谱面。\n");
@@ -137,7 +137,10 @@ void printHelp(Mode mode, bool all) {
             "adocao export --level <谱>                      导出该谱的 hitsound 混音 WAV\n"
             "\n"
             "  以前是 `--export` 开关，现在只有这一个入口。\n"
-            "  强制 hitsound 类型：--force-hitsound [TYPE]；raw-pcm = 把每层音量当 PCM 直通。\n");
+            "  强制 hitsound 类型：--force-hitsound [TYPE]；raw-pcm = 把每层音量当 PCM 直通。\n"
+        "\n"
+        "调试（非用户功能）:\n"
+        "  adocao debug json <in.adocao> <out.adofai>   v7 容器回写成明文（无损验证用）\n");
         return;
     default: break;
     }
@@ -149,7 +152,6 @@ void printHelp(Mode mode, bool all) {
         "  adocao                                   打开向导\n"
         "  adocao <谱.adofai> [选项]                 直接播放\n"
         "  adocao export --level <谱>                导出 hitsound WAV\n"
-        "  adocao json <in.adocao> <out.adofai>       把 v7 容器回写成明文（无损）\n"
         "  adocao image  <out.png>    --level <谱>   导出一张图（默认矢量；--1px 瓦片路线）\n"
         "  adocao tiles  <dir>        --level <谱>   只出瓦片（进阶）\n"
         "  adocao stitch <dir> <out.png>             只拼瓦片（进阶）\n"
@@ -242,7 +244,18 @@ int main(int argc, char* argv[]) {
         else if (std::strcmp(a, "stitch") == 0) { mode = Mode::Stitch; argStart = 2; }
         else if (std::strcmp(a, "export") == 0) { mode = Mode::Export; argStart = 2; }
         else if (std::strcmp(a, "pack") == 0)   { mode = Mode::Pack;   argStart = 2; }
-        else if (std::strcmp(a, "json") == 0)   { mode = Mode::Json;   argStart = 2; }
+        else if (std::strcmp(a, "json") == 0) {        // 旧名字：指向调试工具
+            std::fprintf(stderr, "`json` 已移到调试工具：\n  adocao debug json <in.adocao> <out.adofai>\n");
+            return 2;
+        }
+        else if (std::strcmp(a, "debug") == 0) {      // 调试工具，不是给用户的一级命令
+            if (argc > 2 && std::strcmp(argv[2], "json") == 0) { mode = Mode::Json; argStart = 3; }
+            else {
+                std::fprintf(stderr, "adocao debug 子命令：\n  json <in.adocao> <out.adofai>"
+                                     "   把 v7 容器回写成明文（验证无损用）\n");
+                return 2;
+            }
+        }
         else if (std::strcmp(a, "map") == 0 || std::strcmp(a, "mono") == 0) {
             std::fprintf(stderr, "`%s` 已并入 image：\n  adocao image <out.png> --level <谱>%s\n",
                          a, std::strcmp(a, "mono") == 0 ? " --1px --1bit" : "");
@@ -429,9 +442,9 @@ int main(int argc, char* argv[]) {
         progress::enable(progressForce > 0 || (progressForce == 0 && tty));
     }
 
-    // adocao json <in.adocao> <out.adofai>：把 v7 容器回写成明文（ADOCAO-E 无损回写的基础）
+    // adocao debug json <in.adocao> <out.adofai>：把 v7 容器回写成明文（无损验证用，不是给用户的导出）
     if (mode == Mode::Json) {
-        if (pos.size() < 2) return usageErr(mode, "adocao json 需要 <in.adocao> <out.adofai>");
+        if (pos.size() < 2) return usageErr(mode, "adocao debug json 需要 <in.adocao> <out.adofai>");
         LevelData lv;
         if (!lv.loadFromFile(resolveLevelPath(pos[0]))) {
             std::fprintf(stderr, "加载失败: %s\n", pos[0].c_str());

@@ -23,6 +23,7 @@ static void check(bool ok, const std::string& what) {
 }
 
 int main() {
+    setvbuf(stdout, nullptr, _IONBF, 0);   // 崩溃时也要看到已经跑到哪一步
     archive::install();
 
     const char* json = R"({
@@ -75,6 +76,13 @@ int main() {
     std::vector<std::string> events;
     check(adocao::decodeEventColumns(schema, cols, cols.typeIds.size(), events, err),
           "事件列解码: " + err);
+    for (size_t i = 0; i < events.size(); ++i) {
+        rapidjson::Document dbg;
+        dbg.Parse(events[i].c_str(), events[i].size());
+        if (dbg.HasParseError() || !dbg.IsObject() || !dbg.HasMember("eventType")) {
+            std::printf("DEBUG 坏事件 %zu: %s\n", i, events[i].c_str());
+        }
+    }
 
     // 预期事件数 = **v6 段装不下的** actions + decorations（去重：Twirl 已由 v6 承载，不进 v7）
     rapidjson::Document deco;

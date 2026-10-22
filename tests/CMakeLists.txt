@@ -105,6 +105,15 @@ target_link_libraries(adocao_cull_index_test PRIVATE adocao_core adocao_archive)
 add_test(NAME cull_index
          COMMAND adocao_cull_index_test ${CMAKE_SOURCE_DIR}/tests/charts/angles360.adofai)
 
+# 样式段（trackStyleRunEnd）的区间不变量：run 区间内 trackStyleAt 必须逐字符相同。
+# 覆盖 ColorTrack/justThisTile/inactive 与 RecolorTrack（负向范围、angleOffset 90、gap）。
+add_executable(adocao_style_run_test style_run_test.cpp)
+target_link_libraries(adocao_style_run_test PRIVATE adocao_core adocao_archive)
+add_test(NAME style_run
+         COMMAND adocao_style_run_test
+                 ${CMAKE_SOURCE_DIR}/tests/level_fixtures/f39_color_events.json
+                 ${CMAKE_SOURCE_DIR}/tests/level_fixtures/f40_recolor_track.json)
+
 # 剔除策略对比探针（④）：同一份真实数据、同一套 AABB 判定下比三种候选集策略
 # （全扫 O(n) / 层号±4096 窗口 / 4096 层块 AABB 查询）的候选数、漏砖数、耗时、索引体积。
 add_executable(adocao_cull_cost_probe cull_cost_probe.cpp)

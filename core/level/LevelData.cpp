@@ -3412,3 +3412,175 @@ void LevelData::convertPathToAngles() {
 }
 
 }  // namespace adofai
+
+namespace adofai {
+
+// ── v7：不经 JSON 的字段直灌（容器用）─────────────────────────────────────────
+// 与 `parseActionObject` 的映射**逐条对应**；改动这里必须同时改那边（对拍用例见
+// tests/adocao_v7_container_test.cpp 的"直接解码 vs JSON 路径"）。
+LevelData::FieldRole LevelData::fieldRoleForName(const char* name, size_t len) {
+    struct R { const char* n; FieldRole r; };
+    static const R kRoles[] = {
+        {"floor", FieldRole::Floor}, {"eventType", FieldRole::EventType},
+        {"speedType", FieldRole::SpeedType}, {"bpmMultiplier", FieldRole::BpmMultiplier},
+        {"beatsPerMinute", FieldRole::BeatsPerMinute}, {"beatsBehind", FieldRole::BeatsBehind},
+        {"beatsAhead", FieldRole::BeatsAhead}, {"duration", FieldRole::Duration},
+        {"hitsound", FieldRole::Hitsound}, {"hitsoundVolume", FieldRole::HitsoundVolume},
+        {"trackAnimation", FieldRole::TrackAnimation},
+        {"trackDisappearAnimation", FieldRole::TrackDisappear},
+        {"angleOffset", FieldRole::AngleOffset}, {"positionOffset", FieldRole::PositionOffset},
+        {"scale", FieldRole::Scale}, {"opacity", FieldRole::Opacity},
+        {"justThisTile", FieldRole::JustThisTile}, {"editorOnly", FieldRole::EditorOnly},
+        {"position", FieldRole::Position}, {"rotation", FieldRole::Rotation},
+        {"zoom", FieldRole::Zoom}, {"relativeTo", FieldRole::RelativeTo},
+        {"ease", FieldRole::Ease}, {"eventTag", FieldRole::EventTag}, {"tag", FieldRole::Tag},
+        {"id", FieldRole::Id}, {"repeatType", FieldRole::RepeatType},
+        {"repetitions", FieldRole::Repetitions}, {"interval", FieldRole::Interval},
+        {"gapLength", FieldRole::GapLength},
+        {"executeOnCurrentFloor", FieldRole::ExecuteOnCurrentFloor},
+        {"floorCount", FieldRole::FloorCount}, {"startTile", FieldRole::StartTile},
+        {"endTile", FieldRole::EndTile}, {"trackColor", FieldRole::TrackColor},
+        {"secondaryTrackColor", FieldRole::SecondaryTrackColor},
+        {"trackColorType", FieldRole::TrackColorType},
+        {"trackColorPulse", FieldRole::TrackColorPulse}, {"trackStyle", FieldRole::TrackStyle},
+        {"trackColorAnimDuration", FieldRole::TrackColorAnimDuration},
+        {"trackPulseLength", FieldRole::TrackPulseLength},
+        {"trackGlowIntensity", FieldRole::TrackGlowIntensity}, {"plane", FieldRole::Plane},
+        {"startColor", FieldRole::StartColor}, {"endColor", FieldRole::EndColor},
+        {"startOpacity", FieldRole::StartOpacity}, {"endOpacity", FieldRole::EndOpacity},
+        {"flashStyle", FieldRole::FlashStyle}, {"rotationOffset", FieldRole::RotationOffset},
+    };
+    for (const auto& r : kRoles)
+        if (std::strlen(r.n) == len && std::memcmp(r.n, name, len) == 0) return r.r;
+    return FieldRole::Unknown;
+}
+
+bool LevelData::ingestEventFields(const EventFieldValue* v, size_t n, std::string& err) {
+    err.clear();
+    ActionFields f;
+    const auto strOf = [](const EventFieldValue& e) { return std::string(e.str ? e.str : "", e.len); };
+    const auto relOf = [](const char* p, uint32_t len) -> int8_t {
+        if (len == 8 && std::memcmp(p, "ThisTile", 8) == 0) return 0;
+        if (len == 5 && std::memcmp(p, "Start", 5) == 0) return 1;
+        if (len == 3 && std::memcmp(p, "End", 3) == 0) return 2;
+        return 0;
+    };
+    for (size_t i = 0; i < n; ++i) {
+        const EventFieldValue& e = v[i];
+        switch (e.role) {
+            case FieldRole::Floor: f.floor = (int)e.num; f.hasFloor = true; break;
+            case FieldRole::EventType:
+                f.type = eventTypeOf(KeyRef{e.str, (size_t)e.len});
+                f.hasEvent = true;
+                break;
+            case FieldRole::SpeedType: f.isMultiplier = (strOf(e) == "Multiplier"); break;
+            case FieldRole::BpmMultiplier: f.bpmMultiplier = (float)e.num; f.hasBpmMultiplier = true; break;
+            case FieldRole::BeatsPerMinute: f.beatsPerMinute = (float)e.num; f.hasBeatsPerMinute = true; break;
+            case FieldRole::BeatsBehind: f.beatsBehind = (float)e.num; f.hasBeatsBehind = true; break;
+            case FieldRole::BeatsAhead: f.beatsAhead = (float)e.num; f.hasBeatsAhead = true; break;
+            case FieldRole::Duration: f.duration = (float)e.num; f.hasDuration = true; break;
+            case FieldRole::Hitsound: f.hitsound = strOf(e); break;
+            case FieldRole::HitsoundVolume: f.hitsoundVolume = (float)e.num; f.hasHitsoundVolume = true; break;
+            case FieldRole::TrackAnimation: f.trackAnimation = strOf(e); f.hasTrackAnimation = true; break;
+            case FieldRole::TrackDisappear: f.trackDisappear = strOf(e); f.hasTrackDisappear = true; break;
+            case FieldRole::AngleOffset: f.angleOffset = e.num; f.hasAngleOffset = true; break;
+            case FieldRole::PositionOffset:
+                if (e.type == EventFieldValue::Pair) {
+                    if (!e.nullA) { f.offX = (float)e.a; f.hasOffX = true; }
+                    if (!e.nullC) { f.offY = (float)e.c; f.hasOffY = true; }
+                    f.hasOffset = f.hasOffX && f.hasOffY;
+                }
+                break;
+            case FieldRole::Scale:
+                if (e.type == EventFieldValue::Pair) {
+                    if (!e.nullA) f.scaleX = (float)(e.a / 100.0);
+                    if (!e.nullC) f.scaleY = (float)(e.c / 100.0);
+                    f.hasScale = true;
+                } else {
+                    f.scaleX = f.scaleY = (float)(e.num / 100.0);
+                    f.hasScale = true;
+                }
+                break;
+            case FieldRole::Opacity: f.legacyOpacity = (float)e.num; f.hasLegacyOpacity = true; break;
+            case FieldRole::JustThisTile: f.justThisTile = e.b; f.hasJustThisTile = true; break;
+            case FieldRole::EditorOnly: if (e.b) f.editorOnly = true; break;
+            case FieldRole::Position:
+                f.hasPosition = true;
+                if (!e.nullA) { f.hasPosX = true; f.posX = e.a; }
+                if (!e.nullC) { f.hasPosY = true; f.posY = e.c; }
+                break;
+            case FieldRole::Rotation: f.rotation = e.num; f.hasRotation = true; break;
+            case FieldRole::Zoom: f.zoom = e.num; f.hasZoom = true; break;
+            case FieldRole::RelativeTo: {
+                const std::string s = strOf(e);
+                if (s == "Player") f.relativeTo = 0;
+                else if (s == "Tile") f.relativeTo = 1;
+                else if (s == "Global") f.relativeTo = 2;
+                else if (s == "LastPosition") f.relativeTo = 3;
+                else if (s == "LastPositionNoRotation") f.relativeTo = 4;
+                else f.relativeTo = 100;
+                break;
+            }
+            case FieldRole::Ease:
+                f.easeId = (int)easeFromName(std::string_view(e.str ? e.str : "", e.len));
+                f.hasEase = true;
+                break;
+            case FieldRole::EventTag: f.tagPtr = e.str; f.tagEnd = e.str + e.len; break;
+            case FieldRole::Tag: f.tagPtr = e.str; f.tagEnd = e.str + e.len; break;
+            case FieldRole::Id: f.idNum = e.num; f.hasId = true; break;
+            case FieldRole::RepeatType: f.isBeat = (strOf(e) != "Floor"); break;
+            case FieldRole::Repetitions: f.repetitions = e.num; break;
+            case FieldRole::Interval: f.interval = e.num; break;
+            case FieldRole::GapLength: f.gapLength = e.num; f.hasGapLength = true; break;
+            case FieldRole::ExecuteOnCurrentFloor: f.executeOnCurrentFloor = e.b; break;
+            case FieldRole::FloorCount: f.floorCount = e.num; break;
+            case FieldRole::StartTile:
+                f.startOff = (int32_t)e.a;
+                f.startRel = relOf(e.str, e.len);
+                f.hasStartTile = true;
+                break;
+            case FieldRole::EndTile:
+                f.endOff = (int32_t)e.a;
+                f.endRel = relOf(e.str, e.len);
+                f.hasEndTile = true;
+                break;
+            case FieldRole::TrackColor: f.trackColor = strOf(e); f.hasTrackColor = true; break;
+            case FieldRole::SecondaryTrackColor:
+                f.secondaryTrackColor = strOf(e); f.hasSecondaryTrackColor = true; break;
+            case FieldRole::TrackColorType: f.trackColorType = strOf(e); f.hasTrackColorType = true; break;
+            case FieldRole::TrackColorPulse: f.trackColorPulse = strOf(e); f.hasTrackColorPulse = true; break;
+            case FieldRole::TrackStyle: f.trackStyle = strOf(e); f.hasTrackStyle = true; break;
+            case FieldRole::TrackColorAnimDuration:
+                f.trackAnimDuration = (float)e.num; f.hasTrackAnimDuration = true; break;
+            case FieldRole::TrackPulseLength:
+                f.trackPulseLength = (float)e.num; f.hasTrackPulseLength = true; break;
+            case FieldRole::TrackGlowIntensity: f.trackGlow = (float)e.num; f.hasTrackGlow = true; break;
+            case FieldRole::Plane: f.flashPlane = strOf(e); f.hasFlashPlane = true; break;
+            case FieldRole::StartColor: f.startColor = strOf(e); f.hasStartColor = true; break;
+            case FieldRole::EndColor: f.endColor = strOf(e); f.hasEndColor = true; break;
+            case FieldRole::StartOpacity: f.startOpacity = (float)e.num; f.hasStartOpacity = true; break;
+            case FieldRole::EndOpacity: f.endOpacity = (float)e.num; f.hasEndOpacity = true; break;
+            case FieldRole::FlashStyle: f.flashStyle = strOf(e); f.hasFlashStyle = true; break;
+            case FieldRole::RotationOffset: f.rotOffset = (float)e.num; f.hasRotOffset = true; break;
+            default: break;
+        }
+    }
+    FastAction a;
+    bool keep = false;
+    if (!buildAction(f, a, keep)) { err = "事件字段路由失败"; return false; }
+    if (keep) { actions.push_back(std::move(a)); return true; }
+    if (f.type == FastAction::MoveCamera || f.type == FastAction::RepeatEvents ||
+        f.type == FastAction::ColorTrack || f.type == FastAction::RecolorTrack ||
+        f.type == FastAction::Flash || f.type == FastAction::MoveTrack) {
+        CameraSink sink;
+        decodeSpecialEvent(f, sink);
+        for (auto& e : sink.moves) moveTrackEvents.push_back(std::move(e));
+        for (auto& e : sink.cameras) cameraEvents.push_back(std::move(e));
+        for (auto& e : sink.repeats) repeatEvents.push_back(std::move(e));
+        for (auto& e : sink.colors) colorEvents.push_back(std::move(e));
+        for (auto& e : sink.flashes) flashEvents.push_back(std::move(e));
+    }
+    return true;
+}
+
+}  // namespace adofai

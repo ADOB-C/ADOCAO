@@ -47,6 +47,36 @@ struct LevelData {
     // 与路由（simple → actions；camera/colour/flash/moveTrack/repeat → 各自的富结构）。
     // 这样"容器 v7 成为唯一存储"不需要重写一遍解码逻辑（重写必然漂移）。
     bool ingestEventJson(const char* begin, const char* end, std::string& err);
+
+    // **v7 直接喂字段**（不经 JSON）：容器把列值按"角色"送进来，core 负责映射进
+    // `ActionFields` → `buildAction` / `decodeSpecialEvent`，与 JSON 路径共用同一套路由。
+    // role 由 `fieldRoleForName()` 在加载时按 (类型,字段) 算一次，热路径只查表。
+    enum class FieldRole : uint8_t {
+        Unknown = 0,
+        // 简单事件（FastAction）
+        Floor, EventType, SpeedType, BpmMultiplier, BeatsPerMinute, BeatsBehind, BeatsAhead,
+        Duration, Hitsound, HitsoundVolume, TrackAnimation, TrackDisappear,
+        AngleOffset, PositionOffset, Scale, Opacity, JustThisTile, EditorOnly,
+        // 富事件（相机/颜色/闪屏/轨道动画/重复）
+        Position, Rotation, Zoom, RelativeTo, Ease, EventTag, Tag, Id, RepeatType,
+        Repetitions, Interval, GapLength, ExecuteOnCurrentFloor, FloorCount,
+        StartTile, EndTile, TrackColor, SecondaryTrackColor, TrackColorType, TrackColorPulse,
+        TrackStyle, TrackColorAnimDuration, TrackPulseLength, TrackGlowIntensity,
+        Plane, StartColor, EndColor, StartOpacity, EndOpacity, FlashStyle, RotationOffset,
+        Count_
+    };
+    struct EventFieldValue {
+        FieldRole role = FieldRole::Unknown;
+        enum T : uint8_t { Num, Bool, Str, Pair } type = Num;
+        double num = 0.0;
+        bool b = false;
+        const char* str = nullptr;   // Str；Pair 时表示第二分量（如 startTile 的 "ThisTile"）
+        uint32_t len = 0;
+        double a = 0.0, c = 0.0;     // Pair 的两个数值分量
+        uint8_t nullA = 0, nullC = 0;   // 分量是否 null
+    };
+    static FieldRole fieldRoleForName(const char* name, size_t len);
+    bool ingestEventFields(const EventFieldValue* v, size_t n, std::string& err);
     // v7 段（读 `.adocao` v7 时填；写出来给 `adocao json` 回写与"裁剪/丢失"诊断用）
     std::vector<uint8_t> v7SchemaBytes;
     std::vector<uint8_t> v7ColumnsBytes;

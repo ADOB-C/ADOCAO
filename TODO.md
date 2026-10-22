@@ -56,9 +56,14 @@
       16k 事件块 ≈ 一块，所谓"解整块再过滤"的浪费并不存在；**真正的成本是每条事件的
       JSON 重序列化（≈1.7 µs/事件）**，与块边界无关。decorations 还得单独走尾块。
       下次别再试"块边界对齐"，除非先解决下面的直接解码。
-- [ ] **直接解码（不经 JSON）**：窗口化要快，必须让"列 → `LevelData` 结构"直达，
-      而不是先拼 JSON 文本再 `parseActionObject` 解析一遍。这是 v7 接进加载器的真正前提
-      （现在 `unpackLevel` 仍全量解码后再 ingest）。
+- [x] **直接解码第一半（2026-10-22）**：`LevelData::ingestEventFields()` —— 容器把列值按
+      **角色**（`FieldRole`，加载时按 (类型,字段) 算一次）送进来，core 负责映射进 `ActionFields`
+      → `buildAction`/`decodeSpecialEvent`（**与 JSON 路径共用路由**，不重写第二套）。
+      对拍用例 `tests/adocao_direct_fields_test.cpp`：同一批事件走 JSON 与走字段，产出逐字段一致。
+      实测动机：v7-only 容器加载 **16.1 ms** vs 明文 **9.0 ms** —— 慢的正是每条事件的 JSON 重序列化。
+- [ ] **直接解码第二半**：archive 侧把 `EventColumns` 解成 `EventFieldValue[]`（现在只产出 JSON 文本），
+      然后 `unpackLevel` 走 `ingestEventFields` 而不是 `ingestEventJson`；量加载时间应从 16.1 ms
+      降到 ≤9 ms。
 - [ ] 把窗口解码接进 `unpackLevel`（现在仍全量解码后再 ingest；要真正省时得让
       `LevelData` 持有"未解码的事件块 + 索引"，按窗口惰性 ingest）。
 - [ ] `Coverage` 在应用里提示（打开被裁剪的 `.adocao` 时说清缺了哪些类型）。

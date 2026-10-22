@@ -280,3 +280,7 @@ add_test(NAME adocao_event_columns COMMAND adocao_event_columns_test)
 add_executable(adocao_v7_container_test adocao_v7_container_test.cpp)
 target_link_libraries(adocao_v7_container_test PRIVATE adocao_archive)
 add_test(NAME adocao_v7_container COMMAND adocao_v7_container_test)
+
+add_executable(adocao_direct_fields_test adocao_direct_fields_test.cpp)
+target_link_libraries(adocao_direct_fields_test PRIVATE adocao_core)
+add_test(NAME adocao_direct_fields COMMAND adocao_direct_fields_test)

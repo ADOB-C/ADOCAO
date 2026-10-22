@@ -146,6 +146,39 @@ void SchemaBuilder::addEvent(std::string_view typeName, EventSource source,
 
 const Schema& SchemaBuilder::finalize() {
     if (m_finalized) return m_schema;
+    // **字段必须按类型连续存放**：addEvent 交错追加时，同一类型的字段会被别的类型插开，
+    // 而 TypeDesc 只有 (firstField, fieldCount)。这里按"首次出现顺序"重排一次，并把
+    // 统计数组 m_acc 一起置换（否则 kind 会按错位的那一列算 —— 踩过：AnimateTrack.beatsBehind
+    // 明明是数字却被判成 Pair）。
+    {
+        std::vector<std::vector<uint32_t>> perType(m_schema.types.size());
+        for (const auto& kv : m_fieldIndex) {
+            const uint32_t typeIdx = (uint32_t)(kv.first >> 32);
+            if (typeIdx < perType.size()) perType[typeIdx].push_back(kv.second);
+        }
+        std::vector<uint32_t> perm;
+        perm.reserve(m_schema.fields.size());
+        for (size_t t = 0; t < perType.size(); ++t) {
+            auto& list = perType[t];
+            std::sort(list.begin(), list.end());
+            m_schema.types[t].firstField = (uint16_t)perm.size();
+            m_schema.types[t].fieldCount = (uint16_t)list.size();
+            for (uint32_t idx : list) perm.push_back(idx);
+        }
+        if (perm.size() == m_schema.fields.size()) {
+            std::vector<FieldDesc> nf;
+            nf.reserve(perm.size());
+            std::vector<std::unique_ptr<Acc>> na;
+            na.reserve(perm.size());
+            for (uint32_t oldIdx : perm) {
+                nf.push_back(m_schema.fields[oldIdx]);
+                na.push_back(oldIdx < m_acc.size() ? std::move(m_acc[oldIdx]) : nullptr);
+            }
+            m_schema.fields = std::move(nf);
+            m_acc = std::move(na);
+            m_fieldIndex.clear();   // 索引已失效；finalize 之后不再 addEvent
+        }
+    }
     for (size_t i = 0; i < m_schema.fields.size(); ++i) {
         FieldDesc& fd = m_schema.fields[i];
         if (!m_acc[i]) { fd.kind = Kind::RawJSON; continue; }
@@ -156,7 +189,7 @@ const Schema& SchemaBuilder::finalize() {
         if (a.present < a.total) fd.flags |= 0x2;
         // 单一形态优先；混合一律 RawJSON（编码器仍能无损，只是压得少）
         if (a.sawObject) { fd.kind = Kind::Nested; continue; }
-        if (a.sawPair) {
+        if (a.sawPair && !a.sawArrayOther && !a.sawInt && !a.sawFloat && !a.sawBool && !a.sawString) {
             fd.kind = Kind::Pair;
             if (a.pairHasNull) fd.flags |= 0x8;   // 分量出现 null：拆两列，各自带 null 掩码
             continue;

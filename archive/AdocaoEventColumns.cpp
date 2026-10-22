@@ -1,6 +1,7 @@
 #include "archive/AdocaoEventColumns.hpp"
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <unordered_map>
 
@@ -223,7 +224,15 @@ bool buildEventColumns(const Schema& schema, const std::vector<std::string>& eve
                 }
                 case Kind::Pair: {
                     const rapidjson::Value& a = v;
-                    if (!a.IsArray() || a.Size() != 2) { err = "Pair 字段不是二元数组"; return false; }
+                    if (!a.IsArray() || a.Size() != 2) {
+                        char msg[256];
+                        std::snprintf(msg, sizeof msg, "Pair 字段不是二元数组: %s.%s (type=%d, isArray=%d size=%d isNum=%d)",
+                                      schema.name(schema.types[typeIdx].nameId).c_str(),
+                                      schema.name(fd.nameId).c_str(), (int)typeIdx, (int)a.IsArray(),
+                                      a.IsArray() ? (int)a.Size() : -1, (int)a.IsNumber());
+                        err = msg;
+                        return false;
+                    }
                     if (a[0].IsNull()) { bitSet(out.fields[f].nulls0, within); c.pair0.push_back(0.0); }
                     else {
                         const double d0 = a[0].GetDouble();

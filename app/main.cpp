@@ -5,6 +5,8 @@
 #include <rapidjson/writer.h>
 
 #include "archive/AdocaoEventColumns.hpp"
+#include <set>
+
 #include "archive/AdocaoSchema.hpp"
 #include "archive/AdocaoWriter.hpp"     // `adocao pack`：把已加载的谱打成 .adocao
 #include "archive/AdocaoDiagnostics.hpp"  // `--codec-report`：§8.4 的判据统计（纯诊断）
@@ -237,7 +239,8 @@ int main(int argc, char* argv[]) {
     int block = 4096, threads = 0, scale = 1, progressForce = 0;
     bool codecReport = false;
     bool packCheckpoints = false;
-    bool packSchemaReport = false;   // pack --schema-report：打印 v7 自描述 schema 的统计   // pack --checkpoints：写 Derived 段（每 4096 层的续算快照）                    // pack：打印每列的体积明细
+    bool packSchemaReport = false;   // pack --schema-report：打印 v7 自描述 schema 的统计
+    std::string packEventsPreset = "all";   // pack --events=all|playable|minimal（裁剪导出）   // pack --checkpoints：写 Derived 段（每 4096 层的续算快照）                    // pack：打印每列的体积明细
 
     // CLI-FLAGS-BEGIN —— scripts/check-cli-help.sh 只在这个区间里找开关名
     for (int i = argStart; i < argc; i++) {
@@ -320,6 +323,7 @@ int main(int argc, char* argv[]) {
             if (std::strcmp(a, "--codec-report") == 0) codecReport = true;
             else if (std::strcmp(a, "--checkpoints") == 0) packCheckpoints = true;
             else if (std::strcmp(a, "--schema-report") == 0) packSchemaReport = true;
+            else if (std::strncmp(a, "--events=", 9) == 0) packEventsPreset = a + 9;
             else { std::fprintf(stderr, "未知选项: %s（pack 模式）\n", a); return 2; }
         }
         else if (mode == Mode::Image) {
@@ -397,14 +401,31 @@ int main(int argc, char* argv[]) {
         if (packSchemaReport) {
             adocao::SchemaBuilder sb;
             std::string serr;
-            if (adocao::buildSchemaFromLevel(lv, sb, serr)) {
-                sb.finalize();
+            if (true) {
                 std::printf("原始成员: %zu 条 action + decorations %zu B\n",
                             lv.rawActionsJson.size(), lv.rawDecorationsJson.size());
-                std::fputs(adocao::schemaSummary(sb.schema()).c_str(), stdout);
                 // 事件列的真实体积（v7 的预期大小）：建列后按"列字节 + 位图 + 字典 + schema"合计
-                std::vector<std::string> evs = lv.rawActionsJson;
-                std::vector<uint8_t> srcs(evs.size(), 0);
+                // 裁剪：只保留指定类型（playable = v5 能力面；minimal = 影响几何/计时的）
+                static const std::set<std::string> kPlayable = {
+                    "Twirl","SetSpeed","PositionTrack","SetHitsound","Bookmark","Pause","AnimateTrack",
+                    "MoveCamera","ColorTrack","RecolorTrack","Flash","MoveTrack","RepeatEvents","ScaleRadius"};
+                static const std::set<std::string> kMinimal = {
+                    "Twirl","SetSpeed","PositionTrack","ScaleRadius","AnimateTrack"};
+                const std::set<std::string>* allow = nullptr;
+                if (packEventsPreset == "playable") allow = &kPlayable;
+                else if (packEventsPreset == "minimal") allow = &kMinimal;
+                std::vector<std::string> evs;
+                std::vector<uint8_t> srcs;
+                size_t dropped = 0;
+                (void)serr;
+                for (const auto& js : lv.rawActionsJson) {
+                    rapidjson::Document d;
+                    d.Parse(js.c_str(), js.size());
+                    const char* t = (d.HasParseError() || !d.HasMember("eventType")) ? "" : d["eventType"].GetString();
+                    if (allow && !allow->count(t)) { ++dropped; continue; }
+                    evs.push_back(js);
+                    srcs.push_back(0);
+                }
                 if (!lv.rawDecorationsJson.empty()) {
                     rapidjson::Document dd;
                     dd.Parse(lv.rawDecorationsJson.c_str(), lv.rawDecorationsJson.size());
@@ -413,11 +434,22 @@ int main(int argc, char* argv[]) {
                             rapidjson::StringBuffer b;
                             rapidjson::Writer<rapidjson::StringBuffer> w(b);
                             v.Accept(w);
+                            if (allow && !allow->count(v["eventType"].GetString())) { ++dropped; continue; }
                             evs.emplace_back(b.GetString(), b.GetSize());
                             srcs.push_back(1);
                         }
                     }
                 }
+                // schema 必须在**裁剪之后**建：只描述保留下来的类型/字段
+                for (size_t i = 0; i < evs.size(); ++i) {
+                    rapidjson::Document d;
+                    d.Parse(evs[i].c_str(), evs[i].size());
+                    if (d.HasParseError() || !d.HasMember("eventType")) continue;
+                    sb.addEvent(d["eventType"].GetString(),
+                                srcs[i] ? adocao::EventSource::Decorations : adocao::EventSource::Actions, d);
+                }
+                sb.finalize();
+                std::fputs(adocao::schemaSummary(sb.schema()).c_str(), stdout);
                 adocao::EventColumns cols;
                 std::string cerr;
                 if (adocao::buildEventColumns(sb.schema(), evs, srcs, cols, cerr)) {
@@ -450,6 +482,9 @@ int main(int argc, char* argv[]) {
                                 (double)(payload + bitmaps + dicts + schemaBytes) / 1024.0,
                                 (double)(z + adocao::zstdEstimate(sb.serialize())) / 1024.0,
                                 (double)(z + adocao::zstdEstimate(sb.serialize())) / 1024.0);
+                    if (dropped) std::printf("  裁剪: 事件 %zu → %zu（丢掉 %zu 条，preset=%s）\n",
+                                             lv.rawActionsJson.size() + (lv.rawDecorationsJson.empty() ? 0 : 1),
+                                             evs.size(), dropped, packEventsPreset.c_str());
                 } else {
                     std::fprintf(stderr, "事件列构建失败: %s\n", cerr.c_str());
                 }

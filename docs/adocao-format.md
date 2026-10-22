@@ -1258,7 +1258,20 @@ GridFloat 10.2 KB、Enum 10.6 KB、Color 5.2 KB、Float 5.8 KB、Bool 1.8 KB、T
 **实测否掉的两条**（都试过、都变差）：字典串前置编码（+2.1 KB）、全局字符串池（+2.1 KB）——
 整段 zstd 已经跨列吃到重复前缀，再叠映射只会变贵。
 
-### 9.4 待做
+### 9.4 裁剪导出实测（回答"屏蔽事件能回到 v5 体积吗"）
+
+`adocao pack --schema-report --events=all|playable|minimal`（schema 在**裁剪之后**建）：
+
+| 预设 | 保留类型 | 事件数 | 列字节 | **整段 zstd-19** |
+|---|---|---|---|---|
+| `all` | 全部 36 类 | 12,466 | 212.4 KB | **72.4 KB** |
+| `playable` | v5 能力面 14 类 | 7,439 | 43.8 KB | **15.6 KB** |
+| `minimal` | Twirl/SetSpeed/PositionTrack/ScaleRadius/AnimateTrack | 3,618 | 5.0 KB | **2.5 KB** |
+
+对照：v6 文件 **19.3 KB**（只保留 9 类、丢掉装饰）。
+**结论：`playable` 档比 v6 还小 19%**（15.6 vs 19.3 KB），且 schema 跟着裁剪自动缩到 1.9 KB。
+
+### 9.5 待做
 
 列编码（按 kind 建列/解列）、`EventIndex` 块内 seek、`Coverage` 段与裁剪导出
 （`--events=playable` 回到 v5 体积）、`adocao json` 回写、`PeriodicResidual` 变换。

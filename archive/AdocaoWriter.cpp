@@ -1,6 +1,7 @@
 #include "archive/AdocaoWriter.hpp"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <set>
 
@@ -697,7 +698,19 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         sch.blob = sb.serialize();
         secs.push_back(std::move(sch));
         Section col; col.id = (uint8_t)SectionId::EventColumns;
-        col.blob = serializeEventColumns(sb.schema(), cols);
+        // 分块（每 4096 事件一块，块内自包含）：窗口化 seek 只需要解命中的块。
+        size_t blocks = 0;
+        // 块大小（默认 **16384**）：块越小 seek 越细，但块间重复的字典/位图越多。
+        // 实测（v7-only vs 不分块）：2025 12.5k 事件 4096→+6.5 KB / 8192→+3.2 KB / 16384→+88 B；
+        // MEGAMIX_2 38k 事件 4096→+14.4 KB / 8192→+18.6 KB / 16384→+4.3 KB（压缩对块边界敏感，非单调）。
+        uint32_t blockEvents = 16384;
+        if (const char* e = std::getenv("ADOCAO_V7_BLOCK_EVENTS")) {
+            const int v = std::atoi(e);
+            if (v >= 256 && v <= 1 << 20) blockEvents = (uint32_t)v;
+        }
+        col.blob = serializeEventColumnsBlocked(sb.schema(), evs, srcs, blockEvents, &blocks);
+        if (blocks == 0) { err = "v7: 事件列分块失败"; return false; }
+        col.flags |= kFlagBlockedEvents;
         col.elements = evs.size();
         secs.push_back(std::move(col));
         // EventIndex：按 4096 层块记录"第一个 floor >= b<<12 的事件下标"

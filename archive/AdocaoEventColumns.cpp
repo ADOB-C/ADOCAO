@@ -667,18 +667,24 @@ std::vector<uint8_t> serializeEventColumns(const Schema& schema, const EventColu
             b.insert(b.end(), v.begin(), v.end());
         };
         putBlob(c.present); putBlob(c.nulls); putBlob(c.nulls0); putBlob(c.nulls1); putBlob(c.payload);
-        const uint32_t dn = (uint32_t)c.dictStrings.size();
-        putU32(b, dn);
-        for (const auto& ds : c.dictStrings) {
-            putVarU32(b, (uint32_t)ds.size());
-            b.insert(b.end(), ds.begin(), ds.end());
+        if (c.subFlags & ColumnBlob::kDictGlobal) {
+            const uint32_t dn = (uint32_t)c.dictGlobalIds.size();
+            putU32(b, dn);
+            for (uint32_t gid : c.dictGlobalIds) putVarU32(b, gid);
+        } else {
+            const uint32_t dn = (uint32_t)c.dictStrings.size();
+            putU32(b, dn);
+            for (const auto& ds : c.dictStrings) {
+                putVarU32(b, (uint32_t)ds.size());
+                b.insert(b.end(), ds.begin(), ds.end());
+            }
         }
     }
     return b;
 }
 
 bool deserializeEventColumns(const Schema& schema, const uint8_t* p, size_t n, EventColumns& out,
-                             std::string& err) {
+                             std::string& err, const std::vector<std::string>* pool) {
     err.clear();
     out = EventColumns{};
     const uint8_t* e = p + n;
@@ -718,14 +724,127 @@ bool deserializeEventColumns(const Schema& schema, const uint8_t* p, size_t n, E
             !getBlob(c.payload)) { err = "事件列：字段数据截断"; return false; }
         uint32_t dictCount = 0;
         if (!getU32(p, e, dictCount)) { err = "事件列：字典头截断"; return false; }
-        c.dictStrings.reserve(dictCount);
-        for (uint32_t i = 0; i < dictCount; ++i) {
-            uint32_t len = 0;
-            if (!getVarU32(p, e, len) || (size_t)(e - p) < len) { err = "事件列：字典截断"; return false; }
-            c.dictStrings.emplace_back((const char*)p, len);
-            p += len;
+        if (c.subFlags & ColumnBlob::kDictGlobal) {
+            c.dictGlobalIds.reserve(dictCount);
+            for (uint32_t i = 0; i < dictCount; ++i) {
+                uint32_t gid = 0;
+                if (!getVarU32(p, e, gid)) { err = "事件列：全局字典下标截断"; return false; }
+                c.dictGlobalIds.push_back(gid);
+                if (pool) {
+                    if (gid >= pool->size()) { err = "事件列：全局字典下标越界"; return false; }
+                    c.dictStrings.push_back((*pool)[gid]);
+                }
+            }
+        } else {
+            c.dictStrings.reserve(dictCount);
+            for (uint32_t i = 0; i < dictCount; ++i) {
+                uint32_t len = 0;
+                if (!getVarU32(p, e, len) || (size_t)(e - p) < len) { err = "事件列：字典截断"; return false; }
+                c.dictStrings.emplace_back((const char*)p, len);
+                p += len;
+            }
         }
     }
+    return true;
+}
+
+namespace {
+// 块容器的段头：u32 version | u32 blockEvents | u32 blockCount | u32 reserved | u64 offsets[blockCount+1]
+constexpr uint32_t kBlockedVersion = 1;
+constexpr size_t kBlockedHeaderBytes = 16;
+
+void putU64(std::vector<uint8_t>& b, uint64_t v) {
+    for (int i = 0; i < 8; ++i) b.push_back((uint8_t)((v >> (8 * i)) & 0xFF));
+}
+uint64_t rdU64(const uint8_t* p) {
+    uint64_t v = 0;
+    for (int i = 0; i < 8; ++i) v |= (uint64_t)p[i] << (8 * i);
+    return v;
+}
+}  // namespace
+
+std::vector<uint8_t> serializeEventColumnsBlocked(const Schema& schema,
+                                                  const std::vector<std::string>& eventsJson,
+                                                  const std::vector<uint8_t>& source,
+                                                  uint32_t blockEvents, size_t* outBlocks) {
+    if (blockEvents == 0) blockEvents = 4096;
+    const size_t n = eventsJson.size();
+    const uint32_t blocks = (uint32_t)((n + blockEvents - 1) / blockEvents);
+    std::vector<std::vector<uint8_t>> blobs(blocks);
+    for (uint32_t b = 0; b < blocks; ++b) {
+        const size_t first = (size_t)b * blockEvents;
+        const size_t last = std::min(n, first + blockEvents);
+        std::vector<std::string> evs(eventsJson.begin() + (long)first, eventsJson.begin() + (long)last);
+        std::vector<uint8_t> src(source.begin() + (long)first, source.begin() + (long)last);
+        EventColumns cols;
+        std::string err;
+        if (!buildEventColumns(schema, evs, src, cols, err)) { blobs[b].clear(); continue; }
+        blobs[b] = serializeEventColumns(schema, cols);
+    }
+    std::vector<uint8_t> out;
+    putU32(out, kBlockedVersion);
+    putU32(out, blockEvents);
+    putU32(out, blocks);
+    putU32(out, 0);
+    uint64_t off = kBlockedHeaderBytes + (uint64_t)(blocks + 1) * 8;
+    for (uint32_t b = 0; b <= blocks; ++b) {
+        putU64(out, off);
+        if (b < blocks) off += blobs[b].size();
+    }
+    for (uint32_t b = 0; b < blocks; ++b) out.insert(out.end(), blobs[b].begin(), blobs[b].end());
+    if (outBlocks) *outBlocks = blocks;
+    return out;
+}
+
+bool decodeEventColumnsRange(const Schema& schema, const uint8_t* p, size_t n,
+                             uint32_t firstEvent, uint32_t lastEvent,
+                             std::vector<std::string>& outEvents, std::string& err,
+                             uint32_t* outBlocks, std::vector<uint16_t>* outTypeIds) {
+    err.clear();
+    outEvents.clear();
+    if (n < kBlockedHeaderBytes) { err = "分块事件列：段头截断"; return false; }
+    const uint32_t version = (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+    if (version != kBlockedVersion) { err = "分块事件列：版本不认识"; return false; }
+    const uint32_t blockEvents = (uint32_t)p[4] | ((uint32_t)p[5] << 8) | ((uint32_t)p[6] << 16) | ((uint32_t)p[7] << 24);
+    const uint32_t blocks = (uint32_t)p[8] | ((uint32_t)p[9] << 8) | ((uint32_t)p[10] << 16) | ((uint32_t)p[11] << 24);
+    if (blockEvents == 0 || blocks == 0) { err = "分块事件列：块参数非法"; return false; }
+    if (n < kBlockedHeaderBytes + (size_t)(blocks + 1) * 8) { err = "分块事件列：块表截断"; return false; }
+    if (outBlocks) *outBlocks = blocks;
+    if (lastEvent > blocks * (uint64_t)blockEvents) lastEvent = (uint32_t)(blocks * blockEvents);
+    if (firstEvent >= lastEvent) return true;
+    const uint32_t b0 = firstEvent / blockEvents;
+    const uint32_t b1 = (lastEvent - 1) / blockEvents;
+    for (uint32_t b = b0; b <= b1; ++b) {
+        const uint64_t o0 = rdU64(p + kBlockedHeaderBytes + (size_t)b * 8);
+        const uint64_t o1 = rdU64(p + kBlockedHeaderBytes + (size_t)(b + 1) * 8);
+        if (o0 > o1 || o1 > n) { err = "分块事件列：块偏移越界"; return false; }
+        EventColumns cols;
+        std::string cerr;
+        if (!deserializeEventColumns(schema, p + o0, (size_t)(o1 - o0), cols, cerr)) {
+            err = "分块事件列：块 " + std::to_string(b) + " 解码失败: " + cerr;
+            return false;
+        }
+        std::vector<std::string> evs;
+        if (!decodeEventColumns(schema, cols, cols.typeIds.size(), evs, cerr)) {
+            err = "分块事件列：块 " + std::to_string(b) + " 还原失败: " + cerr;
+            return false;
+        }
+        const uint32_t blkFirst = b * blockEvents;
+        for (size_t i = 0; i < evs.size(); ++i) {
+            const uint32_t idx = blkFirst + (uint32_t)i;
+            if (idx < firstEvent || idx >= lastEvent) continue;
+            outEvents.push_back(std::move(evs[i]));
+            if (outTypeIds) outTypeIds->push_back(cols.typeIds[i]);
+        }
+    }
+    return true;
+}
+
+bool decodeEventColumnsBlockedAll(const Schema& schema, const uint8_t* p, size_t n,
+                                  std::vector<std::string>& outEvents, std::string& err,
+                                  std::vector<uint16_t>* outTypeIds) {
+    uint32_t blocks = 0;
+    if (!decodeEventColumnsRange(schema, p, n, 0, UINT32_MAX, outEvents, err, &blocks, outTypeIds)) return false;
     return true;
 }
 

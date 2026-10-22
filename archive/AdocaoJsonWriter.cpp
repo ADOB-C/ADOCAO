@@ -21,15 +21,22 @@ bool writeLevelJson(const LevelData& lv, std::string& out, std::string& err) {
     }
     Schema schema;
     if (!SchemaBuilder::deserialize(lv.v7SchemaBytes.data(), lv.v7SchemaBytes.size(), schema, err)) return false;
-    EventColumns cols;
-    if (!deserializeEventColumns(schema, lv.v7ColumnsBytes.data(), lv.v7ColumnsBytes.size(), cols, err)) return false;
     std::vector<std::string> events;
-    if (!decodeEventColumns(schema, cols, cols.typeIds.size(), events, err)) return false;
+    std::vector<uint16_t> typeIds;
+    if (lv.v7ColumnsBlocked) {
+        if (!decodeEventColumnsBlockedAll(schema, lv.v7ColumnsBytes.data(), lv.v7ColumnsBytes.size(),
+                                          events, err, &typeIds)) return false;
+    } else {
+        EventColumns cols;
+        if (!deserializeEventColumns(schema, lv.v7ColumnsBytes.data(), lv.v7ColumnsBytes.size(), cols, err)) return false;
+        if (!decodeEventColumns(schema, cols, cols.typeIds.size(), events, err)) return false;
+        typeIds = cols.typeIds;
+    }
 
     // 按 schema 的 source 分回 actions / decorations（解码结果的顺序 = 原顺序，但两类是混排的）
     std::vector<size_t> actionIdx, decoIdx;
-    for (size_t i = 0; i < cols.typeIds.size(); ++i) {
-        const auto& td = schema.types[cols.typeIds[i]];
+    for (size_t i = 0; i < typeIds.size(); ++i) {
+        const auto& td = schema.types[typeIds[i]];
         (td.source == (uint8_t)EventSource::Decorations ? decoIdx : actionIdx).push_back(i);
     }
 

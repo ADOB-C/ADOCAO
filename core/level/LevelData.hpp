@@ -56,6 +56,7 @@ struct LevelData {
     std::vector<uint32_t> eventBlockStart;
     uint32_t eventBlockShift = 12;
     bool eventBlockSorted = false;
+    bool v7ColumnsBlocked = false;   // EventColumns 段是分块容器（每 4096 事件一块）
 
     struct Settings {
         int    version = 15;

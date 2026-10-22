@@ -582,6 +582,7 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
         }
         if (const Sec* s15 = findSec(secs, SectionId::EventColumns)) {
             out.v7ColumnsBytes.assign(s15->p, s15->p + s15->size);
+            out.v7ColumnsBlocked = (s15->flags & kFlagBlockedEvents) != 0;
         }
         if (const Sec* s16 = findSec(secs, SectionId::Coverage)) {
             out.v7CoverageBytes.assign(s16->p, s16->p + s16->size);
@@ -619,16 +620,28 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
         Schema schema;
         EventColumns cols;
         std::vector<std::string> events;
-        if (!SchemaBuilder::deserialize(out.v7SchemaBytes.data(), out.v7SchemaBytes.size(), schema, err) ||
-            !deserializeEventColumns(schema, out.v7ColumnsBytes.data(), out.v7ColumnsBytes.size(), cols, err) ||
-            !decodeEventColumns(schema, cols, cols.typeIds.size(), events, err)) {
+        std::vector<uint16_t> typeIds;   // 与 events 平行（块化解码也要它，否则下面会越界）
+        if (!SchemaBuilder::deserialize(out.v7SchemaBytes.data(), out.v7SchemaBytes.size(), schema, err)) {
             err = "v7 事件库: " + err;
             return false;
         }
+        if (out.v7ColumnsBlocked) {
+            if (!decodeEventColumnsBlockedAll(schema, out.v7ColumnsBytes.data(), out.v7ColumnsBytes.size(),
+                                              events, err, &typeIds)) {
+                err = "v7 事件库: " + err;
+                return false;
+            }
+        } else if (!deserializeEventColumns(schema, out.v7ColumnsBytes.data(), out.v7ColumnsBytes.size(), cols, err) ||
+                   !decodeEventColumns(schema, cols, cols.typeIds.size(), events, err)) {
+            err = "v7 事件库: " + err;
+            return false;
+        }
+        if (!out.v7ColumnsBlocked) typeIds = cols.typeIds;
         // 只还原 **actions**（source=Actions）；decorations 数组里的类型（AddDecoration/AddParticle…）
         // 在 JSON 路径里本来就不进 LevelData（它们由 decorations 数组承载），这里同样跳过。
         for (size_t i = 0; i < events.size(); ++i) {
-            const auto& td = schema.types[cols.typeIds[i]];
+            if (i >= typeIds.size()) { err = "v7: 类型列与事件数不一致"; return false; }
+            const auto& td = schema.types[typeIds[i]];
             if (td.source != (uint8_t)EventSource::Actions) continue;
             const auto& js = events[i];
             if (!out.ingestEventJson(js.data(), js.data() + js.size(), err)) {

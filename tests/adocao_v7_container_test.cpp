@@ -69,13 +69,25 @@ int main() {
     adocao::Schema schema;
     check(adocao::SchemaBuilder::deserialize(back.v7SchemaBytes.data(), back.v7SchemaBytes.size(),
                                              schema, err), "schema 反序列化: " + err);
-    adocao::EventColumns cols;
-    check(adocao::deserializeEventColumns(schema, back.v7ColumnsBytes.data(),
-                                          back.v7ColumnsBytes.size(), cols, err),
-          "事件列反序列化: " + err);
+    // 事件列现在是**分块容器**（每 4096 事件一块），整段解码走 BlockedAll
     std::vector<std::string> events;
-    check(adocao::decodeEventColumns(schema, cols, cols.typeIds.size(), events, err),
-          "事件列解码: " + err);
+    std::vector<uint16_t> typeIds;
+    check(back.v7ColumnsBlocked, "EventColumns 段标记为分块");
+    check(adocao::decodeEventColumnsBlockedAll(schema, back.v7ColumnsBytes.data(),
+                                               back.v7ColumnsBytes.size(), events, err, &typeIds),
+          "事件列分块解码: " + err);
+    check(typeIds.size() == events.size(), "类型列与事件数一致");
+
+    // **范围解码**必须等于全量解码的对应片段（这就是窗口化 seek 的正确性依据）
+    if (events.size() >= 3) {
+        std::vector<std::string> range;
+        std::string rerr;
+        check(adocao::decodeEventColumnsRange(schema, back.v7ColumnsBytes.data(),
+                                              back.v7ColumnsBytes.size(), 1, 3, range, rerr),
+              "范围解码 [1,3): " + rerr);
+        check(range.size() == 2 && range[0] == events[1] && range[1] == events[2],
+              "范围解码与全量解码逐字节一致");
+    }
     for (size_t i = 0; i < events.size(); ++i) {
         rapidjson::Document dbg;
         dbg.Parse(events[i].c_str(), events[i].size());

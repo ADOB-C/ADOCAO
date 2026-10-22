@@ -39,6 +39,8 @@ inline constexpr uint16_t kMinReadVersion = 2;   // 读侧仍认 v2（双读）�
 //          于是 **v3 的文件永远 ≤ v2 的文件**（§8.0-2 的"最坏零收益"落在文件层面）；
 //   清零 = v3 的分块列容器（`AdocaoBlocked.hpp`，帧可独立解压 = 可按 4096 层 seek）。
 inline constexpr uint16_t kFlagLegacyColumns = 0x0001;
+// v7：`EventColumns` 段用**分块容器**（每 4096 事件一块、块内自包含，供窗口化 seek）。
+inline constexpr uint16_t kFlagBlockedEvents   = 0x0002;
 
 // 段 id。v1 只用 1..5；6/7 预留（preserved / derived），未知 id 一律跳过（前向兼容）。
 enum class SectionId : uint8_t {

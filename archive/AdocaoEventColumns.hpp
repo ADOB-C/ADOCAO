@@ -31,6 +31,11 @@ struct ColumnBlob {
                                     // Color 用：bit2 = 8 位（含 alpha）、bit3 = 带 '#'
     std::vector<uint8_t> nulls0, nulls1;   // Pair 的分量 null 位图（出现才写）
     std::vector<std::string> dictStrings;  // 该列若是字符串类（Enum/Tag/String）则带字典
+    // 分块容器用：字典串已进**段级共享池**，这里只留"本地下标 → 全局池下标"。
+    // 置位时 serialization 不再写字符串本身（块间重复的图名/tag 只存一次）。
+    std::vector<uint32_t> dictGlobalIds;
+    static constexpr uint8_t kDictGlobal = 0x01;   // subFlags 位
+
 };
 
 struct EventColumns {
@@ -53,7 +58,24 @@ bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t e
 // 列集的字节化（容器段用；也是"体积报告"的口径）。不含 schema —— schema 单独一段。
 std::vector<uint8_t> serializeEventColumns(const Schema& schema, const EventColumns& cols);
 bool deserializeEventColumns(const Schema& schema, const uint8_t* p, size_t n, EventColumns& out,
-                             std::string& err);
+                             std::string& err,
+                             const std::vector<std::string>* pool = nullptr);
+
+// **按事件分块**（供窗口化 seek）：每 `blockEvents` 个事件一块，块内自包含（各自带字典/位图），
+// 因此解一个窗口只需要解命中的那几块。段头存块表（offsets 相对段起点）。
+std::vector<uint8_t> serializeEventColumnsBlocked(const Schema& schema,
+                                                  const std::vector<std::string>& eventsJson,
+                                                  const std::vector<uint8_t>& source,
+                                                  uint32_t blockEvents, size_t* outBlocks = nullptr);
+// 解出 `[firstEvent, lastEvent)` 的事件（只需解命中的块）。`outFirst` = 第一块的起始事件下标。
+bool decodeEventColumnsRange(const Schema& schema, const uint8_t* p, size_t n,
+                             uint32_t firstEvent, uint32_t lastEvent,
+                             std::vector<std::string>& outEvents, std::string& err,
+                             uint32_t* outBlocks = nullptr, std::vector<uint16_t>* outTypeIds = nullptr);
+// 解全部（等价于解所有块再拼接）。
+bool decodeEventColumnsBlockedAll(const Schema& schema, const uint8_t* p, size_t n,
+                                  std::vector<std::string>& outEvents, std::string& err,
+                                  std::vector<uint16_t>* outTypeIds = nullptr);
 
 // 诊断：整段 zstd-19 之后的字节数（报告用；真正写文件时由段级压缩决定）。
 size_t zstdEstimate(const std::vector<uint8_t>& raw);

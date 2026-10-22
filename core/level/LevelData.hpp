@@ -32,6 +32,17 @@ class FloorWindowCache;
 struct WinCacheDeleter { void operator()(FloorWindowCache* p) const; };
 
 struct LevelData {
+    // v7 打包期的"原样成员"捕获（**只在 pack 用**，播放路径一个字节也不多留）：
+    //   * actions 里**每一条**事件的原始 JSON 切片（含我们解码不了的 SetFilter/MoveDecorations/…）；
+    //   * decorations 整个数组的原始切片。
+    // 目的：容器 v7 的 schema 从实际 JSON 自动发现类型/字段，做到"新增事件类型不改格式"。
+    // 默认关（false）→ 播放路径的内存与行为完全不变。
+    bool preserveRawJson = false;
+    std::vector<std::string> rawActionsJson;
+    std::string rawDecorationsJson;
+    // 解析原始成员；失败只警告（pack 会退回旧段），不影响已经解析好的数据。
+    bool captureRawMembers(const char* data, size_t length);
+
     struct Settings {
         int    version = 15;
         float  bpm = 100.0f;
@@ -510,6 +521,8 @@ private:
     // parseLegacy(). Set ADOCAO_FORCE_DOM_PARSE=1 to force the legacy path (A/B tests).
     bool tryFastParse(const char* data, size_t length, ProgressCb onProgress);
     // Legacy path: cleanJson + RapidJSON DOM. Also the fallback and the A/B reference.
+    // 真正的加载实现（幂等重置 + 三条解析路径）；public 入口负责 v7 的原始成员捕获。
+    bool loadFromBufferImpl(const char* data, size_t length, ProgressCb onProgress, bool exportOnly);
     bool parseLegacy(const std::string& cleanedJson, ProgressCb onProgress, bool exportOnly);
     // Shared tail: pathData → angleData, tile positions, actions, position offsets
     bool finishLoad(ProgressCb onProgress, bool exportOnly);

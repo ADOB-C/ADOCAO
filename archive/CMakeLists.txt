@@ -6,6 +6,9 @@ add_library(adocao_archive STATIC
     # `.adocao` 的列编码器（字典/常量/差分/位打包/原始）。它**不依赖** lzma/zstd：
     # 压缩只是列流之后的可选一步，设计核心是"每列按取值基数选编码"。
     AdocaoColumns.cpp
+    # v7 的 kind 与自描述 schema（类型/字段自动发现；新增事件类型不改格式）
+    AdocaoKinds.cpp
+    AdocaoSchema.cpp
     # v3 的分块列容器（4096 一块、块内自选编码、帧级 zstd 与 seek 粒度解耦，§8.3）。
     # 这个文件用 zstd（帧），所以它和 Columns 不同 —— 帧是 seek 的单位，必须能单独解压。
     AdocaoBlocked.cpp

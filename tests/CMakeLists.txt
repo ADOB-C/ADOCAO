@@ -268,3 +268,7 @@ add_test(NAME tile_animation COMMAND adocao_tile_animation_test)
 add_executable(adocao_time_origin_test time_origin_test.cpp)
 target_link_libraries(adocao_time_origin_test PRIVATE adocao_core)
 add_test(NAME time_origin COMMAND adocao_time_origin_test)
+
+add_executable(adocao_schema_test adocao_schema_test.cpp)
+target_link_libraries(adocao_schema_test PRIVATE adocao_archive)
+add_test(NAME adocao_schema COMMAND adocao_schema_test)

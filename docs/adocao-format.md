@@ -1217,3 +1217,35 @@ SetSpeed 314 层，**全部 0 不一致**。
 ⚠️ **边界（别读过头）**：这只证明了**加载路径**（容器 + 重算）与 n 解耦。
 `LevelData` 现在仍是全量加载，按需开窗的消费方（渲染 / 剔除 / 时间线）**还没接** ——
 所以 **D1 对"产品常驻内存"还不能宣称**。
+
+## 9. v7（进行中）：自描述列式事件库
+
+目标：容器不再为每类事件手写定长记录，而是**按 kind 分列**装下任何事件的任何字段，
+做到"新增事件类型不改格式"。本节记录已落地部分与实测。
+
+### 9.1 已落地（2026-10-22）
+
+- `archive/AdocaoKinds.{hpp,cpp}`：kind 枚举（Bool/Int/Float/GridFloat/Enum/Color/String/Tag/Pair/
+  Nested/RawJSON）与单值形态判定；**新增 kind 必须 bump version**，新增类型/字段不用。
+- `archive/AdocaoSchema.{hpp,cpp}`：打包期从实际 JSON **自动发现**类型与字段，整列统计决定 kind
+  （整列都在十进制网格上 → `GridFloat`；取值少且短 → `Enum`；全 hex → `Color` …），
+  三态用 flags 区分（bit0 有 null / bit1 有缺失 / bit2 全 null / bit3 pair 的分量有 null）。
+  序列化往返逐字节确定（同输入两次打包相同）。
+- `LevelData::preserveRawJson`（**只在 pack 用**）：用 RapidJSON 捕获 `actions` 每条事件的原始切片
+  与整个 `decorations` 数组；默认关，播放路径零成本。`adocao pack --schema-report` 打印统计。
+
+### 9.2 实测（Hello 2025，3.41 MB / 11,233 事件 / 1,233 装饰）
+
+```
+schema: 36 类型 / 388 字段；rawJSON 字段 0/388（0%）
+  Bool 41 | Int 112 | Float 10 | GridFloat 17 | Enum 126 | Color 19
+  String 9 | Tag 3 | Pair 49 | Nested 2
+```
+
+即：**没有一个字段落到 RawJSON 兜底** —— 全部进入了有专用变换的 kind，且这张谱里
+`MoveDecorations`(23 字段)/`SetFilterAdvanced`/`Bloom` 等 v6 会整体丢弃的类型都在 schema 里。
+
+### 9.3 待做
+
+列编码（按 kind 建列/解列）、`EventIndex` 块内 seek、`Coverage` 段与裁剪导出
+（`--events=playable` 回到 v5 体积）、`adocao json` 回写、`PeriodicResidual` 变换。

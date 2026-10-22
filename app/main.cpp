@@ -1,6 +1,7 @@
 #include "app/HitsoundTypes.hpp"
 #include "core/util/Progress.hpp"
 #include "core/level/LevelData.hpp"
+#include "archive/AdocaoSchema.hpp"
 #include "archive/AdocaoWriter.hpp"     // `adocao pack`：把已加载的谱打成 .adocao
 #include "archive/AdocaoDiagnostics.hpp"  // `--codec-report`：§8.4 的判据统计（纯诊断）
 #include <fstream>
@@ -231,7 +232,8 @@ int main(int argc, char* argv[]) {
     float padding = -1.0f, thickness = -1.0f;        // <0 = 用默认
     int block = 4096, threads = 0, scale = 1, progressForce = 0;
     bool codecReport = false;
-    bool packCheckpoints = false;   // pack --checkpoints：写 Derived 段（每 4096 层的续算快照）                    // pack：打印每列的体积明细
+    bool packCheckpoints = false;
+    bool packSchemaReport = false;   // pack --schema-report：打印 v7 自描述 schema 的统计   // pack --checkpoints：写 Derived 段（每 4096 层的续算快照）                    // pack：打印每列的体积明细
 
     // CLI-FLAGS-BEGIN —— scripts/check-cli-help.sh 只在这个区间里找开关名
     for (int i = argStart; i < argc; i++) {
@@ -313,6 +315,7 @@ int main(int argc, char* argv[]) {
         else if (mode == Mode::Pack) {
             if (std::strcmp(a, "--codec-report") == 0) codecReport = true;
             else if (std::strcmp(a, "--checkpoints") == 0) packCheckpoints = true;
+            else if (std::strcmp(a, "--schema-report") == 0) packSchemaReport = true;
             else { std::fprintf(stderr, "未知选项: %s（pack 模式）\n", a); return 2; }
         }
         else if (mode == Mode::Image) {
@@ -382,9 +385,22 @@ int main(int argc, char* argv[]) {
     if (mode == Mode::Pack) {
         if (pos.size() < 2) return usageErr(mode, "adocao pack 需要 <谱> <输出.adocao>");
         LevelData lv;
+        lv.preserveRawJson = true;   // v7：留下 actions/decorations 的原始切片（建 schema 用）
         if (!lv.loadFromFile(resolveLevelPath(pos[0]))) {
             std::fprintf(stderr, "加载失败: %s\n", pos[0].c_str());
             return 1;
+        }
+        if (packSchemaReport) {
+            adocao::SchemaBuilder sb;
+            std::string serr;
+            if (adocao::buildSchemaFromLevel(lv, sb, serr)) {
+                sb.finalize();
+                std::printf("原始成员: %zu 条 action + decorations %zu B\n",
+                            lv.rawActionsJson.size(), lv.rawDecorationsJson.size());
+                std::fputs(adocao::schemaSummary(sb.schema()).c_str(), stdout);
+            } else {
+                std::fprintf(stderr, "schema 构建失败: %s\n", serr.c_str());
+            }
         }
         std::vector<uint8_t> bytes;
         std::string err;

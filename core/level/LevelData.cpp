@@ -18,6 +18,9 @@
 #include <chrono>
 #include <iterator>
 #include "core/util/CountLimits.hpp"
+#include <rapidjson/document.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 #include "core/util/Easing.hpp"
 
 
@@ -2203,6 +2206,35 @@ static std::vector<double> parseAngleDataFast(const char* json, size_t len, size
 
 // 可移植读法（测试 / 嵌入方用）。app 走 FileMap + loadFromBuffer：1.5 GB 的谱
 // 用 ifstream 复制一份要多花 ~250 ms 和 1.5 GB 常驻内存，mmap 没有这份副本。
+// v7：pack 期把 actions/decorations 的原始 JSON 切片留下来（RapidJSON，一次，CLI 用）。
+// 不做任何数值转换 —— 容器侧直接从这些切片建 schema/列，保证"值一个都不丢"。
+bool LevelData::captureRawMembers(const char* data, size_t length) {
+    rawActionsJson.clear();
+    rawDecorationsJson.clear();
+    if (!data || length == 0) return false;
+    rapidjson::Document d;
+    d.Parse<rapidjson::kParseTrailingCommasFlag | rapidjson::kParseCommentsFlag>(data, length);
+    if (d.HasParseError() || !d.IsObject()) return false;
+    auto ai = d.FindMember("actions");
+    if (ai != d.MemberEnd() && ai->value.IsArray()) {
+        rawActionsJson.reserve(ai->value.Size());
+        for (const auto& v : ai->value.GetArray()) {
+            rapidjson::StringBuffer buf;
+            rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+            if (!v.Accept(w)) return false;
+            rawActionsJson.emplace_back(buf.GetString(), buf.GetSize());
+        }
+    }
+    auto di = d.FindMember("decorations");
+    if (di != d.MemberEnd() && di->value.IsArray()) {
+        rapidjson::StringBuffer buf;
+        rapidjson::Writer<rapidjson::StringBuffer> w(buf);
+        if (!di->value.Accept(w)) return false;
+        rawDecorationsJson.assign(buf.GetString(), buf.GetSize());
+    }
+    return true;
+}
+
 bool LevelData::loadFromFile(const std::string& filepath, ProgressCb onProgress, bool exportOnly) {
     if (onProgress) onProgress(0.05f, "Reading file...");
     std::ifstream file(filepath, std::ios::binary);
@@ -2227,6 +2259,23 @@ bool LevelData::loadFromString(const std::string& jsonStr, ProgressCb onProgress
 }
 
 bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgress, bool exportOnly) {
+    const bool ok = loadFromBufferImpl(data, len, onProgress, exportOnly);
+    if (ok && preserveRawJson) {
+        // 只在明文 JSON 上捕获（压缩容器解压后的缓冲在 impl 作用域里，这里拿不到）；
+        // 需要从 .xz/.zst 打包时先转明文，v7 的 Preserved 覆盖率统计会显示 0。
+        if (sniffLevelArchive(data, len) == LevelArchiveKind::Plain) {
+            const char* p = data;
+            size_t n = len;
+            if (n >= 3 && (unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xBB &&
+                (unsigned char)p[2] == 0xBF) { p += 3; n -= 3; }
+            if (!captureRawMembers(p, n))
+                LOG_W("preserveRawJson: 原始成员捕获失败（JSON 解析不了），pack 将退回旧段");
+        }
+    }
+    return ok;
+}
+
+bool LevelData::loadFromBufferImpl(const char* data, size_t len, ProgressCb onProgress, bool exportOnly) {
     // **幂等**：同一个对象加载两次必须与"新建一个再加载"等价。以前只清了驻留表，于是
     // `actions` 会被追加（两条路都是 `if (actions.empty()) … else insert(...)`）而
     // `angleData` 是替换 —— 结果是"角度新的、事件两份"。现在先回到刚构造的状态。
@@ -2234,8 +2283,10 @@ bool LevelData::loadFromBuffer(const char* data, size_t len, ProgressCb onProgre
     // （CLI 预置颜色、向导的配置），必须留着（见 parseLegacy / 窗口路径里的沿用逻辑）。
     {
         Settings keep = settings;
+        const bool keepPreserve = preserveRawJson;
         *this = LevelData{};
         settings = keep;
+        preserveRawJson = keepPreserve;
     }
     g_internOwner = this;                                  // 事件字符串驻留表归本次加载所有
     actionStrTable.resize(1);                              // id 0 = 空串

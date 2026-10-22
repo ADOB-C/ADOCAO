@@ -11,6 +11,7 @@
 // 自检/坏数据失败这些既有保证直接继承。Pair 的分量按 double 存（逐位无损）+ 分量 null 位；
 // Nested/RawJSON 存原始 JSON 文本（长度前缀）。
 #include <cstdint>
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -58,6 +59,9 @@ bool buildEventColumns(const Schema& schema,
 struct FieldBatch {
     std::vector<LevelData::EventFieldValue> values;
     std::vector<uint32_t> offsets;   // size = eventCount + 1
+    // 颜色等"现算出来的字符串"必须存在这里：`EventFieldValue::str` 只有裸指针，
+    // 早先用 thread_local 缓冲复用 → 后面的事件把前一个的颜色覆盖掉（语料回归抓到的）。
+    std::deque<std::string> strings;
 };
 
 // `outBatch` 非空时**同时**产出结构化字段（v7 → LevelData 直灌用，不再拼 JSON 文本）；

@@ -699,7 +699,10 @@ bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t e
                     case Kind::Enum:
                     case Kind::Tag:
                     case Kind::String: {
-                        const std::string& sv = d.strv[d.cursor++];
+                        // **必须拷进 batch**：`dec` 是 decodeEventColumns 的局部变量，函数返回就析构，
+                        // 直接把 `d.strv` 的指针交出去会悬垂（语料回归里表现为 style/relativeTo 变乱码）。
+                        outBatch->strings.push_back(d.strv[d.cursor++]);
+                        const std::string& sv = outBatch->strings.back();
                         v.type = LevelData::EventFieldValue::Str;
                         v.str = sv.data();
                         v.len = (uint32_t)sv.size();
@@ -708,13 +711,14 @@ bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t e
                     case Kind::Color: {
                         v.type = LevelData::EventFieldValue::Str;
                         if (blob.subFlags & 0x40) {
-                            const std::string& sv = d.strv[d.cursor++];
+                            outBatch->strings.push_back(d.strv[d.cursor++]);
+                            const std::string& sv = outBatch->strings.back();
                             v.str = sv.data();
                             v.len = (uint32_t)sv.size();
                         } else {
-                            // 颜色：转成 "#RRGGBB" 字符串（core 侧按字符串比较/解析）
-                            static thread_local std::string hex;
-                            hex = colorToString(d.u32v[d.cursor++], blob.subFlags & 0x0C);
+                            // 颜色：转成十六进制串（core 侧按字符串解析）。**存在 batch 里**，不能复用缓冲。
+                            outBatch->strings.push_back(colorToString(d.u32v[d.cursor++], blob.subFlags & 0x0C));
+                            const std::string& hex = outBatch->strings.back();
                             v.str = hex.data();
                             v.len = (uint32_t)hex.size();
                         }
@@ -735,7 +739,12 @@ bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t e
                             v.a = d.pair0[k];
                         }
                         if (blob.subFlags & kPairStr1) {
-                            if (k < d.pair1s.size()) { v.str = d.pair1s[k].data(); v.len = (uint32_t)d.pair1s[k].size(); }
+                            if (k < d.pair1s.size()) {
+                                outBatch->strings.push_back(d.pair1s[k]);
+                                const std::string& ps = outBatch->strings.back();
+                                v.str = ps.data();
+                                v.len = (uint32_t)ps.size();
+                            }
                         } else if (k < d.pair1.size()) {
                             v.c = d.pair1[k];
                         }
@@ -747,7 +756,8 @@ bool decodeEventColumns(const Schema& schema, const EventColumns& cols, size_t e
                     }
                     case Kind::Nested:
                     case Kind::RawJSON: {
-                        const std::string& sv = d.strv[d.cursor++];
+                        outBatch->strings.push_back(d.strv[d.cursor++]);
+                        const std::string& sv = outBatch->strings.back();
                         v.type = LevelData::EventFieldValue::Str;
                         v.str = sv.data();
                         v.len = (uint32_t)sv.size();

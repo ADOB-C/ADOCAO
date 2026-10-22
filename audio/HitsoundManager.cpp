@@ -252,11 +252,19 @@ bool HitsoundManager::preSynthesize(const std::vector<HitsoundTimestampGroup>& g
     //     receive the same value (both start at 0 and every add is identical), so
     //     accumulating one channel and duplicating at the end is exact — and halves
     //     the read-modify-write traffic.
-    //  3. The output is swept in blocks that fit in L2, and a block only visits the
-    //     hits overlapping it, so source data stays hot; blocks are independent and
-    //     are handed to worker threads (no locking, hits visited in timestamp order
-    //     inside a block).
-    constexpr int kBlockFrames = 1 << 16;      // 65536 frames = 128 KB mono int16
+    //  3. The output is swept in blocks, and a block only visits the hits overlapping
+    //     it, so source data stays hot; blocks are independent and are handed to
+    //     worker threads (no locking, hits visited in timestamp order inside a block).
+    //
+    // Block size was 65536 frames (128 KB) and is now 4096 (8 KB): every hit does a
+    // read-modify-write of the SAME destination block, and 128 KB + the ~19 KB source
+    // does not fit in L1, so each add paid L2 traffic. At 8 KB both the block and the
+    // source stay in L1. The partition point is invisible in the output: each sample
+    // still receives exactly its overlapping hits, in timestamp order, so the
+    // saturating (order-dependent) accumulation is unchanged — verified byte-identical
+    // on the mixer's full buffers. Narrower blocks do add one upper_bound per block and
+    // per group, which is free next to millions of sample adds.
+    constexpr int kBlockFrames = 1 << 12;      // 4096 frames = 8 KB mono int16
     const size_t numBlocks = ((size_t)totalFrames + kBlockFrames - 1) / kBlockFrames;
 
     // Prepared per-group scaled source (see 1). `wide` is only used when a scaled

@@ -137,6 +137,21 @@ int main() {
         if (back.eventBlockStart[i] < back.eventBlockStart[i - 1]) mono = false;
     check(mono && back.eventBlockSorted, "EventIndex 单调且标记为已排序");
 
+    // **按层号窗口解事件**：只解命中的块，再按 floor 精确过滤
+    {
+        std::vector<std::string> win;
+        std::string werr;
+        check(adocao::decodeEventsInFloorRange(back, 2, 6, win, werr), "按层窗口解事件: " + werr);
+        bool floorsOk = true;
+        for (const auto& e : win) {
+            rapidjson::Document d;
+            d.Parse(e.c_str(), e.size());
+            const int64_t fl = d["floor"].GetInt64();
+            if (fl < 2 || fl >= 6) floorsOk = false;
+        }
+        check(!win.empty() && floorsOk, "窗口内事件 floor 全部落在 [2,6)（" + std::to_string(win.size()) + " 条）");
+    }
+
     // **v7 唯一存储**：不写 v6 段，读侧从 v7 事件还原出 actions / 富事件
     adocao::PackOptions only;
     only.v7Only = true;

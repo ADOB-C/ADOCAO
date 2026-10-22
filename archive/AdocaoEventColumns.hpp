@@ -77,6 +77,12 @@ bool decodeEventColumnsBlockedAll(const Schema& schema, const uint8_t* p, size_t
                                   std::vector<std::string>& outEvents, std::string& err,
                                   std::vector<uint16_t>* outTypeIds = nullptr);
 
+// **按层号窗口解事件**（2e9 的 seek 落点）：用 `LevelData::eventBlockStart`（EventIndex）把
+// `floor ∈ [floorLo, floorHi)` 映射成事件下标区间，只解覆盖的块；块边界是近似的，
+// 所以解出来后再按每条事件的 `floor` 精确过滤。索引缺失/非升序时退回"全解再过滤"。
+bool decodeEventsInFloorRange(const LevelData& lv, int64_t floorLo, int64_t floorHi,
+                              std::vector<std::string>& outEvents, std::string& err);
+
 // 诊断：整段 zstd-19 之后的字节数（报告用；真正写文件时由段级压缩决定）。
 size_t zstdEstimate(const std::vector<uint8_t>& raw);
 

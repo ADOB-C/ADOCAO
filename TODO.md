@@ -47,8 +47,15 @@
       `decodeEventColumnsRange([first,last))` 只解命中的块（范围解码与全量解码逐字节一致的用例已加）。
       块大小默认 **16384**（`ADOCAO_V7_BLOCK_EVENTS` 可调）：4096 会让 2025 +6.5 KB、
       MEGAMIX_2 +14.4 KB；16384 只 +88 B / +4.3 KB。
-- [ ] 把"按层窗口 → 事件块"真正接进加载器（现在 `EventIndex` + 范围解码都已就位，
-      但 `unpackLevel` 仍是全量解码；接上之后窗口加载才不再扫全部事件）。
+- [x] **按层窗口解事件** `decodeEventsInFloorRange(lv, floorLo, floorHi)`：用 `EventIndex` 定位块、
+      只解命中的块，再按每条事件的 `floor` 精确过滤（2026-10-22）。实测 2025：
+      三段窗口分别 4,447 / 5,159 / 1,627 条，**合计恰好 11,233 = actions 总数** ✓。
+- [ ] **事件块改成"按 floor 对齐"**（现在是按事件数 16k 一块）：实测窗口
+      `[0,4096)` 要 7.6 ms —— 因为它解的是**整块 16k 事件**再过滤。若块边界 = 4096 层
+      （与 `EventIndex` 同粒度），一个窗口就只解一块、无过滤浪费。decorations 放尾块
+      （它们与 actions 不是同一条 floor 序列）。
+- [ ] 把窗口解码接进 `unpackLevel`（现在仍全量解码后再 ingest；要真正省时得让
+      `LevelData` 持有"未解码的事件块 + 索引"，按窗口惰性 ingest）。
 - [ ] `Coverage` 在应用里提示（打开被裁剪的 `.adocao` 时说清缺了哪些类型）。
 - [ ] 体积：2025 `all` 72.9 KB，目标 60 KB；已实测否掉的优化见 `docs/adocao-format.md` §9.3。
 

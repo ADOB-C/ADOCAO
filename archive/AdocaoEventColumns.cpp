@@ -10,6 +10,9 @@
 #include <rapidjson/writer.h>
 
 #include "core/util/Env.hpp"
+#include "core/level/LevelData.hpp"
+
+#include <rapidjson/document.h>
 #include "archive/AdocaoColumns.hpp"
 
 #include <zstd.h>
@@ -845,6 +848,53 @@ bool decodeEventColumnsBlockedAll(const Schema& schema, const uint8_t* p, size_t
                                   std::vector<uint16_t>* outTypeIds) {
     uint32_t blocks = 0;
     if (!decodeEventColumnsRange(schema, p, n, 0, UINT32_MAX, outEvents, err, &blocks, outTypeIds)) return false;
+    return true;
+}
+
+bool decodeEventsInFloorRange(const LevelData& lv, int64_t floorLo, int64_t floorHi,
+                              std::vector<std::string>& outEvents, std::string& err) {
+    err.clear();
+    outEvents.clear();
+    if (floorHi <= floorLo) return true;
+    if (lv.v7SchemaBytes.empty() || lv.v7ColumnsBytes.empty()) { err = "没有 v7 事件段"; return false; }
+    Schema schema;
+    if (!SchemaBuilder::deserialize(lv.v7SchemaBytes.data(), lv.v7SchemaBytes.size(), schema, err))
+        return false;
+
+    uint32_t first = 0, last = UINT32_MAX;
+    if (lv.eventBlockSorted && lv.eventBlockStart.size() >= 2 && lv.eventBlockShift <= 20) {
+        const uint32_t bs = lv.eventBlockShift;
+        const uint32_t lo = (uint32_t)((floorLo < 0 ? 0 : floorLo) >> bs);
+        // **末块要取"包含 floorHi-1 的块"的结束**：用 floorHi>>bs 会漏掉同块内的窗口
+        // （踩过：[2,6) 落在同一块，first==last==0 → 一条都解不出来）。
+        const uint32_t hiBlock = (uint32_t)((floorHi - 1) >> bs);
+        const uint32_t nb = (uint32_t)lv.eventBlockStart.size() - 1;
+        first = lv.eventBlockStart[std::min(lo, nb)];
+        last = lv.eventBlockStart[std::min(hiBlock + 1, nb)];
+    }
+
+    std::vector<std::string> raw;
+    if (!lv.v7ColumnsBlocked) {
+        // 非分块布局：只能全量解（记录在案）
+        EventColumns cols;
+        if (!deserializeEventColumns(schema, lv.v7ColumnsBytes.data(), lv.v7ColumnsBytes.size(), cols, err))
+            return false;
+        if (!decodeEventColumns(schema, cols, cols.typeIds.size(), raw, err)) return false;
+    } else if (!decodeEventColumnsRange(schema, lv.v7ColumnsBytes.data(), lv.v7ColumnsBytes.size(),
+                                        first, last == UINT32_MAX ? UINT32_MAX : last, raw, err)) {
+        return false;
+    }
+
+    for (auto& js : raw) {
+        rapidjson::Document d;
+        d.Parse(js.c_str(), js.size());
+        if (d.HasParseError() || !d.IsObject()) { err = "事件 JSON 解析失败"; return false; }
+        auto it = d.FindMember("floor");
+        if (it == d.MemberEnd() || !it->value.IsInt64()) continue;   // 没有 floor 的事件不进窗口
+        const int64_t fl = it->value.GetInt64();
+        if (fl < floorLo || fl >= floorHi) continue;
+        outEvents.push_back(std::move(js));
+    }
     return true;
 }
 

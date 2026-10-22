@@ -42,6 +42,10 @@ struct LevelData {
     std::string rawDecorationsJson;
     // 解析原始成员；失败只警告（pack 会退回旧段），不影响已经解析好的数据。
     bool captureRawMembers(const char* data, size_t length);
+    // v7 段（读 `.adocao` v7 时填；写出来给 `adocao json` 回写与"裁剪/丢失"诊断用）
+    std::vector<uint8_t> v7SchemaBytes;
+    std::vector<uint8_t> v7ColumnsBytes;
+    std::vector<uint8_t> v7CoverageBytes;
 
     struct Settings {
         int    version = 15;

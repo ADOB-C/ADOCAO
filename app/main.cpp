@@ -7,6 +7,7 @@
 #include "archive/AdocaoEventColumns.hpp"
 #include <set>
 
+#include "archive/AdocaoReader.hpp"
 #include "archive/AdocaoSchema.hpp"
 #include "archive/AdocaoWriter.hpp"     // `adocao pack`：把已加载的谱打成 .adocao
 #include "archive/AdocaoDiagnostics.hpp"  // `--codec-report`：§8.4 的判据统计（纯诊断）
@@ -67,6 +68,7 @@ void printHelp(Mode mode, bool all) {
             "\n"
             "  --codec-report            打印每列的编码、元素数、朴素/编码后字节、字典项数、位宽\n"
             "  --checkpoints             额外写 Derived 段（每 4096 层的续算快照，默认关）\n"
+            "  --v7                      写 v7 事件库段（自描述 schema + 列；v6 会丢的类型也能无损装下）\n"
             "  --compress=auto|zstd|lzma|none  段级压缩器（auto = 两者都试、取更小；默认 auto）\n"
             "  --level=N                 压缩级别（0 = 编码器默认：zstd 19 / lzma 9|EXTREME；取 0..22）\n"
             "  --schema-report           打印 v7 自描述 schema（类型/字段/kind 分布）与事件列体积\n"
@@ -245,6 +247,7 @@ int main(int argc, char* argv[]) {
     bool codecReport = false;
     bool packCheckpoints = false;
     bool packSchemaReport = false;   // pack --schema-report：打印 v7 自描述 schema 的统计
+    bool packV7 = false;             // pack --v7：写 v7 事件库段（EventSchema/EventColumns/Coverage）
     std::string packEventsPreset = "all";   // pack --events=all|playable|minimal（裁剪导出）
     adocao::Compress packCompress = adocao::Compress::Auto;   // pack --compress=auto|zstd|lzma|none
     int packLevel = 0;                                        // pack --level=N（0 = 编码器默认）   // pack --checkpoints：写 Derived 段（每 4096 层的续算快照）                    // pack：打印每列的体积明细
@@ -330,6 +333,7 @@ int main(int argc, char* argv[]) {
             if (std::strcmp(a, "--codec-report") == 0) codecReport = true;
             else if (std::strcmp(a, "--checkpoints") == 0) packCheckpoints = true;
             else if (std::strcmp(a, "--schema-report") == 0) packSchemaReport = true;
+            else if (std::strcmp(a, "--v7") == 0) packV7 = true;
             else if (std::strncmp(a, "--events=", 9) == 0) packEventsPreset = a + 9;
             else if (std::strncmp(a, "--compress=", 11) == 0) {
                 const char* v = a + 11;
@@ -511,6 +515,34 @@ int main(int argc, char* argv[]) {
                 std::fprintf(stderr, "schema 构建失败: %s\n", serr.c_str());
             }
         }
+        // 裁剪导出：先把 raw 切片按预设过滤掉（v7 段只装保留下来的）
+        uint32_t droppedForV7 = 0;
+        if (packV7 && packEventsPreset != "all") {
+            static const std::set<std::string> kPlayable = {
+                "Twirl","SetSpeed","PositionTrack","SetHitsound","Bookmark","Pause","AnimateTrack",
+                "MoveCamera","ColorTrack","RecolorTrack","Flash","MoveTrack","RepeatEvents","ScaleRadius"};
+            static const std::set<std::string> kMinimal = {
+                "Twirl","SetSpeed","PositionTrack","ScaleRadius","AnimateTrack"};
+            const std::set<std::string>& allow =
+                (packEventsPreset == "minimal") ? kMinimal : kPlayable;
+            std::vector<std::string> kept;
+            kept.reserve(lv.rawActionsJson.size());
+            for (const auto& js : lv.rawActionsJson) {
+                rapidjson::Document d;
+                d.Parse(js.c_str(), js.size());
+                const char* t = (d.HasParseError() || !d.HasMember("eventType")) ? "" : d["eventType"].GetString();
+                if (allow.count(t)) kept.push_back(js);
+                else ++droppedForV7;
+            }
+            lv.rawActionsJson = std::move(kept);
+            if (!lv.rawDecorationsJson.empty()) {
+                rapidjson::Document dd;
+                dd.Parse(lv.rawDecorationsJson.c_str(), lv.rawDecorationsJson.size());
+                size_t n = (!dd.HasParseError() && dd.IsArray()) ? dd.Size() : 0;
+                droppedForV7 += (uint32_t)n;
+                lv.rawDecorationsJson.clear();   // 预设都不含装饰
+            }
+        }
         std::vector<uint8_t> bytes;
         std::string err;
         adocao::PackResult rep;
@@ -518,9 +550,27 @@ int main(int argc, char* argv[]) {
         popts.withCheckpoints = packCheckpoints;
         popts.compress = packCompress;
         popts.level = packLevel;
+        popts.withV7Events = packV7;
+        popts.droppedEvents = droppedForV7;
         if (!adocao::packLevel(lv, bytes, err, &rep, popts)) {
             std::fprintf(stderr, "打包失败: %s\n", err.c_str());
             return 1;
+        }
+        if (packV7) {
+            LevelData chk;
+            adocao::DerivedInfo di;
+            std::string cerr;
+            if (!adocao::unpackLevel(bytes.data(), bytes.size(), chk, cerr, &di)) {
+                std::fprintf(stderr, "v7 自检失败（解容器）: %s\n", cerr.c_str());
+                return 1;
+            }
+            if (chk.v7SchemaBytes.empty() || chk.v7ColumnsBytes.empty()) {
+                std::fprintf(stderr, "v7 自检失败：段缺失\n");
+                return 1;
+            }
+            std::printf("v7 自检: schema %zu B + 事件列 %zu B%s\n", chk.v7SchemaBytes.size(),
+                        chk.v7ColumnsBytes.size(),
+                        chk.v7CoverageBytes.empty() ? "（未裁剪）" : "（含 Coverage）");
         }
         std::ofstream f(pos[1], std::ios::binary);
         if (!f) {

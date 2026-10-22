@@ -29,7 +29,7 @@ namespace adocao {
 inline constexpr char kMagic[4] = {kAdocaoMagic[0], kAdocaoMagic[1], kAdocaoMagic[2], kAdocaoMagic[3]};
 static_assert(kAdocaoMagic[0] == 'A' && kAdocaoMagic[1] == 'D' && kAdocaoMagic[2] == 'O' &&
               kAdocaoMagic[3] == '1', "core 的 kAdocaoMagic 变了，archive 这边要一起改");
-inline constexpr uint16_t kVersion  = 6;   // v6：actions 加 actions.strId2（AnimateTrack 的 trackAnimation）   // v5：MoveTrack 段加 eventTag（52→54 B，RepeatEvents 展开用）   // v3：列改**分块容器**（每 4096 元素一块、块内自选编码、
+inline constexpr uint16_t kVersion  = 7;   // v7：自描述事件库（EventSchema/EventColumns/Coverage）   // v6：actions 加 actions.strId2（AnimateTrack 的 trackAnimation）   // v5：MoveTrack 段加 eventTag（52→54 B，RepeatEvents 展开用）   // v3：列改**分块容器**（每 4096 元素一块、块内自选编码、
                                           //     帧级 zstd 与 seek 粒度解耦，见 AdocaoBlocked.hpp）
                                           // + Derived 段（PositionTrack/前缀状态 checkpoint，§8.8）
 inline constexpr uint16_t kMinReadVersion = 2;   // 读侧仍认 v2（双读）；更早的版本没有实现过
@@ -55,6 +55,9 @@ enum class SectionId : uint8_t {
     Colour     = 11,  // ColorTrack / RecolorTrack（v3 32 B / v4 50 B）
     Flash      = 12,  // Flash（定长记录 32 B；全屏闪屏）
     MoveTrack  = 13,  // MoveTrack（定长记录 52 B；轨道动画）
+    EventSchema = 14, // **v7**：自描述事件 schema（类型表 + 字段表；新增事件类型不改格式）
+    EventColumns = 15,// **v7**：按 kind 分列的事件值（含 decorations；v6 会整体丢弃的那些类型）
+    Coverage    = 16, // **v7**：裁剪导出记录（哪些类型被丢了多少条 + lossy 标志）
 };
 
 // 列/段的编码方式。`ColumnHeader::codec` 与 `SectionEntry::codec` 共用这一套。

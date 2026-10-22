@@ -1,13 +1,19 @@
 #include "archive/AdocaoWriter.hpp"
 
 #include <cstring>
+#include <set>
 
 #include "archive/AdocaoBlocked.hpp"
 #include "core/util/Logger.hpp"
 #include "archive/AdocaoCheckpoints.hpp"
+#include "archive/AdocaoEventColumns.hpp"
+#include "archive/AdocaoSchema.hpp"
 #include "archive/AdocaoColumns.hpp"
 #include "core/level/LevelData.hpp"
 
+#include <rapidjson/document.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 #include <zstd.h>
 #include <lzma.h>   // 段级压缩（archive 的 PRIVATE 依赖；实测真实文件上 zstd 比 xz 更小）
 
@@ -622,6 +628,69 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         putU64(s.blob, level.pathData.size());
         putBytes(s.blob, level.pathData.data(), level.pathData.size());
         secs.push_back(std::move(s));
+    }
+
+    // ---- v7：自描述事件库（schema + 列 + 裁剪记录）----
+    // 只写"v6 装不下/会丢"的那部分内容的**无损**表示；播放路径仍读 v6 段（这里不改变语义）。
+    if (opts.withV7Events && !level.rawActionsJson.empty()) {
+        // **只写 v6 段装不下的类型**（去重）：Camera/Colour/Flash/MoveTrack/Repeat 与
+        // Actions 里那 9 类播放事件已经有定长段了，再写一遍纯属重复（实测 16 KB）。
+        // v7 的价值在"v6 会整体丢弃的那部分"：MoveDecorations/SetFilter*/Bloom/装饰…
+        static const std::set<std::string> kLegacyStored = {
+            "Twirl","SetSpeed","PositionTrack","SetHitsound","Bookmark","Pause","AnimateTrack",
+            "MoveCamera","ColorTrack","RecolorTrack","Flash","MoveTrack","RepeatEvents","ScaleRadius"};
+        std::vector<std::string> evs;
+        evs.reserve(level.rawActionsJson.size());
+        for (const auto& js : level.rawActionsJson) {
+            rapidjson::Document d;
+            d.Parse(js.c_str(), js.size());
+            const char* t = (d.HasParseError() || !d.HasMember("eventType")) ? "" : d["eventType"].GetString();
+            if (kLegacyStored.count(t)) continue;   // 已由 v6 段承载
+            evs.push_back(js);
+        }
+        std::vector<uint8_t> srcs(evs.size(), 0);
+        if (!level.rawDecorationsJson.empty()) {
+            rapidjson::Document dd;
+            dd.Parse(level.rawDecorationsJson.c_str(), level.rawDecorationsJson.size());
+            if (dd.HasParseError() || !dd.IsArray()) { err = "v7: decorations 切片解析失败"; return false; }
+            for (const auto& v : dd.GetArray()) {
+                rapidjson::StringBuffer b;
+                rapidjson::Writer<rapidjson::StringBuffer> w(b);
+                v.Accept(w);
+                evs.emplace_back(b.GetString(), b.GetSize());
+                srcs.push_back((uint8_t)1);
+            }
+        }
+        SchemaBuilder sb;
+        for (size_t i = 0; i < evs.size(); ++i) {
+            rapidjson::Document d;
+            d.Parse(evs[i].c_str(), evs[i].size());
+            if (d.HasParseError() || !d.IsObject()) { err = "v7: 事件切片解析失败"; return false; }
+            auto it = d.FindMember("eventType");
+            if (it == d.MemberEnd() || !it->value.IsString()) { err = "v7: 事件缺 eventType"; return false; }
+            sb.addEvent(std::string_view(it->value.GetString(), it->value.GetStringLength()),
+                        srcs[i] ? EventSource::Decorations : EventSource::Actions, d);
+        }
+        sb.finalize();
+        EventColumns cols;
+        std::string cerr;
+        if (!buildEventColumns(sb.schema(), evs, srcs, cols, cerr)) {
+            err = "v7: 建列失败: " + cerr;
+            return false;
+        }
+        Section sch; sch.id = (uint8_t)SectionId::EventSchema;
+        sch.blob = sb.serialize();
+        secs.push_back(std::move(sch));
+        Section col; col.id = (uint8_t)SectionId::EventColumns;
+        col.blob = serializeEventColumns(sb.schema(), cols);
+        col.elements = evs.size();
+        secs.push_back(std::move(col));
+        if (opts.droppedEvents) {
+            Section cov; cov.id = (uint8_t)SectionId::Coverage;
+            putU32(cov.blob, opts.droppedEvents);
+            putU32(cov.blob, (uint32_t)evs.size());
+            secs.push_back(std::move(cov));
+        }
     }
 
     // ---- 段目录（偏移 8 B 对齐，为 mmap 直读）----

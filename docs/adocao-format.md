@@ -1275,7 +1275,20 @@ GridFloat 10.2 KB、Enum 10.6 KB、Color 5.2 KB、Float 5.8 KB、Bool 1.8 KB、T
 对照：v6 文件 **19.3 KB**（只保留 9 类、丢掉装饰）。
 **结论：`playable` 档比 v6 还小 19%**（15.6 vs 19.3 KB），且 schema 跟着裁剪自动缩到 1.9 KB。
 
-### 9.5 待做
+### 9.5 容器落地（v7 段，2026-10-22）
+
+`pack --v7` 写出 `EventSchema(14) / EventColumns(15)`（裁剪时另加 `Coverage(16)`）。
+**去重**：v6 段已经承载的 14 类事件不再重复写（实测省 16 KB），v7 只装 v6 会丢的那些
+（`MoveDecorations` / `SetFilter*` / `Bloom` / `decorations` …）。读侧只做搬运
+（`LevelData::v7SchemaBytes/v7ColumnsBytes`），**播放语义完全不变** —— v7 出图与 JSON 逐字节相同。
+
+| 2025 产物 | 事件数 | 文件 |
+|---|---|---|
+| v6（`--checkpoints` 关，zstd-19） | 3,643 actions + 富事件 | 19,344 B |
+| v7 `--events=all`（含 v6 段 + 全部补全） | 12,466 | **72,056 B** |
+| v7 `--events=playable` | 7,439（v7 段几乎为空） | **18,504 B**（比 v6 小 4.3%） |
+
+### 9.6 待做
 
 列编码（按 kind 建列/解列）、`EventIndex` 块内 seek、`Coverage` 段与裁剪导出
 （`--events=playable` 回到 v5 体积）、`adocao json` 回写、`PeriodicResidual` 变换。

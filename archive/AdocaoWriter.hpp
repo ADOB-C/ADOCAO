@@ -58,6 +58,11 @@ struct PackOptions {
     bool withCheckpoints = false;
     Compress compress = Compress::Auto;
     int level = 0;          // 0 = 各编码器默认（zstd 19 / lzma 9|EXTREME）
+    // **v7 事件库**：把 `LevelData::rawActionsJson` / `rawDecorationsJson`（pack 期捕获的原始切片）
+    // 按自描述 schema 写成 EventSchema + EventColumns 两段。v6 会丢掉的类型（MoveDecorations /
+    // SetFilter / decorations …）由此无损存进容器。裁剪由调用方先过滤 raw 切片完成。
+    bool withV7Events = false;
+    uint32_t droppedEvents = 0;   // 可选：写进 Coverage（裁剪导出时用；0 = 没裁）
 };
 
 // 打包。out 是完整的文件字节（含头与段目录）；失败时 err 里是原因。

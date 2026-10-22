@@ -563,6 +563,27 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
         out.pathData.assign((const char*)pathSec->p + 8, (size_t)len);
     }
 
+    // v7：自描述事件库三节。这里**只做搬运**（存进 LevelData 供 `adocao json` 回写与诊断用），
+    // 播放语义仍由上面那些 v6 段决定 —— 这样 v7 的引入不会改变任何渲染行为。
+    {
+        out.v7SchemaBytes.clear();
+        out.v7ColumnsBytes.clear();
+        out.v7CoverageBytes.clear();
+        if (const Sec* s14 = findSec(secs, SectionId::EventSchema)) {
+            out.v7SchemaBytes.assign(s14->p, s14->p + s14->size);
+        }
+        if (const Sec* s15 = findSec(secs, SectionId::EventColumns)) {
+            out.v7ColumnsBytes.assign(s15->p, s15->p + s15->size);
+        }
+        if (const Sec* s16 = findSec(secs, SectionId::Coverage)) {
+            out.v7CoverageBytes.assign(s16->p, s16->p + s16->size);
+        }
+        if (!out.v7SchemaBytes.empty() != !out.v7ColumnsBytes.empty()) {
+            err = "v7: EventSchema 与 EventColumns 必须同时存在";
+            return false;
+        }
+    }
+
     // ⑥ Derived（可选）：checkpoint 表。坏数据**明确失败**（它是 ③ 的寻址依据，不许半信半疑）
     if (derived) {
         derived->stride = 0;

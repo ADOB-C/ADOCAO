@@ -5,6 +5,8 @@
 
 #include "archive/AdocaoBlocked.hpp"
 #include "archive/AdocaoColumns.hpp"
+#include "archive/AdocaoEventColumns.hpp"
+#include "archive/AdocaoSchema.hpp"
 #include "archive/AdocaoFormat.hpp"
 #include "archive/LevelArchive.hpp"   // 段级解压复用现成的 decompressLevelArchive
 #include "core/level/LevelData.hpp"
@@ -584,12 +586,55 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
         if (const Sec* s16 = findSec(secs, SectionId::Coverage)) {
             out.v7CoverageBytes.assign(s16->p, s16->p + s16->size);
         }
+        if (const Sec* s17 = findSec(secs, SectionId::EventIndex)) {
+            const uint8_t* q = s17->p;
+            const uint8_t* qe = s17->p + s17->size;
+            if ((size_t)(qe - q) < 12) { err = "v7: EventIndex 段截断"; return false; }
+            const uint32_t shift = rdU32(q);
+            const uint32_t blocks = rdU32(q + 4);
+            const uint32_t sorted = rdU32(q + 8);
+            if (shift > 20 || blocks > (1u << 24) || (size_t)(qe - q) < 12 + ((size_t)blocks + 1) * 4) {
+                err = "v7: EventIndex 段损坏";
+                return false;
+            }
+            out.eventBlockShift = shift;
+            out.eventBlockSorted = sorted != 0;
+            out.eventBlockStart.resize(blocks + 1);
+            for (uint32_t i = 0; i <= blocks; ++i) out.eventBlockStart[i] = rdU32(q + 12 + i * 4);
+        }
         if (const Sec* pre = findSec(secs, SectionId::Preserved)) {
             out.rawSettingsJson.assign((const char*)pre->p, pre->size);
         }
         if (!out.v7SchemaBytes.empty() != !out.v7ColumnsBytes.empty()) {
             err = "v7: EventSchema 与 EventColumns 必须同时存在";
             return false;
+        }
+    }
+
+    // **v7 唯一存储**：容器里没有 v6 事件段时，事件全部从 EventColumns 解出来，
+    // 再走 `LevelData::ingestEventJson`（与 JSON 路径同一套字段映射/路由，不重写第二遍）。
+    if (!out.v7ColumnsBytes.empty() && !out.v7SchemaBytes.empty() &&
+        out.actions.empty() && out.cameraEvents.empty() && out.repeatEvents.empty() &&
+        out.colorEvents.empty() && out.flashEvents.empty() && out.moveTrackEvents.empty()) {
+        Schema schema;
+        EventColumns cols;
+        std::vector<std::string> events;
+        if (!SchemaBuilder::deserialize(out.v7SchemaBytes.data(), out.v7SchemaBytes.size(), schema, err) ||
+            !deserializeEventColumns(schema, out.v7ColumnsBytes.data(), out.v7ColumnsBytes.size(), cols, err) ||
+            !decodeEventColumns(schema, cols, cols.typeIds.size(), events, err)) {
+            err = "v7 事件库: " + err;
+            return false;
+        }
+        // 只还原 **actions**（source=Actions）；decorations 数组里的类型（AddDecoration/AddParticle…）
+        // 在 JSON 路径里本来就不进 LevelData（它们由 decorations 数组承载），这里同样跳过。
+        for (size_t i = 0; i < events.size(); ++i) {
+            const auto& td = schema.types[cols.typeIds[i]];
+            if (td.source != (uint8_t)EventSource::Actions) continue;
+            const auto& js = events[i];
+            if (!out.ingestEventJson(js.data(), js.data() + js.size(), err)) {
+                err = "v7 事件还原: " + err;
+                return false;
+            }
         }
     }
 

@@ -93,6 +93,7 @@
 | `ADOCAO_TILE_EXACT` | 布尔 | 关 | 几何测试要求**逐位**相等（默认口径是 1e-5 砖） |
 | `ADOCAO_GATE_PY` | 路径 | `python3` | 像素门槛比对用的 Python（需要 Pillow） |
 | `ADOCAO_V7_NO_REORDER` | 诊断 | 关掉 v7 事件列的"按 kind 重排"，用来 A/B 压缩率（不改变解码结果） |
+| `ADOCAO_V7_DEBUG` | 诊断 | pack 时打印 v7 事件索引构建信息（floors 数量/首尾 floor） |
 | `ADOFAO_GATE_HOME` | 路径 | `~/Projects/.ADOCAO/gate` | 像素门槛基线目录（**注意拼写是 ADOFAO**，历史遗留，勿"顺手修正"） |
 
 ## 8. 相关但**不是**环境变量的东西

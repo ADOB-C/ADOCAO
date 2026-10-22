@@ -58,6 +58,7 @@ enum class SectionId : uint8_t {
     EventSchema = 14, // **v7**：自描述事件 schema（类型表 + 字段表；新增事件类型不改格式）
     EventColumns = 15,// **v7**：按 kind 分列的事件值（含 decorations；v6 会整体丢弃的那些类型）
     Coverage    = 16, // **v7**：裁剪导出记录（哪些类型被丢了多少条 + lossy 标志）
+    EventIndex  = 17, // **v7**：按 4096 层块的**事件区间**（floor → 事件下标），供窗口化 seek 用
 };
 
 // 列/段的编码方式。`ColumnHeader::codec` 与 `SectionEntry::codec` 共用这一套。

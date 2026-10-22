@@ -43,10 +43,19 @@ struct LevelData {
     std::string rawSettingsJson;   // settings 对象原样（回写时用它，避免逐键建模）
     // 解析原始成员；失败只警告（pack 会退回旧段），不影响已经解析好的数据。
     bool captureRawMembers(const char* data, size_t length);
+    // **v7 容器专用入口**：把一条事件的 JSON 对象喂进来，走与 JSON 路径**同一套**字段映射
+    // 与路由（simple → actions；camera/colour/flash/moveTrack/repeat → 各自的富结构）。
+    // 这样"容器 v7 成为唯一存储"不需要重写一遍解码逻辑（重写必然漂移）。
+    bool ingestEventJson(const char* begin, const char* end, std::string& err);
     // v7 段（读 `.adocao` v7 时填；写出来给 `adocao json` 回写与"裁剪/丢失"诊断用）
     std::vector<uint8_t> v7SchemaBytes;
     std::vector<uint8_t> v7ColumnsBytes;
     std::vector<uint8_t> v7CoverageBytes;
+    // v7 的 EventIndex：每 4096 层一个起点（事件下标），`eventBlockSorted=0` 表示谱面事件不是
+    // 按 floor 升序写的（此时索引不可用于二分，只能线性扫）。
+    std::vector<uint32_t> eventBlockStart;
+    uint32_t eventBlockShift = 12;
+    bool eventBlockSorted = false;
 
     struct Settings {
         int    version = 15;

@@ -2208,6 +2208,39 @@ static std::vector<double> parseAngleDataFast(const char* json, size_t len, size
 // 用 ifstream 复制一份要多花 ~250 ms 和 1.5 GB 常驻内存，mmap 没有这份副本。
 // v7：pack 期把 actions/decorations 的原始 JSON 切片留下来（RapidJSON，一次，CLI 用）。
 // 不做任何数值转换 —— 容器侧直接从这些切片建 schema/列，保证"值一个都不丢"。
+bool LevelData::ingestEventJson(const char* begin, const char* end, std::string& err) {
+    err.clear();
+    const char* p = skipWs(begin, end);
+    if (p >= end || *p != '{') { err = "事件不是 JSON 对象"; return false; }
+    const char* objEnd = skipContainer(p, end);
+    if (!objEnd) { err = "事件对象截断"; return false; }
+    ActionFields f;
+    g_failPos = p;
+    if (!parseActionObject(p + 1, objEnd, f)) {
+        err = std::string("事件字段解析失败: ") + std::string(p, std::min<size_t>(160, (size_t)(objEnd - p)));
+        return false;
+    }
+    FastAction a;
+    bool keep = false;
+    g_failPos = p;
+    if (!buildAction(f, a, keep)) { err = "事件路由失败"; return false; }
+    if (keep) { actions.push_back(std::move(a)); return true; }
+    if (f.type == FastAction::MoveCamera || f.type == FastAction::RepeatEvents ||
+        f.type == FastAction::ColorTrack || f.type == FastAction::RecolorTrack ||
+        f.type == FastAction::Flash || f.type == FastAction::MoveTrack) {
+        CameraSink sink;
+        ActionFields rich;
+        if (!parseActionObject(p + 1, objEnd, rich, /*rich=*/true)) { err = "富事件字段解析失败"; return false; }
+        decodeSpecialEvent(rich, sink);
+        for (auto& e : sink.moves) moveTrackEvents.push_back(std::move(e));
+        for (auto& e : sink.cameras) cameraEvents.push_back(std::move(e));
+        for (auto& e : sink.repeats) repeatEvents.push_back(std::move(e));
+        for (auto& e : sink.colors) colorEvents.push_back(std::move(e));
+        for (auto& e : sink.flashes) flashEvents.push_back(std::move(e));
+    }
+    return true;   // 其余类型（MoveDecorations / SetFilter …）暂时不进 LevelData，与 JSON 路径一致
+}
+
 bool LevelData::captureRawMembers(const char* data, size_t length) {
     rawActionsJson.clear();
     rawDecorationsJson.clear();

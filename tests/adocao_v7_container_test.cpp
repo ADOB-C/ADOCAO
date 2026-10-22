@@ -118,6 +118,28 @@ int main() {
     check(matched == nonLegacy, "每条非 legacy action 都能在解码结果里找到对应事件");
     check(!back.v7CoverageBytes.empty() == false, "未裁剪时不写 Coverage 段");
 
+    // EventIndex：按 4096 层块的事件区间（floor → 事件下标）
+    check(back.eventBlockStart.size() >= 2, "读回 EventIndex");
+    bool mono = true;
+    for (size_t i = 1; i < back.eventBlockStart.size(); ++i)
+        if (back.eventBlockStart[i] < back.eventBlockStart[i - 1]) mono = false;
+    check(mono && back.eventBlockSorted, "EventIndex 单调且标记为已排序");
+
+    // **v7 唯一存储**：不写 v6 段，读侧从 v7 事件还原出 actions / 富事件
+    adocao::PackOptions only;
+    only.v7Only = true;
+    std::vector<uint8_t> bytes2;
+    check(adocao::packLevel(lv, bytes2, err, nullptr, only), "打包 v7-only: " + err);
+    LevelData only2;
+    check(adocao::unpackLevel(bytes2.data(), bytes2.size(), only2, err, &derived), "解 v7-only: " + err);
+    check(only2.actions.size() == lv.actions.size(),
+          "v7-only 还原 actions 数量（" + std::to_string(only2.actions.size()) + " vs " +
+              std::to_string(lv.actions.size()) + "）");
+    check(only2.cameraEvents.size() == lv.cameraEvents.size() &&
+              only2.colorEvents.size() == lv.colorEvents.size() &&
+              only2.moveTrackEvents.size() == lv.moveTrackEvents.size(),
+          "v7-only 还原富事件数量（camera/colour/moveTrack）");
+
     if (g_fail) { std::printf("%d 项失败\n", g_fail); return 1; }
     std::printf("adocao_v7_container: 全部通过\n");
     return 0;

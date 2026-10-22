@@ -1,9 +1,11 @@
 #include "archive/AdocaoWriter.hpp"
 
+#include <cstdio>
 #include <cstring>
 #include <set>
 
 #include "archive/AdocaoBlocked.hpp"
+#include "core/util/Env.hpp"
 #include "core/util/Logger.hpp"
 #include "archive/AdocaoCheckpoints.hpp"
 #include "archive/AdocaoEventColumns.hpp"
@@ -492,7 +494,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         if (!anglePacked) s.flags |= kFlagLegacyColumns;
         s.blob = std::move(angleBlob); secs.push_back(std::move(s));
     }
-    {
+    if (!opts.v7Only) {
         Section s; s.id = (uint8_t)SectionId::Actions; s.elements = level.actions.size();
         s.preStored = actionsPacked;
         if (!actionsPacked) s.flags |= kFlagLegacyColumns;
@@ -523,7 +525,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
     }
     // ---- 相机 / 重复事件：罕见但**必须无损往返**（否则 .adocao 里的运镜会整段消失）----
     // 定长记录、字段顺序固定（打包确定性）；tag 走字符串池下标。order 不存 —— 它 = 记录下标。
-    if (!level.cameraEvents.empty()) {
+    if (!opts.v7Only && !level.cameraEvents.empty()) {
         Section s; s.id = (uint8_t)SectionId::Camera; s.elements = level.cameraEvents.size();
         s.blob.reserve(level.cameraEvents.size() * 38);
         for (size_t i = 0; i < level.cameraEvents.size(); ++i) {
@@ -544,7 +546,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         }
         secs.push_back(std::move(s));
     }
-    if (!level.repeatEvents.empty()) {
+    if (!opts.v7Only && !level.repeatEvents.empty()) {
         Section s; s.id = (uint8_t)SectionId::Repeat; s.elements = level.repeatEvents.size();
         s.blob.reserve(level.repeatEvents.size() * 19);
         for (size_t i = 0; i < level.repeatEvents.size(); ++i) {
@@ -558,7 +560,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         }
         secs.push_back(std::move(s));
     }
-    if (!level.colorEvents.empty()) {
+    if (!opts.v7Only && !level.colorEvents.empty()) {
         Section s; s.id = (uint8_t)SectionId::Colour; s.elements = level.colorEvents.size();
         s.blob.reserve(level.colorEvents.size() * 50);
         for (size_t i = 0; i < level.colorEvents.size(); ++i) {
@@ -585,7 +587,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         }
         secs.push_back(std::move(s));
     }
-    if (!level.flashEvents.empty()) {
+    if (!opts.v7Only && !level.flashEvents.empty()) {
         Section s; s.id = (uint8_t)SectionId::Flash; s.elements = level.flashEvents.size();
         s.blob.reserve(level.flashEvents.size() * 32);
         for (const LevelData::FlashEvent& e : level.flashEvents) {
@@ -603,7 +605,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         }
         secs.push_back(std::move(s));
     }
-    if (!level.moveTrackEvents.empty()) {
+    if (!opts.v7Only && !level.moveTrackEvents.empty()) {
         Section s; s.id = (uint8_t)SectionId::MoveTrack; s.elements = level.moveTrackEvents.size();
         s.blob.reserve(level.moveTrackEvents.size() * 54);
         for (size_t mi = 0; mi < level.moveTrackEvents.size(); ++mi) {
@@ -635,7 +637,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
 
     // ---- v7：自描述事件库（schema + 列 + 裁剪记录）----
     // 只写"v6 装不下/会丢"的那部分内容的**无损**表示；播放路径仍读 v6 段（这里不改变语义）。
-    if (opts.withV7Events && !level.rawActionsJson.empty()) {
+    if ((opts.withV7Events || opts.v7Only) && !level.rawActionsJson.empty()) {
         // **只写 v6 段装不下的类型**（去重）：Camera/Colour/Flash/MoveTrack/Repeat 与
         // Actions 里那 9 类播放事件已经有定长段了，再写一遍纯属重复（实测 16 KB）。
         // v7 的价值在"v6 会整体丢弃的那部分"：MoveDecorations/SetFilter*/Bloom/装饰…
@@ -643,15 +645,19 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
             "Twirl","SetSpeed","PositionTrack","SetHitsound","Bookmark","Pause","AnimateTrack",
             "MoveCamera","ColorTrack","RecolorTrack","Flash","MoveTrack","RepeatEvents","ScaleRadius"};
         std::vector<std::string> evs;
+        std::vector<int64_t> floors;   // 与 evs 平行（缺 floor 记 -1）
         evs.reserve(level.rawActionsJson.size());
         for (const auto& js : level.rawActionsJson) {
             rapidjson::Document d;
             d.Parse(js.c_str(), js.size());
             const char* t = (d.HasParseError() || !d.HasMember("eventType")) ? "" : d["eventType"].GetString();
-            if (!opts.v7IncludeLegacy && kLegacyStored.count(t)) continue;   // 已由 v6 段承载
+            if (!(opts.v7IncludeLegacy || opts.v7Only) && kLegacyStored.count(t)) continue;   // 已由 v6 段承载
             evs.push_back(js);
+            floors.push_back(d.HasParseError() || !d.HasMember("floor") || !d["floor"].IsInt64()
+                                 ? -1 : d["floor"].GetInt64());
         }
         std::vector<uint8_t> srcs(evs.size(), 0);
+        const size_t actionEventCount = evs.size();   // decorations 追加之前的事件数（前缀才是按 floor 有序的）
         if (!level.rawDecorationsJson.empty()) {
             rapidjson::Document dd;
             dd.Parse(level.rawDecorationsJson.c_str(), level.rawDecorationsJson.size());
@@ -662,6 +668,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
                 v.Accept(w);
                 evs.emplace_back(b.GetString(), b.GetSize());
                 srcs.push_back((uint8_t)1);
+                floors.push_back(v.HasMember("floor") && v["floor"].IsInt64() ? v["floor"].GetInt64() : -1);
             }
         }
         SchemaBuilder sb;
@@ -693,6 +700,38 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         col.blob = serializeEventColumns(sb.schema(), cols);
         col.elements = evs.size();
         secs.push_back(std::move(col));
+        // EventIndex：按 4096 层块记录"第一个 floor >= b<<12 的事件下标"
+        {
+            if (env::flag("ADOCAO_V7_DEBUG"))
+                std::fprintf(stderr, "[v7] floors=%zu first=%lld last=%lld\n", floors.size(),
+                             floors.empty() ? -1LL : (long long)floors.front(),
+                             floors.empty() ? -1LL : (long long)floors.back());
+            // 索引只覆盖 **actions 前缀**：decorations 是追加在后面的，floor 会从头再来一次，
+            // 混在一起就不是升序了（踩过：last=-1 + 倒序 → 索引没写出来）。
+            bool sorted = actionEventCount > 0;
+            for (size_t i = 1; i < actionEventCount; ++i)
+                if (floors[i] >= 0 && floors[i - 1] >= 0 && floors[i] < floors[i - 1]) { sorted = false; break; }
+            if (sorted && actionEventCount > 0) {
+                int64_t maxFloor = 0;
+                for (size_t i = 0; i < actionEventCount; ++i)
+                    if (floors[i] > maxFloor) maxFloor = floors[i];
+                const uint32_t shift = 12;
+                const uint32_t blocks = (uint32_t)((maxFloor >> shift) + 1);
+                std::vector<uint32_t> starts(blocks + 1, 0);
+                size_t ei = 0;
+                for (uint32_t b = 0; b <= blocks; ++b) {
+                    const int64_t lo = (int64_t)b << shift;
+                    while (ei < actionEventCount && floors[ei] >= 0 && floors[ei] < lo) ++ei;
+                    starts[b] = (uint32_t)ei;
+                }
+                Section ix; ix.id = (uint8_t)SectionId::EventIndex;
+                putU32(ix.blob, shift);
+                putU32(ix.blob, blocks);
+                putU32(ix.blob, 1);   // sorted
+                for (uint32_t v : starts) putU32(ix.blob, v);
+                secs.push_back(std::move(ix));
+            }
+        }
         if (opts.droppedEvents) {
             Section cov; cov.id = (uint8_t)SectionId::Coverage;
             putU32(cov.blob, opts.droppedEvents);

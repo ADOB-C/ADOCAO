@@ -72,6 +72,7 @@ void printHelp(Mode mode, bool all) {
             "  --checkpoints             额外写 Derived 段（每 4096 层的续算快照，默认关）\n"
             "  --v7                      写 v7 事件库段（自描述 schema + 列；v6 会丢的类型也能无损装下）\n"
             "  --v7-all                  同上但**不去重**（全部事件进 v7，供 `adocao json` 无损回写）\n"
+            "  --v7-only                 **v7 唯一存储**：不写 v6 的 Actions/Camera/… 段（读侧从 v7 还原）\n"
             "  --compress=auto|zstd|lzma|none  段级压缩器（auto = 两者都试、取更小；默认 auto）\n"
             "  --level=N                 压缩级别（0 = 编码器默认：zstd 19 / lzma 9|EXTREME；取 0..22）\n"
             "  --schema-report           打印 v7 自描述 schema（类型/字段/kind 分布）与事件列体积\n"
@@ -261,6 +262,7 @@ int main(int argc, char* argv[]) {
     bool packSchemaReport = false;   // pack --schema-report：打印 v7 自描述 schema 的统计
     bool packV7 = false;             // pack --v7：写 v7 事件库段（EventSchema/EventColumns/Coverage）
     bool packV7All = false;          // pack --v7-all：不去重（`adocao json` 回写需要全部事件）
+    bool packV7Only = false;         // pack --v7-only：v7 唯一存储（不写 v6 事件段）
     std::string packEventsPreset = "all";   // pack --events=all|playable|minimal（裁剪导出）
     adocao::Compress packCompress = adocao::Compress::Auto;   // pack --compress=auto|zstd|lzma|none
     int packLevel = 0;                                        // pack --level=N（0 = 编码器默认）   // pack --checkpoints：写 Derived 段（每 4096 层的续算快照）                    // pack：打印每列的体积明细
@@ -348,6 +350,7 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--schema-report") == 0) packSchemaReport = true;
             else if (std::strcmp(a, "--v7") == 0) packV7 = true;
             else if (std::strcmp(a, "--v7-all") == 0) { packV7 = true; packV7All = true; }
+            else if (std::strcmp(a, "--v7-only") == 0) { packV7 = true; packV7Only = true; }
             else if (std::strncmp(a, "--events=", 9) == 0) packEventsPreset = a + 9;
             else if (std::strncmp(a, "--compress=", 11) == 0) {
                 const char* v = a + 11;
@@ -587,6 +590,7 @@ int main(int argc, char* argv[]) {
         popts.level = packLevel;
         popts.withV7Events = packV7;
         popts.v7IncludeLegacy = packV7All;
+        popts.v7Only = packV7Only;
         popts.droppedEvents = droppedForV7;
         if (!adocao::packLevel(lv, bytes, err, &rep, popts)) {
             std::fprintf(stderr, "打包失败: %s\n", err.c_str());

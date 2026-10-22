@@ -63,6 +63,7 @@ struct PackOptions {
     // SetFilter / decorations …）由此无损存进容器。裁剪由调用方先过滤 raw 切片完成。
     bool withV7Events = false;
     bool v7IncludeLegacy = false;   // true = 不去重（v6 段已有的类型也进 v7；`adocao json` 回写需要）
+    bool v7Only = false;            // true = **v7 唯一存储**：不写 v6 的 Actions/Camera/… 段（读侧走 v7 ingest）
     uint32_t droppedEvents = 0;   // 可选：写进 Coverage（裁剪导出时用；0 = 没裁）
 };
 

@@ -1,6 +1,10 @@
 #include "app/HitsoundTypes.hpp"
 #include "core/util/Progress.hpp"
 #include "core/level/LevelData.hpp"
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
+
+#include "archive/AdocaoEventColumns.hpp"
 #include "archive/AdocaoSchema.hpp"
 #include "archive/AdocaoWriter.hpp"     // `adocao pack`：把已加载的谱打成 .adocao
 #include "archive/AdocaoDiagnostics.hpp"  // `--codec-report`：§8.4 的判据统计（纯诊断）
@@ -398,6 +402,38 @@ int main(int argc, char* argv[]) {
                 std::printf("原始成员: %zu 条 action + decorations %zu B\n",
                             lv.rawActionsJson.size(), lv.rawDecorationsJson.size());
                 std::fputs(adocao::schemaSummary(sb.schema()).c_str(), stdout);
+                // 事件列的真实体积（v7 的预期大小）：建列后按"列字节 + 位图 + 字典 + schema"合计
+                std::vector<std::string> evs = lv.rawActionsJson;
+                std::vector<uint8_t> srcs(evs.size(), 0);
+                if (!lv.rawDecorationsJson.empty()) {
+                    rapidjson::Document dd;
+                    dd.Parse(lv.rawDecorationsJson.c_str(), lv.rawDecorationsJson.size());
+                    if (!dd.HasParseError() && dd.IsArray()) {
+                        for (const auto& v : dd.GetArray()) {
+                            rapidjson::StringBuffer b;
+                            rapidjson::Writer<rapidjson::StringBuffer> w(b);
+                            v.Accept(w);
+                            evs.emplace_back(b.GetString(), b.GetSize());
+                            srcs.push_back(1);
+                        }
+                    }
+                }
+                adocao::EventColumns cols;
+                std::string cerr;
+                if (adocao::buildEventColumns(sb.schema(), evs, srcs, cols, cerr)) {
+                    size_t payload = 0, bitmaps = 0, dicts = 0;
+                    for (const auto& c : cols.fields) {
+                        payload += c.payload.size();
+                        bitmaps += c.present.size() + c.nulls.size() + c.nulls0.size() + c.nulls1.size();
+                        for (const auto& s : c.dictStrings) dicts += s.size() + 2;
+                    }
+                    const size_t schemaBytes = sb.serialize().size();
+                    std::printf("事件列: %zu 条 → payload %zu B + 位图 %zu B + 字典 %zu B + schema %zu B = %.1f KB\n",
+                                evs.size(), payload, bitmaps, dicts, schemaBytes,
+                                (double)(payload + bitmaps + dicts + schemaBytes) / 1024.0);
+                } else {
+                    std::fprintf(stderr, "事件列构建失败: %s\n", cerr.c_str());
+                }
             } else {
                 std::fprintf(stderr, "schema 构建失败: %s\n", serr.c_str());
             }

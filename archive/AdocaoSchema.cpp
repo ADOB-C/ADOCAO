@@ -98,6 +98,8 @@ void SchemaBuilder::addEvent(std::string_view typeName, EventSource source,
 
     // 该事件写到的字段：其余字段算"缺失"（presence 位图在列侧维护）
     for (auto it = obj.MemberBegin(); it != obj.MemberEnd(); ++it) {
+        // `eventType` 是**结构字段**（它决定类型），不作为普通列重复存一遍
+        if (std::strcmp(it->name.GetString(), "eventType") == 0) continue;
         const uint16_t fname = internName(std::string_view(it->name.GetString(), it->name.GetStringLength()));
         const uint32_t fi = ensureField(typeIdx, fname);
         if (!m_acc[fi]) m_acc[fi] = std::make_unique<Acc>();

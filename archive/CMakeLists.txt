@@ -9,6 +9,7 @@ add_library(adocao_archive STATIC
     # v7 的 kind 与自描述 schema（类型/字段自动发现；新增事件类型不改格式）
     AdocaoKinds.cpp
     AdocaoSchema.cpp
+    AdocaoEventColumns.cpp
     # v3 的分块列容器（4096 一块、块内自选编码、帧级 zstd 与 seek 粒度解耦，§8.3）。
     # 这个文件用 zstd（帧），所以它和 Columns 不同 —— 帧是 seek 的单位，必须能单独解压。
     AdocaoBlocked.cpp

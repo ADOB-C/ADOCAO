@@ -87,6 +87,11 @@ struct LevelData {
     uint32_t eventBlockShift = 12;
     bool eventBlockSorted = false;
     bool v7ColumnsBlocked = false;   // EventColumns 段是分块容器（每 4096 事件一块）
+    // **事件窗口**（可选）：在加载前设好，`.adocao` v7 就只解出 `floor ∈ [lo, hi)` 的事件。
+    // 用途：2e9 的窗口化加载 / 诊断（WYSIWYG 验证）。未设 = 全量（默认）。
+    bool hasEventWindow = false;
+    int64_t eventWindowLo = 0, eventWindowHi = 0;
+    void setEventWindow(int64_t lo, int64_t hi) { hasEventWindow = true; eventWindowLo = lo; eventWindowHi = hi; }
 
     struct Settings {
         int    version = 15;

@@ -89,7 +89,8 @@ bool decodeEventColumnsRange(const Schema& schema, const uint8_t* p, size_t n,
 using EventFieldsFn = bool (*)(void* ctx, const LevelData::EventFieldValue* v, size_t n,
                                uint16_t typeId, std::string& err);
 bool decodeEventFieldsBlockedEach(const Schema& schema, const uint8_t* p, size_t n,
-                                  EventFieldsFn fn, void* ctx, std::string& err);
+                                  EventFieldsFn fn, void* ctx, std::string& err,
+                                  uint32_t firstEvent = 0, uint32_t lastEvent = 0xFFFFFFFFu);
 bool decodeEventColumnsBlockedAll(const Schema& schema, const uint8_t* p, size_t n,
                                   std::vector<std::string>& outEvents, std::string& err,
                                   std::vector<uint16_t>* outTypeIds = nullptr);

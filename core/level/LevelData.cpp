@@ -2334,9 +2334,14 @@ bool LevelData::loadFromBufferImpl(const char* data, size_t len, ProgressCb onPr
     {
         Settings keep = settings;
         const bool keepPreserve = preserveRawJson;
+        const bool keepWin = hasEventWindow;          // 事件窗口同样属于"调用方给的条件"
+        const int64_t keepLo = eventWindowLo, keepHi = eventWindowHi;
         *this = LevelData{};
         settings = keep;
         preserveRawJson = keepPreserve;
+        hasEventWindow = keepWin;
+        eventWindowLo = keepLo;
+        eventWindowHi = keepHi;
     }
     g_internOwner = this;                                  // 事件字符串驻留表归本次加载所有
     actionStrTable.resize(1);                              // id 0 = 空串

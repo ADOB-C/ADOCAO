@@ -167,6 +167,25 @@ int main() {
               only2.moveTrackEvents.size() == lv.moveTrackEvents.size(),
           "v7-only 还原富事件数量（camera/colour/moveTrack）");
 
+    // **事件窗口**：设了窗口就只解该层段的事件（EventIndex 定位块 + floor 精确过滤）
+    {
+        LevelData win;
+        win.setEventWindow(2, 6);   // 合成谱：Twirl@2 / SetSpeed@3 / MoveCamera@5 / MoveTrack@6 / Color@7 / Flash@8
+        std::string werr;
+        check(adocao::unpackLevel(bytes2.data(), bytes2.size(), win, werr, &derived), "窗口加载: " + werr);
+        // 这张合成谱只有 1 条真 action（Twirl@2）+ MoveDecorations@3,5 + SetFilterAdvanced@6
+        check(win.actions.size() == 1 && win.actions[0].floor == 2,
+              "窗口 [2,6) 只含 floor 2 的那条 action（实际 " + std::to_string(win.actions.size()) + " 条）");
+        check(win.cameraEvents.empty() && win.colorEvents.empty() && win.flashEvents.empty(),
+              "窗口里没有 camera/colour/flash（这张谱本来就没有）");
+        LevelData none;
+        none.setEventWindow(3, 6);   // 整段都落在唯一 action 之后 → 必须一条都没有
+        std::string nerr;
+        check(adocao::unpackLevel(bytes2.data(), bytes2.size(), none, nerr, &derived),
+              "窗口加载（空段）: " + nerr);
+        check(none.actions.empty(), "窗口 [3,6) 不含任何 action（过滤生效）");
+    }
+
     if (g_fail) { std::printf("%d 项失败\n", g_fail); return 1; }
     std::printf("adocao_v7_container: 全部通过\n");
     return 0;

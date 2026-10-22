@@ -968,15 +968,24 @@ bool decodeEventColumnsRange(const Schema& schema, const uint8_t* p, size_t n,
 }
 
 bool decodeEventFieldsBlockedEach(const Schema& schema, const uint8_t* p, size_t n,
-                                  EventFieldsFn fn, void* ctx, std::string& err) {
+                                  EventFieldsFn fn, void* ctx, std::string& err,
+                                  uint32_t firstEvent, uint32_t lastEvent) {
     err.clear();
     if (n < kBlockedHeaderBytes) { err = "分块事件列：段头截断"; return false; }
     const uint32_t version = (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
     if (version != kBlockedVersion) { err = "分块事件列：版本不认识"; return false; }
     const uint32_t blocks = (uint32_t)p[8] | ((uint32_t)p[9] << 8) | ((uint32_t)p[10] << 16) | ((uint32_t)p[11] << 24);
-    if (blocks == 0) { err = "分块事件列：块数为 0"; return false; }
+    const uint32_t blockEvents = (uint32_t)p[4] | ((uint32_t)p[5] << 8) | ((uint32_t)p[6] << 16) | ((uint32_t)p[7] << 24);
+    if (blocks == 0 || blockEvents == 0) { err = "分块事件列：块参数非法"; return false; }
     if (n < kBlockedHeaderBytes + (size_t)(blocks + 1) * 8) { err = "分块事件列：块表截断"; return false; }
-    for (uint32_t b = 0; b < blocks; ++b) {
+    // 只解覆盖 [firstEvent,lastEvent) 的块（窗口化加载）
+    uint32_t b0 = 0, b1 = blocks - 1;
+    if (firstEvent > 0 || lastEvent != 0xFFFFFFFFu) {
+        if (lastEvent <= firstEvent) return true;
+        b0 = std::min(firstEvent / blockEvents, blocks - 1);
+        b1 = std::min((lastEvent - 1) / blockEvents, blocks - 1);
+    }
+    for (uint32_t b = b0; b <= b1; ++b) {
         const uint64_t o0 = rdU64(p + kBlockedHeaderBytes + (size_t)b * 8);
         const uint64_t o1 = rdU64(p + kBlockedHeaderBytes + (size_t)(b + 1) * 8);
         if (o0 > o1 || o1 > n) { err = "分块事件列：块偏移越界"; return false; }
@@ -994,6 +1003,8 @@ bool decodeEventFieldsBlockedEach(const Schema& schema, const uint8_t* p, size_t
             return false;
         }
         for (size_t i = 0; i + 1 < batch.offsets.size(); ++i) {
+            const uint32_t globalIdx = b * blockEvents + (uint32_t)i;
+            if (globalIdx < firstEvent || globalIdx >= lastEvent) continue;
             const uint32_t o0 = batch.offsets[i], o1 = batch.offsets[i + 1];
             if (!fn(ctx, batch.values.data() + o0, (size_t)(o1 - o0), cols.typeIds[i], cerr)) {
                 err = "分块事件列：块 " + std::to_string(b) + " 直灌失败: " + cerr;

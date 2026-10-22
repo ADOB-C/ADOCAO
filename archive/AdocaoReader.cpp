@@ -630,16 +630,38 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
         // 不再把每条事件拼成 JSON 文本。`ADOCAO_V7_JSON_EVENTS=1` 可退回旧路做 A/B。
         const bool direct = !env::flag("ADOCAO_V7_JSON_EVENTS");
         if (direct) {
-            struct Ctx { LevelData* lv; const Schema* schema; };
-            Ctx ctx{&out, &schema};
+            struct Ctx {
+                LevelData* lv;
+                const Schema* schema;
+                bool window;
+                int64_t lo, hi;
+            };
+            Ctx ctx{&out, &schema, out.hasEventWindow, out.eventWindowLo, out.eventWindowHi};
             auto fn = [](void* c, const LevelData::EventFieldValue* v, size_t n, uint16_t typeId,
                          std::string& ferr) -> bool {
                 Ctx* cc = (Ctx*)c;
                 if (cc->schema->types[typeId].source != (uint8_t)EventSource::Actions) return true;
+                if (cc->window) {   // 窗口化：块边界是近似的，这里按 floor 精确过滤
+                    bool hasFloor = false;
+                    int64_t fl = 0;
+                    for (size_t i = 0; i < n; ++i)
+                        if (v[i].role == LevelData::FieldRole::Floor) { fl = (int64_t)v[i].num; hasFloor = true; break; }
+                    if (!hasFloor || fl < cc->lo || fl >= cc->hi) return true;
+                }
                 return cc->lv->ingestEventFields(v, n, ferr);
             };
+            // 有 EventIndex 且请求了窗口 → 只解命中的块
+            uint32_t firstEv = 0, lastEv = 0xFFFFFFFFu;
+            if (out.hasEventWindow && out.eventBlockSorted && out.eventBlockStart.size() >= 2) {
+                const uint32_t bs = out.eventBlockShift;
+                const uint32_t nb = (uint32_t)out.eventBlockStart.size() - 1;
+                const uint32_t lo = (uint32_t)((out.eventWindowLo < 0 ? 0 : out.eventWindowLo) >> bs);
+                const uint32_t hi = (uint32_t)(((out.eventWindowHi - 1) < 0 ? 0 : (out.eventWindowHi - 1)) >> bs);
+                firstEv = out.eventBlockStart[std::min(lo, nb)];
+                lastEv = out.eventBlockStart[std::min(hi + 1, nb)];
+            }
             if (!decodeEventFieldsBlockedEach(schema, out.v7ColumnsBytes.data(), out.v7ColumnsBytes.size(),
-                                              fn, &ctx, err)) {
+                                              fn, &ctx, err, firstEv, lastEv)) {
                 err = "v7 事件库: " + err;
                 return false;
             }

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 #include <chrono>
 #include "core/util/CountLimits.hpp"
@@ -226,53 +227,126 @@ PositionSolver::TrailWindow PositionSolver::trailWindow(const Timeline& timeline
     return w;
 }
 
+namespace {
+
+// 每砖常量（`positionAtTile` 主分支里那些**只依赖 tileIdx** 的量）。
+// 连续采样点绝大多数落在同一块砖上，把它提出循环 = 只少算、不改任何算术：
+// 每个量都是 `(double)` 同一个访问器返回值，逐位相同。
+struct TrailTileConsts {
+    double pivotX = 0.0, pivotY = 0.0;
+    double startTime = 0.0;
+    double duration = 0.0;
+    double startAngle = 0.0;
+    double totalAngle = 0.0;
+    double startDist = 0.0;
+    double endDist = 0.0;
+    double firstStart = 0.0;  // == timeline.firstStartTime()（首砖之前的特例判据）
+    bool isRed = true;
+    bool tileMain = false;    // false = 落在 `positionAtTile` 的两个特例（首砖之前 / 末尾合成砖）
+};
+
+// `startTime` 由调用方给（推进循环刚刚算过同一个值，别重复取一遍）。
+inline void loadTrailTileConsts(const Timeline& timeline, int tileIdx, int n, double startTime,
+                               TrailTileConsts& c) {
+    const LevelData& L = *timeline.level();
+    const auto pivot = L.tilePositionAt(tileIdx);
+    c.pivotX = pivot[0];
+    c.pivotY = pivot[1];
+    c.startTime = startTime;
+    c.duration = (double)timeline.durationAt(tileIdx);
+    c.startAngle = (double)timeline.startAngleAt(tileIdx);
+    c.totalAngle = (double)timeline.totalAngleAt(tileIdx);
+    c.startDist = (double)timeline.tileStartDist(tileIdx);
+    c.endDist = (double)timeline.tileEndDist(tileIdx);
+    c.isRed = (tileIdx % 2 == 0);
+    c.firstStart = timeline.firstStartTime();
+    // 与 `positionAtTile` 的分支判据一致：n < 2 或首砖之前走特例；末尾合成砖（>= n-1）也走特例。
+    c.tileMain = (n >= 2) && (tileIdx < n - 1);
+}
+
+// `positionAtTile` 主分支的算术，逐字照抄（同操作、同顺序、同类型）。
+// 唯一区别：`startTime/duration/startAngle/totalAngle/dist/pivot` 来自已提好的常量。
+inline void trailPointAt(const TrailTileConsts& c, double tt, double& rx, double& ry,
+                         double& bx, double& by) {
+    double progress = (c.duration > 0.0001) ? (tt - c.startTime) / c.duration : 1.0;
+    if (progress < 0) progress = 0; if (progress > 1) progress = 1;
+    const double angle = c.startAngle + c.totalAngle * progress;
+    const double dist = c.startDist + (c.endDist - c.startDist) * progress;
+    const double mvx = c.pivotX + std::cos(angle) * dist;
+    const double mvy = c.pivotY + std::sin(angle) * dist;
+    if (c.isRed) { rx = c.pivotX; ry = c.pivotY; bx = mvx; by = mvy; }
+    else         { bx = c.pivotX; by = c.pivotY; rx = mvx; ry = mvy; }
+}
+
+}  // namespace
+
 void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime, double t, float sampleRate, const glm::dvec2& redHead, const glm::dvec2& blueHead, std::vector<glm::dvec2>& redOut, std::vector<glm::dvec2>& blueOut) {
     if (sampleRate <= 0.0f || t <= startTime) return;
 
     const int maxSamples = (int)std::ceil((t - startTime) * sampleRate) + 1;
     const double dt = 1.0 / sampleRate;
 
-    std::vector<double> redXY(maxSamples*2 + 2), blueXY(maxSamples*2 + 2);
-    int samples = 0;
-
     int tileIdx = timeline.findTileIndex(startTime);
     if (tileIdx < 0) tileIdx = 0;
     const int tsz = (int)timeline.tileCount();
+    const int64_t nFull = timeline.level()->tileCount();
+    const int n = fitsInt32(nFull) ? (int)nFull : 0;
 
+    // 直接写输出（原来是两条临时 double 数组 + 末尾一趟拷贝）。
+    // 末尾的 head 也要一格，所以 +1。
+    const size_t base = redOut.size();
+    redOut.resize(base + (size_t)maxSamples + 1);
+    blueOut.resize(base + (size_t)maxSamples + 1);
+    size_t samples = 0;
+
+    TrailTileConsts c;
+    int cTile = -1;              // c 对应的砖号（-1 = 还没有；推进后置 -1 变懒加载）
+    double tileStart = timeline.startTimeAt(tileIdx);
+    double nextStart = (tileIdx + 1 < tsz) ? timeline.startTimeAt(tileIdx + 1)
+                                           : std::numeric_limits<double>::infinity();
 
     for (int i = 0; i < maxSamples; i++) {
         double tt = startTime + dt * (double)i;
         if (tt > t) break;
-        while (tileIdx + 1 < tsz && tt >= timeline.startTimeAt(tileIdx + 1))
+        // 推进语义与原来逐字相同：`while (tileIdx + 1 < tsz && tt >= startTimeAt(tileIdx + 1))`。
+        // 区别只是下一砖的起始时间被记下来了（它是纯函数，值不变），不必每采样点重取。
+        while (tileIdx + 1 < tsz && tt >= nextStart) {
             tileIdx++;
+            tileStart = nextStart;      // startTimeAt(旧 tileIdx + 1) == 新砖的 startTimeAt
+            nextStart = (tileIdx + 1 < tsz) ? timeline.startTimeAt(tileIdx + 1)
+                                            : std::numeric_limits<double>::infinity();
+            cTile = -1;
+        }
+        if (cTile != tileIdx) {         // 每采样点最多一次
+            loadTrailTileConsts(timeline, tileIdx, n, tileStart, c);
+            cTile = tileIdx;
+        }
         if (i < 3 && env::flag("ADOCAO_TRAIL_INPUTS")) {
             const LevelData& L = *timeline.level();
-            const auto p = L.tilePositionAt(tileIdx);
             LOG_I("trail-in[%d] idx=%d tt=%.17g st=%.17g pos=%.17g,%.17g sa=%.17g ta=%.17g dir=%.17g",
-                  i, tileIdx, tt, timeline.startTimeAt(tileIdx), p[0], p[1],
-                  (double)timeline.startAngleAt(tileIdx), (double)timeline.totalAngleAt(tileIdx),
+                  i, tileIdx, tt, c.startTime, c.pivotX, c.pivotY,
+                  c.startAngle, c.totalAngle,
                   (double)L.tileDirectionAt((int64_t)tileIdx - 1));
         }
-        glm::dvec2 r(0), b(0);
-        positionAtTile(timeline, tt, tileIdx, r, b);
-        redXY[samples*2]=r.x; redXY[samples*2+1]=r.y;
-        blueXY[samples*2]=b.x; blueXY[samples*2+1]=b.y;
+        double rx = 0.0, ry = 0.0, bx = 0.0, by = 0.0;
+        if (c.tileMain && tt >= c.firstStart) {
+            trailPointAt(c, tt, rx, ry, bx, by);
+        } else {
+            // 特例（首砖之前 / 末尾合成砖）：照原样调 positionAtTile，语义与逐位都不动。
+            glm::dvec2 r(0), b(0);
+            positionAtTile(timeline, tt, tileIdx, r, b);
+            rx = r.x; ry = r.y; bx = b.x; by = b.y;
+        }
+        redOut[base + samples]  = glm::dvec2(rx, ry);
+        blueOut[base + samples] = glm::dvec2(bx, by);
         samples++;
     }
-    {
-        // Bind trail head directly to planet's actual position.
-        redXY[samples*2]   = redHead.x;
-        redXY[samples*2+1] = redHead.y;
-        blueXY[samples*2]   = blueHead.x;
-        blueXY[samples*2+1] = blueHead.y;
-        samples++;
-    }
-    redOut.reserve(samples);
-    blueOut.reserve(samples);
-    for (int i = 0; i < samples; i++) {
-        redOut.emplace_back(redXY[i*2], redXY[i*2+1]);
-        blueOut.emplace_back(blueXY[i*2], blueXY[i*2+1]);
-    }
+    // Bind trail head directly to planet's actual position.
+    redOut[base + samples]  = glm::dvec2(redHead.x, redHead.y);
+    blueOut[base + samples] = glm::dvec2(blueHead.x, blueHead.y);
+    samples++;
+    redOut.resize(base + samples);
+    blueOut.resize(base + samples);
 }
 
 void PositionSolver::sampleTrail(const Timeline& timeline, double t, float trailDuration, float sampleRate, const glm::dvec2& redHead, const glm::dvec2& blueHead, std::vector<glm::dvec2>& redOut, std::vector<glm::dvec2>& blueOut) {

@@ -574,6 +574,14 @@ void Timeline::precalculateTiming() {
         }
         LOG_D("Timeline: %zu 个锚点（每 %lld 层）", m_anchors.size(), (long long)kAnchorStride);
 
+        // 窗口物化的块起始时间（kBlockStride 粒度，8 B/份）。**原样抄自同一支数组**，
+        // 所以与"从 4096 锚点起累加到同一层"的中间值逐位相同 —— 从更近的块起点重新累加
+        // 得到的仍是同一串 double（同一顺序、同一操作），这就是块粒度可以自由变细的原因。
+        m_blockStartTimes.clear();
+        m_blockStartTimes.reserve((size_t)((n + kBlockStride - 1) / kBlockStride));
+        for (int64_t i = 0; i < (int64_t)n; i += kBlockStride)
+            m_blockStartTimes.push_back(m_tileStartTimes[(size_t)i]);
+
         // ③ 切片 3：粗索引（每锚点一份 TrackVis 时间，26 KB 换掉 103 MB）+ 单调性判据。
         // **必须在锚点记完之后建**（它在 Phase 5 之后，早建会遍历空数组）。
         m_coarseDA.clear(); m_coarseAA.clear();
@@ -604,17 +612,18 @@ void Timeline::precalculateTiming() {
 bool Timeline::recomputeBlock(int64_t i0, int64_t i1, BlockResult& out) const {
     const int64_t n = tileCount();   // 丢过密集数组也要成立（这正是窗口化的用途）
     if (i0 < 0 || i1 > n || i0 >= i1) return false;
-    const int64_t stride = kAnchorStride;
+    const int64_t stride = kBlockStride;
     const int64_t b = i0 / stride;
-    if (b >= (int64_t)m_anchors.size() || m_anchors[(size_t)b].floor != i0) return false;
+    if (b < 0 || b >= (int64_t)m_blockStartTimes.size()) return false;
+    if (i0 != b * stride) return false;                 // 必须落在块边界上
     if ((int64_t)m_tileBPM.size() != n) return false;   // 前置：BPM/角度/cw 都在（时长现算）
     // 起始时间只依赖"时长 + 锚点"，任何谱都可算；TrackVis 两支才需要额外条件（见下）
 
-    // 1) 起始时间：从锚点的**已存值**起步，按层序把时长（转 double）累加 —— 与原前缀同一顺序、
+    // 1) 起始时间：从**块起点**的已存值起步，按层序把时长（转 double）累加 —— 与原前缀同一顺序、
     //    同一操作，所以逐位相同。为 TrackVis 那一遍多算一层（disappear[i] 要用 start[i+1]）。
     const int64_t last = std::min(i1 + 1, n);
     out.startTimes.assign((size_t)(last - i0), 0.0);
-    double t = m_anchors[(size_t)b].startTime;
+    double t = m_blockStartTimes[(size_t)b];
     for (int64_t i = i0; i < last; i++) {
         out.startTimes[(size_t)(i - i0)] = t;
         if (i < n - 1) t += (double)durationAt(i);   // 现算：与 precalculateTiming 同一函数、同一顺序
@@ -647,10 +656,10 @@ bool Timeline::recomputeBlock(int64_t i0, int64_t i1, BlockResult& out) const {
 // ③ 切片 3：物化 i 所在的块（单块缓存）。返回该块，出错则 nullptr
 const Timeline::BlockResult* Timeline::windowFor(int64_t i) const {
     if (i < 0 || i >= tileCount()) return nullptr;
-    const int64_t b = i / kAnchorStride;
+    const int64_t b = i / kBlockStride;
     if (m_winBlock == b && !m_winCache.startTimes.empty()) return &m_winCache;
-    const int64_t i0 = b * kAnchorStride;
-    const int64_t i1 = std::min(i0 + kAnchorStride, tileCount());
+    const int64_t i0 = b * kBlockStride;
+    const int64_t i1 = std::min(i0 + kBlockStride, tileCount());
     BlockResult r;
     if (!recomputeBlock(i0, i1, r)) return nullptr;
     m_winCache = std::move(r);
@@ -664,14 +673,14 @@ double Timeline::startTimeAt(int64_t i) const {
     }
     const BlockResult* w = windowFor(i);
     if (!w) return 0.0;
-    const size_t k = (size_t)(i - (i / kAnchorStride) * kAnchorStride);
+    const size_t k = (size_t)(i - (i / kBlockStride) * kBlockStride);
     return k < w->startTimes.size() ? w->startTimes[k] : 0.0;
 }
 
 bool Timeline::dropStartTimesArray() {
     const size_t n = m_tileBPM.size();
     if (n == 0) return false;
-    if (m_anchors.empty() || m_tileBPM.size() != n) return false;     // 前置：锚点 + BPM 齐备
+    if (m_blockStartTimes.empty() || m_tileBPM.size() != n) return false;   // 前置：块起点 + BPM 齐备
     std::vector<double>().swap(m_tileStartTimes);
     m_startWindowed = true;
     m_winBlock = -1;         // 缓存里的 startTimes 仍有效，但保持一致语义
@@ -692,7 +701,7 @@ double Timeline::disappearTimeAt(int64_t i) const {
     }
     const BlockResult* w = windowFor(i);
     if (!w) return std::numeric_limits<double>::infinity();
-    const size_t k = (size_t)(i - (i / kAnchorStride) * kAnchorStride);
+    const size_t k = (size_t)(i - (i / kBlockStride) * kBlockStride);
     return k < w->disappearTimes.size() ? w->disappearTimes[k] : std::numeric_limits<double>::infinity();
 }
 
@@ -703,7 +712,7 @@ double Timeline::appearTimeAt(int64_t i) const {
     }
     const BlockResult* w = windowFor(i);
     if (!w) return -std::numeric_limits<double>::infinity();
-    const size_t k = (size_t)(i - (i / kAnchorStride) * kAnchorStride);
+    const size_t k = (size_t)(i - (i / kBlockStride) * kBlockStride);
     return k < w->appearTimes.size() ? w->appearTimes[k] : -std::numeric_limits<double>::infinity();
 }
 
@@ -833,18 +842,19 @@ int Timeline::findTileIndex(double t) const {
         if (idx >= (int)n) idx = (int)n - 1;
         return idx;
     }
-    // 窗口化：先在锚点上二分（startTime 单调不减：duration 恒 ≥ 0），再在那一块内取
-    // "最后一个 startTime <= t"的层（与原实现的结果相同；块内扫描对非单调也更稳）。
-    int64_t lo = 0, hi = (int64_t)m_anchors.size() - 1, aEnd = -1;
+    // 窗口化：先在**块起始时间**上二分（每 kBlockStride 层一份，startTime 单调不减：
+    // duration 恒 ≥ 0），再在那一块内二分取"最后一个 startTime <= t"的层。
+    // 与原实现（锚点二分 + 4096 层块内扫描）同值：块更细，但单调性前提一样。
+    int64_t lo = 0, hi = (int64_t)m_blockStartTimes.size() - 1, aEnd = -1;
     while (lo <= hi) {
         const int64_t m = (lo + hi) / 2;
-        if (m_anchors[(size_t)m].startTime <= t) { aEnd = m; lo = m + 1; } else hi = m - 1;
+        if (m_blockStartTimes[(size_t)m] <= t) { aEnd = m; lo = m + 1; } else hi = m - 1;
     }
     if (aEnd < 0) return 0;
-    const int64_t from = aEnd * kAnchorStride;
-    const int64_t to = std::min(from + kAnchorStride, n);
+    const int64_t from = aEnd * kBlockStride;
+    const int64_t to = std::min(from + kBlockStride, n);
     // 块内二分：找"最后一个 startTimeAt(i) <= t"，与原来那次线性扫描**同值**。
-    // 前提是块内 startTimes 单调不减（duration 恒 ≥ 0）—— 上面的锚点二分本来就依赖同一前提。
+    // 前提是块内 startTimes 单调不减（duration 恒 ≥ 0）—— 上面那次块起点二分依赖同一前提。
     // 实测 4 张谱（angles360 / The Moon / Singularity / Won't You 638 万层）违例数全为 0；
     // 边界（t 恰好等于某层起始时间、±1 ULP）与"块内一个都不 ≤ t"都保持原语义（后者仍返回 0）。
     //

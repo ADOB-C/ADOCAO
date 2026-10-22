@@ -63,6 +63,14 @@ public:
     };
     static constexpr int64_t kAnchorStride = 4096;   // 与 ② 分块 / ④ 块索引同粒度
     const std::vector<Anchor>& anchors() const { return m_anchors; }
+    // **窗口物化粒度与锚点粒度解耦**（2026-10-21）。`Anchor` 是 48 B/份，翻 4 倍就是 75 MB（2³¹ 层），
+    // 而"块起始时间"只要 8 B/份：所以窗口/块改用这个更细的 stride，锚点仍是 kAnchorStride
+    // （`LevelScene` 的 disappear 粗索引二分、`tests/timeline_anchor_test.cpp` 都依赖它，不能动）。
+    // p90：块越小越低（4096 → 1024 实测 recomputeBlock p90 约 1/4，总工作量几乎不变）。
+    static constexpr int64_t kBlockStride = 1024;
+    // 每 kBlockStride 层一条起始时间（== m_tileStartTimes[b*kBlockStride]，同一个 double，
+    // 由 precalculateTiming 从全量数组里**原样抄下**，所以逐位相同）。
+    const std::vector<double>& blockStartTimes() const { return m_blockStartTimes; }
     // ③ 切片 2：**按块重算**。给块号与块内 [i0,i1)，用"锚点 + 每层时长（float）+ 每层 BPM +
     // TrackVis 恒定态"重算出该块的三支 double（若 needsTrackVis 则含 disappear/appear）。
     // 逐位口径与 precalculateTiming 相同：duration 转 double 后按层序累加（同一顺序、同一操作）。
@@ -75,6 +83,7 @@ public:
     // （FastAction 没留 trackAnimation 的值，见 LevelData.cpp 的 AnimateTrack 组装）。
     bool blocksRecomputable() const { return m_blocksRecomputable; }
     const char* blocksRecomputableWhy() const { return m_blocksWhy; }
+    // i0 必须是 **kBlockStride 的整数倍**（块边界）；i1 可以是任意 > i0 的位置（测试会跨块取）。
     bool recomputeBlock(int64_t i0, int64_t i1, BlockResult& out) const;
     // ③ 切片 3：TrackVis 两支的**窗口化访问**。粗索引（每 kAnchorStride 层一份，26 KB）
     // 供消费方的二分查找用；逐层值由"物化所在块"给出（单块缓存）。
@@ -85,7 +94,7 @@ public:
     int64_t tileCount() const { return (int64_t)m_tileBPM.size(); }
     const std::vector<double>& coarseDisappearTimes() const { return m_coarseDA; }
     // 逐层 TrackVis 时间（未窗口化时直接读密集数组；窗口化时物化所在块）
-    const BlockResult* windowFor(int64_t i) const;   // 单块缓存（物化 i 所在的块）
+    const BlockResult* windowFor(int64_t i) const;   // 单块缓存（物化 i 所在的 kBlockStride 块）
     // 起始时间：未窗口化时直读密集数组，窗口化时物化所在块（单块缓存）
     double startTimeAt(int64_t i) const;
     // 丢掉 `m_tileStartTimes`（只依赖"锚点 + 每层时长"，**与 TrackVis 能否重算无关**，
@@ -177,6 +186,7 @@ private:
     std::vector<float> m_tileBPM;
     std::vector<bool>  m_tileIsCW;
     std::vector<Anchor> m_anchors;   // ③ 切片 1：见 anchors()
+    std::vector<double> m_blockStartTimes;   // 每 kBlockStride 层一份（窗口物化的起点）
     // ③ 切片 2 起时长是"按块重算"的前缀来源；2026-10-16 起**不再存**（27 MB）：`durationAt(i)`
     // 由 `angleAt(i)` + `m_tileBPM[i]` + `m_tileIsCW[i]` 现算，口径与 `precalculateTiming` 逐字相同。
     bool   m_blocksRecomputable = false;

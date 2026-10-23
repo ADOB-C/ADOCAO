@@ -2,6 +2,8 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include <initializer_list>
+
 #define GLFW_EXPOSE_NATIVE_COCOA
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
@@ -13,6 +15,26 @@ namespace {
 double g_transitionUntil = 0.0;
 
 void beginTransition() { g_transitionUntil = glfwGetTime() + 0.8; }
+
+// **进 Space 之后把焦点抢回来**。`toggleFullScreen:` 是带过场的异步操作：过场期间窗口
+// 会先 resign key，动作完成后再变成 key —— 我们在 toggle 之后立刻 activate 是**无效的**
+// （用户实测：窗口化能拿到焦点，全屏（进 Space）拿不到）。
+// 所以在过场结束后再 activate + makeKey 一次（两次，覆盖慢动画）。
+void activateAndFocus(NSWindow* w) {
+    if (!w) return;
+    [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
+    [w makeKeyAndOrderFront:nil];
+}
+void focusAfterTransition(NSWindow* w) {
+    [w retain];
+    for (double delay : {0.35, 1.10}) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+                           activateAndFocus(w);
+                           [w release];
+                       });
+    }
+}
 
 bool isFullScreen(NSWindow* w) { return ([w styleMask] & NSWindowStyleMaskFullScreen) != 0; }
 
@@ -52,6 +74,9 @@ void macosBorderlessEnter(GLFWwindow* window) {
     if (!isFullScreen(w)) {
         beginTransition();
         [w toggleFullScreen:nil];
+        focusAfterTransition(w);   // 过场结束后再抢焦点（立刻抢没用）
+    } else {
+        activateAndFocus(w);
     }
     [w setLevel:NSNormalWindowLevel];
 }

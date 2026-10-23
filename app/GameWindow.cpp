@@ -321,6 +321,8 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     if (m_level->tileCount() > 0) {
         const auto& p0 = m_level->tilePositionAt(0);
         m_camCtrl.snapTo(p0[0], p0[1]);
+        LOG_I("camera init: tile0=(%.3f,%.3f) adoZoom=%.1f internalZoom=%.2f", (double)p0[0], (double)p0[1],
+              (double)m_level->settings.zoom, (double)m_camera.zoom());
     }
     rebuildCameraTimeline();
 
@@ -400,6 +402,8 @@ void GameWindow::navigateToTile(int floor, bool center) {
         const auto& p = m_level->tilePositionAt(floor);
         m_camCtrl.snapTo(p[0], p[1]);
     }
+    LOG_D("navigate: tile=%d center=%d cam=(%.2f,%.2f)", floor, (int)center,
+          m_camera.targetX(), m_camera.targetY());
     m_selectedTile = floor;
 }
 

@@ -283,11 +283,35 @@ bool encodeDoubleColumn(const std::vector<double>& v, std::vector<uint8_t>& out,
             if ((double)ks[i] / scale != v[i]) { okAll = false; break; }   // 必须逐位一致
         }
         if (!okAll) continue;
-        std::vector<uint8_t> b;
-        writeColumnHeader(b, Codec::FixedPointDelta, 64, n, (uint64_t)e);
-        int64_t prev = 0;
-        for (size_t i = 0; i < n; ++i) { putVarint(b, zigzag(ks[i] - prev)); prev = ks[i]; }
-        consider(best, Codec::FixedPointDelta, 64, 0, std::move(b));
+        // **wrap-aware**：角度列会在 0°/360° 处绕圈，一阶差分于是出现 ±360000 这种巨值
+        // （Tempest_hertz 有 36,655 次绕圈）。按周期取最短弧，差分立刻变小：
+        // 实测 148,112 → **103,064 B**（−30%）。
+        // 周期只在"值域跨度 ≤ 360"时才试，写进 aux 的高位（低 8 位仍是 e，
+        // 于是没有任何旧文件会因此解错：period = 0 就是原来的行为）。
+        int64_t lo = ks[0], hi = ks[0];
+        for (int64_t k : ks) { if (k < lo) lo = k; if (k > hi) hi = k; }
+        const int64_t deg360 = (int64_t)std::llround(360.0 * scale);   // 360° 在网格上是多少
+        const int64_t period = (hi - lo <= deg360) ? deg360 : 0;       // 值域跨度 ≤ 360° 才试环绕
+        for (int mode = 0; mode < 2; ++mode) {
+            const int64_t wrap = (mode == 1) ? period : 0;
+            if (mode == 1 && wrap <= 0) continue;
+            if (mode == 1 && hi - lo > wrap) continue;
+            std::vector<uint8_t> b;
+            writeColumnHeader(b, Codec::FixedPointDelta, 64, n,
+                              (uint64_t)e | ((uint64_t)wrap << 8));
+            int64_t prev = 0;
+            for (size_t i = 0; i < n; ++i) {
+                int64_t dd = ks[i] - prev;
+                if (wrap > 0) {                     // 取最短弧
+                    dd %= wrap;
+                    if (dd > wrap / 2) dd -= wrap;
+                    else if (dd < -wrap / 2) dd += wrap;
+                }
+                putVarint(b, zigzag(dd));
+                prev = ks[i];
+            }
+            consider(best, Codec::FixedPointDelta, 64, 0, std::move(b));
+        }
         break;
     }
 
@@ -360,7 +384,8 @@ bool decodeDoubleColumn(const uint8_t* p, size_t n, std::vector<double>& out) {
         return true;
     }
     if (h.codec == (uint8_t)Codec::FixedPointDelta) {
-        const int e = (int)h.aux;
+        const int e = (int)(h.aux & 0xFF);          // 低 8 位 = 十进制指数
+        const int64_t wrap = (int64_t)(h.aux >> 8);  // 高位 = 环绕周期（0 = 不环绕）
         if (e < 0 || e > 9) return false;
         const double scale = std::pow(10.0, e);
         out.resize(count);
@@ -370,6 +395,10 @@ bool decodeDoubleColumn(const uint8_t* p, size_t n, std::vector<double>& out) {
             uint64_t zz = 0;
             if (!getVarint(body, bodyN, off, zz)) return false;
             prev += unzigzag(zz);
+            if (wrap > 0) {                          // 还原到 [0, wrap)
+                prev %= wrap;
+                if (prev < 0) prev += wrap;
+            }
             out[i] = (double)prev / scale;
         }
         return true;
@@ -691,7 +720,8 @@ bool decodeU32Column(const uint8_t* p, size_t n, std::vector<uint32_t>& out) {
         return true;
     }
     if (h.codec == (uint8_t)Codec::FixedPointDelta) {
-        const int e = (int)h.aux;
+        const int e = (int)(h.aux & 0xFF);          // 低 8 位 = 十进制指数
+        const int64_t wrap = (int64_t)(h.aux >> 8);  // 高位 = 环绕周期（0 = 不环绕）
         if (e < 0 || e > 9) return false;
         const double scale = std::pow(10.0, e);
         out.resize(count);
@@ -701,6 +731,10 @@ bool decodeU32Column(const uint8_t* p, size_t n, std::vector<uint32_t>& out) {
             uint64_t zz = 0;
             if (!getVarint(body, bodyN, off, zz)) return false;
             prev += unzigzag(zz);
+            if (wrap > 0) {                          // 还原到 [0, wrap)
+                prev %= wrap;
+                if (prev < 0) prev += wrap;
+            }
             out[i] = (double)prev / scale;
         }
         return true;

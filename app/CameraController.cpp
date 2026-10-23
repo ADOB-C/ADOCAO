@@ -156,6 +156,19 @@ void CameraController::update(int fbW, int fbH, float targetAspect, bool panEnab
             m_offsetX = -mdx * pxToWorldX;
             m_offsetY =  mdy * pxToWorldY;
             unrotate(*m_camera, m_offsetX, m_offsetY);      // 旋转视角下拖动方向也跟着转
+            // **默认就记**：光标这一帧几乎没动、镜头却移了 >1 砖 —— 那就是"传送"。
+            // （很少见，所以不必藏到 env 后面；每帧细节仍走 ADOCAO_DRAG_DEBUG。）
+            {
+                const double tx0 = m_baseTargetX + m_offsetX, ty0 = m_baseTargetY + m_offsetY;
+                const double camDx0 = tx0 - m_prevTargetX, camDy0 = ty0 - m_prevTargetY;
+                const double mousePts = std::hypot(m_cursorX - m_dragStartX, m_cursorY - m_dragStartY);
+                if (mousePts < 4.0 && camDx0 * camDx0 + camDy0 * camDy0 > 1.0) {
+                    LOG_W("drag-jump: 光标只移了 %.2f 点，镜头却移了 (%.3f,%.3f) 砖 —— "
+                          "cursor=(%.1f,%.1f) start=(%.1f,%.1f) zoom=%.1f win=%dx%d fb=%dx%d",
+                          mousePts, camDx0, camDy0, m_cursorX, m_cursorY, m_dragStartX, m_dragStartY,
+                          (double)m_camera->zoom(), m_winW, m_winH, fbW, fbH);
+                }
+            }
             if (env::flag("ADOCAO_DRAG_DEBUG")) {
                 const double tx = m_baseTargetX + m_offsetX, ty = m_baseTargetY + m_offsetY;
                 const double camDx = tx - m_prevTargetX, camDy = ty - m_prevTargetY;

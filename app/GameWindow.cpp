@@ -130,7 +130,7 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     m_windowedH = winH;
     // 窗口模式的落点先算好：全屏启动时 Alt+Enter 退回窗口也要落回屏幕中间，
     // 不能是 (0,0)（默认值）。
-    if (primary && !captureRun) {
+    if (primary && !captureRun && !cfg.fullscreen) {
         // 窗口比工作区大就按比例缩小（点为单位），否则会被系统截掉一部分。
         int wx, wy, ww, wh;
         glfwGetMonitorWorkarea(primary, &wx, &wy, &ww, &wh);

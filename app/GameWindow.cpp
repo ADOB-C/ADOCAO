@@ -617,7 +617,7 @@ void GameWindow::update(float deltaMs) {
 
     // **每秒一条状态**（INFO，进日志文件）：相机 / 缩放 / 拖拽 / 播放 / 时间。
     // 复现"镜头乱跳"时，把这一串拿去就能看出是相机在动还是谱面在动、动在什么时间点。
-    {
+    if (env::flag("ADOCAO_STATE_LOG")) {   // 排查用：默认关，否则日志每秒长一行
         static double lastLog = 0.0;
         const double now = glfwGetTime();
         if (now - lastLog >= 1.0) {

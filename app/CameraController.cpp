@@ -60,6 +60,10 @@ void CameraController::snapTo(double worldX, double worldY) {
 }
 
 void CameraController::onMouseButton(bool pressed) {
+    // 低成本的生命周期日志：先确认"按/松"到底有没有到达控制器（相机不动时先排除这条）。
+    if (env::flag("ADOCAO_DRAG_DEBUG")) {
+        LOG_I("mouse %s at (%.1f,%.1f)", pressed ? "down" : "up", m_cursorX, m_cursorY);
+    }
     if (pressed) {
         m_dragging = true;
         m_dragStartX = m_cursorX;

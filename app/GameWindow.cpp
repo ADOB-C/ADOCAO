@@ -381,6 +381,11 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
 
+    // **抢一次键盘焦点**：从终端直接跑 `build/adocao`（不是 .app 包）时，macOS 不会自动把
+    // 这个进程当成前台 App，窗口出来了但键盘事件照样送到别处（空格/方向键全失效）。
+    // `glfwFocusWindow` 在 macOS 上会 makeKeyAndOrderFront + activateIgnoringOtherApps。
+    if (cfg.capturePath.empty()) glfwFocusWindow(m_window);
+
     m_lastFrameTime = glfwGetTime();
     m_autoPlayTriggerTime = glfwGetTime() + (cfg.autoPlay ? 0.5 : 999999.0);
     return true;
@@ -617,10 +622,12 @@ void GameWindow::update(float deltaMs) {
         const double now = glfwGetTime();
         if (now - lastLog >= 1.0) {
             lastLog = now;
-            LOG_I("state: t=%.2fs cam=(%.2f,%.2f) zoom=%.1f rot=%.1f drag=%d play=%d tile=%d",
+            LOG_I("state: t=%.2fs cam=(%.2f,%.2f) zoom=%.1f rot=%.1f drag=%d play=%d tile=%d focus=%d space=%d",
                   m_playback->timeInLevel(), m_camera.targetX(), m_camera.targetY(),
                   (double)m_camera.zoom(), (double)m_camera.rotation(),
-                  (int)m_camCtrl.dragging(), (int)m_playback->isPlaying(), m_selectedTile);
+                  (int)m_camCtrl.dragging(), (int)m_playback->isPlaying(), m_selectedTile,
+                  (int)glfwGetWindowAttrib(m_window, GLFW_FOCUSED),
+                  (int)(glfwGetKey(m_window, GLFW_KEY_SPACE) == GLFW_PRESS));
         }
     }
 }
@@ -1097,6 +1104,7 @@ void GameWindow::run() {
         if (m_pendingFullscreenEnter) {
             m_pendingFullscreenEnter = false;
             macosBorderlessEnter(m_window);
+            glfwFocusWindow(m_window);   // 进全屏后同样要抢焦点
         }
 #endif
         handleInput();

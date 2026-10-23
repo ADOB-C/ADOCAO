@@ -61,9 +61,8 @@ void CameraController::snapTo(double worldX, double worldY) {
 
 void CameraController::onMouseButton(bool pressed) {
     // 低成本的生命周期日志：先确认"按/松"到底有没有到达控制器（相机不动时先排除这条）。
-    if (env::flag("ADOCAO_DRAG_DEBUG")) {
-        LOG_I("mouse %s at (%.1f,%.1f)", pressed ? "down" : "up", m_cursorX, m_cursorY);
-    }
+    // 默认就记（DEBUG 级、只写日志文件）：先确认"按/松"有没有到达控制器。
+    LOG_D("mouse %s at (%.1f,%.1f) seen=%d", pressed ? "down" : "up", m_cursorX, m_cursorY, (int)m_cursorSeen);
     if (pressed) {
         m_dragging = true;
         m_dragStartX = m_cursorX;
@@ -110,7 +109,7 @@ void CameraController::onScroll(double yOffset) {
     // 而那需要视口尺寸，只有 update() 有。学自 ADOCAO-E 的编辑器（它先做了这件事）。
     m_pendingScroll += yOffset;
     // 触控板"双指拖动"在 GLFW 里是 **scroll**，不是鼠标拖动 —— 传送先要分清是哪一路。
-    LOG_D("scroll: dy=%.3f pending=%.3f", yOffset, m_pendingScroll);
+    LOG_D("scroll: dy=%.3f pending=%.3f cursor=(%.1f,%.1f)", yOffset, m_pendingScroll, m_cursorX, m_cursorY);
 }
 
 bool CameraController::consumeClick() {

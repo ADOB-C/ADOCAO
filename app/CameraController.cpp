@@ -64,6 +64,17 @@ void CameraController::onMouseButton(bool pressed) {
         m_dragging = true;
         m_dragStartX = m_cursorX;
         m_dragStartY = m_cursorY;
+        m_dragFrames = 0;
+        m_prevTargetX = m_camera ? m_camera->targetX() : 0.0;
+        m_prevTargetY = m_camera ? m_camera->targetY() : 0.0;
+        // **拖动前先把输入日志打出来**：`m_cursorX/Y` 是"最后一次光标回调"的值，
+        // 如果它还是 (0,0)（窗口刚建好、鼠标没动过就按下），dragStart 就是错的 ——
+        // 第一次移动会算出一个巨大的 delta，镜头直接"传送"。这条日志就是为了看清这一点。
+        if (env::flag("ADOCAO_DRAG_DEBUG")) {
+            LOG_I("drag-start: cursor=(%.2f,%.2f) base=(%.3f,%.3f) zoom=%.2f seen=%d win=%dx%d",
+                  m_cursorX, m_cursorY, m_baseTargetX, m_baseTargetY,
+                  m_camera ? (double)m_camera->zoom() : 0.0, (int)m_cursorSeen, m_winW, m_winH);
+        }
     } else {
         double dx = m_cursorX - m_dragStartX, dy = m_cursorY - m_dragStartY;
         m_dragging = false;
@@ -136,9 +147,29 @@ void CameraController::update(int fbW, int fbH, float targetAspect, bool panEnab
         if (vp.w > 0 && vp.h > 0) {
             double pxToWorldX, pxToWorldY;
             pixelToWorldScale(halfViewHeight(m_camera->zoom()), vp, pxToWorldX, pxToWorldY);
-            m_offsetX = -(m_cursorX - m_dragStartX) * pxToWorldX;
-            m_offsetY =  (m_cursorY - m_dragStartY) * pxToWorldY;
+            // 光标增量是**窗口点**，而 pxToWorld 是**帧缓冲像素**口径 —— Retina 上差 content scale。
+            // 这里先按帧缓冲换算（与缩放/拾取同一条口径）。
+            const double sx = m_winW > 0 ? (double)fbW / (double)m_winW : 1.0;
+            const double sy = m_winH > 0 ? (double)fbH / (double)m_winH : 1.0;
+            const double mdx = (m_cursorX - m_dragStartX) * sx;
+            const double mdy = (m_cursorY - m_dragStartY) * sy;
+            m_offsetX = -mdx * pxToWorldX;
+            m_offsetY =  mdy * pxToWorldY;
             unrotate(*m_camera, m_offsetX, m_offsetY);      // 旋转视角下拖动方向也跟着转
+            if (env::flag("ADOCAO_DRAG_DEBUG")) {
+                const double tx = m_baseTargetX + m_offsetX, ty = m_baseTargetY + m_offsetY;
+                const double camDx = tx - m_prevTargetX, camDy = ty - m_prevTargetY;
+                const double mousePx = std::hypot(m_cursorX - m_dragStartX, m_cursorY - m_dragStartY);
+                // "鼠标这一帧没怎么动，镜头却大幅移动" = 传送的典型征兆
+                if (m_dragFrames < 40 || (camDx * camDx + camDy * camDy > 1.0 && mousePx < 4.0)) {
+                    LOG_I("drag[%d]: cursor=(%.1f,%.1f) d=%.2fpt  offset=(%.3f,%.3f) target=(%.3f,%.3f) Δcam=(%.3f,%.3f) zoom=%.1f",
+                          m_dragFrames, m_cursorX, m_cursorY, mousePx, m_offsetX, m_offsetY,
+                          tx, ty, camDx, camDy, (double)m_camera->zoom());
+                }
+                ++m_dragFrames;
+                m_prevTargetX = tx;
+                m_prevTargetY = ty;
+            }
         }
     }
     m_camera->setTarget(m_baseTargetX + m_offsetX, m_baseTargetY + m_offsetY);

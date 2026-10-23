@@ -288,3 +288,13 @@ add_test(NAME adocao_direct_fields COMMAND adocao_direct_fields_test)
 add_executable(adocao_v7_corpus_test adocao_v7_corpus_test.cpp)
 target_link_libraries(adocao_v7_corpus_test PRIVATE adocao_archive)
 add_test(NAME adocao_v7_corpus COMMAND adocao_v7_corpus_test ${CMAKE_SOURCE_DIR}/tests/charts)
+
+# 容器 → 明文 → 重新打包 的逐字节验收（回写器只存在于 tests/，ADOCAO 不提供导出）
+add_executable(adocao_v7_roundtrip_json_test adocao_v7_roundtrip_json_test.cpp AdocaoJsonWriter.cpp)
+target_link_libraries(adocao_v7_roundtrip_json_test PRIVATE adocao_archive)
+add_test(NAME adocao_v7_roundtrip_json
+         COMMAND adocao_v7_roundtrip_json_test
+                 ${CMAKE_SOURCE_DIR}/tests/charts/angles360.adofai
+                 ${CMAKE_SOURCE_DIR}/tests/charts/camera_basic.adofai
+                 ${CMAKE_SOURCE_DIR}/tests/charts/diag_chord.adofai
+                 ${CMAKE_SOURCE_DIR}/tests/charts/neon_alpha.adofai)

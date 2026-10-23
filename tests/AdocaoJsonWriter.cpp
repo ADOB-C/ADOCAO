@@ -1,4 +1,4 @@
-#include "archive/AdocaoJsonWriter.hpp"
+#include "AdocaoJsonWriter.hpp"
 
 #include <cstring>
 

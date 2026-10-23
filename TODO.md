@@ -25,7 +25,7 @@
 ### 装饰物（2026-10-22 拍板：**不做渲染**）
 
 - [x] 容器 v7 **只存数据**：`MoveDecorations` / `AddDecoration` / `decorations` 数组已经无损装进
-      `EventColumns`（MEGAMIX_2：23,198 + 1,944 + 2,946 条，容器 165 KB），`adocao debug json` 能原样回写。
+      `EventColumns`（MEGAMIX_2：23,198 + 1,944 + 2,946 条，容器 165 KB），测试里的回写器能原样还原。
 - [ ] **不做装饰物渲染**。理由（用户 2026-10-22）：装饰系统深度依赖 Unity 的 shader/材质/timeline，
       Re_ADOJAS 死磕 3 个月也只能做到"看得出有装饰"；目前唯一接近原版的播放器是 Unity 实现，
       且因大量借鉴原版代码要求后台挂正版 Steam 验证。
@@ -41,8 +41,9 @@
 - [x] **v7 唯一存储** `pack --v7-only`：不写 v6 事件段，读侧走 `LevelData::ingestEventJson()`
       （复用 JSON 路径的 `parseActionObject`/`buildAction`/`decodeSpecialEvent`，不重写第二套）。
       实测 2025 73,256 B / MEGAMIX_2 173,568 B，出图与明文逐字节相同。
-- [x] **`adocao debug json`**（调试工具，不是导出）：v7 容器 → 明文，`--v7-all` 的包才能回写全部事件；
-      2025 往返 0 差异、回写再打包**逐字节相同**。
+- [x] **无损回写验收**（不是导出功能）：回写器只在 `tests/AdocaoJsonWriter.cpp`，
+      ctest `adocao_v7_roundtrip_json` 要求"容器 → 明文 → 重新打包"**逐字节相同**；
+      对外规范见 `docs/adocao-export.md`（ADOFAI.Lib 用符号链接指过来）。
 - [x] **事件列按块分块**（2026-10-22）：`EventColumns` 段头带块表、每块自包含；
       `decodeEventColumnsRange([first,last))` 只解命中的块（范围解码与全量解码逐字节一致的用例已加）。
       块大小默认 **16384**（`ADOCAO_V7_BLOCK_EVENTS` 可调）：4096 会让 2025 +6.5 KB、

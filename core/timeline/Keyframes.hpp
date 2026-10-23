@@ -30,7 +30,7 @@ public:
     // 同刻覆盖（保留原位置）；否则插入到有序位置。
     void addKeyframe(double t, float v);
 
-    // Kill(complete) + tween：[t0, t1] 从 from 到 to，缓动 e。
+    // Kill(complete) + tween：[t0, t1] 从 from 到 to，缓速 e。
     // `fallback` 用于"此刻之前没有任何关键帧"时补一个起点（与 Re_ADOJAS 的 fallback 一致）。
     void addTween(double t0, double t1, float from, float to, Ease e, float fallback);
 

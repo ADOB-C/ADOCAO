@@ -152,7 +152,7 @@
 - [ ] 无头视频（构想）：那个 fork `rech114/ADOCAO` 用离屏 FBO + ffmpeg 管道做过（Apache-2.0，可参考）
   - core 侧已有先例：headless 探针直接跑 PositionSolver/sampleTrail（见拖尾调研用的 trailprobe）；缺口在离屏 GL 上下文（headless GLFW / EGL）+ 渲染循环的时间源——无音频设备时不能依赖音频回调推进 m_readCursor，需固定步长驱动
 - [ ] MoveCamera（5 种 relativeTo 模式）—— **八步依赖链 2026-10-17 全部落地，详见 `docs/camera.md` §12**
-      ✅ 已完成（都有独立验收）：32 个缓动（`core/util/Easing`，金标由 `Easing.ts` 直接跑出来，32×25 点）、
+      ✅ 已完成（都有独立验收）：32 个缓速（`core/util/Easing`，金标由 `Easing.ts` 直接跑出来，32×25 点）、
       `angleOffset`、`RepeatEvents` 展开（Beat/Floor + `entryBeat` 的 -1 哨兵 + 多 tag）、`MoveCamera`
       富事件（快路径/分块并行/流式窗口/DOM 四条路径 + `.adocao` 段 9/10，容器往返逐字段对拍）、
       相机时间线（`tileStartTimes[floor] + angleOffset/180*60/bpm`，`(time,id,文件序)` 排序）、

@@ -21,7 +21,7 @@ void Channel::instantKeyframe(double t0, float v) {
 void Channel::addTween(double t0, double t1, float from, float to, Ease e, float fallback) {
     if (m_keys.empty()) addKeyframe(t0, fallback);
     // Kill(complete)：旧 tween 在 t0 **跳到它自己的终点**（t0 之前的历史不受影响）。
-    // 实现方式：在 t0 插一个"跳变后的值"的关键帧作为新 tween 的起点（ease = 新缓动）。
+    // 实现方式：在 t0 插一个"跳变后的值"的关键帧作为新 tween 的起点（ease = 新缓速）。
     float startValue = from;
     {
         auto it = std::lower_bound(m_keys.begin(), m_keys.end(), t0,
@@ -40,7 +40,7 @@ void Channel::addTween(double t0, double t1, float from, float to, Ease e, float
         else m_keys.insert(at, Key{t0, to, 255});
         return;
     }
-    // **缓动挂在起点帧上**（= 这一段 tween 的 ease）；终点帧是纯值。
+    // **缓速挂在起点帧上**（= 这一段 tween 的 ease）；终点帧是纯值。
     auto at0 = std::lower_bound(m_keys.begin(), m_keys.end(), t0,
                                 [](const Key& k, double x) { return k.time < x; });
     if (at0 != m_keys.end() && at0->time == t0) { at0->value = startValue; at0->ease = (uint8_t)e; }

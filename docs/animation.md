@@ -59,7 +59,7 @@ struct TileAnim {
 ## 4. 迁移步骤（每一步都要能验收）
 
 1. **核心**：`core/timeline/Keyframes.{hpp,cpp}`（通道/采样/Kill-complete）+ ctest
-   `keyframes_test`（手工算例：覆盖、tween 中途、`Kill(complete)`、越界缓动）。
+   `keyframes_test`（手工算例：覆盖、tween 中途、`Kill(complete)`、越界缓速）。
 2. **MoveTrack 建帧**：把 `LevelData::moveTransformAt` 的链式设置换成"逐砖建关键帧"，
    旋转改绝对角、枢轴改砖起点（已于 2026-10-21 单独修过，这里改为由关键帧直接给出）。
 3. **AnimateTrack 建帧**：把 `Timeline::animAt` 的解析式改成建帧（appear/disappear 各类型），

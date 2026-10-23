@@ -1,4 +1,4 @@
-// 缓动模块（core/util/Easing）对拍测试。
+// 缓速模块（core/util/Easing）对拍测试。
 //
 // 金标来源：`~/Repos/Re_ADOJAS/src/lib/Player/Easing.ts` —— 在 25 个 t 采样点上用 node 直接
 // import 那份 .ts（类型擦除）算出来的 double，`toPrecision(17)` 落成 `easing_gold.inc`。
@@ -9,7 +9,7 @@
 //   * 取值容差 1e-12（**相对**）。为什么不是逐位：这里跨了 JS 的 `Math.sin/cos/pow` 与 libm，
 //     这几个函数本身允许 1 ulp 级差异（1e-16），而公式里的 +-*/ 是完全一致的。1e-12 足以抓住
 //     "公式抄错/分支写反"，又不会被 libm 的 ulp 差异误报；
-//   * 另外单独验一条**反向**护栏：`InBack(0.5) < 0` —— 缓动越界是 ADOFAI 的预期行为
+//   * 另外单独验一条**反向**护栏：`InBack(0.5) < 0` —— 缓速越界是 ADOFAI 的预期行为
 //     （回弹/过冲），实现里绝不能在返回前再 clamp 一次。
 
 #include "core/util/Easing.hpp"
@@ -35,7 +35,7 @@ int main() {
     using namespace adofai;
 
     static_assert(sizeof(kEaseGold) / sizeof(kEaseGold[0]) == (size_t)kEaseCount,
-                  "金标行数必须与 Ease 枚举数一致（新增/删除缓动时重新生成 easing_gold.inc）");
+                  "金标行数必须与 Ease 枚举数一致（新增/删除缓速时重新生成 easing_gold.inc）");
 
     // 1) 名字 ↔ 枚举：32 个名字全部认得，且能双向还原。
     for (int i = 0; i < kEaseCount; i++) {
@@ -87,6 +87,6 @@ int main() {
     }
 
     if (g_fail) { std::fprintf(stderr, "easing: %d 处失败\n", g_fail); return 1; }
-    std::printf("easing: 32 个缓动 × %d 个采样点全部对上（容差 1e-12）\n", kEaseGoldT);
+    std::printf("easing: 32 个缓速 × %d 个采样点全部对上（容差 1e-12）\n", kEaseGoldT);
     return 0;
 }

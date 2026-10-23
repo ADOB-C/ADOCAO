@@ -587,6 +587,20 @@ void GameWindow::update(float deltaMs) {
     glfwGetFramebufferSize(m_window, &fbW, &fbH);
     glfwGetWindowSize(m_window, &winW, &winH);
     m_camCtrl.update(fbW, fbH, m_targetAspect, !m_playback->isPlaying(), winW, winH);
+
+    // **没有人拖拽，相机却动了** —— 与 AnimateTrack/MoveTrack 移动砖的情形区分开。
+    // 用户报"传送"时，这条日志能直接回答：是相机被谁改了，还是只是砖在动。
+    if (!m_camCtrl.dragging() && !m_playback->isPlaying()) {
+        const double dx = m_camera.targetX() - m_lastCamX;
+        const double dy = m_camera.targetY() - m_lastCamY;
+        if (dx * dx + dy * dy > 0.25) {   // >0.5 砖
+            LOG_W("camera-jump: target (%.3f,%.3f) → (%.3f,%.3f)  zoom %.1f  拖拽中=%d 播放中=%d",
+                  m_lastCamX, m_lastCamY, m_camera.targetX(), m_camera.targetY(),
+                  (double)m_camera.zoom(), (int)m_camCtrl.dragging(), (int)m_playback->isPlaying());
+        }
+    }
+    m_lastCamX = m_camera.targetX();
+    m_lastCamY = m_camera.targetY();
 }
 
 void GameWindow::render() {

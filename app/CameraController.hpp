@@ -36,6 +36,7 @@ public:
     // True once after a press+release without drag movement (a "click").
     // Cleared by this call. Poll it only when playback is stopped.
     bool consumeClick();
+    bool dragging() const { return m_dragging; }
 
     // Per-frame update. panEnabled=false while playing (playback owns the
     // camera); the drag state is kept so panning resumes seamlessly.

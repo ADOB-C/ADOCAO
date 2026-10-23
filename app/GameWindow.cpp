@@ -110,8 +110,14 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
         if (csx <= 0.0f) csx = 1.0f;
         if (csy <= 0.0f) csy = 1.0f;
     }
-    int winW = (int)(cfg.resolutionW / csx); if (winW < 1) winW = 1;
-    int winH = (int)(cfg.resolutionH / csy); if (winH < 1) winH = 1;
+    // **交互窗口按"点"**（用户说的 800×600 就该是屏幕上 800×600），
+    // 抓帧（--capture）仍按**物理像素**（像素门槛的基线尺寸不能随显示器变）。
+    // 之前两者都按物理像素：Retina 上 `--width 800` 会得到一个 400×300 的小窗口。
+    const bool captureRun = !cfg.capturePath.empty();
+    int winW = captureRun ? (int)(cfg.resolutionW / csx) : cfg.resolutionW;
+    int winH = captureRun ? (int)(cfg.resolutionH / csy) : cfg.resolutionH;
+    if (winW < 1) winW = 1;
+    if (winH < 1) winH = 1;
     // **别把 video mode 再除一次 content scale**：macOS 的 `glfwGetVideoMode()` 报的就是
     // **逻辑点**（与窗口/坐标系同单位），不是物理像素 —— 实测本机 mode=1470x956、scale=2.0，
     // 除完只剩 735x478，于是"无边框铺满"只铺了屏幕左上四分之一（2026-10-19 用户截图）。
@@ -124,6 +130,17 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     m_windowedH = winH;
     // 窗口模式的落点先算好：全屏启动时 Alt+Enter 退回窗口也要落回屏幕中间，
     // 不能是 (0,0)（默认值）。
+    if (primary && !captureRun) {
+        // 窗口比工作区大就按比例缩小（点为单位），否则会被系统截掉一部分。
+        int wx, wy, ww, wh;
+        glfwGetMonitorWorkarea(primary, &wx, &wy, &ww, &wh);
+        if (ww > 0 && wh > 0 && (winW > ww || winH > wh)) {
+            const double k = std::min((double)ww / winW, (double)wh / winH);
+            winW = std::max(1, (int)(winW * k));
+            winH = std::max(1, (int)(winH * k));
+            LOG_I("window: 请求的窗口大于工作区 %dx%d 点 → 缩到 %dx%d 点", ww, wh, winW, winH);
+        }
+    }
     if (primary) {
         int wx, wy, ww, wh;
         glfwGetMonitorWorkarea(primary, &wx, &wy, &ww, &wh);
@@ -320,6 +337,23 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
 
     // Input callbacks → CameraController (pan/zoom/click state)
     glfwSetWindowUserPointer(m_window, &m_camCtrl);
+    // **窗口点 vs 帧缓冲像素**：Retina/全屏下两者不等，光标换算必须知道窗口点尺寸。
+    // 初始化喂一次，之后跟随 window-size / framebuffer-size 回调更新。
+    {
+        int ww = 0, wh = 0;
+        glfwGetWindowSize(m_window, &ww, &wh);
+        m_camCtrl.setWindowSizePts(ww, wh);
+    }
+    glfwSetWindowSizeCallback(m_window, [](GLFWwindow* w, int ww, int wh) {
+        auto* ctrl = static_cast<CameraController*>(glfwGetWindowUserPointer(w));
+        if (ctrl) ctrl->setWindowSizePts(ww, wh);
+    });
+    glfwSetFramebufferSizeCallback(m_window, [](GLFWwindow* w, int, int) {
+        auto* ctrl = static_cast<CameraController*>(glfwGetWindowUserPointer(w));
+        int ww = 0, wh = 0;
+        glfwGetWindowSize(w, &ww, &wh);
+        if (ctrl) ctrl->setWindowSizePts(ww, wh);
+    });
     glfwSetMouseButtonCallback(m_window, [](GLFWwindow* w, int b, int a, int) {
         auto* ctrl = static_cast<CameraController*>(glfwGetWindowUserPointer(w));
         if (b == GLFW_MOUSE_BUTTON_LEFT)
@@ -396,7 +430,7 @@ void GameWindow::handleInput() {
     if (!m_playback->isPlaying() && m_camCtrl.consumeClick()) {
         int fbW, fbH;
         glfwGetFramebufferSize(m_window, &fbW, &fbH);
-        glm::dvec2 world = m_camCtrl.screenToWorld(m_camCtrl.cursorX(), m_camCtrl.cursorY(),
+        glm::dvec2 world = m_camCtrl.screenToWorld(m_camCtrl.cursorFbX(fbW), m_camCtrl.cursorFbY(fbH),
                                                    fbW, fbH, m_targetAspect);
 
         int best = -1; double bestDist = 1.0;
@@ -540,9 +574,10 @@ void GameWindow::update(float deltaMs) {
     m_wasPlaying = playing;
 
     // Pan/drag (only when not playing)
-    int fbW, fbH;
+    int fbW, fbH, winW, winH;
     glfwGetFramebufferSize(m_window, &fbW, &fbH);
-    m_camCtrl.update(fbW, fbH, m_targetAspect, !m_playback->isPlaying());
+    glfwGetWindowSize(m_window, &winW, &winH);
+    m_camCtrl.update(fbW, fbH, m_targetAspect, !m_playback->isPlaying(), winW, winH);
 }
 
 void GameWindow::render() {

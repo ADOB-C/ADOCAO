@@ -1,5 +1,7 @@
 #include "CameraController.hpp"
 
+#include "core/util/Env.hpp"
+#include "core/util/Logger.hpp"
 #include "render/Camera.hpp"
 
 #include <algorithm>
@@ -77,6 +79,7 @@ void CameraController::onMouseButton(bool pressed) {
 void CameraController::onCursorPos(double x, double y) {
     m_cursorX = x;
     m_cursorY = y;
+    m_cursorSeen = true;
 }
 
 void CameraController::onScroll(double yOffset) {
@@ -91,21 +94,40 @@ bool CameraController::consumeClick() {
     return click;
 }
 
-void CameraController::update(int fbW, int fbH, float targetAspect, bool panEnabled) {
+void CameraController::update(int fbW, int fbH, float targetAspect, bool panEnabled,
+                              int winW, int winH) {
     m_lastFbW = fbW; m_lastFbH = fbH; m_lastAspect = targetAspect;
+    if (winW > 0 && winH > 0) { m_winW = winW; m_winH = winH; }
+    // 光标从没进过窗口 / 尺寸还没拿到 → **不做锚定**（退回以中心缩放）。
+    // 否则锚点会落在像素 (0,0)，也就是"缩放中心在屏幕左上角"。
+    const bool canAnchor = m_cursorSeen && m_winW > 0 && m_winH > 0 && fbW > 0 && fbH > 0;
     // ── 滚轮：以光标为中心缩放（光标下的世界点保持不动）──
-    if (m_pendingScroll != 0.0 && fbW > 0 && fbH > 0) {
-        const glm::dvec2 before = screenToWorld(m_cursorX, m_cursorY, fbW, fbH, targetAspect);
+    if (m_pendingScroll != 0.0 && canAnchor) {
+        // 光标是**窗口点**，换成帧缓冲像素再算（Retina / 全屏下两者不等）
+        const double cx = cursorFbX(fbW), cy = cursorFbY(fbH);
+        const glm::dvec2 before = screenToWorld(cx, cy, fbW, fbH, targetAspect);
         // 指数步进（触控板的小数增量也顺滑）；倍率与 ADOCAO-E 一致（1.15/格）。
         // 上限从 1000 放宽：谱面 zoom 是 ADOFAI 口径、会映射成较大的放大倍数。
         const float minZoom = ADOCAO_MIN_ZOOM, maxZoom = 100000.0f;
+        const float z0 = m_camera->zoom();
         float z = m_camera->zoom() * (float)std::pow(1.15, m_pendingScroll);
         z = std::min(std::max(z, minZoom), maxZoom);
         m_camera->setZoom(z);
-        const glm::dvec2 after = screenToWorld(m_cursorX, m_cursorY, fbW, fbH, targetAspect);
+        const glm::dvec2 after = screenToWorld(cx, cy, fbW, fbH, targetAspect);
+        if (env::flag("ADOCAO_ZOOM_DEBUG")) {
+            LOG_I("zoom: cursor_pts=(%.1f,%.1f) fb=(%.0f,%.0f) win=%dx%d fb=%dx%d zoom %.1f→%.1f 世界点 (%.4f,%.4f)→(%.4f,%.4f) target (%.4f,%.4f)",
+                  m_cursorX, m_cursorY, cx, cy, m_winW, m_winH, fbW, fbH, (double)z0, (double)m_camera->zoom(),
+                  before.x, before.y, after.x, after.y, m_baseTargetX, m_baseTargetY);
+        }
         m_baseTargetX += before.x - after.x;
         m_baseTargetY += before.y - after.y;
         m_offsetX = m_offsetY = 0.0;
+        m_pendingScroll = 0.0;
+    } else if (m_pendingScroll != 0.0) {
+        // 退化路径：仍然缩放，只是以中心为锚点。
+        const float minZoom = ADOCAO_MIN_ZOOM, maxZoom = 100000.0f;
+        float z = m_camera->zoom() * (float)std::pow(1.15, m_pendingScroll);
+        m_camera->setZoom(std::min(std::max(z, minZoom), maxZoom));
         m_pendingScroll = 0.0;
     }
     if (!panEnabled) return;

@@ -147,6 +147,7 @@ void printHelp(Mode mode, bool all) {
         "\n"
         "播放选项:\n"
         "  --level <file>  --music <file>  --width N  --height N  --fullscreen\n"
+        "     （--width/--height 是**窗口点尺寸**；抓帧时按物理像素）\n"
         "  --fill <hex>  --stroke <hex>  --bg <hex>  --no-auto-stroke\n"
         "  --msaa N                                 抗锯齿采样数（0/2/4/8）\n"
         "  --windowed | --borderless                窗口 / 无边框全屏（默认 Borderless；= osu! 的 Borderless 语义）\n"

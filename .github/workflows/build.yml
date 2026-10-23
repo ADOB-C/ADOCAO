@@ -92,12 +92,13 @@ jobs:
       - name: Tests (parser parity + tile geometry)
         run: ctest --test-dir build --output-on-failure
 
-      - name: Guards (core purity + CLI help + shader fallbacks + env docs)
+      - name: Guards (core purity + CLI help + shader fallbacks + env docs + std headers)
         run: |
           bash scripts/check-core-purity.sh
           bash scripts/check-cli-help.sh
           bash scripts/check-shader-fallback.sh
           bash scripts/check-env-docs.sh
+          bash scripts/check-std-includes.sh
 
       - uses: actions/upload-artifact@v4
         with:

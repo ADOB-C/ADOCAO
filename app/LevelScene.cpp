@@ -1,5 +1,6 @@
 #include "LevelScene.hpp"
 
+#include <cstdio>
 #include <cstdlib>   // getenv（诊断转储）
 
 #include "core/util/AssetPaths.hpp"

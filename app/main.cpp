@@ -18,6 +18,7 @@
 #include "LauncherWindow.hpp"
 #include "core/util/Logger.hpp"
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <string>

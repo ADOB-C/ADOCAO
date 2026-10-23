@@ -97,6 +97,7 @@
 | `ADOCAO_V7_BLOCK_EVENTS` | 性能/格式 | v7 事件列分块大小（默认 16384；越小 seek 越细、体积略涨） |
 | `ADOCAO_V7_JSON_EVENTS` | 诊断 | v7 读侧退回"列 → JSON → 解析"的旧路（A/B 用；默认直接字段直灌） |
 | `ADOCAO_DRAG_DEBUG` | 诊断 | 打印拖拽起始状态与每帧光标位移/镜头位移（排查拖动传送用） |
+| `ADOCAO_ZOOM_DEBUG` | 诊断 | 打印每次滚轮缩放的锚点计算（光标点/帧缓冲像素/世界点前后值） |
 | `ADOFAO_GATE_HOME` | 路径 | `~/Projects/.ADOCAO/gate` | 像素门槛基线目录（**注意拼写是 ADOFAO**，历史遗留，勿"顺手修正"） |
 
 ## 8. 相关但**不是**环境变量的东西

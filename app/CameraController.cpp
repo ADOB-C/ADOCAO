@@ -155,7 +155,17 @@ void CameraController::update(int fbW, int fbH, float targetAspect, bool panEnab
         m_camera->setZoom(std::min(std::max(z, minZoom), maxZoom));
         m_pendingScroll = 0.0;
     }
+    // **没有拖拽在生效时，绝不写相机 target**：
+    // 以前这里无条件 `setTarget(base + offset)`，而 base 只在 snapTo() 里更新 ——
+    // 播放/跳转把相机挪走之后 base 就过期了，下一帧会把镜头**拽回一个旧位置**
+    // （那个位置通常不在任何砖上，用户看到的就是"传送到空白处"）。
+    // 现在空闲时只做一件事：把 base 同步成相机当前值（保持新鲜）。
     if (!panEnabled) return;
+    if (!m_dragging && m_offsetX == 0.0 && m_offsetY == 0.0) {
+        m_baseTargetX = m_camera->targetX();
+        m_baseTargetY = m_camera->targetY();
+        return;
+    }
     if (m_dragging) {
         LetterboxedViewport vp = computeLetterbox(fbW, fbH, targetAspect);
         if (vp.w > 0 && vp.h > 0) {

@@ -101,6 +101,8 @@ void CameraController::onScroll(double yOffset) {
     // 只记下来：**缩放要以光标为中心**（光标下的世界点保持不动），
     // 而那需要视口尺寸，只有 update() 有。学自 ADOCAO-E 的编辑器（它先做了这件事）。
     m_pendingScroll += yOffset;
+    // 触控板"双指拖动"在 GLFW 里是 **scroll**，不是鼠标拖动 —— 传送先要分清是哪一路。
+    LOG_D("scroll: dy=%.3f pending=%.3f", yOffset, m_pendingScroll);
 }
 
 bool CameraController::consumeClick() {

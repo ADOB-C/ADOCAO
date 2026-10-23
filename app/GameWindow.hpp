@@ -69,7 +69,7 @@ private:
     float m_bgR = 0, m_bgG = 0, m_bgB = 0;
     double m_lastFrameTime = 0;
 
-    void navigateToTile(int floor);
+    void navigateToTile(int floor, bool center = true);
     void rebuildCameraTimeline();
     void handleInput();
     void update(float deltaMs);

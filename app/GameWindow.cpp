@@ -391,10 +391,15 @@ void GameWindow::rebuildCameraTimeline() {
     }
 }
 
-void GameWindow::navigateToTile(int floor) {
+void GameWindow::navigateToTile(int floor, bool center) {
     if (floor < 0 || floor >= (int)m_level->tileCount()) return;
-    const auto& p = m_level->tilePositionAt(floor);
-    m_camCtrl.snapTo(p[0], p[1]);
+    // 只有"跳转"类操作（书签、Ctrl+方向键）才把镜头移过去；
+    // **点击选砖不移动镜头** —— 你点的那块本来就在眼前，把相机瞬移过去反而像"传送"
+    // （用户实测：按下后手抖 3 px 就被当成点击，镜头跳出去好几砖）。
+    if (center) {
+        const auto& p = m_level->tilePositionAt(floor);
+        m_camCtrl.snapTo(p[0], p[1]);
+    }
     m_selectedTile = floor;
 }
 
@@ -440,7 +445,7 @@ void GameWindow::handleInput() {
             double d = dx*dx + dy*dy;
             if (d < bestDist*bestDist) { bestDist = std::sqrt(d); best = i; }
         }
-        if (best >= 0) navigateToTile(best);
+        if (best >= 0) navigateToTile(best, /*center=*/false);
         else m_selectedTile = -1;
     }
 

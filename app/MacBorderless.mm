@@ -24,6 +24,11 @@ void activateAndFocus(NSWindow* w) {
     if (!w) return;
     [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
     [w makeKeyAndOrderFront:nil];
+    // 键盘事件走 first responder；无边框窗口 makeKey 之后视图不一定是第一响应者
+    if (NSView* v = [w contentView]) [w makeFirstResponder:v];
+    NSLog(@"[ADOCAO] focus: key=%d main=%d active=%d firstResponder=%@",
+          (int)[w isKeyWindow], (int)[w isMainWindow],
+          (int)[[NSApplication sharedApplication] isActive], [[w firstResponder] class]);
 }
 void focusAfterTransition(NSWindow* w) {
     [w retain];

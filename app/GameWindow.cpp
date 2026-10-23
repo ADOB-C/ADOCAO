@@ -595,6 +595,16 @@ void GameWindow::update(float deltaMs) {
     }
     m_wasPlaying = playing;
 
+    // 焦点变化时记一行（不进每秒日志，也不刷屏）
+    {
+        const int f = glfwGetWindowAttrib(m_window, GLFW_FOCUSED);
+        static int lastFocus = -1;
+        if (f != lastFocus) {
+            LOG_I("focus: %d → %d", lastFocus, f);
+            lastFocus = f;
+        }
+    }
+
     // Pan/drag (only when not playing)
     int fbW, fbH, winW, winH;
     glfwGetFramebufferSize(m_window, &fbW, &fbH);

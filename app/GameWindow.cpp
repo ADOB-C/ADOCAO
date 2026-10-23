@@ -601,6 +601,20 @@ void GameWindow::update(float deltaMs) {
     }
     m_lastCamX = m_camera.targetX();
     m_lastCamY = m_camera.targetY();
+
+    // **每秒一条状态**（INFO，进日志文件）：相机 / 缩放 / 拖拽 / 播放 / 时间。
+    // 复现"镜头乱跳"时，把这一串拿去就能看出是相机在动还是谱面在动、动在什么时间点。
+    {
+        static double lastLog = 0.0;
+        const double now = glfwGetTime();
+        if (now - lastLog >= 1.0) {
+            lastLog = now;
+            LOG_I("state: t=%.2fs cam=(%.2f,%.2f) zoom=%.1f rot=%.1f drag=%d play=%d tile=%d",
+                  m_playback->timeInLevel(), m_camera.targetX(), m_camera.targetY(),
+                  (double)m_camera.zoom(), (double)m_camera.rotation(),
+                  (int)m_camCtrl.dragging(), (int)m_playback->isPlaying(), m_selectedTile);
+        }
+    }
 }
 
 void GameWindow::render() {

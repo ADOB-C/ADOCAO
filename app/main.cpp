@@ -579,13 +579,18 @@ int main(int argc, char* argv[]) {
                 std::fprintf(stderr, "v7 自检失败（解容器）: %s\n", cerr.c_str());
                 return 1;
             }
-            if (chk.v7SchemaBytes.empty() || chk.v7ColumnsBytes.empty()) {
+            // **允许没有 v7 段**：去重后可能一条事件都不剩（整张谱只有 Pause/SetSpeed 之类，
+            // 它们全由 v6 段承载）。那不是错误，只是"这张谱 v7 无话可说"。
+            if (chk.v7SchemaBytes.empty() && chk.v7ColumnsBytes.empty()) {
+                std::printf("v7 自检: 无事件需要 v7 段（全部由 v6 段承载）\n");
+            } else if (chk.v7SchemaBytes.empty() || chk.v7ColumnsBytes.empty()) {
                 std::fprintf(stderr, "v7 自检失败：段缺失\n");
                 return 1;
+            } else {
+                std::printf("v7 自检: schema %zu B + 事件列 %zu B%s\n", chk.v7SchemaBytes.size(),
+                            chk.v7ColumnsBytes.size(),
+                            chk.v7CoverageBytes.empty() ? "（未裁剪）" : "（含 Coverage）");
             }
-            std::printf("v7 自检: schema %zu B + 事件列 %zu B%s\n", chk.v7SchemaBytes.size(),
-                        chk.v7ColumnsBytes.size(),
-                        chk.v7CoverageBytes.empty() ? "（未裁剪）" : "（含 Coverage）");
         }
         std::ofstream f(pos[1], std::ios::binary);
         if (!f) {

@@ -1316,3 +1316,33 @@ GridFloat 10.2 KB、Enum 10.6 KB、Color 5.2 KB、Float 5.8 KB、Bool 1.8 KB、T
 
 列编码（按 kind 建列/解列）、`EventIndex` 块内 seek、`Coverage` 段与裁剪
 （`--events=playable` 回到 v5 体积）、`PeriodicResidual` 变换。
+
+### 9.8 `FixedPointDelta`：double 列的十进制定点差分（kVersion 8，2026-10-23）
+
+**动机**（一张 MIDI 转谱，`Tempest_hertz.adofai`）：148,644 个角度、**100,103 个不同取值**、
+全是 3 位小数。double 列的候选只有 Const/Dict/Rle/Raw —— 字典 8 B/项比 Raw 还大，RLE 抓不到，
+于是整列退回 **Raw 8 B/值（1.19 MB）**，段级 lzma 之后仍有 **377,000 B**。
+（诊断早就写着 `建议 FixedPoint`，但编码器里**根本没有这个候选** —— 判据和实编脱节。）
+
+**编码**（`Codec::FixedPointDelta = 8`）：找一个最小的 e（0..6），使所有值都满足
+`onGrid(v, e)`：`k = round(v·10^e)` 且 `(double)k / 10^e == v`（**逐位**，不是近似）。
+满足就写 `header(aux = e)` + 整数差分的 zigzag varint；解侧累加后再除以 10^e。
+解码与十进制字面量的正确舍入等价，所以逐位无损由既有自检兜底（解回来 memcmp，失败退回 Raw）。
+
+**实测**（同一张谱）：
+
+| 编码 | 体积 |
+|---|---|
+| Raw 8 B/值 + lzma | 377,000 B |
+| **FixedPointDelta + 列级 zstd/lzma** | **149,728 B**（2.52×） |
+
+其余语料不受影响（2025 v6 18,352 B、MEGAMIX_2 30,992 B —— 它们的角度取值少，Dict 仍然更小）。
+
+**版本**：新增 codec 是**读侧不兼容**的改动 → `kVersion` 7 → **8**。旧构建读新文件会明确报
+"未知 codec"，不会给出半截数据。
+
+**顺带修的两个坑**（都是这张谱暴露的）：
+1. 去重后**一条事件都不剩**时（整张谱只有 `Pause`，全由 v6 段承载）`pack --v7` 会报
+   "事件列分块失败" —— 现在直接跳过 v7 段，并在自检里认这种"无需 v7"的情况；
+2. `adocao_blocked` 的 fixture 原来用 `round(u·1e6)/1e6`（正好落在十进制网格上），
+   FixedPointDelta 一上线它就赢过"分块"，用例覆盖不到分块布局了 —— 改成全精度 uniform 值。

@@ -65,8 +65,10 @@ std::vector<double> segmentedColumn(int blocks, double fraction, uint32_t seed) 
                           ((int64_t)b * irregular / blocks != (int64_t)(b + 1) * irregular / blocks);
         const size_t from = (size_t)b * kBlockElems;
         if (take) {
-            for (uint32_t i = 0; i < kBlockElems; ++i)
-                v[from + i] = std::round(uni(rng) * 1e6) / 1e6;
+            // **故意不落在十进制网格上**：`round(1e6)/1e6` 会让整列变成 `k/10^6`，
+            // 于是 FixedPointDelta（单块、更小）必然赢过"分块"，这条用例就覆盖不到分块布局了。
+            // 用全精度 uniform 值，保证分块是唯一能按块解的选择。
+            for (uint32_t i = 0; i < kBlockElems; ++i) v[from + i] = uni(rng);
         } else {
             fillSmooth(v, from, from + kBlockElems);
         }

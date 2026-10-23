@@ -672,6 +672,14 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
                 floors.push_back(v.HasMember("floor") && v["floor"].IsInt64() ? v["floor"].GetInt64() : -1);
             }
         }
+        // 去重后一条事件都不剩（例如整张谱只有 Pause，而 Pause 由 v6 段承载）：
+        // 不写 v7 段就是了 —— 以前这里会走到"分块数为 0"然后 `pack --v7` 直接失败。
+        if (evs.empty()) {
+            // 去重后一条事件都不剩（例如整张谱只有 Pause，而 Pause 由 v6 段承载）：
+            // **不写 v7 段就是了**，不要 return（那会把整个文件跳过去）。
+            // 以前这里会走到"分块数为 0"然后 `pack --v7` 直接失败。
+            if (opts.droppedEvents) err = "v7: 没有可写的事件";
+        } else {
         SchemaBuilder sb;
         for (size_t i = 0; i < evs.size(); ++i) {
             rapidjson::Document d;
@@ -751,6 +759,7 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
             putU32(cov.blob, (uint32_t)evs.size());
             secs.push_back(std::move(cov));
         }
+        }   // evs.empty() 的 else
     }
 
     // ---- 段目录（偏移 8 B 对齐，为 mmap 直读）----

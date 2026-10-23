@@ -29,7 +29,7 @@ namespace adocao {
 inline constexpr char kMagic[4] = {kAdocaoMagic[0], kAdocaoMagic[1], kAdocaoMagic[2], kAdocaoMagic[3]};
 static_assert(kAdocaoMagic[0] == 'A' && kAdocaoMagic[1] == 'D' && kAdocaoMagic[2] == 'O' &&
               kAdocaoMagic[3] == '1', "core 的 kAdocaoMagic 变了，archive 这边要一起改");
-inline constexpr uint16_t kVersion  = 7;   // v7：自描述事件库（EventSchema/EventColumns/Coverage）   // v6：actions 加 actions.strId2（AnimateTrack 的 trackAnimation）   // v5：MoveTrack 段加 eventTag（52→54 B，RepeatEvents 展开用）   // v3：列改**分块容器**（每 4096 元素一块、块内自选编码、
+inline constexpr uint16_t kVersion  = 8;   // v7：自描述事件库（EventSchema/EventColumns/Coverage）   // v6：actions 加 actions.strId2（AnimateTrack 的 trackAnimation）   // v5：MoveTrack 段加 eventTag（52→54 B，RepeatEvents 展开用）   // v3：列改**分块容器**（每 4096 元素一块、块内自选编码、
                                           //     帧级 zstd 与 seek 粒度解耦，见 AdocaoBlocked.hpp）
                                           // + Derived 段（PositionTrack/前缀状态 checkpoint，§8.8）
 inline constexpr uint16_t kMinReadVersion = 2;   // 读侧仍认 v2（双读）；更早的版本没有实现过
@@ -74,6 +74,9 @@ enum class Codec : uint8_t {
     // —— 列级（写在 ColumnHeader.codec 里）——
     Rle = 6,            // 字典 + (下标, 游程长度)：抓"长游程"（直线型赫兹谱的 angleData、type/flag/val1/val2）
     DeltaRleVarint = 7, // 差分 + 对差分再取游程：抓"单调且差分恒定"（floor 恒 +1 → 十几字节）
+    FixedPointDelta = 8,// **double 列**：值全在十进制网格 k/10^e 上 → 存整数差分（varint）。
+                        // 抓"MIDI 转谱"那种大量互不相同、但只有 3 位小数的角度
+                        // （Tempest_hertz：148,644 个值、100,103 个不同取值，字典必输，Raw 8 B/值）
     // —— 段级（写在 SectionEntry.codec 里；与列级同字段但取值区间分开）——
     SectionZstd = 16,   // 段内容是一整帧 zstd
     SectionXz   = 17,   // 段内容是一整帧 xz（体积敏感时用，实测真实文件上 zstd 更小）

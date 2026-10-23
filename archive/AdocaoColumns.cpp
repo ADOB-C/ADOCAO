@@ -268,6 +268,29 @@ bool encodeDoubleColumn(const std::vector<double>& v, std::vector<uint8_t>& out,
         }
     }
 
+    // **FixedPointDelta**：值全在十进制网格 `k / 10^e` 上时，存整数差分。
+    // 适用于"大量互不相同、但只有 2~6 位小数"的列（MIDI 转谱的 angleData 最典型：
+    // 字典/游程都赢不了，Raw 是 8 B/值）。e 取**最小可行**的那个（k 越小、varint 越短）。
+    // 正确性由下面的自检兜底：解回来必须逐位相同，否则退回 Raw。
+    for (int e = 0; e <= 6 && n > 0; ++e) {
+        const double scale = std::pow(10.0, e);
+        std::vector<int64_t> ks(n);
+        bool okAll = true;
+        for (size_t i = 0; i < n; ++i) {
+            const double r = std::round(v[i] * scale);
+            if (!std::isfinite(r) || std::fabs(r) > 9e15) { okAll = false; break; }
+            ks[i] = (int64_t)r;
+            if ((double)ks[i] / scale != v[i]) { okAll = false; break; }   // 必须逐位一致
+        }
+        if (!okAll) continue;
+        std::vector<uint8_t> b;
+        writeColumnHeader(b, Codec::FixedPointDelta, 64, n, (uint64_t)e);
+        int64_t prev = 0;
+        for (size_t i = 0; i < n; ++i) { putVarint(b, zigzag(ks[i] - prev)); prev = ks[i]; }
+        consider(best, Codec::FixedPointDelta, 64, 0, std::move(b));
+        break;
+    }
+
     // Raw 兜底：定宽 8 B。**只在它可能更小的时候才建** —— 否则白占 n*8 字节的瞬时内存，
     // 6841 万个值就是 547 MB（pack primer 时真付不起）。
     const size_t rawBytes = sizeof(ColumnHeader) + n * 8;
@@ -334,6 +357,21 @@ bool decodeDoubleColumn(const uint8_t* p, size_t n, std::vector<double>& out) {
         double d;
         std::memcpy(&d, &b, sizeof(double));
         out.assign(count, d);
+        return true;
+    }
+    if (h.codec == (uint8_t)Codec::FixedPointDelta) {
+        const int e = (int)h.aux;
+        if (e < 0 || e > 9) return false;
+        const double scale = std::pow(10.0, e);
+        out.resize(count);
+        int64_t prev = 0;
+        size_t off = 0;
+        for (size_t i = 0; i < count; ++i) {
+            uint64_t zz = 0;
+            if (!getVarint(body, bodyN, off, zz)) return false;
+            prev += unzigzag(zz);
+            out[i] = (double)prev / scale;
+        }
         return true;
     }
     if (h.codec == (uint8_t)Codec::Dict || h.codec == (uint8_t)Codec::Rle) {
@@ -650,6 +688,21 @@ bool decodeU32Column(const uint8_t* p, size_t n, std::vector<uint32_t>& out) {
         if (!bitUnpack(body, bodyN, count, h.bits, vals)) return false;
         out.resize(count);
         for (size_t i = 0; i < count; ++i) out[i] = (uint32_t)vals[i];
+        return true;
+    }
+    if (h.codec == (uint8_t)Codec::FixedPointDelta) {
+        const int e = (int)h.aux;
+        if (e < 0 || e > 9) return false;
+        const double scale = std::pow(10.0, e);
+        out.resize(count);
+        int64_t prev = 0;
+        size_t off = 0;
+        for (size_t i = 0; i < count; ++i) {
+            uint64_t zz = 0;
+            if (!getVarint(body, bodyN, off, zz)) return false;
+            prev += unzigzag(zz);
+            out[i] = (double)prev / scale;
+        }
         return true;
     }
     if (h.codec == (uint8_t)Codec::Dict || h.codec == (uint8_t)Codec::Rle) {

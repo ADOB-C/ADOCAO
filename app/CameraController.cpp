@@ -68,6 +68,14 @@ void CameraController::onMouseButton(bool pressed) {
         m_dragging = true;
         m_dragStartX = m_cursorX;
         m_dragStartY = m_cursorY;
+        // **按下的瞬间以相机当前位置为基准**（而不是上次 snapTo 留下的旧 base）。
+        // 播放时相机的 target 由 CameraDirector 每帧改写，base 会过期；只用一个旧 base
+        // 去算 `base + offset` 就等于"一按下就传送到旧位置"。这也是拖动传送的根因之一。
+        if (m_camera) {
+            m_baseTargetX = m_camera->targetX();
+            m_baseTargetY = m_camera->targetY();
+        }
+        m_offsetX = m_offsetY = 0.0;
         m_dragFrames = 0;
         m_prevTargetX = m_camera ? m_camera->targetX() : 0.0;
         m_prevTargetY = m_camera ? m_camera->targetY() : 0.0;

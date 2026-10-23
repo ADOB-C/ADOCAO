@@ -11,6 +11,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   播放器只画当前可见窗口内的砖。两者画面不同是正常的，别拿它当 MoveTrack 的 bug。
 - **缩放**：用户说"轨道缩放/超级拉伸"多指 MoveTrack 的 `scale`/`positionOffset` 造成的展开，
   不是相机 zoom；相机 zoom 我们内部越大越近、ADOFAI 口径越大越远。
+- **缓速 = Easing**：谱面 `ease` 字段的那套缓动函数（32 个名字，`core/util/Easing.hpp`）。
+  用户口径叫"缓速"；文档里写的"缓动"是同一个东西，不用改。
 
 ## 导航（先读这里，省 token）
 

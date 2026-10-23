@@ -119,7 +119,7 @@ ADOCAO/
 ├── render/                     # ★ GL 渲染库 adocao_render（依赖 core）
 │   ├── CMakeLists.txt
 │   ├── Camera.hpp/.cpp                 # ← camera/（纯数学，无 GL）
-│   ├── Easing.hpp                      # ← util/Easing.hpp（唯一使用方：Camera 的缓速动画，见决策 10）
+│   ├── Easing.hpp                      # ← util/Easing.hpp（唯一使用方：Camera 的缓动动画，见决策 10）
 │   ├── TileGeometry.hpp                # 常量 + **参考实现**的声明（A/B 基准，与 parseLegacy 一个路子）
 │   ├── TileGeometryReference.cpp       # ← track/TileGeometry.cpp（改名：只编进测试，渲染路径不再依赖）
 │   ├── TileShape.hpp/.cpp              # 形状表：canonical 布局 + 参数推导 + CPU 镜像展开（决策 10 的落点）

@@ -12,7 +12,7 @@ ADOCAO_TRACKVIS_DUMP=2 ./build/adocao <chart.adofai> --capture /tmp/x.png --capt
 #    → build/trackvis_grid.csv（floor,startTime,bpm）
 
 # 2) 打包 R 的 TimelineManager（vite 虚拟模块 virtual:wasm-easing 用空模块桩掉，
-#    WasmEasing 会自动回落到 JS 缓速）
+#    WasmEasing 会自动回落到 JS 缓动）
 cd "$ADOJAS_REF"   # 默认 ~/Repos/Re_ADOJAS；ADOCAO=本仓库根
 node -e '
 const esbuild = require("esbuild");

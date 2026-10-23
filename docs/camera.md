@@ -743,7 +743,7 @@ planetWorldPos, currentTileIndex})`；世界是 40 块砖沿 +x、间距 1 砖�
 | `MoveCamera` | 完整（5 种 relativeTo + 4 轨 tween） | **完全没有**：`eventTypeOf()` 把未知事件归 `Other` 并丢弃 |
 | `angleOffset` | 事件计时用 | **没解析**（`grep angleOffset` 只在注释里） |
 | `RepeatEvents` | 已展开 | **未实现** |
-| 缓速函数 | 32 个（`Easing.ts`，名字 = 谱面 `ease` 字符串） | **一个都没有**（`core/util` 下没有 Easing 模块） |
+| 缓动函数 | 32 个（`Easing.ts`，名字 = 谱面 `ease` 字符串） | **一个都没有**（`core/util` 下没有 Easing 模块） |
 | 相机旋转 | `camAngle` → `camera.rotation.z` | `render/Camera` 的 view 矩阵构造时固定 `lookAt`，**没有旋转** |
 | 相机缩放事件 | `zoomSize` | `setZoom` 只有编辑器/CLI 用（`zoom=100 → halfH=6`） |
 | 视野基准 | 5.47 砖全高 @100 | **12 砖全高 @100**（`halfH = 6/(zoom/100)`）→ 两套 zoom 不能混用 |
@@ -757,7 +757,7 @@ planetWorldPos, currentTileIndex})`；世界是 40 块砖沿 +x、间距 1 砖�
    加字段时别把快路径又打回慢路径。
 2. **`RepeatEvents` 展开**：相机事件只关心 Beat/Floor 两模式 + tag 匹配 + `entryBeat` 几何拍差
    （§2.3）。没有它，所有用重复做的运镜都会缺。
-3. **缓速模块（32 个函数）**：`Easing.ts` 的**名字就是契约**（谱面里的 `ease` 字符串直接查表），
+3. **缓动模块（32 个函数）**：`Easing.ts` 的**名字就是契约**（谱面里的 `ease` 字符串直接查表），
    查不到时回退 `Linear`。建议做成 `name → id` 的静态表 + `switch`，别每帧拿字符串查表。
    验收方式同 `render/TileShape`：拿 `Easing.ts` 当参考实现逐点对拍（含 `InBack` 这种越界值，
    以及 `InBounce`/`OutBounce` 的分段常数 7.5625 / 2.75）。
@@ -819,7 +819,7 @@ planetWorldPos, currentTileIndex})`；世界是 40 块砖沿 +x、间距 1 砖�
 | `TimelineManager.ts:~250` | `MoveCamera` 的 `time` 计算与 `_cameraEvents` |
 | `TimelineManager.ts:~150` | `RepeatEvents` 表与展开（Beat/Floor） |
 | `src/lib/Player/EventUtils.ts` | `isEventActive` / `isFieldEnabled` |
-| `src/lib/Player/Easing.ts` | 32 个缓速（名称即事件里的 `ease` 字符串；含 `Linear`/`Unset`） |
+| `src/lib/Player/Easing.ts` | 32 个缓动（名称即事件里的 `ease` 字符串；含 `Linear`/`Unset`） |
 
 ---
 
@@ -829,7 +829,7 @@ planetWorldPos, currentTileIndex})`；世界是 40 块砖沿 +x、间距 1 砖�
 
 | # | 内容 | 落点 | 验收 |
 |---|---|---|---|
-| ③ | 32 个缓速 | `core/util/Easing.{hpp,cpp}` | `tests/easing_test.cpp`：金标由 `Easing.ts` 直接跑出来（`tests/easing_gold.inc`），32×25 点，容差 1e-12（跨 JS/libm 的 ulp）；另外钉住 `InBack(0.5)<0`（不许 clamp） |
+| ③ | 32 个缓动 | `core/util/Easing.{hpp,cpp}` | `tests/easing_test.cpp`：金标由 `Easing.ts` 直接跑出来（`tests/easing_gold.inc`），32×25 点，容差 1e-12（跨 JS/libm 的 ulp）；另外钉住 `InBack(0.5)<0`（不许 clamp） |
 | ① | `angleOffset` | `LevelData::CameraEvent.angleOffset`（**不存进 16 B 的 `FastAction`** —— 只有运镜需要它，9M action 不该为此变 24 B） | 解析对拍（下面 ④ 的同一套） |
 | ② | `RepeatEvents` 展开 | `core/camera/CameraTimeline.cpp`（Beat/Floor、`executeOnCurrentFloor`、`entryBeat` 的 -1 哨兵、多 tag、id tie-break） | `tests/camera_timeline_test.cpp`（8 组手算用例） |
 | ④ | `MoveCamera` 富事件 | `LevelData::CameraEvent` + 四条解析路径（快路径/分块并行/流式窗口/DOM）+ `.adocao` 段 9 | `tests/level_parse_test.cpp`（新增 fixture `f30_camera_events.json`，四条路径 + 容器往返逐字段对拍） |

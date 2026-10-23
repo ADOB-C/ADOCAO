@@ -56,6 +56,11 @@ void ensureFullscreenCapable(NSWindow* w) {
 
 }  // namespace
 
+void macosFocusWindow(GLFWwindow* window) {
+    NSWindow* w = window ? glfwGetCocoaWindow(window) : nil;
+    if (w) activateAndFocus(w);
+}
+
 bool macosFullscreenTransitionActive() { return glfwGetTime() < g_transitionUntil; }
 
 void macosWindowedChrome(GLFWwindow* window) {

@@ -42,7 +42,8 @@ private:
     const adofai::CameraTimeline* m_cameraTimeline = nullptr;   // 归 LoadResult 所有
     adofai::CameraDirector m_cameraDirector;
     bool   m_wasPlaying = false;
-    double m_lastCamX = 0.0, m_lastCamY = 0.0;   // camera-jump 诊断
+    double m_lastCamX = 0.0, m_lastCamY = 0.0;
+    double m_startTime = 0.0;   // 启动期焦点兜底用   // camera-jump 诊断
 
     const LauncherConfig* m_cfg = nullptr;
     adofai::LevelData* m_level = nullptr;

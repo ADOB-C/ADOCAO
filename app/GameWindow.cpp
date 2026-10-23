@@ -1073,6 +1073,7 @@ void GameWindow::run() {
         LOG_I("start-at: %.3fs（audioPos=%.3fs）", (double)m_cfg->startAt, (double)audioPos);
     }
 
+    m_startTime = glfwGetTime();
     double targetFrameTime = 1.0 / 320.0;
     // 诊断：`ADOCAO_UNCAPPED=1` 关掉 320fps 的帧率上限（profiler 要量机器真实上限）。
     // 不设 = 行为完全不变。按首个字符判断（与 ADOCAO_PROFILE 同口径）：
@@ -1115,6 +1116,20 @@ void GameWindow::run() {
             m_pendingFullscreenEnter = false;
             macosBorderlessEnter(m_window);
             glfwFocusWindow(m_window);   // 进全屏后同样要抢焦点
+        }
+#endif
+        // **启动期焦点兜底**：前 2 秒里只要窗口不是 key，就每 250 ms 抢一次。
+        // 走不同入口（终端 / 向导 / 全屏过场）时"谁最后拿到焦点"存在竞态，与其逐个入口打补丁，
+        // 不如在启动窗口期里重试几次 —— 只在这一小段时间内做，不会长期抢用户焦点。
+#ifdef __APPLE__
+        if (!m_cfg->capturePath.empty() ? false : true) {
+            const double t0 = glfwGetTime() - m_startTime;
+            static double lastTry = -1.0;
+            if (t0 < 2.0 && !glfwGetWindowAttrib(m_window, GLFW_FOCUSED) &&
+                (lastTry < 0.0 || t0 - lastTry > 0.25)) {
+                lastTry = t0;
+                adofai::macosFocusWindow(m_window);
+            }
         }
 #endif
         handleInput();

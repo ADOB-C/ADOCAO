@@ -23,6 +23,8 @@ namespace adofai {
 void macosWindowedChrome(GLFWwindow* window);
 void macosBorderlessEnter(GLFWwindow* window);
 void macosBorderlessExit(GLFWwindow* window);
+// 启动期兜底：把窗口抢成 key（幂等，可重复调用）。
+void macosFocusWindow(GLFWwindow* window);
 // 全屏 Space 的过场是否还在进行（期间不要改窗口尺寸/位置）
 bool macosFullscreenTransitionActive();
 }  // namespace adofai

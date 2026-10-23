@@ -18,8 +18,6 @@ set(ADOCAO_APP_SOURCES
     GameWindow.hpp
     CameraController.cpp
     CameraController.hpp
-    LevelScene.cpp
-    LevelScene.hpp
     wizard/WizardState.hpp
     wizard/WizardChrome.cpp
     wizard/WizardChrome.hpp

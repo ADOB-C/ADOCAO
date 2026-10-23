@@ -1,5 +1,6 @@
 #pragma once
 
+#include "render/SceneConfig.hpp"
 #include "core/timeline/TileAnimation.hpp"
 #include "core/util/Scheduler.hpp"   // Handle 是**按值**成员 → 需要完整类型
 
@@ -9,16 +10,15 @@
 #include <vector>
 
 struct GLFWwindow;
-struct LauncherConfig;
-namespace adofai {
 
-class Scheduler; struct PlaybackFrame; }   // 库侧类型：前置声明也要在 adofai 里
-namespace adofai { class Camera; }   // 库侧类型：前置声明也要在 adofai 里
-namespace adofai { struct LevelData; }   // 库侧类型：前置声明也要在 adofai 里
-namespace adofai { class Planet; }   // 库侧类型：前置声明也要在 adofai 里
-namespace adofai { class Shader; }   // 库侧类型：前置声明也要在 adofai 里
-namespace adofai { class TileMesh; }   // 库侧类型：前置声明也要在 adofai 里
-namespace adofai { class Timeline; }   // 库侧类型：前置声明也要在 adofai 里
+namespace adofai {
+class Scheduler; struct PlaybackFrame;
+class Camera;
+struct LevelData;
+class Planet;
+class Shader;
+class TileMesh;
+class Timeline;
 
 // LevelScene owns the GL drawables of a loaded level — shaders, tile mesh,
 // planets with trails — plus the per-frame scene state (track appear/
@@ -38,7 +38,7 @@ public:
 
     // Compile shaders (with inline fallback), create planets and allocate the
     // tile mesh. A GL context must be current. Returns false on shader failure.
-    bool init(const LauncherConfig& cfg, const adofai::LevelData& level,
+    bool init(const SceneConfig& cfg, const adofai::LevelData& level,
               const adofai::Timeline* timeline = nullptr);
 
     // Build tile mesh + planet GPU buffers synchronously (main thread/context).
@@ -118,6 +118,7 @@ private:
 
     bool m_meshReady = false;
     int m_viewportHpx = 720;
+    std::function<size_t()> m_residentBytes;   // 由 SceneConfig 注入；空 = 不打 RSS 日志
     // 逐砖关键帧时间轴（MoveTrack + AnimateTrack）；谱面没有动画时为空。
     std::unique_ptr<adofai::TileAnimation> m_tileAnim;
     bool m_tileAnimBuilt = false;
@@ -127,3 +128,5 @@ private:
     bool m_visBuilt = false;
     bool m_timeChangedSinceVis = true;
 };
+
+}  // namespace adofai

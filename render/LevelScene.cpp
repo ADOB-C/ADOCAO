@@ -1,12 +1,10 @@
-#include "LevelScene.hpp"
+#include "render/LevelScene.hpp"
 
 #include <cstdio>
 #include <cstdlib>   // getenv（诊断转储）
 
 #include "core/util/AssetPaths.hpp"
 
-#include "LauncherWindow.hpp"
-#include "ProcMem.hpp"
 #include "glad/gl_core.hpp"
 #include "render/Camera.hpp"
 #include "render/Shader.hpp"
@@ -38,10 +36,7 @@
 #include <limits.h>
 #endif
 
-
-
-namespace adofai {}          // 前置声明：本文件可能不直接 include 库头
-using namespace adofai;      // 库侧公共 API 在 adofai:: 里（P1：为 ADOFAI.Lib 做准备）
+namespace adofai {
 
 // 资产查找（shader 的 "assets/shaders/..."）走库里的 adofai::resolveAsset：
 // 搜索根由 app/AssetSetup.cpp 在启动时配置（CWD → exe 目录 → macOS bundle 的
@@ -124,7 +119,8 @@ bool LevelScene::compileShaders() {
     return true;
 }
 
-bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level, const Timeline* timeline) {
+bool LevelScene::init(const SceneConfig& cfg, const LevelData& level, const Timeline* timeline) {
+    m_residentBytes = cfg.residentBytes;
     m_buildTimeline = timeline;
     m_fillColor = cfg.trackFillColor;
     // autoStroke：描边 = 填充 ×0.5（与向导的 deriveStroke 同一规则）。CLI 的 --no-auto-stroke
@@ -182,7 +178,7 @@ bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level, const T
     m_tileMesh = new TileMesh();
     m_tileMesh->setCpuGeometry(m_cpuGeometry);   // 在 build() 之前：决定建哪张纹理
     // 抓帧 = 确定性剔除（LOD 步长只由视口 + 两段式决定，不用上一帧的反馈种子）
-    m_tileMesh->setDeterministicCull(!cfg.capturePath.empty());
+    m_tileMesh->setDeterministicCull(cfg.deterministicCull);
     m_tileMesh->setCullBlockFloors(cfg.cullBlockFloors);
     m_tileMesh->setMovePad(level.movePad());
     m_tileMesh->setAnimNeeded(level.animatesTiles());   // ④ 剔除粗块粒度（0 = 全扫）
@@ -196,9 +192,11 @@ bool LevelScene::init(const LauncherConfig& cfg, const LevelData& level, const T
 
 int LevelScene::drawnInstances() const { return m_tileMesh ? m_tileMesh->lastDrawnInstances() : 0; }
 
-// D1 的仪表盘：**常驻**口径（不是 peak RSS —— 大谱的峰值在加载期，见 ProcMem.hpp）
-static void logResidentDelta(const char* what, size_t before) {
-    const size_t after = appmem::currentResidentBytes();
+// D1 的仪表盘：**常驻**口径（不是 peak RSS —— 大谱的峰值在加载期）。
+// 数值由宿主注入（SceneConfig::residentBytes），render/ 不依赖 app/。
+static void logResidentDelta(const std::function<size_t()>& provider, const char* what, size_t before) {
+    if (!provider) return;
+    const size_t after = provider();
     if (before == 0 || after == 0) {
         LOG_I("RSS: 建 %s 后 %.1f MB（本平台量不到前后差）", what, (double)after / 1048576.0);
         return;
@@ -209,9 +207,9 @@ static void logResidentDelta(const char* what, size_t before) {
 }
 
 void LevelScene::buildSync(const LevelData& level) {
-    const size_t rss0 = appmem::currentResidentBytes();
+    const size_t rss0 = m_residentBytes ? m_residentBytes() : 0;
     m_tileMesh->build(level, m_fillColor, m_strokeColor, m_buildTimeline);
-    logResidentDelta("TileMesh", rss0);
+    logResidentDelta(m_residentBytes, "TileMesh", rss0);
     if (m_redPlanet) {
         m_redPlanet->buildGPU();
         m_bluePlanet->buildGPU();
@@ -561,3 +559,5 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
 
     if (!env::flag("ADOCAO_DEBUG_NO_FLASH")) drawFlashPass(0);   // Foreground：最上层
 }
+
+}  // namespace adofai

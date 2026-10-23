@@ -12,8 +12,9 @@ namespace adofai { struct LevelData; }   // 库侧类型：前置声明也要在
 namespace adofai { class Timeline; }   // 库侧类型：前置声明也要在 adofai 里
 namespace adofai { class PlaybackClock; }   // 库侧类型：前置声明也要在 adofai 里
 namespace adofai { class HitsoundManager; }   // 库侧类型：前置声明也要在 adofai 里
-namespace adofai { class AudioEngine; }   // 库侧类型：前置声明也要在 adofai 里
-class LevelScene;
+namespace adofai { class AudioEngine; }
+namespace adofai { class LevelScene; }   // 库侧类型：前置声明也要在 adofai 里
+
 
 void showGameWindow(const LauncherConfig& cfg, LoadResult& loadResult);
 
@@ -33,15 +34,13 @@ private:
     GLFWwindow* m_window = nullptr;
 
     // Scene (shaders / tile mesh / planets / trails) + camera navigation
-    std::unique_ptr<LevelScene> m_scene;
+    std::unique_ptr<adofai::LevelScene> m_scene;
     adofai::Camera m_camera;
     CameraController m_camCtrl;   // attached to m_camera in init()
     // 关卡相机（docs/camera.md）：settings 是第一层，MoveCamera 时间线是第二层。
     // 只在播放/抓帧（--capture-camera）时驱动；停下后回到用户拖拽的导航相机。
     const adofai::CameraTimeline* m_cameraTimeline = nullptr;   // 归 LoadResult 所有
     adofai::CameraDirector m_cameraDirector;
-    bool   m_cameraActive = false;   // false = 下一帧要 seek（开始播/跳转/回退）
-    double m_camLastTime = 0.0;
     bool   m_wasPlaying = false;
 
     const LauncherConfig* m_cfg = nullptr;

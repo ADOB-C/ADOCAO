@@ -34,6 +34,24 @@ public:
     void update(double nowSeconds, double deltaSeconds, float bpm, double pitch,
                 double planetX, double planetY, int64_t tileIndex);
 
+    // **宿主只用这一个**：内部决定"seek 还是 update"。判据原本在 ADOCAO 的 GameWindow 里
+    // （首帧 / 跳转 / 回退 / 帧间隔 > 0.25 s → seek），下游（ADOFAO-E）复制过一份 → 搬进来。
+    // 顺序敏感：seek 会重放全部事件并强制跟随层稳态，update 只推进 tween。
+    void drive(double t, double deltaSeconds, float bpm, double pitch,
+               double planetX, double planetY, int64_t tileIndex) {
+        constexpr double kSeekGap = 0.25;   // 正常的帧间隔远小于它
+        if (!m_driveActive || t < m_driveLastTime - 1e-6 || t - m_driveLastTime > kSeekGap) {
+            seek(t, planetX, planetY, tileIndex, pitch);
+            m_driveActive = true;
+        } else {
+            update(t, deltaSeconds, bpm, pitch, planetX, planetY, tileIndex);
+        }
+        m_driveLastTime = t;
+    }
+    // 换关卡/重开时调用（下一次 drive 会 seek）。
+    void resetDrive() { m_driveActive = false; m_driveLastTime = 0.0; }
+    bool driveActive() const { return m_driveActive; }
+
     // 长按带：跟随目标叠加的圆心滑动量（每帧由 app 写；非长按砖写 0）。
 
     // ── 结果 ───────────────────────────────────────────────────────────────
@@ -63,6 +81,9 @@ private:
     void setToFreeMode();
     void updateFollowCam(double planetX, double planetY);
     double cameraWorldX() const { return m_camParent.x + m_pos.x; }
+
+    bool   m_driveActive = false;   // drive() 的状态：false = 下一次必须 seek
+    double m_driveLastTime = 0.0;
 
     // 关卡起点（reset 时缓存；resetState/回退守卫要用）
     LevelData::Settings m_settings{};

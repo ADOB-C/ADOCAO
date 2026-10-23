@@ -5,7 +5,8 @@
 
 #include "LauncherWindow.hpp"
 #include "LevelLoader.hpp"
-#include "LevelScene.hpp"
+#include "render/LevelScene.hpp"
+#include "render/SceneConfig.hpp"
 #include "core/util/Profile.hpp"
 #include "ProcMem.hpp"   // 常驻口径（浸泡统计用）
 #include "glad/gl_core.hpp"
@@ -259,8 +260,30 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     glfwSwapBuffers(m_window);
 
     // Scene: shaders / tile mesh / planets (heap objects freed by LevelScene)
-    m_scene = std::make_unique<LevelScene>();
-    if (!m_scene->init(cfg, *m_level, m_timeline)) {
+    m_scene = std::make_unique<adofai::LevelScene>();
+    // LauncherConfig（app 的产品配置）→ SceneConfig（库的宿主无关配置）
+    adofai::SceneConfig sceneCfg;
+    sceneCfg.trackColorOverride = cfg.trackColorOverride;
+    sceneCfg.trackFillColor = cfg.trackFillColor;
+    sceneCfg.trackStrokeColor = cfg.trackStrokeColor;
+    sceneCfg.autoStroke = cfg.autoStroke;
+    sceneCfg.showTrail = cfg.showTrail;
+    sceneCfg.trailDuration = cfg.trailDuration;
+    sceneCfg.trailSampleRate = cfg.trailSampleRate;
+    sceneCfg.trailAdaptive = cfg.trailAdaptive;
+    sceneCfg.trailTargetFps = cfg.trailTargetFps;
+    sceneCfg.trailRateMin = cfg.trailRateMin;
+    sceneCfg.trailRateMax = cfg.trailRateMax;
+    sceneCfg.trailPerTile = cfg.trailPerTile;
+    sceneCfg.trailSamplesPerTile = cfg.trailSamplesPerTile;
+    sceneCfg.trailLengthInTiles = cfg.trailLengthInTiles;
+    sceneCfg.trailTiles = cfg.trailTiles;
+    sceneCfg.trailSagitta = cfg.trailSagitta;
+    sceneCfg.cullBlockFloors = cfg.cullBlockFloors;
+    sceneCfg.deterministicCull = !cfg.capturePath.empty();
+    sceneCfg.showAllTiles = cfg.showAllTiles;
+    sceneCfg.residentBytes = [] { return appmem::currentResidentBytes(); };
+    if (!m_scene->init(sceneCfg, *m_level, m_timeline)) {
         // Shader compile failed; fall back strings are already exhausted
         m_scene.reset();
         glfwDestroyWindow(m_window);
@@ -326,7 +349,7 @@ void GameWindow::rebuildCameraTimeline() {
     if (m_level->tileCount() > 0) p0 = m_level->tilePositionAt(0);
     const float bpm0 = m_timeline->tileBPMs().empty() ? 100.0f : m_timeline->tileBPMs()[0];
     m_cameraDirector.reset(m_level->settings, m_cameraTimeline->keys(), p0[0], p0[1], bpm0);
-    m_cameraActive = false;
+    m_cameraDirector.resetDrive();
     m_wasPlaying = false;
     if (m_cameraTimeline && !m_cameraTimeline->empty()) {
         LOG_I("camera: %zu 条运镜事件（已展开/已排序），settings.relativeTo=%s",
@@ -500,25 +523,19 @@ void GameWindow::update(float deltaMs) {
         const double pitch = std::max(0.1, (double)m_level->settings.pitch / 100.0);
         const double t = m_playback->timeInLevel();
 
-        // 跳转/回退/第一次播放 → seek（重放全部事件并强制跟随层稳态），否则逐帧 update。
-        // 0.25 s 是"跨了一次跳转"的判据：正常帧间隔远小于它。
-        if (!m_cameraActive || t < m_camLastTime - 1e-6 || t - m_camLastTime > 0.25) {
-            m_cameraDirector.seek(t, p[0], p[1], tileIdx, pitch);
-            m_cameraActive = true;
-        } else {
-            m_cameraDirector.update(t, (double)deltaMs / 1000.0, bpm, pitch, p[0], p[1], tileIdx);
-        }
-        m_camLastTime = t;
+        // seek/update 的判据在库里（`CameraDirector::drive`），宿主不再自己判断。
+        m_cameraDirector.drive(t, (double)deltaMs / 1000.0, bpm, pitch, p[0], p[1], tileIdx);
 
         m_camera.setTarget(m_cameraDirector.x(), m_cameraDirector.y());
         m_camera.setAdoZoom((float)m_cameraDirector.zoom());
         m_camera.setRotation((float)m_cameraDirector.rotation());
     } else if (m_wasPlaying) {
+        m_cameraDirector.resetDrive();
         // 停下：把当前视角接收为拖拽的基准（否则会跳回播放前的位置）。
         // **保留旋转**（Re_ADOJAS 也保留）：CameraController 的 screenToWorld/拖动已经
         // 按 camera.rotation() 反旋转，所以暂停时点击选中仍然准确。
         m_camCtrl.snapTo(m_camera.targetX(), m_camera.targetY());
-        m_cameraActive = false;
+        m_cameraDirector.resetDrive();
     }
     m_wasPlaying = playing;
 

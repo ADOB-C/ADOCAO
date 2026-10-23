@@ -880,3 +880,18 @@ ctest --test-dir build -R 'easing|camera|level_parse'    # 纯逻辑（无 GL）
 tests/gen_camera_gold.sh                                  # 重新生成金标（node ≥ 22 + Re_ADOJAS 克隆）
 scripts/capture-gate.sh check                             # 像素（要没有别的 build/adocao 在跑）
 ```
+
+## 交互：光标位置必须"按下前现取"（2026-10-22 实测）
+
+GLFW **不会**在窗口创建时送一次 cursor-pos 事件；如果用户开窗后立刻按下（1 秒内），
+`CameraController::m_cursorX/Y` 还是 `(0,0)`，`dragStart` 被记成 `(0,0)` →
+第一次移动算出的 offset 是「整块屏幕」的量级 → 镜头被甩到**不在任何砖上**的空白处。
+
+症状（用户原话）："一拖动镜头会传送，而且那个地方不在任何一块砖上"。
+
+修法（两层）：
+1. `glfwSetMouseButtonCallback` 里**先** `glfwGetCursorPos()` 再 `onCursorPos()`，最后才
+   `onMouseButton()` —— 保证 dragStart 一定是真实位置；
+2. `CameraController::update()` 的拖拽分支：`!m_cursorSeen` 时**不计算 offset**（防御未来其它入口）。
+
+诊断用：`ADOCAO.log` 里 `mouse down at (0.0,0.0) seen=0` 就是踩中了这个坑。

@@ -166,6 +166,8 @@ void CameraController::update(int fbW, int fbH, float targetAspect, bool panEnab
         return;
     }
     if (m_dragging) {
+        // 光标位置还没拿到 → 这一帧不能算 offset（否则用的是 (0,0)，会甩飞）
+        if (!m_cursorSeen) return;
         LetterboxedViewport vp = computeLetterbox(fbW, fbH, targetAspect);
         if (vp.w > 0 && vp.h > 0) {
             double pxToWorldX, pxToWorldY;

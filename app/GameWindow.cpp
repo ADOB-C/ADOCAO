@@ -358,8 +358,16 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     });
     glfwSetMouseButtonCallback(m_window, [](GLFWwindow* w, int b, int a, int) {
         auto* ctrl = static_cast<CameraController*>(glfwGetWindowUserPointer(w));
-        if (b == GLFW_MOUSE_BUTTON_LEFT)
-            ctrl->onMouseButton(a == GLFW_PRESS);
+        if (b != GLFW_MOUSE_BUTTON_LEFT) return;
+        // **按下前先取一次真实光标位置**：窗口刚开、鼠标还没动过时，GLFW 不会送
+        // cursor-pos 事件，`m_cursorX/Y` 还是 (0,0) —— 此时按下会把 dragStart 记成 (0,0)，
+        // 第一次拖动就把镜头甩出几百砖（用户看到的"传送到不在任何砖上的地方"）。
+        if (a == GLFW_PRESS) {
+            double cx = 0.0, cy = 0.0;
+            glfwGetCursorPos(w, &cx, &cy);
+            ctrl->onCursorPos(cx, cy);
+        }
+        ctrl->onMouseButton(a == GLFW_PRESS);
     });
     glfwSetCursorPosCallback(m_window, [](GLFWwindow* w, double x, double y) {
         auto* ctrl = static_cast<CameraController*>(glfwGetWindowUserPointer(w));

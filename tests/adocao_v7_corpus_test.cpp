@@ -3,6 +3,7 @@
 //
 // 为什么不在仓库里提交 `.adocao` 二进制：这些容器只是谱面的另一种编码，重新生成是确定性的，
 // 提交生成物等于把"同一个东西"存两份（而且二进制 дифф 不可读）。用打包往返测同一件事更干净。
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>

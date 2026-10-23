@@ -2,6 +2,7 @@
 //
 // 这是"容器没丢东西"最强的证据（比逐字段比对更强：任何顺序/格式差异都会让字节不同）。
 // 回写器 `AdocaoJsonWriter` 只活在 `tests/` 里 —— ADOCAO 不做导出功能，它只是这条验收的工具。
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>

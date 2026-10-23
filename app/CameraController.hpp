@@ -56,5 +56,8 @@ private:
     double m_baseTargetX = 0, m_baseTargetY = 0;   // rest position (no drag)
     double m_offsetX = 0, m_offsetY = 0;           // live drag offset
     bool m_dragging = false;
+    double m_pendingScroll = 0.0;   // 累积到下一次 update()：滚轮要**以光标为中心**缩放
+    int m_lastFbW = 0, m_lastFbH = 0;
+    float m_lastAspect = 0.0f;
     bool m_clickPending = false;
 };

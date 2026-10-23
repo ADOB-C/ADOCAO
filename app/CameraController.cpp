@@ -80,13 +80,9 @@ void CameraController::onCursorPos(double x, double y) {
 }
 
 void CameraController::onScroll(double yOffset) {
-    // 上限从 1000 放宽：谱面 zoom 是 ADOFAI 口径、会映射成较大的放大倍数
-    // （ADOFAI zoom=10 → 本类约 2194）。滚轮本身仍是本类口径。
-    float minZoom = ADOCAO_MIN_ZOOM, maxZoom = 100000.0f;
-    float z = m_camera->zoom() * (1.0f + (float)yOffset * 0.1f);
-    if (z < minZoom) z = minZoom;
-    if (z > maxZoom) z = maxZoom;
-    m_camera->setZoom(z);
+    // 只记下来：**缩放要以光标为中心**（光标下的世界点保持不动），
+    // 而那需要视口尺寸，只有 update() 有。学自 ADOCAO-E 的编辑器（它先做了这件事）。
+    m_pendingScroll += yOffset;
 }
 
 bool CameraController::consumeClick() {
@@ -96,6 +92,22 @@ bool CameraController::consumeClick() {
 }
 
 void CameraController::update(int fbW, int fbH, float targetAspect, bool panEnabled) {
+    m_lastFbW = fbW; m_lastFbH = fbH; m_lastAspect = targetAspect;
+    // ── 滚轮：以光标为中心缩放（光标下的世界点保持不动）──
+    if (m_pendingScroll != 0.0 && fbW > 0 && fbH > 0) {
+        const glm::dvec2 before = screenToWorld(m_cursorX, m_cursorY, fbW, fbH, targetAspect);
+        // 指数步进（触控板的小数增量也顺滑）；倍率与 ADOCAO-E 一致（1.15/格）。
+        // 上限从 1000 放宽：谱面 zoom 是 ADOFAI 口径、会映射成较大的放大倍数。
+        const float minZoom = ADOCAO_MIN_ZOOM, maxZoom = 100000.0f;
+        float z = m_camera->zoom() * (float)std::pow(1.15, m_pendingScroll);
+        z = std::min(std::max(z, minZoom), maxZoom);
+        m_camera->setZoom(z);
+        const glm::dvec2 after = screenToWorld(m_cursorX, m_cursorY, fbW, fbH, targetAspect);
+        m_baseTargetX += before.x - after.x;
+        m_baseTargetY += before.y - after.y;
+        m_offsetX = m_offsetY = 0.0;
+        m_pendingScroll = 0.0;
+    }
     if (!panEnabled) return;
     if (m_dragging) {
         LetterboxedViewport vp = computeLetterbox(fbW, fbH, targetAspect);

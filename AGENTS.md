@@ -7,8 +7,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **R** = 谱面 `~/Documents/Charts/Plum - R/main.adofai`（**不是** Re_ADOJAS 的简称！参考实现一律写全名 **Re_ADOJAS**）。
 - **2025 / 2021 / 2026** = `Hello (BPM) 2025 - Camellia (かめりあ)` / `HELLO_BPM_2021` / `HELLO (BPM) 2026`。
 - **Tile = Track = 砖块 = 轨道 = 格子**（同一个东西）；**AnimationTrack = 轨道动画**（JSON 里的 `AnimateTrack`）。
-- **编辑器/全图视角**（Re_ADOJAS `#/editor`）≠ **播放器**：编辑器画**全部**砖、忽略 appear/disappear；
-  播放器只画当前可见窗口内的砖。两者画面不同是正常的，别拿它当 MoveTrack 的 bug。
+- **Re_ADOJAS 没有编辑器**（2026-10-24 用户明确纠正）：它**只有一个界面，就是播放器**。
+  路由虽然叫 `#/editor`、页面上还写着"打开播放编辑器"，但那仍然是播放器本身
+  （有判定文字、进度条、播放控制）。
+  **所以"我们和参考不一样"时，绝不许再拿"那是编辑器 / 编辑器相机 / 编辑器忽略特效"来解释** ——
+  这条曾经被我用来解释 MM2 的开头与位置差异，是错的：两边都是播放器，
+  **同一时刻、同一相机语义下画面不同就是 bug**，必须去查 `MoveCamera` 的 target/zoom/rotation
+  或时间→砖号的映射（`SetSpeed`/`Pause`/`durationAt` 那一类）。
+  对比工具：`scripts/ref-ab.sh`（真跑 `~/Repos/Re_ADOJAS` 到同一秒 → 并排拼图），
+  但**它按墙钟时间截图**（`wall=` 有 ±0.5 s 抖动），对"位置差一点点"的结论要先用同一时刻的
+  我们这边 `--capture-time` 复核；`--capture-fit-all` 只能比几何，不能比相机。
 - **缩放**：用户说"轨道缩放/超级拉伸"多指 MoveTrack 的 `scale`/`positionOffset` 造成的展开，
   不是相机 zoom；相机 zoom 我们内部越大越近、ADOFAI 口径越大越远。
 - **缓速 = Easing**：谱面 `ease` 字段的那套缓动函数（32 个名字，`core/util/Easing.hpp`）。

@@ -439,3 +439,19 @@ target_link_libraries(adocao PRIVATE adocao_core adocao_render adocao_audio adoc
 - **GameWindow（607 行）**：拆出 `CameraController`（输入→相机，纯状态机、可单测）与 `LevelScene`（渲染对象编排），主循环骨架收窄到 ~250 行内。不建议更细（逐方法拆会撕裂本来就内聚的帧循环），也不建议不拆（当前一文件里输入/同步/渲染三层混合）。
 - **LauncherWindow（772 行）**：按 5.0.0 向导的 6 页各拆一个文件（§4.3）。想更保守可先在单文件内按页分成 `drawXxxPage()` 静态函数（每段 <150 行），仍超阈值再物理拆文件——两者都符合"≤250–300 行"原则，只是节奏不同。
 - **结论（已拍板）**：按 §4 建议执行——GameWindow 拆 `CameraController` + `LevelScene`，LauncherWindow 按向导 6 页拆文件。
+
+## 链接阶段体积优化（2026-10-23）
+
+之前 Release **只有 `-O3`**：符号全留、每个函数/常量各占一段，链接器没有可删的粒度。现在默认开
+（`ADOCAO_LTO=OFF` 可关）：
+
+| 配置 | 二进制 |
+|---|---|
+| 之前（`-O3`） | 4,340,424 B |
+| LTO + `-ffunction-sections -fdata-sections` + `-Wl,-dead_strip` | **3,341,096 B**（−23%） |
+| 再加 `strip -x`（发布包可选） | 3,104,024 B（−28.5%） |
+
+只作用于**本仓库的目标**：设置在 FetchContent 之后、`add_subdirectory` 之前，所以 zstd/lzma/glfw
+这些依赖不跟着吃 LTO（链接时间与风险都不涨）。
+
+验收：`ctest 41/41`、像素门槛 54/54、`adocao image` 与 LTO 前**逐字节相同**。

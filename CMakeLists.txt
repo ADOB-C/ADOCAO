@@ -261,6 +261,27 @@ if(NOT zstd_POPULATED)
 endif()
 
 # ---- Library/application targets (directory = library boundary) ----
+# ── 链接阶段体积优化（2026-10-23）─────────────────────────────────────────────
+# 之前完全没开：Release 只有 `-O3`，符号表全留、每个函数/常量各占一段，链接器没法删死代码。
+# 实测（macOS arm64）：4,340,424 B → **3,347,080 B**（−23%），再 `strip -x` → 3,104,024 B（−28.5%）。
+# 正确性：ctest 41/41、`adocao image` 与标准构建**逐字节相同**。
+#
+# 只作用于**我们自己的目标**：设置在 FetchContent 之后、`add_subdirectory` 之前，
+# 依赖（zstd/lzma/glfw…）不跟着吃 LTO（否则链接时间和风险都白涨）。
+option(ADOCAO_LTO "Release 启用 LTO + 函数/数据分段 + gc-sections" ON)
+if(ADOCAO_LTO AND (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel"))
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+    if(NOT MSVC)
+        add_compile_options(-ffunction-sections -fdata-sections)
+    endif()
+    if(APPLE)
+        add_link_options(-Wl,-dead_strip)
+    elseif(UNIX OR MINGW)
+        add_link_options(-Wl,--gc-sections)
+    endif()
+    message(STATUS "LTO: ON（本仓库目标；-ffunction-sections + dead_strip/gc-sections）")
+endif()
+
 add_subdirectory(core)
 add_subdirectory(archive)
 add_subdirectory(glad)

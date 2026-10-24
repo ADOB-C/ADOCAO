@@ -75,13 +75,13 @@
 
 | 读者 | tile + zstd | tile + deflate | strip + deflate |
 |---|---|---|---|
-| Krita（自带 libtiff 6.2.0） | 预期 ✓（libtiff ≥4.5 支持 zstd，未做无头验证） | ✓ | ✓ |
-| **Kdenlive / MLT `qimage`**（Qt → libtiff 6.2.0） | **✓ 实测**（解码帧与 PNG 降采样**逐像素相同**） | ✓ | ✓ |
+| **Krita**（自带 libtiff 6.2.0） | **✓ 用户实测**（tile 打开正常；测试样图 `tiff_writer_tile.tif`） | ✓ | ✓ |
+| **Kdenlive / MLT `qimage`**（Qt → libtiff 6.2.0） | **✓ 用户实测**（16K 直接拖进 Project Bin 能显示；另用 `melt qimage:` 解帧与 PNG 降采样逐像素相同） | ✓ | ✓ |
 | Kdenlive / MLT `avformat`（ffmpeg） | ✗ `Unknown compression method 50000` | ✗ **全黑**（ffmpeg 不读 tiled） | ✓ |
 | macOS 预览 / `sips`（ImageIO） | ✗ | ✗（不认 tiled） | ✓ |
 | ImageMagick / libtiff `tiffinfo` | ✓ | ✓ | ✓ |
 
-**结论**：Krita 与 Kdenlive 的**静帧**路径（都走 libtiff）能开 `tile + zstd`；
+**结论（已由用户在两款软件里实际打开确认）**：Krita 与 Kdenlive 的**静帧**路径（都走 libtiff）能开 `tile + zstd`；
 但 Kdenlive 里任何走 **ffmpeg** 的环节（图片序列、proxy、部分导出）只认 **strip + deflate** ——
 ffmpeg 的 TIFF 解码器既不吃 tiled（解出来全黑，不报错）也不吃 zstd（报错）。
 

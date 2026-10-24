@@ -8,6 +8,9 @@
 #include "core/util/Scheduler.hpp"
 #include "core/util/Progress.hpp"
 
+#include <zstd.h>
+
+#include "core/map/TiffWriter.hpp"
 #include "core/map/PngStream.hpp"
 #include "core/map/PngBand.hpp"
 
@@ -59,6 +62,33 @@ uint32_t parseHex(const std::string& h, uint32_t fallback) {
 }
 
 }  // namespace
+
+// TIFF 条带写出（默认 Deflate，`ADOCAO_TIFF_ZSTD=1` 换 zstd；条带内独立压缩）。
+// 为什么不是分块（Tile）：macOS ImageIO 不认 tiled TIFF（实测，连 ImageMagick 生成的也不认）。
+static bool writeTiff(const std::string& path, int w, int h, const std::vector<uint8_t>& rgba) {
+    TiffWriter tw;
+    auto zstdComp = [](const uint8_t* data, size_t n, std::vector<uint8_t>& out) {
+        out.resize(ZSTD_compressBound(n));
+        const size_t got = ZSTD_compress(out.data(), out.size(), data, n, 19);
+        if (ZSTD_isError(got)) return false;
+        out.resize(got);
+        return true;
+    };
+    const bool useZstd = [] { const char* e = std::getenv("ADOCAO_TIFF_ZSTD"); return e && e[0] == '1'; }();
+    const bool forceBig = [] { const char* e = std::getenv("ADOCAO_TIFF_BIG"); return e && e[0] == '1'; }();
+    const TiffWriter::Compressor comp = useZstd ? TiffWriter::Compressor(zstdComp)
+                                                 : TiffWriter::Compressor(deflateCompress);
+    const uint32_t rowsPerStrip = 256;
+    const bool big = forceBig || (size_t)w * h * 4 > 3ull * 1024 * 1024 * 1024;
+    if (!tw.open(path, (uint32_t)w, (uint32_t)h, rowsPerStrip,
+                 useZstd ? (uint16_t)50000 : TiffWriter::kCompressionDeflate, comp, big))
+        return false;
+    for (uint32_t y = 0; y < (uint32_t)h; y += rowsPerStrip) {
+        const uint32_t rows = std::min(rowsPerStrip, (uint32_t)h - y);
+        if (!tw.writeStrip(&rgba[(size_t)y * w * 4], rows)) return false;
+    }
+    return tw.finish();
+}
 
 int exportLevelMap(const std::string& levelPath, const std::string& outPath,
                    const std::string& sizeStr, const std::string& bgStr,
@@ -117,9 +147,15 @@ int exportLevelMap(const std::string& levelPath, const std::string& outPath,
         std::fprintf(stderr, "Map rendering failed\n");
         return 1;
     }
-    if (!stbi_write_png(outPath.c_str(), opts.width, opts.height, 4,
-                        rgba.data(), opts.width * 4)) {
-        std::fprintf(stderr, "Failed to write PNG: %s\n", outPath.c_str());
+    const bool wantTiff = [&] {
+        const std::string ext = [&] { auto p = outPath.rfind('.'); return p == std::string::npos ? std::string() : outPath.substr(p); }();
+        return ext == ".tif" || ext == ".tiff" || ext == ".TIF" || ext == ".TIFF";
+    }();
+    const bool written = wantTiff
+        ? writeTiff(outPath, opts.width, opts.height, rgba)
+        : stbi_write_png(outPath.c_str(), opts.width, opts.height, 4, rgba.data(), opts.width * 4) != 0;
+    if (!written) {
+        std::fprintf(stderr, "Failed to write %s: %s\n", wantTiff ? "TIFF" : "PNG", outPath.c_str());
         return 1;
     }
     LOG_I("Map: 已写出 %s", outPath.c_str());

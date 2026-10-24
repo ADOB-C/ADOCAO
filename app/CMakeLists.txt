@@ -68,6 +68,13 @@ else()
 endif()
 
 target_include_directories(adocao PRIVATE ${CMAKE_SOURCE_DIR} ${stb_SOURCE_DIR})
+# zstd：MapExport 的 BigTIFF 分块用它（archive 是 PRIVATE 链接 libzstd，这里要显式加）
+if(TARGET libzstd_static)
+    set(ADOCAO_ZSTD_TARGET libzstd_static)
+elseif(TARGET zstd::libzstd_static)
+    set(ADOCAO_ZSTD_TARGET zstd::libzstd_static)
+endif()
+
 target_link_libraries(adocao PRIVATE
     adocao_core
     adocao_archive
@@ -79,6 +86,9 @@ target_link_libraries(adocao PRIVATE
     glm::glm
     tinyfiledialogs
 )
+if(ADOCAO_ZSTD_TARGET)
+    target_link_libraries(adocao PRIVATE ${ADOCAO_ZSTD_TARGET})
+endif()
 
 # Platform-specific
 if(WIN32)

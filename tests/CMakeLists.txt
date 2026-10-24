@@ -298,3 +298,9 @@ add_test(NAME adocao_v7_roundtrip_json
                  ${CMAKE_SOURCE_DIR}/tests/charts/camera_basic.adofai
                  ${CMAKE_SOURCE_DIR}/tests/charts/diag_chord.adofai
                  ${CMAKE_SOURCE_DIR}/tests/charts/neon_alpha.adofai)
+
+add_executable(tiff_writer_test tiff_writer_test.cpp)
+target_link_libraries(tiff_writer_test PRIVATE adocao_core)
+# 系统没有 zlib 时 core 会 FetchContent 一份（zlibstatic），测试也要能解压
+target_include_directories(tiff_writer_test PRIVATE ${CMAKE_SOURCE_DIR}/build/_deps/zlib-src)
+add_test(NAME tiff_writer COMMAND tiff_writer_test)

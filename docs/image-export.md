@@ -50,3 +50,26 @@
   便于检视或复用已有瓦片）。
 - 已知可续：按 tile 区间取景（`--range A-B` ✓）用来看密集"结"的内部结构 ✓。
 
+## TIFF 输出（2026-10-23 起，`.tif` / `.tiff`）
+
+输出扩展名是 `.tif`/`.tiff` 时走 `core/map/TiffWriter`（自研，无 libtiff 依赖）：**按条带
+（RowsPerStrip = 256 行）独立压缩**、边写边压，内存 = 一条带 + 每段 8 B 索引。
+
+实测（2025，4096x3072，同一次渲染）：
+
+| 格式 | 体积 | 说明 |
+|---|---|---|
+| PNG | 586,187 B | 原来 |
+| **TIFF + Deflate（默认）** | **123,624 B** | 缩小 **4.7x**；Preview / PIL / ImageMagick 都能读 |
+| TIFF + zstd-19（`ADOCAO_TIFF_ZSTD=1`） | 67,863 B | 再小 45%，但 macOS ImageIO / PIL 不认 `Compression=50000` |
+
+**为什么是条带不是分块（Tile）**：macOS ImageIO **不认 tiled TIFF** —— `sips -g pixelWidth`
+对 tiled 文件返回 nil（连 ImageMagick 生成的 tiled TIFF 也一样），同一张图的 strip 版本秒开。
+所以 `TiffWriter` 用 `RowsPerStrip` + `StripOffsets/TileByteCounts`，既兼容又能流式压。
+
+**BigTIFF**：默认写经典 TIFF（32 位偏移）；超过 4 GB 偏移才需要 BigTIFF，用
+`ADOCAO_TIFF_BIG=1` 强制（实测 macOS ImageIO 同样不认 BigTIFF，只有 libtiff/ImageMagick 认）。
+这是"给超大画布留的路"，不是默认格式。
+
+> 注意：**像素内容与 PNG 逐字节相同**（`PIL` 对拍过 4096x3072 全图）。
+> `adocao image out.tif` 的其它开关（`--size/--bg/--time-color/--padding/--thickness`）全部照旧。

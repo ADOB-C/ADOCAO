@@ -20,6 +20,7 @@ add_library(adocao_core STATIC
     camera/CameraDirector.cpp
     map/LevelMap.cpp
     map/PngStream.cpp
+    map/TiffWriter.cpp
     map/PngBand.cpp
 )
 

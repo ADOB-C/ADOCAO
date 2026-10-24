@@ -224,7 +224,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     `gh run list` + `gh run watch` + 20 分钟超时 —— 那是白占一次工具调用的时间。
   * 命令超时别动辄十几二十分钟（真跑过 28 分钟）；短命令给 ≤120 s，长任务放后台。
   * **不要用 `job_output` 轮询**后台任务：任务结束会**自动注入上下文**，反复 poll 是纯浪费。
-- 脚本：`scripts/push-ci.sh`（push → gh run watch；`--watch` 默认输出平台耗时/产物）
+- 脚本：`scripts/check-gcc.sh`（**推之前用真 GCC 扫一遍**：`-fsyntax-only` 跑 114 个 TU、~30 s，
+  抓"libc++ 间接带头 / clang 宽容、GCC 报错"这类只在 CI 红的问题 —— 2026-10-23/24 连踩两次：
+  `<cmath>` 缺失、`(void)y0;`（`y0` 是 `<math.h>` 的 Bessel 函数）。`--jobs N`、可接目录前缀过滤；
+  Apple SDK/miniaudio 那些 GCC 解析不了的头会记 SKIP 而不是 FAIL）
+  `scripts/push-ci.sh`（push → gh run watch；`--watch` 默认输出平台耗时/产物）
   `scripts/run.sh --debugger` | `scripts/release.sh`（支持 x.y.z-AlphaN/-BetaN/-RcN）
   `scripts/make-app.sh`（macOS：把 `build/adocao` + `assets/` 打成自包含的 `build/adocao.app`，含 ad-hoc 签名；CI 的 macOS job 也用同一个脚本）
   **注意 `.app` 默认是快照**：`./build.sh` 之后它不会自动更新 —— 验收/试玩前要么直跑 `build/adocao`，

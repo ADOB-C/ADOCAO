@@ -1674,7 +1674,15 @@ void LevelData::buildRecolorIndex(const Timeline& timeline) {
         rt.lo = (int32_t)a;
         rt.hi = (int32_t)b;
         rt.gap = std::max<int32_t>(0, ev.gapLength);
-        rt.beat = (double)timeline.durationAt(ev.floor);
+        // **一拍 = 60/bpm**（Re_ADOJAS `TileColorManager::calcRecolorTriggerTime`：
+        // `tileTime + (angleOffset / 180) * (60 / bpm)`）。
+        // 别用 `durationAt(floor)` —— 那是"这一砖走完要多久" = 角度/180 × 一拍，
+        // 于是 30° 的砖会把 angleOffset 和 duration 都算成 1/6（2026-10-24 真踩过：
+        // MM2 里"有些砖飞快飘走、有些正常"，就是角度不同的砖被缩放了不同的倍率）。
+        const auto& bpms0 = timeline.tileBPMs();
+        const int64_t bi0 = std::clamp<int64_t>(ev.floor, 0, (int64_t)bpms0.size() - 1);
+        const double secPerBeat0 = 60.0 / std::max(1.0f, bpms0.empty() ? 100.0f : bpms0[(size_t)bi0]);
+        rt.beat = secPerBeat0;
         rt.trigger = (double)timeline.startTimeAt(ev.floor) +
                      ((double)ev.angleOffset / 180.0) * rt.beat;
         rt.duration = ev.duration;
@@ -2006,10 +2014,15 @@ void LevelData::buildMoveTrackIndex(const Timeline& timeline) {
             if (a > b) std::swap(a, b);
             ev.lo = (int32_t)std::clamp<int64_t>(a, 0, n - 1);
             ev.hi = (int32_t)std::clamp<int64_t>(b, 0, n - 1);
-            const double beat = (double)timeline.durationAt(ev.floor);
+            // 同 Re_ADOJAS `TimelineManager`：`timeOffset = (angleOffset/180)*secPerBeat`、
+            // `duration = (durBeats * secPerBeat) / pitch`，其中 **secPerBeat = 60/bpm**。
+            // 用 durationAt(floor) 会让"转角小的砖"动画时长短得离谱 → 看起来是"飞走"。
+            const auto& bpms = timeline.tileBPMs();
+            const int64_t bidx = std::clamp<int64_t>(ev.floor, 0, (int64_t)bpms.size() - 1);
+            const double secPerBeat = 60.0 / std::max(1.0f, bpms.empty() ? 100.0f : bpms[(size_t)bidx]);
             ev.trigger = (double)timeline.startTimeAt(ev.floor) +
-                         ((double)ev.angleOffset / 180.0) * beat;
-            ev.durSec = (double)std::max(0.0f, ev.durBeats) * beat / pitch;
+                         ((double)ev.angleOffset / 180.0) * secPerBeat;
+            ev.durSec = (double)std::max(0.0f, ev.durBeats) * secPerBeat / pitch;
             m_moveIndex.push_back(ev);
             const float sc = std::max(std::abs(ev.scaleX), std::abs(ev.scaleY));
             if (sc > m_moveMaxScale) m_moveMaxScale = sc;
@@ -2139,7 +2152,10 @@ TileColors LevelData::baseColorsAt(int64_t floor, double timeSec, float amplitud
     if (cfg.colorType != "Single" && cfg.colorType != "Stripes") return to;
 
     const double start = timeline->startTimeAt(e->floor);
-    const double beat = (double)timeline->durationAt(e->floor);   // 一砖 = 一拍（秒）
+    // 一拍 = 60/bpm（Re_ADOJAS：`fadeDur = evDurBeats * 60 / bpm`）。
+    const auto& bpmsC = timeline->tileBPMs();
+    const int64_t biC = std::clamp<int64_t>(e->floor, 0, (int64_t)bpmsC.size() - 1);
+    const double beat = 60.0 / std::max(1.0f, bpmsC.empty() ? 100.0f : bpmsC[(size_t)biC]);
     const double dur = (double)e->duration * beat;
     if (dur <= 0.0) return to;
     if (timeSec >= start + dur) return to;

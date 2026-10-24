@@ -82,7 +82,8 @@ void CameraDirector::resetState() {
     startEffect(syn, 0.0, 0.0, 0.0, 1.0);
 }
 
-void CameraDirector::seek(double t, double planetX, double planetY, int64_t tileIndex, double pitch) {
+void CameraDirector::seek(double t, double planetX, double planetY, int64_t tileIndex, double pitch,
+                          const PlanetAtFn& planetAt) {
     if (env::flag("ADOCAO_CAM_DEBUG")) {
         LOG_I("cam-seek: t=%.3f in=(%.2f,%.2f) tile=%lld keys=%zu", t, planetX, planetY,
               (long long)tileIndex, m_keys ? m_keys->size() : 0);
@@ -95,9 +96,12 @@ void CameraDirector::seek(double t, double planetX, double planetY, int64_t tile
             if (k.time > t) break;
             idx = (int64_t)i;
             applyTweens(k.time);
+            // 重放历史事件要用**当时**的行星位置（见头文件 PlanetAtFn 的注释）
+            double px = planetX, py = planetY;
+            if (planetAt) planetAt(k.time, px, py);
             // 循环里把跟随层钉在行星上：让 free→follow 的换算看到确定的世界坐标
-            if (m_followMode) { m_frompos = m_topos = m_pos = Vec{planetX, planetY}; }
-            startEffect(k, planetX, planetY, k.time, pitch);
+            if (m_followMode) { m_frompos = m_topos = m_pos = Vec{px, py}; }
+            startEffect(k, px, py, k.time, pitch);
         }
     }
     m_cursor = idx;
@@ -298,6 +302,15 @@ void CameraDirector::startEffect(const CameraKey& k, double planetX, double plan
     if (zoomUsed) {
         startTween(m_zoomTween, m_zoomSize, m_zoomSize, (double)ev.zoom / 100.0, duration, ease, now);
     }
+    if (env::flag("ADOCAO_CAM_DUMP")) {
+        char buf[320];
+        std::snprintf(buf, sizeof(buf),
+                      "cam-ev t=%.3f floor=%d rel=%d dur=%.4f pos=(%.2f,%.2f) camParent=(%.2f,%.2f) "
+                      "rot=%.1f zoom=%.3f flags=%u",
+                      now, (int)ev.floor, (int)movementType, duration, finalPos.x, finalPos.y,
+                      m_camParent.x, m_camParent.y, m_camAngle, m_zoomSize, (unsigned)ev.flags);
+        LOG_I("%s", buf);
+    }
 }
 
 void CameraDirector::killTween(Tween& tw, double& dst) {
@@ -305,6 +318,8 @@ void CameraDirector::killTween(Tween& tw, double& dst) {
     dst = tw.to;
     tw.active = false;
 }
+
+#include <cstdio>
 
 void CameraDirector::startTween(Tween& tw, double& dst, double from, double to,
                                 double duration, Ease ease, double now) {

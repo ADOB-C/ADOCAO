@@ -761,7 +761,16 @@ void GameWindow::captureAndExit() {
                   (double)p[0], (double)p[1], (int)m_level->tilesWindowed());
         }
         const double pitch = std::max(0.1, (double)m_level->settings.pitch / 100.0);
-        m_cameraDirector.seek(m_playback->timeInLevel(), p[0], p[1], tileIdx, pitch);
+        // 重放历史事件时用"当时"的行星位置：否则 relativeTo=Player 的运镜会把 rig 算错，
+        // 抓帧/跳转后的画面整体偏移、旋转中心也不对（2026-10-24 MM2 实测）
+        auto planetAt = [this](double tt, double& x, double& y) {
+            int64_t ii = m_timeline->findTileIndex(tt);
+            if (ii < 0) ii = 0;
+            if (ii >= m_level->tileCount()) ii = m_level->tileCount() - 1;
+            const auto q = m_level->tilePositionAt(ii);
+            x = q[0]; y = q[1];
+        };
+        m_cameraDirector.seek(m_playback->timeInLevel(), p[0], p[1], tileIdx, pitch, planetAt);
         m_camCtrl.snapTo(m_cameraDirector.x(), m_cameraDirector.y());
         if (env::flag("ADOCAO_CAM_DEBUG")) {
             LOG_I("capture-cam: target=(%.2f,%.2f) zoom=%.2f", m_camera.targetX(), m_camera.targetY(), (double)m_camera.zoom());

@@ -28,7 +28,14 @@ public:
     void resetState();
 
     // 跳到时间 t（暂停/从中间开始播）：重放全部事件，跟随层强制稳态。
-    void seek(double t, double planetX, double planetY, int64_t tileIndex, double pitch);
+    //
+    // `planetAt(t, x, y)`（可选）：**重放历史事件时**行星在该事件时刻的位置。
+    // 为什么必须有它：`relativeTo: Player` 的事件把"行星位置"当基准换算世界坐标，
+    // 若整个重放都用**当前**行星位置，历史事件就会把 rig 算到错误的地方 ——
+    // 表现是"跳转/抓帧后相机整体偏移、旋转中心也不对"（2026-10-24 MM2 真踩过）。
+    using PlanetAtFn = std::function<void(double t, double& x, double& y)>;
+    void seek(double t, double planetX, double planetY, int64_t tileIndex, double pitch,
+              const PlanetAtFn& planetAt = {});
 
     // 每帧驱动。bpm = **当前砖**的 BPM（跟随速度用）；pitch 已归一成倍率（settings.pitch/100）。
     void update(double nowSeconds, double deltaSeconds, float bpm, double pitch,

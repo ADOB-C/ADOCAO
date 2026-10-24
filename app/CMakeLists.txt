@@ -106,10 +106,9 @@ endif()
 
 # Strip Release binaries
 if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+    # 只处理 MinGW：MSVC 在顶层就被拒了（见 CMakeLists.txt 的 FATAL_ERROR）
     if(MINGW)
         target_link_options(adocao PRIVATE -Wl,-s)
-    elseif(MSVC)
-        target_link_options(adocao PRIVATE /OPT:REF /OPT:ICF)
     endif()
 endif()
 
@@ -117,8 +116,6 @@ endif()
 if(ADOCAO_PORTABLE)
     if(MINGW)
         target_link_options(adocao PRIVATE -static)
-    elseif(MSVC)
-        set_property(TARGET adocao PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     endif()
 endif()
 

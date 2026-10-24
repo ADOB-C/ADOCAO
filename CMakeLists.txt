@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 
-# Prefer GCC over Clang (both over MSVC). Must be set before project().
+# Prefer GCC over Clang. **MSVC 不支持**（`core/level/JsonScan.hpp` 用了 `__builtin_ctz`，
+# 且 SIMD 后端只认 GCC/Clang 的宏），选到 MSVC 会在配置阶段直接报错，而不是编到一半炸。
+# Must be set before project().
 if(NOT CMAKE_C_COMPILER AND NOT CMAKE_CXX_COMPILER)
     find_program(GCC_C   gcc)
     find_program(GCC_CXX g++)
@@ -25,6 +27,13 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
 endif()
 
 project(ADOCAO VERSION 7.1.0 LANGUAGES CXX C)
+
+if(MSVC)
+    message(FATAL_ERROR
+        "ADOCAO 不支持 MSVC。\n"
+        "  Windows 请用 build.bat（MinGW/GCC）；Linux/macOS 用 gcc 或 clang。\n"
+        "  原因：core/level/JsonScan.hpp 无条件使用 __builtin_ctz，SIMD 后端只认 GCC/Clang 宏。")
+endif()
 
 option(ADOCAO_PORTABLE "Build a static-linked portable executable" OFF)
 
@@ -271,9 +280,7 @@ endif()
 option(ADOCAO_LTO "Release 启用 LTO + 函数/数据分段 + gc-sections" ON)
 if(ADOCAO_LTO AND (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel"))
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
-    if(NOT MSVC)
-        add_compile_options(-ffunction-sections -fdata-sections)
-    endif()
+    add_compile_options(-ffunction-sections -fdata-sections)   # MSVC 到不了这里（顶层已报错）
     if(APPLE)
         add_link_options(-Wl,-dead_strip)
     elseif(UNIX OR MINGW)

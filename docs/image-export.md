@@ -71,6 +71,20 @@
 - **要随机访问（看右下角只解几块）且体积最小** → 默认 `tile + zstd`（用 ImageMagick/libtiff 看）；
 - 默认值按"体积 + 随机访问优先"取 `tile + zstd`；兼容性优先时显式给 `strip + deflate`。
 
+### 具体软件能不能开（2026-10-23 实测）
+
+| 读者 | tile + zstd | tile + deflate | strip + deflate |
+|---|---|---|---|
+| Krita（自带 libtiff 6.2.0） | 预期 ✓（libtiff ≥4.5 支持 zstd，未做无头验证） | ✓ | ✓ |
+| **Kdenlive / MLT `qimage`**（Qt → libtiff 6.2.0） | **✓ 实测**（解码帧与 PNG 降采样**逐像素相同**） | ✓ | ✓ |
+| Kdenlive / MLT `avformat`（ffmpeg） | ✗ `Unknown compression method 50000` | ✗ **全黑**（ffmpeg 不读 tiled） | ✓ |
+| macOS 预览 / `sips`（ImageIO） | ✗ | ✗（不认 tiled） | ✓ |
+| ImageMagick / libtiff `tiffinfo` | ✓ | ✓ | ✓ |
+
+**结论**：Krita 与 Kdenlive 的**静帧**路径（都走 libtiff）能开 `tile + zstd`；
+但 Kdenlive 里任何走 **ffmpeg** 的环节（图片序列、proxy、部分导出）只认 **strip + deflate** ——
+ffmpeg 的 TIFF 解码器既不吃 tiled（解出来全黑，不报错）也不吃 zstd（报错）。
+
 16K（16384x6616，2025）两档实测：
 
 | 配置 | 体积 | 峰值 RSS | Preview |

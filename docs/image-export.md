@@ -50,42 +50,37 @@
   便于检视或复用已有瓦片）。
 - 已知可续：按 tile 区间取景（`--range A-B` ✓）用来看密集"结"的内部结构 ✓。
 
-## TIFF 输出（2026-10-23 起，`.tif` / `.tiff`）
+## TIFF 输出（`.tif` / `.tiff`）
 
-输出扩展名是 `.tif`/`.tiff` 时走 `core/map/TiffWriter`（自研，无 libtiff 依赖）：**按条带
-（RowsPerStrip = 256 行）独立压缩**、边写边压，内存 = 一条带 + 每段 8 B 索引。
+`adocao image out.tif --level <谱> [--tiff-layout tile|strip] [--tiff-compress zstd|deflate]`
+走 `core/map/TiffWriter`（自研，无 libtiff 依赖）：**每块独立压缩**、边算边写，
+内存只保留一条带 + 线段表（16K 实测峰值 **50.8 MB**，整图 PNG 是 890 MB）。
 
-实测（2025，4096x3072，同一次渲染）：
+**两种布局**（2026-10-23 实测，4096x3072、2025）：
 
-| 格式 | 体积 | 说明 |
-|---|---|---|
-| PNG | 586,187 B | 原来 |
-| **TIFF + Deflate（默认）** | **123,624 B** | 缩小 **4.7x**；Preview / PIL / ImageMagick 都能读 |
-| TIFF + zstd-19（`ADOCAO_TIFF_ZSTD=1`） | 67,863 B | 再小 45%，但 macOS ImageIO / PIL 不认 `Compression=50000` |
-
-**为什么是条带不是分块（Tile）**：macOS ImageIO **不认 tiled TIFF** —— `sips -g pixelWidth`
-对 tiled 文件返回 nil（连 ImageMagick 生成的 tiled TIFF 也一样），同一张图的 strip 版本秒开。
-所以 `TiffWriter` 用 `RowsPerStrip` + `StripOffsets/TileByteCounts`，既兼容又能流式压。
-
-**BigTIFF**：默认写经典 TIFF（32 位偏移）；超过 4 GB 偏移才需要 BigTIFF，用
-`ADOCAO_TIFF_BIG=1` 强制（实测 macOS ImageIO 同样不认 BigTIFF，只有 libtiff/ImageMagick 认）。
-这是"给超大画布留的路"，不是默认格式。
-
-### 分带流式渲染（`renderLevelMapBands`）
-
-TIFF 那条路**不再建整图**：先算包围盒与坐标 → 把线段收进平表（148k 层 ≈ 9.5 MB）→
-按 y 分桶 → 逐带画（一条带 W x 256 x 4）→ 回调里直接 `writeStrip` 压缩写出。
-
-16K（16384x6616）实测：
-
-| | 峰值 RSS | 时间 | 文件 |
+| 布局 + 压缩 | 体积 | libtiff / ImageMagick | macOS 预览（ImageIO） |
 |---|---|---|---|
-| 整图 PNG | 890 MB | 3.46 s | 4,657,533 B |
-| 整图 + TIFF（旧思路） | 918 MB | 1.02 s | 768,980 B |
-| **分带流式 TIFF** | **50.8 MB** | 0.88 s | 768,980 B（与整图版**逐字节相同**） |
+| `tile` + `zstd`（默认） | **68,639 B** | ✓ | ✗ |
+| `tile` + `deflate` | 123,086 B | ✓ | ✗ |
+| `strip` + `zstd` | 67,863 B | ✓ | ✗（Compression=50000 不支持） |
+| `strip` + `deflate` | 123,624 B | ✓ | **✓** |
 
-`renderLevelMap()` 现在就是"一条带"的 `renderLevelMapBands()`，两路共用同一份绘制代码
-（验收方式 = 两路输出逐字节相同，已对拍）。
+所以：
 
-> 注意：**像素内容与 PNG 逐字节相同**（`PIL` 对拍过 4096x3072 全图）。
-> `adocao image out.tif` 的其它开关（`--size/--bg/--time-color/--padding/--thickness`）全部照旧。
+- **要 macOS 预览/快速查看能打开** → `--tiff-layout strip --tiff-compress deflate`；
+- **要随机访问（看右下角只解几块）且体积最小** → 默认 `tile + zstd`（用 ImageMagick/libtiff 看）；
+- 默认值按"体积 + 随机访问优先"取 `tile + zstd`；兼容性优先时显式给 `strip + deflate`。
+
+16K（16384x6616，2025）两档实测：
+
+| 配置 | 体积 | 峰值 RSS | Preview |
+|---|---|---|---|
+| `tile + zstd`（默认） | **327,241 B** | 37.2 MB | ✗ |
+| `strip + deflate` | 771,520 B | 50.8 MB | ✓ |
+| （对照）整图 PNG | 4,657,533 B | 890 MB | ✓ |
+
+**为什么 tile 也不能完全替代 strip**：macOS ImageIO **不认 tiled TIFF**（`sips` 返回 nil，
+连 ImageMagick 生成的 tiled 文件也一样）—— 这是平台限制，不是我们的实现问题。
+
+> 像素内容与 PNG **逐字节相同**（PIL 全图对拍，四种组合都验过）。
+> BigTIFF（64 位偏移）在偏移会超过 4 GB 时自动启用（`TiffWriter` 内部判断）。

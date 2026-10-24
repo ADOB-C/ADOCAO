@@ -37,12 +37,18 @@ int main() {
 
     const char* path = "tiff_writer_test.tif";
     TiffWriter w;
-    check(w.open(path, W, H, 32, TiffWriter::kCompressionDeflate, deflateCompress),
+    check(w.open(path, W, H, TiffWriter::Layout::Strips, 0, 32,
+                 TiffWriter::kCompressionDeflate, deflateCompress),
           "open");
-    check(w.stripCount() == 3, "条带数 3（32 行/条，70 行）");
-    for (uint32_t y = 0; y < H; y += 32) {
-        const uint32_t rows = std::min(32u, H - y);
-        check(w.writeStrip(&img[(size_t)y * W * 4], rows), "writeStrip");
+    check(w.blocksY() == 3, "条带数 3（32 行/条，70 行）");
+    {
+        std::vector<uint8_t> strip((size_t)w.blockW() * w.blockH() * 4, 0);
+        for (uint32_t y = 0; y < H; y += w.blockH()) {
+            std::fill(strip.begin(), strip.end(), 0);
+            const uint32_t rows = std::min(w.blockH(), H - y);
+            std::memcpy(strip.data(), &img[(size_t)y * W * 4], (size_t)W * rows * 4);
+            check(w.writeBlock(strip.data()), "writeBlock（条带）");
+        }
     }
     check(w.finish(), "finish");
     w.close();
@@ -93,6 +99,58 @@ int main() {
     inflateEnd(&s);
     check(rc == Z_STREAM_END && s.total_out == raw.size(), "第一条带解压出 100x32x4");
     check(std::memcmp(raw.data(), img.data(), raw.size()) == 0, "第一条带像素逐字节一致");
+
+    // ── tiled 布局：同样写一张，检查 tile 标签与像素 ──
+    {
+        const char* tpath = "tiff_writer_tile.tif";
+        TiffWriter t;
+        check(t.open(tpath, W, H, TiffWriter::Layout::Tiles, 32, 32,
+                     TiffWriter::kCompressionDeflate, deflateCompress), "tile open");
+        check(t.blocksX() == 4 && t.blocksY() == 3, "tile 4x3 块");
+        std::vector<uint8_t> blk((size_t)t.blockW() * t.blockH() * 4);
+        for (uint32_t by = 0; by < t.blocksY(); ++by) {
+            for (uint32_t bx = 0; bx < t.blocksX(); ++bx) {
+                std::fill(blk.begin(), blk.end(), 0);
+                for (uint32_t y = 0; y < t.blockH(); ++y) {
+                    const uint32_t sy = by * t.blockH() + y;
+                    if (sy >= H) break;
+                    for (uint32_t x = 0; x < t.blockW(); ++x) {
+                        const uint32_t sx = bx * t.blockW() + x;
+                        if (sx >= W) break;
+                        std::memcpy(&blk[((size_t)y * t.blockW() + x) * 4],
+                                    &img[((size_t)sy * W + sx) * 4], 4);
+                    }
+                }
+                check(t.writeBlock(blk.data()), "tile writeBlock");
+            }
+        }
+        check(t.finish(), "tile finish");
+        t.close();
+
+        std::FILE* tf = std::fopen(tpath, "rb");
+        check(tf != nullptr, "tile 读回");
+        if (tf) {
+            std::fseek(tf, 0, SEEK_END);
+            const long tsz = std::ftell(tf);
+            std::fseek(tf, 0, SEEK_SET);
+            std::vector<uint8_t> tb((size_t)tsz);
+            check(std::fread(tb.data(), 1, tb.size(), tf) == tb.size(), "tile 读满");
+            std::fclose(tf);
+            const uint64_t tifd = rd32(&tb[4]);
+            const uint64_t tn = rd16(&tb[(size_t)tifd]);
+            uint64_t tw = 0, th = 0, toff = 0;
+            for (uint64_t i = 0; i < tn; ++i) {
+                const uint8_t* e = &tb[(size_t)tifd + 2 + i * 12];
+                const uint16_t tag = rd16(e);
+                const uint64_t val = rd32(e + 8);
+                if (tag == 322) tw = val;
+                if (tag == 323) th = val;
+                if (tag == 324) toff = val;
+            }
+            check(tw == 32 && th == 32, "TileWidth/TileLength = 32");
+            check(toff > 0, "TileOffsets 非空");
+        }
+    }
 
     std::printf("tiff_writer: %s\n", g_fail ? "有失败" : "全部通过");
     return g_fail ? 1 : 0;

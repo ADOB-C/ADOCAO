@@ -63,10 +63,11 @@ uint32_t parseHex(const std::string& h, uint32_t fallback) {
 
 }  // namespace
 
-// TIFF 条带写出（默认 Deflate，`ADOCAO_TIFF_ZSTD=1` 换 zstd；条带内独立压缩）。
-// 为什么不是分块（Tile）：macOS ImageIO 不认 tiled TIFF（实测，连 ImageMagick 生成的也不认）。
-static bool writeTiff(const std::string& path, int w, int h, const std::vector<uint8_t>& rgba) {
-    TiffWriter tw;
+// 分带流式写 TIFF：**不建整图**（只保留一条带 + 线段表）。
+// layout：tile（默认，随机访问好，但 macOS ImageIO 不认）/ strip（全宽条带，兼容一切读者）。
+// compress：zstd（默认，最小）/ deflate（兼容）。
+static bool writeTiffBands(const std::string& path, const Timeline& tl, const LevelMapOptions& opts,
+                           const std::string& layoutStr, const std::string& compressStr) {
     auto zstdComp = [](const uint8_t* data, size_t n, std::vector<uint8_t>& out) {
         out.resize(ZSTD_compressBound(n));
         const size_t got = ZSTD_compress(out.data(), out.size(), data, n, 19);
@@ -74,51 +75,45 @@ static bool writeTiff(const std::string& path, int w, int h, const std::vector<u
         out.resize(got);
         return true;
     };
-    const bool useZstd = [] { const char* e = std::getenv("ADOCAO_TIFF_ZSTD"); return e && e[0] == '1'; }();
-    const bool forceBig = [] { const char* e = std::getenv("ADOCAO_TIFF_BIG"); return e && e[0] == '1'; }();
+    const bool useZstd = compressStr != "deflate";
+    const bool tiled = layoutStr != "strip";
     const TiffWriter::Compressor comp = useZstd ? TiffWriter::Compressor(zstdComp)
                                                  : TiffWriter::Compressor(deflateCompress);
-    const uint32_t rowsPerStrip = 256;
-    const bool big = forceBig || (size_t)w * h * 4 > 3ull * 1024 * 1024 * 1024;
-    if (!tw.open(path, (uint32_t)w, (uint32_t)h, rowsPerStrip,
-                 useZstd ? (uint16_t)50000 : TiffWriter::kCompressionDeflate, comp, big))
-        return false;
-    for (uint32_t y = 0; y < (uint32_t)h; y += rowsPerStrip) {
-        const uint32_t rows = std::min(rowsPerStrip, (uint32_t)h - y);
-        if (!tw.writeStrip(&rgba[(size_t)y * w * 4], rows)) return false;
-    }
-    return tw.finish();
-}
-
-// 分带流式写 TIFF：**不再整图驻留**（只保留一条带 + 线段表）。
-static bool writeTiffBands(const std::string& path, const Timeline& tl, const LevelMapOptions& opts) {
-    auto zstdComp = [](const uint8_t* data, size_t n, std::vector<uint8_t>& out) {
-        out.resize(ZSTD_compressBound(n));
-        const size_t got = ZSTD_compress(out.data(), out.size(), data, n, 19);
-        if (ZSTD_isError(got)) return false;
-        out.resize(got);
-        return true;
-    };
-    const bool useZstd = [] { const char* e = std::getenv("ADOCAO_TIFF_ZSTD"); return e && e[0] == '1'; }();
-    const bool forceBig = [] { const char* e = std::getenv("ADOCAO_TIFF_BIG"); return e && e[0] == '1'; }();
-    const TiffWriter::Compressor comp = useZstd ? TiffWriter::Compressor(zstdComp)
-                                                 : TiffWriter::Compressor(deflateCompress);
-    const uint32_t rowsPerStrip = 256;
+    const uint16_t compression = useZstd ? TiffWriter::kCompressionZstd : TiffWriter::kCompressionDeflate;
+    const uint32_t block = 256;
     TiffWriter tw;
-    const bool big = forceBig || (size_t)opts.width * opts.height * 4 > 3ull * 1024 * 1024 * 1024;
-    if (!tw.open(path, (uint32_t)opts.width, (uint32_t)opts.height, rowsPerStrip,
-                 useZstd ? (uint16_t)50000 : TiffWriter::kCompressionDeflate, comp, big))
+    const bool big = (size_t)opts.width * opts.height * 4 > 3ull * 1024 * 1024 * 1024;
+    if (!tw.open(path, (uint32_t)opts.width, (uint32_t)opts.height,
+                 tiled ? TiffWriter::Layout::Tiles : TiffWriter::Layout::Strips,
+                 tiled ? block : 0, block, compression, comp, big))
         return false;
-    return renderLevelMapBands(tl, opts, (int)rowsPerStrip,
-                               [&](int, int rows, const std::vector<uint8_t>& band) {
-                                   return tw.writeStrip(band.data(), (uint32_t)rows);
-                               }) && tw.finish();
+    // 按 256 行一条带渲染；条带正好等于块高，所以 tile 模式下每带来就直接切块写出。
+    bool ok = true;
+    std::vector<uint8_t> tileBuf;
+    if (tiled) tileBuf.resize((size_t)tw.blockW() * tw.blockH() * 4);
+    ok = renderLevelMapBands(tl, opts, (int)block, [&](int y0, int rows, const std::vector<uint8_t>& band) {
+        if (!tiled) return tw.writeBlock(band.data());   // strip：整宽一条
+        // tile：把这一带按列切成 blockW 宽的块，右侧/下侧补 0
+        const uint32_t bw = tw.blockW(), bh = tw.blockH();
+        for (uint32_t bx = 0; bx < tw.blocksX(); ++bx) {
+            std::fill(tileBuf.begin(), tileBuf.end(), 0);
+            const uint32_t x0 = bx * bw;
+            const uint32_t cols = std::min(bw, (uint32_t)opts.width - x0);
+            for (int y = 0; y < rows; ++y)
+                std::memcpy(&tileBuf[(size_t)y * bw * 4], &band[((size_t)y * opts.width + x0) * 4],
+                            (size_t)cols * 4);
+            if (!tw.writeBlock(tileBuf.data())) return false;
+        }
+        return true;
+    });
+    (void)y0;
+    return ok && tw.finish();
 }
 
 int exportLevelMap(const std::string& levelPath, const std::string& outPath,
                    const std::string& sizeStr, const std::string& bgStr,
                    const std::string& tilesStr, bool native, bool timeColor, float padding,
-                   float lineWidthPx) {
+                   float lineWidthPx, const std::string& tiffLayout, const std::string& tiffCompress) {
     LevelMapOptions opts;
     if (lineWidthPx > 0.0f) {                                 // --map-thickness：直接给线宽（像素）
         opts.lineWidthPx = lineWidthPx;
@@ -174,7 +169,7 @@ int exportLevelMap(const std::string& levelPath, const std::string& outPath,
     // TIFF 走**分带流式**（不建整图）；PNG 仍走整图（它自己已经分带并行压缩）
     bool written = false;
     if (wantTiff) {
-        written = writeTiffBands(outPath, timeline, opts);
+        written = writeTiffBands(outPath, timeline, opts, tiffLayout, tiffCompress);
     } else {
         std::vector<uint8_t> rgba;
         if (!renderLevelMap(timeline, opts, rgba)) {

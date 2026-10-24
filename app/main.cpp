@@ -94,6 +94,7 @@ void printHelp(Mode mode, bool all) {
             "  外观:\n"
             "    --time-color         按谱面时间六档彩虹（否则沿进度渐变）\n"
             "    --bg <hex>|transparent   --padding F（默认 0 = 贴边；给正数才留白）   --thickness N（<=1 = 1px 硬线）\n"
+            "    --tiff-layout tile|strip  --tiff-compress zstd|deflate（仅 .tif 输出；默认 tile + zstd）\n"
             "    （--size/--bg/--padding/--thickness/--native 只对矢量路线生效；--1px 不读取它们）\n"
             "    --range A-B          只画第 A..B 层（看密集“结”）   --native  1 像素 = 1 世界单位\n"
             "  资源:\n"
@@ -255,6 +256,7 @@ int main(int argc, char* argv[]) {
     std::string size, bg, range, keepTiles;
     bool native = false, timeColor = false, onePx = false, oneBit = false;
     float padding = -1.0f, thickness = -1.0f;        // <0 = 用默认
+    std::string tiffLayout = "tile", tiffCompress = "zstd";   // --tiff-layout / --tiff-compress
     int block = 4096, threads = 0, scale = 1, progressForce = 0;
     bool codecReport = false;
     bool packCheckpoints = false;
@@ -370,6 +372,8 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--time-color") == 0)             timeColor = true;
             else if (std::strcmp(a, "--padding") == 0    && i+1<argc) padding = (float)atof(argv[++i]);
             else if (std::strcmp(a, "--thickness") == 0  && i+1<argc) thickness = (float)atof(argv[++i]);
+            else if (std::strcmp(a, "--tiff-layout") == 0   && i+1<argc) tiffLayout = argv[++i];
+            else if (std::strcmp(a, "--tiff-compress") == 0 && i+1<argc) tiffCompress = argv[++i];
             else if (std::strcmp(a, "--range") == 0      && i+1<argc) range = argv[++i];
             else if (std::strcmp(a, "--native") == 0)                 native = true;
             else if (std::strcmp(a, "--1px") == 0)                    onePx = true;
@@ -701,7 +705,7 @@ int main(int argc, char* argv[]) {
         const std::string& outPng = pos[0];
         if (!onePx && !oneBit)     // 默认：矢量全景，一条命令直接出图
             return exportLevelMap(cli.levelPath, outPng, size, bg, range, native, timeColor,
-                                  padding, thickness);
+                                  padding, thickness, tiffLayout, tiffCompress);
         if (oneBit && scale != 1)  std::fprintf(stderr, "提示：--scale 对 --1bit 无效（索引色不做降采样）\n");
         // 1px=1tile：内部出瓦片 → 拼接（或 1-bit 索引色）→ 清中间产物
         namespace fs = std::filesystem;

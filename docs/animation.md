@@ -77,3 +77,26 @@ struct TileAnim {
 - 不引入 Re_ADOJAS 的 `Mesh`/three.js 概念；只借它的**时间轴语义**。
 - 不为 2³¹ 层做全量关键帧；超大谱按 `GLOBAL_ANIM_TILE_LIMIT` 跳过全局动画（与参考一致），
   MoveTrack 的大范围事件仍用现有块表 + 稀疏建帧，后续可进 `.adocao` 的 Derived 段。
+
+## 时间单位（2026-10-24 连着踩了三处）
+
+**谱面里所有 "duration / beatsAhead / beatsBehind / angleOffset 的拍数" 都按"一拍 = 60/bpm"换算，
+不是"这一砖走完要多久"。** 后者是 `Timeline::durationAt(i)` = `(转角/180) x 一拍`，
+在 90° 砖上只有一半、U-turn 上是两倍。
+
+| 事件 | 正确公式（= Re_ADOJAS） | 曾经写成 |
+|---|---|---|
+| `MoveTrack` trigger | `startTimeAt(floor) + (angleOffset/180) * 60/bpm` | `durationAt(floor)` |
+| `MoveTrack` duration | `durBeats * (60/bpm) / pitch` | `durBeats * durationAt(floor) / pitch` |
+| `RecolorTrack` trigger | `tileTime + (angleOffset/180) * (60/bpm)` | 同上错法 |
+| `TweenColor` duration | `durBeats * (60/bpm)` | `dur * durationAt(floor)` |
+| `Flash` | `dur * (60/bpm) / pitch` | ✓ 本来就对（2026-10-18 修过） |
+| `AnimateTrack` 出现/消失 | `60/bpm / pitch` + `beatsAhead/Behind` | ✓ 本来就对 |
+| `MoveCamera` | `(60/(bpm*pitch))` | ✓ 本来就对 |
+
+**症状**（用户口径）："有些砖慢慢飘走，有些快速飞走" —— 因为 `durationAt/一拍` 在 0.5~2 之间，
+同一张谱里不同角度的砖会按不同倍率缩放时长。
+
+**护栏**：`tests/anim_timing_test.cpp`（ctest `anim_timing`）用 120 BPM + 混排角度的合成谱钉死
+三类事件：2 拍必须正好 1.0 s、`angleOffset 90°` 必须正好晚 0.25 s；并带**反面对照**
+（90° 砖错算成 0.5 s、U-turn 错算成 2.0 s）。

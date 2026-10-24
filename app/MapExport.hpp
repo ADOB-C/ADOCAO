@@ -10,9 +10,9 @@ int exportLevelMap(const std::string& levelPath, const std::string& outPath,
                   const std::string& sizeStr, const std::string& bgStr,
                   const std::string& tilesStr = "", bool native = false,
                   bool timeColor = false, float padding = -1.0f, float lineWidthPx = -1.0f,
-                  const std::string& tiffLayout = "strip",
+                  const std::string& tiffLayout = "tile",
                   const std::string& tiffCompress = "deflate");
-// .tif/.tiff 输出：tiffLayout = "strip"（默认，最兼容）/"tile"；tiffCompress = "deflate"（默认）/"zstd"。
+// .tif/.tiff 输出：tiffLayout = "tile"（默认）/"strip"；tiffCompress = "deflate"（默认）/"zstd"。
 // tile 的随机访问最好，但 macOS ImageIO 不认；strip 兼容一切读者（全宽条带）。
 // zstd（Compression=50000）体积最小，但只有 libtiff/ImageMagick 认，macOS 预览不认。
 // lineWidthPx > 0 = 直接指定线宽（像素）；<= 0 = 用默认（thicknessScale + clamp）

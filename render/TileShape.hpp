@@ -24,6 +24,7 @@
 // 三角形数：每层 32+4+2+4+2+3+4(Gems) = 51 → 砖 102 + 图标 3×16 = 150…实算 158 个三角形（474 索引）。
 
 #include "TileGeometry.hpp"   // TILE_WIDTH / TILE_LENGTH / OUTLINE / fmodWrap / lerp
+#include <cmath>
 #include "core/level/LevelData.hpp"
 #include <cstdint>
 #include <vector>

@@ -1,4 +1,5 @@
 #include "AudioEngine.hpp"
+#include <cmath>
 #include "core/util/Logger.hpp"
 
 #define STB_VORBIS_HEADER_ONLY

@@ -1,4 +1,5 @@
 #include "TileGeometry.hpp"
+#include <cmath>
 
 
 namespace adofai {

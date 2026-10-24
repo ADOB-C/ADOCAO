@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BitSpan.hpp"
+#include <cmath>
 
 #include "glad/gl_core.hpp"
 #include "core/level/LevelData.hpp"

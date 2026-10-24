@@ -1,6 +1,7 @@
 #include "archive/AdocaoColumns.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <array>
 #include <cstring>
 

@@ -24,6 +24,9 @@ check 'std::strlen\(|std::memcpy\(|std::memcmp\(|std::memset\(' '<cstring>' 'std
 check 'std::deque<' '<deque>' 'std::deque'
 check 'std::filesystem::' '<filesystem>' 'std::filesystem'
 check 'std::snprintf\(|std::fprintf\(' '<cstdio>' 'std::snprintf'
+# 数学函数：libc++ 常经由别的头带进 <cmath>（macOS 绿），GCC/MinGW 直接报
+# "'pow' is not a member of 'std'"（2026-10-24 真踩过：AdocaoColumns 的定点编码）
+check 'std::(pow|round|llround|lround|isfinite|fabs|floor|ceil|sqrt|exp|log|log2)\(' '<cmath>' 'std::pow/round/...'
 
 if [ "$fail" -ne 0 ]; then
     echo "check-std-includes: 有文件漏了标准库头（见上）" >&2

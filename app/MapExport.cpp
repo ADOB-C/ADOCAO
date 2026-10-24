@@ -90,6 +90,31 @@ static bool writeTiff(const std::string& path, int w, int h, const std::vector<u
     return tw.finish();
 }
 
+// 分带流式写 TIFF：**不再整图驻留**（只保留一条带 + 线段表）。
+static bool writeTiffBands(const std::string& path, const Timeline& tl, const LevelMapOptions& opts) {
+    auto zstdComp = [](const uint8_t* data, size_t n, std::vector<uint8_t>& out) {
+        out.resize(ZSTD_compressBound(n));
+        const size_t got = ZSTD_compress(out.data(), out.size(), data, n, 19);
+        if (ZSTD_isError(got)) return false;
+        out.resize(got);
+        return true;
+    };
+    const bool useZstd = [] { const char* e = std::getenv("ADOCAO_TIFF_ZSTD"); return e && e[0] == '1'; }();
+    const bool forceBig = [] { const char* e = std::getenv("ADOCAO_TIFF_BIG"); return e && e[0] == '1'; }();
+    const TiffWriter::Compressor comp = useZstd ? TiffWriter::Compressor(zstdComp)
+                                                 : TiffWriter::Compressor(deflateCompress);
+    const uint32_t rowsPerStrip = 256;
+    TiffWriter tw;
+    const bool big = forceBig || (size_t)opts.width * opts.height * 4 > 3ull * 1024 * 1024 * 1024;
+    if (!tw.open(path, (uint32_t)opts.width, (uint32_t)opts.height, rowsPerStrip,
+                 useZstd ? (uint16_t)50000 : TiffWriter::kCompressionDeflate, comp, big))
+        return false;
+    return renderLevelMapBands(tl, opts, (int)rowsPerStrip,
+                               [&](int, int rows, const std::vector<uint8_t>& band) {
+                                   return tw.writeStrip(band.data(), (uint32_t)rows);
+                               }) && tw.finish();
+}
+
 int exportLevelMap(const std::string& levelPath, const std::string& outPath,
                    const std::string& sizeStr, const std::string& bgStr,
                    const std::string& tilesStr, bool native, bool timeColor, float padding,
@@ -142,18 +167,22 @@ int exportLevelMap(const std::string& levelPath, const std::string& outPath,
     timeline.build(level, /*exportOnly=*/true);
     LOG_I("Map: %d 层，开始出图 %dx%d", (int)level.tiles.size(), opts.width, opts.height);
 
-    std::vector<uint8_t> rgba;
-    if (!renderLevelMap(timeline, opts, rgba)) {
-        std::fprintf(stderr, "Map rendering failed\n");
-        return 1;
-    }
     const bool wantTiff = [&] {
         const std::string ext = [&] { auto p = outPath.rfind('.'); return p == std::string::npos ? std::string() : outPath.substr(p); }();
         return ext == ".tif" || ext == ".tiff" || ext == ".TIF" || ext == ".TIFF";
     }();
-    const bool written = wantTiff
-        ? writeTiff(outPath, opts.width, opts.height, rgba)
-        : stbi_write_png(outPath.c_str(), opts.width, opts.height, 4, rgba.data(), opts.width * 4) != 0;
+    // TIFF 走**分带流式**（不建整图）；PNG 仍走整图（它自己已经分带并行压缩）
+    bool written = false;
+    if (wantTiff) {
+        written = writeTiffBands(outPath, timeline, opts);
+    } else {
+        std::vector<uint8_t> rgba;
+        if (!renderLevelMap(timeline, opts, rgba)) {
+            std::fprintf(stderr, "Map rendering failed\n");
+            return 1;
+        }
+        written = stbi_write_png(outPath.c_str(), opts.width, opts.height, 4, rgba.data(), opts.width * 4) != 0;
+    }
     if (!written) {
         std::fprintf(stderr, "Failed to write %s: %s\n", wantTiff ? "TIFF" : "PNG", outPath.c_str());
         return 1;

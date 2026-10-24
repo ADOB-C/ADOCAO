@@ -80,9 +80,21 @@ void drawSegmentHard(std::vector<uint8_t>& img, int W, int H,
     }
 }
 
+struct Seg { double x0, y0, x1, y1; uint32_t rgba; };
+
 }  // namespace
 
 bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector<uint8_t>& out) {
+    // 整张图 = 一条带（保持老行为的唯一实现，避免两份绘制代码漂移）
+    return renderLevelMapBands(tl, opts, opts.height, [&](int, int rows, const std::vector<uint8_t>& data) {
+        out = data;
+        (void)rows;
+        return true;
+    });
+}
+
+bool renderLevelMapBands(const Timeline& tl, const LevelMapOptions& opts, int bandRows,
+                         const std::function<bool(int, int, const std::vector<uint8_t>&)>& sink) {
     if (opts.width <= 0 || opts.height <= 0) return false;
     if ((size_t)opts.width * (size_t)opts.height > opts.maxPixels) {
         LOG_E("Map: %dx%d 超过内存上限（maxPixels=%zu）", opts.width, opts.height, opts.maxPixels);
@@ -145,17 +157,7 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
         const_cast<LevelMapOptions&>(opts).height = (int)std::ceil(bh) + 3;
     }
     const size_t W = (size_t)opts.width, H = (size_t)opts.height;
-    out.assign(W * H * 4, 0);
     const Rgba bg = unpack(opts.bgRgba);
-    if (bg.a > 0.0f) {
-        for (size_t p = 0; p < W * H; ++p) {
-            out[p * 4 + 0] = (uint8_t)std::lround(bg.r * 255.0f);
-            out[p * 4 + 1] = (uint8_t)std::lround(bg.g * 255.0f);
-            out[p * 4 + 2] = (uint8_t)std::lround(bg.b * 255.0f);
-            out[p * 4 + 3] = (uint8_t)std::lround(bg.a * 255.0f);
-        }
-    }
-    const Rgba fill   = unpack(opts.fillRgba);
     const double rawHalfW = opts.lineWidthPx > 0.0f
         ? (double)opts.lineWidthPx * 0.5
         : scale * opts.thicknessScale * 0.5;
@@ -166,30 +168,64 @@ bool renderLevelMap(const Timeline& tl, const LevelMapOptions& opts, std::vector
     }
     const double halfW = std::max(loHalfW, std::min(hiHalfW, rawHalfW));
 
-    // ── 第二遍：逐段画（红蓝各一条，顺序即进度 → 渐变）
-    glm::dvec2 prevRed, prevBlue;
-    bool havePrev = false;
-    for (int i = i0; i <= i1; ++i) {
-        PositionSolver::positionAtTile(tl, tl.startTimeAt(i), i, red, blue);
-        if (havePrev) {
-            Rgba c = fill;
-            if (opts.timeColor) {
-                const double tot = std::max(1e-9, tl.totalDuration());
-                c = unpack(timeColorAt(tl.startTimeAt(i) / tot));   // 六档彩虹，按真实谱面时间
-            }
-            const glm::dvec2 a = toPx(prevRed), b = toPx(red);
-            if (opts.hardLine) drawSegmentHard(out, (int)W, (int)H, a.x, a.y, b.x, b.y, c);
-            else               drawSegment(out, (int)W, (int)H, a.x, a.y, b.x, b.y, halfW, c);
-            {
+    // ── 第二遍：先把线段收集成平表（148k 层 ≈ 9.5 MB），再按 y 分桶
+    std::vector<Seg> segs;
+    segs.reserve((size_t)(i1 - i0 + 1) * 2);
+    {
+        glm::dvec2 prevRed, prevBlue;
+        bool havePrev = false;
+        for (int i = i0; i <= i1; ++i) {
+            PositionSolver::positionAtTile(tl, tl.startTimeAt(i), i, red, blue);
+            if (havePrev) {
+                uint32_t col = opts.fillRgba;
+                if (opts.timeColor) {
+                    const double tot = std::max(1e-9, tl.totalDuration());
+                    col = timeColorAt(tl.startTimeAt(i) / tot);      // 六档彩虹，按真实谱面时间
+                }
+                const glm::dvec2 a = toPx(prevRed), b = toPx(red);
+                segs.push_back({a.x, a.y, b.x, b.y, col});
                 const glm::dvec2 ab = toPx(prevBlue), bb = toPx(blue);
-                if (opts.hardLine) drawSegmentHard(out, (int)W, (int)H, ab.x, ab.y, bb.x, bb.y, c);
-                else               drawSegment(out, (int)W, (int)H, ab.x, ab.y, bb.x, bb.y, halfW, c);
+                segs.push_back({ab.x, ab.y, bb.x, bb.y, col});
             }
+            prevRed = red; prevBlue = blue; havePrev = true;
         }
-        prevRed = red; prevBlue = blue; havePrev = true;
+    }
+    LOG_I("Map: %dx%d，%d 层，世界范围 %.1f x %.1f，缩放 %.4f px/单位，线宽 %.2f px，%zu 段",
+          opts.width, opts.height, n, bw, bh, scale, halfW * 2.0, segs.size());
+
+    const int bands = (int)((H + (size_t)bandRows - 1) / (size_t)bandRows);
+    std::vector<std::vector<uint32_t>> bucket((size_t)bands);
+    const double pad = halfW + 2.0;
+    for (const Seg& sg : segs) {
+        const double lo = std::min(sg.y0, sg.y1) - pad, hi = std::max(sg.y0, sg.y1) + pad;
+        int b0 = (int)std::floor(lo / bandRows), b1 = (int)std::floor(hi / bandRows);
+        b0 = std::max(0, b0); b1 = std::min(bands - 1, b1);
+        for (int b = b0; b <= b1; ++b) bucket[(size_t)b].push_back((uint32_t)(&sg - segs.data()));
     }
 
-    LOG_I("Map: %dx%d，%d 层，世界范围 %.1f x %.1f，缩放 %.4f px/单位，线宽 %.2f px",
-          opts.width, opts.height, n, bw, bh, scale, halfW * 2.0);
+    std::vector<uint8_t> band;
+    for (int b = 0; b < bands; ++b) {
+        const int y0 = b * bandRows;
+        const int rows = (int)std::min<size_t>((size_t)bandRows, H - (size_t)y0);
+        band.assign((size_t)W * rows * 4, 0);
+        if (bg.a > 0.0f) {
+            for (size_t p = 0; p < (size_t)W * rows; ++p) {
+                band[p * 4 + 0] = (uint8_t)std::lround(bg.r * 255.0f);
+                band[p * 4 + 1] = (uint8_t)std::lround(bg.g * 255.0f);
+                band[p * 4 + 2] = (uint8_t)std::lround(bg.b * 255.0f);
+                band[p * 4 + 3] = (uint8_t)std::lround(bg.a * 255.0f);
+            }
+        }
+        for (uint32_t si : bucket[(size_t)b]) {
+            const Seg& sg = segs[si];
+            const Rgba c = unpack(sg.rgba);
+            if (opts.hardLine)
+                drawSegmentHard(band, (int)W, rows, sg.x0, sg.y0 - y0, sg.x1, sg.y1 - y0, c);
+            else
+                drawSegment(band, (int)W, rows, sg.x0, sg.y0 - y0, sg.x1, sg.y1 - y0, halfW, c);
+        }
+        if (!sink(y0, rows, band)) return false;
+    }
+
     return true;
 }

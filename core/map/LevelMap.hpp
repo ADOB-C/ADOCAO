@@ -53,3 +53,11 @@ inline uint32_t timeColorAt(double t) {
 // 成功时 out 为 width*height*4 的 RGBA8（自上而下），返回 true。
 bool renderLevelMap(const adofai::Timeline& timeline, const LevelMapOptions& opts,
                     std::vector<uint8_t>& out);
+
+// **分带流式**渲染：每次只驻留 bandRows 行（W*bandRows*4 字节），画完一条带就回调。
+// sink(y0, rows, data)：data 是该带的自上而下 RGBA8（rows*width*4），回调返回后即可释放。
+// 语义与 renderLevelMap 完全一致（同一套坐标/线宽/抗锯齿），验收方式 = 两路输出逐字节相同。
+#include <functional>
+bool renderLevelMapBands(const adofai::Timeline& timeline, const LevelMapOptions& opts,
+                         int bandRows,
+                         const std::function<bool(int y0, int rows, const std::vector<uint8_t>&)>& sink);

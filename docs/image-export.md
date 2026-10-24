@@ -71,5 +71,21 @@
 `ADOCAO_TIFF_BIG=1` 强制（实测 macOS ImageIO 同样不认 BigTIFF，只有 libtiff/ImageMagick 认）。
 这是"给超大画布留的路"，不是默认格式。
 
+### 分带流式渲染（`renderLevelMapBands`）
+
+TIFF 那条路**不再建整图**：先算包围盒与坐标 → 把线段收进平表（148k 层 ≈ 9.5 MB）→
+按 y 分桶 → 逐带画（一条带 W x 256 x 4）→ 回调里直接 `writeStrip` 压缩写出。
+
+16K（16384x6616）实测：
+
+| | 峰值 RSS | 时间 | 文件 |
+|---|---|---|---|
+| 整图 PNG | 890 MB | 3.46 s | 4,657,533 B |
+| 整图 + TIFF（旧思路） | 918 MB | 1.02 s | 768,980 B |
+| **分带流式 TIFF** | **50.8 MB** | 0.88 s | 768,980 B（与整图版**逐字节相同**） |
+
+`renderLevelMap()` 现在就是"一条带"的 `renderLevelMapBands()`，两路共用同一份绘制代码
+（验收方式 = 两路输出逐字节相同，已对拍）。
+
 > 注意：**像素内容与 PNG 逐字节相同**（`PIL` 对拍过 4096x3072 全图）。
 > `adocao image out.tif` 的其它开关（`--size/--bg/--time-color/--padding/--thickness`）全部照旧。

@@ -52,7 +52,7 @@
 
 ## TIFF 输出（`.tif` / `.tiff`）
 
-`adocao image out.tif --level <谱> [--tiff-layout tile|strip] [--tiff-compress zstd|deflate]`
+`adocao image out.tif --level <谱> [--tiff-layout strip|tile] [--tiff-compress deflate|zstd]`
 走 `core/map/TiffWriter`（自研，无 libtiff 依赖）：**每块独立压缩**、边算边写，
 内存只保留一条带 + 线段表（16K 实测峰值 **50.8 MB**，整图 PNG 是 890 MB）。
 
@@ -60,16 +60,18 @@
 
 | 布局 + 压缩 | 体积 | libtiff / ImageMagick | macOS 预览（ImageIO） |
 |---|---|---|---|
-| `tile` + `zstd`（默认） | **68,639 B** | ✓ | ✗ |
+| `tile` + `zstd` | **68,639 B** | ✓ | ✗ |
 | `tile` + `deflate` | 123,086 B | ✓ | ✗ |
 | `strip` + `zstd` | 67,863 B | ✓ | ✗（Compression=50000 不支持） |
-| `strip` + `deflate` | 123,624 B | ✓ | **✓** |
+| **`strip` + `deflate`（默认）** | 123,624 B | ✓ | **✓** |
 
 所以：
 
 - **要 macOS 预览/快速查看能打开** → `--tiff-layout strip --tiff-compress deflate`；
 - **要随机访问（看右下角只解几块）且体积最小** → 默认 `tile + zstd`（用 ImageMagick/libtiff 看）；
-- 默认值按"体积 + 随机访问优先"取 `tile + zstd`；兼容性优先时显式给 `strip + deflate`。
+- **默认是 `strip + deflate`**（2026-10-23 用户拍板：Kdenlive 可能走 MLT→FFmpeg，而 ffmpeg
+  对 **tiled 会静默解成全黑**、对 zstd 直接报错 —— 静默错误比报错危险得多，所以默认取"谁都能读"的那档）；
+- 体积优先、且确定只在 Krita/Kdenlive 静帧里用时：`--tiff-layout tile --tiff-compress zstd`（小 1.8×）。
 
 ### 具体软件能不能开（2026-10-23 实测）
 

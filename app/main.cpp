@@ -94,7 +94,7 @@ void printHelp(Mode mode, bool all) {
             "  外观:\n"
             "    --time-color         按谱面时间六档彩虹（否则沿进度渐变）\n"
             "    --bg <hex>|transparent   --padding F（默认 0 = 贴边；给正数才留白）   --thickness N（<=1 = 1px 硬线）\n"
-            "    --tiff-layout tile|strip  --tiff-compress zstd|deflate（仅 .tif 输出；默认 tile + zstd）\n"
+            "    --tiff-layout strip|tile  --tiff-compress deflate|zstd（仅 .tif 输出；默认 strip + deflate，最兼容）\n"
             "    （--size/--bg/--padding/--thickness/--native 只对矢量路线生效；--1px 不读取它们）\n"
             "    --range A-B          只画第 A..B 层（看密集“结”）   --native  1 像素 = 1 世界单位\n"
             "  资源:\n"
@@ -256,7 +256,7 @@ int main(int argc, char* argv[]) {
     std::string size, bg, range, keepTiles;
     bool native = false, timeColor = false, onePx = false, oneBit = false;
     float padding = -1.0f, thickness = -1.0f;        // <0 = 用默认
-    std::string tiffLayout = "tile", tiffCompress = "zstd";   // --tiff-layout / --tiff-compress
+    std::string tiffLayout = "strip", tiffCompress = "deflate";   // 默认最兼容（Kdenlive→MLT→FFmpeg）
     int block = 4096, threads = 0, scale = 1, progressForce = 0;
     bool codecReport = false;
     bool packCheckpoints = false;

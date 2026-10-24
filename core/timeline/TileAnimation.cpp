@@ -1,4 +1,5 @@
 #include "core/timeline/TileAnimation.hpp"
+#include <cstdio>
 
 #include <algorithm>
 #include <cmath>
@@ -210,6 +211,21 @@ void TileAnimation::build(const LevelData& lv, const Timeline& tl) {
         }
     }
 
+    // **补齐 t=0 的基准帧**（Re_ADOJAS `TimelineManager` 对每条通道都先
+    // `addKeyframe(tile:i, 'scaleX', 0, base, null)` 再挂事件）。
+    // 缺了它会有一个很隐蔽的错：若某条通道**只有一条未来的关键帧**（例如 disappear 的
+    // Shrink 在 t=96 把 scale 打到 0），`Channel::sample(t<96)` 会返回那条帧的值 0 ——
+    // 于是整块砖从**第一帧起就"scale=0"、被当成不可见**（MM2 开头整条轨道消失就是这么来的：
+    // 6636 块砖都有 `MoveTrack`/`AnimateTrack` 帧，一半以上带未来的 scale=0）。
+    // 基准值：位移/旋转 = 0，缩放/透明度 = 1（与 Re_ADOJAS 的 bases 一致）。
+    for (TileKeyframes& f : m_frames) {
+        auto seed = [](Channel& c, float base) {
+            if (!c.empty() && c.keys().front().time > 0.0) c.addKeyframe(0.0, base);
+        };
+        seed(f.posX, 0.0f); seed(f.posY, 0.0f); seed(f.rot, 0.0f);
+        seed(f.scaleX, 1.0f); seed(f.scaleY, 1.0f); seed(f.opacity, 1.0f);
+    }
+
     // 建帧完：缓存每块砖"区间之前/之后是否完全不可见"
     for (TileKeyframes& f : m_frames) {
         const auto visible = [](const TileKeyframes& g, double t) {
@@ -231,6 +247,41 @@ void TileAnimation::build(const LevelData& lv, const Timeline& tl) {
         for (size_t i = 0; i < m_index.size(); ++i) reordered[i] = std::move(m_frames[m_index[i].idx]);
         for (size_t i = 0; i < m_index.size(); ++i) m_index[i].idx = (uint32_t)i;
         m_frames = std::move(reordered);
+    }
+    // 诊断：`ADOCAO_ANIM_DUMP_TILE=<n>` 打印该砖各通道的关键帧（排查"砖为什么看不见"）
+    if (const char* dt = std::getenv("ADOCAO_ANIM_DUMP_TILE")) {
+        const int64_t want = std::atoll(dt);
+        const uint32_t wi = frameIndexFor(want);
+        if (wi != UINT32_MAX) {
+            const TileKeyframes& f = m_frames[wi];
+            auto dump = [&](const char* name, const Channel& c) {
+                std::string line;
+                char buf[64];
+                for (const auto& k : c.keys()) {
+                    std::snprintf(buf, sizeof(buf), "%.3f:%.3f ", k.time, k.value);
+                    line += buf;
+                }
+                LOG_I("anim-dump tile=%lld %s keys=%zu [%s]", (long long)want, name, c.size(),
+                      line.c_str());
+            };
+            dump("opacity", f.opacity);
+            dump("scaleX", f.scaleX);
+            dump("scaleY", f.scaleY);
+            dump("posX", f.posX);
+            dump("posY", f.posY);
+            LOG_I("anim-dump tile=%lld range=[%.3f, %.3f] hiddenBefore=%d hiddenAfter=%d",
+                  (long long)want, f.rangeStart, f.rangeEnd, (int)f.hiddenBefore, (int)f.hiddenAfter);
+            if (const char* tt = std::getenv("ADOCAO_ANIM_DUMP_TIME")) {
+                const double tq = std::atof(tt);
+                TileAnimSample sm{};
+                const bool has = sample(want, tq, sm);
+                LOG_I("anim-dump tile=%lld @t=%.3f has=%d op=%.3f sx=%.3f sy=%.3f px=%.3f py=%.3f hidden=%d",
+                      (long long)want, tq, (int)has, sm.opacity, sm.scaleX, sm.scaleY, sm.posX, sm.posY,
+                      (int)hiddenAt(want, tq));
+            }
+        } else {
+            LOG_I("anim-dump tile=%lld 没有动画帧", (long long)want);
+        }
     }
     if (keyframeCount() > kMaxKeyframes) {
         m_truncated = true;

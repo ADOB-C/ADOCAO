@@ -91,7 +91,7 @@ static bool writeTiffBands(const std::string& path, const Timeline& tl, const Le
     bool ok = true;
     std::vector<uint8_t> tileBuf;
     if (tiled) tileBuf.resize((size_t)tw.blockW() * tw.blockH() * 4);
-    ok = renderLevelMapBands(tl, opts, (int)block, [&](int y0, int rows, const std::vector<uint8_t>& band) {
+    ok = renderLevelMapBands(tl, opts, (int)block, [&](int, int rows, const std::vector<uint8_t>& band) {
         if (!tiled) return tw.writeBlock(band.data());   // strip：整宽一条
         // tile：把这一带按列切成 blockW 宽的块，右侧/下侧补 0
         const uint32_t bw = tw.blockW(), bh = tw.blockH();
@@ -106,7 +106,6 @@ static bool writeTiffBands(const std::string& path, const Timeline& tl, const Le
         }
         return true;
     });
-    (void)y0;
     return ok && tw.finish();
 }
 

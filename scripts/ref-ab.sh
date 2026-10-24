@@ -18,10 +18,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CHART=""; TIME=""; TILE=""; CAMERA=1; ZOOM=""; W=1280; H=720
+CHART=""; TIME=""; TILE=""; CAMERA=1; ZOOM=""; W=1280; H=720; MAPTIME=""; SKEW=
 while [ $# -gt 0 ]; do
   case "$1" in
     --time) TIME="$2"; shift 2;;
+    --skew) SKEW="$2"; shift 2;;            # 参考侧多等几秒：Map Time ≈ 关卡时间 + skew
+                                            #（谱面 offset + 倒计时；MM2 实测 4.94）
     --tile) TILE="$2"; shift 2;;
     --zoom) ZOOM="$2"; shift 2;;
     --width) W="$2"; shift 2;;
@@ -81,7 +83,8 @@ curl -s -o /dev/null "http://127.0.0.1:$PORT/" || { echo "参考 dev server 没�
 
 T="${TIME:-0}"
 echo "== 参考实现抓帧（t=${T}s） =="
-REF_URL="http://127.0.0.1:$PORT/" "$NODE" tools/ref-ab/ref_play.cjs "$CHART" "$REF_PNG" "$T"
+MAP_ARG="${SKEW:-0}"   # 参考侧额外等待秒数
+REF_URL="http://127.0.0.1:$PORT/" "$NODE" tools/ref-ab/ref_play.cjs "$CHART" "$REF_PNG" "$T" "$MAP_ARG"
 
 # --- 我们这边：同一时刻、同样的分辨率 ---
 echo "== ADOCAO 抓帧 =="

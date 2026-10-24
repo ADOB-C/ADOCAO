@@ -895,3 +895,22 @@ GLFW **不会**在窗口创建时送一次 cursor-pos 事件；如果用户开�
 2. `CameraController::update()` 的拖拽分支：`!m_cursorSeen` 时**不计算 offset**（防御未来其它入口）。
 
 诊断用：`ADOCAO.log` 里 `mouse down at (0.0,0.0) seen=0` 就是踩中了这个坑。
+
+### 12.1 和参考做 A/B 时的时间基准（2026-10-24）
+
+`scripts/ref-ab.sh` 的 `--time` 传给我们的是**关卡时间**（tile 1 过判定线 = 0），
+而页面上显示的 `Map Time` 从**歌曲开头**算，两者差一个固定量：
+
+```
+Map Time ≈ 关卡时间 + settings.offset/1000 + countdownTicks * 60/bpm0   （MM2 实测 4.94 s）
+```
+
+不补这个差值，A/B 的两张图会差好几秒 —— 大谱上直接是"两段完全不同的路"。
+所以给 `ref-ab.sh` 加了 `--skew S`（参考侧多等 S 秒）：
+
+```bash
+scripts/ref-ab.sh "$CHART" --time 180.46 --skew 4.94
+```
+
+**HUD 的 Map Time 是 canvas 画的**（`document.body.innerText` 里没有），
+所以没法自动读它对齐，只能显式给 skew。

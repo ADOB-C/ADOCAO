@@ -9,8 +9,19 @@
 const { chromium } = require('playwright')
 const CHROME = process.env.CHROME || '/Applications/Chromium.app/Contents/MacOS/Chromium'
 const URL = process.env.REF_URL || 'http://127.0.0.1:5199/'
-const [chart, out, secArg] = process.argv.slice(2)
+const [chart, out, secArg, mapArg] = process.argv.slice(2)
 const target = parseFloat(secArg || '10')
+// **按页面上的 Map Time 对齐**（可选第 4 个参数）：
+// 我们的 `--capture-time` 是"关卡时间"（tile 1 过判定线为 0），而页面显示的 Map Time
+// 从歌曲开头算（含谱面 offset 与倒计时），两者差一个固定 preroll（MM2 约 4.9 s）。
+// 只按墙钟 sleep 会让 A/B 差好几秒 —— 大谱上就是"完全不同的两段路"。
+const extraWait = mapArg ? parseFloat(mapArg) : 0   // 第 4 个参数 = 额外等待秒数（= Map Time - 关卡时间）
+function parseMap(text) {
+  // 宽松：标签和数值之间可能有 '|'、换行、空格
+  const m = text.match(/Map Time[\s\S]{0,16}?([0-9]+):([0-9]+(?:\.[0-9]+)?)/)
+  if (!m) return null
+  return parseInt(m[1], 10) * 60 + parseFloat(m[2])
+}
 const W = 1280, H = 720
 
 ;(async () => {
@@ -27,7 +38,7 @@ const W = 1280, H = 720
   await page.waitForTimeout(25000)          // 大谱（3.4 MB / 1 万砖）解析
   await page.keyboard.press('Space')         // 空格开始播放
   const t0 = Date.now()
-  await page.waitForTimeout(target * 1000)
+  await page.waitForTimeout((target + extraWait) * 1000)
   await page.screenshot({ path: out })
   const txt = await page.evaluate(() => document.body.innerText)
   const m = txt.match(/Tiles\s*\|\s*(\d+)\s*\/\s*(\d+)/)

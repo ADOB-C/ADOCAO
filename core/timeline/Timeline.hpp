@@ -33,11 +33,14 @@ public:
 
     // Precalculated timing arrays (size = n tiles including extra)
     const std::vector<double>& tileStartTimes() const { return m_tileStartTimes; }
-    float durationAt(int64_t i) const;
+    // **double**：时间一律 double（AGENTS 的精度铁律）。以前这里返回 float → 每砖时长先被
+    // 24 位尾数量化（相对 6e-8）再进 double 前缀和；BPM 整体放大 20 倍时这一层量化不变，
+    // 但 1 ulp 的绝对量变成"微秒级砖长的 6e-8" → 没有任何理由再留着。
+    double durationAt(int64_t i) const;
     // 与 `durationAt(i)` **逐位相同**，只是 `totalAngleAt(i)` 的值由调用方传进来。
     // 给"一次取、两处用"的热路径用（拖尾的逐采样点循环已经算过 totalAngle；
     // 再调 `durationAt` 会把它内部那次 `totalAngleAt(i)` 重算一遍 —— 极密谱里是重复的大头）。
-    float durationFromTotalAngle(int64_t i, float totalAngle) const;
+    double durationFromTotalAngle(int64_t i, float totalAngle) const;
     float startAngleAt(int64_t i) const;
     float totalAngleAt(int64_t i) const;
 

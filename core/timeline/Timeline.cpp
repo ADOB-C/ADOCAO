@@ -279,15 +279,18 @@ bool Timeline::animAt(int64_t i, double time, AnimSample& out) const {
     return any;
 }
 
-float Timeline::durationAt(int64_t i) const {
+double Timeline::durationAt(int64_t i) const {
     return durationFromTotalAngle(i, totalAngleAt(i));
 }
 
-float Timeline::durationFromTotalAngle(int64_t i, float totalAngle) const {
+double Timeline::durationFromTotalAngle(int64_t i, float totalAngle) const {
     const int64_t n = (int64_t)m_tileBPM.size();
-    if (i >= n - 1) return m_exportOnly ? 0.1f : 0.0f;
-    const float rotationAmount = std::abs(totalAngle) / (2.0f * 3.14159265f);
-    return rotationAmount * 2.0f * (60.0f / m_tileBPM[(size_t)i]);
+    if (i >= n - 1) return m_exportOnly ? 0.1 : 0.0;
+    // 全程 double 算：`totalAngle`/`m_tileBPM` 本身仍是 float（存的是解析出来的原值），
+    // 但换算不再在 float 里做 —— 20× BPM 时每砖只有几微秒，float 那一步的舍入相对量虽不变，
+    // 没有理由再白丢尾数。
+    const double rotationAmount = std::abs((double)totalAngle) / (2.0 * 3.14159265358979323846);
+    return rotationAmount * 2.0 * (60.0 / (double)m_tileBPM[(size_t)i]);
 }
 void Timeline::precalculateTiming() {
     const auto& tiles = m_level->tiles;
@@ -510,6 +513,18 @@ void Timeline::precalculateTiming() {
             LOG_I("trackvis: startTimes[0..3] = %.4f %.4f %.4f %.4f",
                   m_tileStartTimes[0], m_tileStartTimes[1], m_tileStartTimes[2], m_tileStartTimes[3]);
             // 值 "2" 时额外把整张网格写成 CSV，供 Re_ADOJAS 的 headless harness 用同一套网格
+            // 值 "3"：只写逐砖时长（`durationAt` 的 float 与 double 两条口径），
+            // 用来量"BPM 整体放大 N 倍之后时间线精度掉多少"（见 docs/profiling.md）。
+            if (const char* v3 = std::getenv("ADOCAO_TRACKVIS_DUMP"); v3 && v3[0] == '3') {
+                if (FILE* f = std::fopen("build/trackvis_dur.csv", "w")) {
+                    std::fprintf(f, "floor,dur,startTime\n");
+                    for (int64_t i = 0; i < (int64_t)n; ++i)
+                        std::fprintf(f, "%lld,%.17g,%.17g\n", (long long)i,
+                                     (double)durationAt(i), m_tileStartTimes[(size_t)i]);
+                    std::fclose(f);
+                    LOG_I("trackvis: 时长已写 build/trackvis_dur.csv（%lld 层）", (long long)n);
+                }
+            }
             if (const char* v = std::getenv("ADOCAO_TRACKVIS_DUMP"); v && v[0] == '2') {
                 if (FILE* f = std::fopen("build/trackvis_grid.csv", "w")) {
                     std::fprintf(f, "floor,startTime,bpm,posX,posY\n");

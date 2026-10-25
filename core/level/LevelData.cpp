@@ -354,6 +354,7 @@ struct ActionFields {
     float hitsoundVolume = 0.0f, beatsBehind = 0.0f, beatsAhead = 0.0f;
     float offX = 0.0f, offY = 0.0f;
     bool justThisTile = false;
+    bool hasStickToFloors = false, stickToFloors = true;   // PositionTrack 的"粘性轨道"开关
     std::string hitsound, trackDisappear, trackAnimation;
 
     // ── 以下只给 MoveCamera / RepeatEvents 用（rich 模式才填；热路径一个字段都不碰） ──
@@ -638,7 +639,18 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
             }
             break;
         case 's':
-            if (keyIs(key, "startColor")) {
+            if (keyIs(key, "stickToFloors")) {          // PositionTrack 的"粘性轨道"开关
+                if (vEnd - v == 4 && std::memcmp(v, "true", 4) == 0) {
+                    f.stickToFloors = true; f.hasStickToFloors = true;
+                } else if (vEnd - v == 5 && std::memcmp(v, "false", 5) == 0) {
+                    f.stickToFloors = false; f.hasStickToFloors = true;
+                } else if (*v == '"') {
+                    std::string str;
+                    if (!stringValue(v, vEnd, str)) return false;
+                    f.stickToFloors = (str == "Enabled" || str == "true" || str == "True");
+                    f.hasStickToFloors = true;
+                }
+            } else if (keyIs(key, "startColor")) {
                 std::string tmp;
                 if (!stringValue(v, vEnd, tmp)) return false;
                 f.startColor = std::move(tmp); f.hasStartColor = true;
@@ -833,6 +845,7 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
                 }
             }
             break;
+
         case 'c':
             if (keyIs(key, "color")) {
                 std::string tmp;
@@ -872,6 +885,10 @@ inline bool buildAction(const ActionFields& f, LevelData::FastAction& a, bool& k
     case T::PositionTrack:
         if (f.hasOffset) { a.val1 = f.offX; a.val2 = f.offY; }
         a.flag = f.justThisTile;
+        // 粘性开关（`stickToFloors`）：PositionTrack 的 strId 平时不用，借它存三态
+        //   0 = 关、1 = 开、2 = 事件没写（保持上一个状态）。
+        // 语义同 Re_ADOJAS PositionTrackManager：justThisTile → 只改本层；否则持续到之后所有层。
+        a.strId = f.hasStickToFloors ? (f.stickToFloors ? 1u : 0u) : 2u;
         break;
     case T::ScaleRadius:
         a.val1 = f.hasScale ? f.scaleX : 1.0f;
@@ -3180,6 +3197,7 @@ void LevelData::refreshDerivedCaches() {
     //   ② 那张稠密数组只要谱里有一条 SetSpeed 就 `resize(n)`（MYC 315 条事件白占 81 MB）。
     struct SSEv { int floor = 0; float val = 0.0f; bool isMultiplier = false; };
     std::vector<SSEv> ssEvents;
+    bool& hasStickEvents = m_hasStickEvents;   // 成员：applyPositionTrackOffsets 也要用
     // 按需分配：没有任何 SetSpeed 事件时这 n x 12 B 是白占的（实测 25 万层的无害谱上，
     // 峰值快照里就有一块 250001 x 12 = 3,000,012 B 的分配）。1e8 层就是 1.2 GB。
     // 空 vector 与原来逐位等价：默认构造的 SS 全 false/0，下面那个逐层循环体什么都不做。
@@ -3207,7 +3225,11 @@ void LevelData::refreshDerivedCaches() {
             ssEvents.push_back({floor, a.val1, a.flag});
             break;
         case FastAction::PositionTrack:
-            tilePositionOffsets[floor] = {a.val1, a.val2, a.flag}; break;
+            tilePositionOffsets[floor] = {a.val1, a.val2,
+                                          (int8_t)(a.strId == 1u ? 1 : (a.strId == 0u ? 0 : -1)),
+                                          a.flag};
+            if (a.strId <= 1u) hasStickEvents = true;
+            break;
         case FastAction::SetHitsound:
             // strId == 0 就是空串（= 用 settings.hitsound），与上面 push 的 type 语义逐字一致。
             hsChanges.push_back({floor, a.flag ? a.val1 : settings.hitsoundVolume,
@@ -3275,8 +3297,33 @@ void LevelData::refreshDerivedCaches() {
                          bookmarkFloors.end());
 }
 
+void LevelData::planetPivotAt(int64_t i, double& x, double& y) const {
+    const auto p = tilePositionAt(i);
+    x = p[0]; y = p[1];
+    if (m_tileStick.empty() || i < 0 || (size_t)i >= m_tileStick.size() || m_tileStick[(size_t)i] != 0) return;
+    // stick=false：行星走**原始**砖位 → 把 PositionTrack 的偏移减回去
+    double cx = 0.0, cy = 0.0;
+    auto it = std::upper_bound(m_cumOffsets.begin(), m_cumOffsets.end(), (int32_t)i,
+                               [](int32_t v, const CumOffset& o) { return v < o.floor; });
+    if (it != m_cumOffsets.begin()) { const CumOffset& o = *(it - 1); cx = o.x; cy = o.y; }
+    auto po = tilePositionOffsets.find((int)i);
+    if (po != tilePositionOffsets.end() && po->second.justThisTile) {
+        cx += po->second.offsetX; cy += po->second.offsetY;
+    }
+    x -= cx; y -= cy;
+}
+
 void LevelData::applyPositionTrackOffsets() {
     if (tilePositionOffsets.empty()) return;
+
+    const bool wantStick = !settings.stickToFloors || m_hasStickEvents;
+    if (wantStick) {
+        m_tileStick.assign(tiles.size(), settings.stickToFloors ? 1 : 0);
+        m_cumOffsets.clear();
+    } else {
+        m_tileStick.clear();
+        m_cumOffsets.clear();
+    }
 
     double cumX = 0.0, cumY = 0.0;
     const int64_t nFull = (int64_t)tiles.size();
@@ -3287,6 +3334,17 @@ void LevelData::applyPositionTrackOffsets() {
     }
     const int n = (int)nFull;
 
+    struct StickEv { bool stick = true; bool justThisTile = false; };
+    std::vector<std::pair<int, StickEv>> stickEvents;
+    for (const auto& kv : tilePositionOffsets) {
+        if (kv.second.stick < 0) continue;
+        StickEv se; se.stick = kv.second.stick != 0; se.justThisTile = kv.second.justThisTile;
+        stickEvents.push_back({kv.first, se});
+    }
+    std::sort(stickEvents.begin(), stickEvents.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+    size_t oi2 = 0;
+    int curStick = -1;
     std::vector<std::pair<int, TilePositionOffset>> sorted(tilePositionOffsets.begin(), tilePositionOffsets.end());
     std::sort(sorted.begin(), sorted.end(), [](auto& a, auto& b) { return a.first < b.first; });
     size_t oi = 0;
@@ -3313,6 +3371,21 @@ void LevelData::applyPositionTrackOffsets() {
         }
         tiles[i].position[0] += cumX + px;
         tiles[i].position[1] += cumY + py;
+        if (wantStick) {
+            if (!m_cumOffsets.empty() && m_cumOffsets.back().floor != i)
+                m_cumOffsets.push_back({i, cumX, cumY});      // 该层生效的累计偏移（每层一条）
+            else if (m_cumOffsets.empty())
+                m_cumOffsets.push_back({i, cumX, cumY});
+            // sticky：本层事件（justThisTile → 只改本层；否则改持续值），没写就继承
+            int tileStick = -1;
+            while (oi2 < stickEvents.size() && stickEvents[oi2].first == i) {
+                const auto& se = stickEvents[oi2++];
+                if (se.second.justThisTile) tileStick = se.second.stick ? 1 : 0;
+                else { curStick = se.second.stick ? 1 : 0; tileStick = curStick; }
+            }
+            m_tileStick[(size_t)i] = (uint8_t)(tileStick >= 0 ? tileStick
+                                                : (curStick >= 0 ? curStick : (settings.stickToFloors ? 1 : 0)));
+        }
     }
 }
 

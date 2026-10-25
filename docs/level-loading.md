@@ -277,3 +277,33 @@ Direction-based angle algorithm matching ADOFAI-JS `_parseAngle`. BPM propagatio
 
 **MM2 里 5 条 editorOnly 事件全是 PositionTrack**（floor 1414 / 2232 / 2650 / 3518 / 5085），
 偏移分别是 [20,0] / [0,10] / [0,10] / [10,0] / [0,4] —— 全是给编辑器摆位用的。
+
+## 粘性轨道（`stickToFloors`，2026-10-24）
+
+PositionTrack 把轨道挪走之后，**行星跟不跟着走**由 `stickToFloors` 决定
+（Re_ADOJAS：`PositionTrackManager` 的 `workStick` + `Player.updatePlanetsPosition` 的
+`useStickToFloor`）：
+
+| 值 | 含义 | 渲染 |
+|---|---|---|
+| `true`（默认） | 行星**跟着**移动后的砖位走 | 砖和行星一起动 |
+| `false` | 行星走**原始**砖位，轨道自己飘走 | 砖动、行星不动 |
+
+来源有两个，事件覆盖 settings：settings 里的 `stickToFloors`，以及 PositionTrack 事件自己的
+`stickToFloors`（`justThisTile` → 只改本层，否则持续到之后所有层）。
+
+实现：
+- `TilePositionOffset` 多一个 `int8_t stick`（-1 = 事件没写，继承）；
+- 谱里**真的写过**时（settings=false 或任一 PositionTrack 写了）才分配 `m_tileStick`（1 B/砖），
+  否则空表 = 全 true，零额外内存；
+- `m_cumOffsets`（稀疏，每个事件层一条）记住累计偏移，供 `planetPivotAt()` 减回去；
+- `LevelData::planetPivotAt(i)` = 行星枢轴：stick=false 时返回 `tilePositionAt(i) - 累计偏移`；
+- `PositionSolver` 的三处枢轴读取改成 `planetPivotAt()`（渲染仍用 `tilePositionAt()`）。
+
+**已知近似**：行星的 `startDist/endDist`（沿砖的弧长）仍按**移动后**的相邻砖位算，
+参考实现会在 stick=false 时按**活位置**自适应（`startDist/endDist adapt to neighbors`）。
+目前没做 —— 影响是 stick=false 段的行星半径略有偏差，等有真实谱面用了再补。
+
+护栏：`tests/sticky_track_test.cpp`（ctest `sticky_track`）三组用例：settings=false、
+事件 `stickToFloors: "Disabled"`、默认 true —— 都用"同谱不带事件"的基准谱对比位置，
+并断言 `planetPivotAt` / `stickyAt`。

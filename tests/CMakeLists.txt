@@ -308,3 +308,7 @@ add_test(NAME tiff_writer COMMAND tiff_writer_test)
 add_executable(anim_timing_test anim_timing_test.cpp)
 target_link_libraries(anim_timing_test PRIVATE adocao_core)
 add_test(NAME anim_timing COMMAND anim_timing_test)
+
+add_executable(sticky_track_test sticky_track_test.cpp)
+target_link_libraries(sticky_track_test PRIVATE adocao_core)
+add_test(NAME sticky_track COMMAND sticky_track_test)

@@ -432,6 +432,12 @@ struct LevelData {
     // 可选 `wc`：并行剔除时传**本线程自己的克隆**（见 `FloorWindowCache::clone()`）；
     // 不传 = 用共享缓存（单线程路径，语义与以前逐位相同）。
     std::array<double, 2> tilePositionAt(int64_t i, FloorWindowCache* wc = nullptr) const;
+    // 行星枢轴：`stickToFloors=false` 的层返回**未加 PositionTrack 偏移**的原始位置
+    // （默认全 true → 与 tilePositionAt 完全一致）。
+    bool stickyAt(int64_t i) const {
+        return m_tileStick.empty() || (size_t)i >= m_tileStick.size() || m_tileStick[(size_t)i] != 0;
+    }
+    void planetPivotAt(int64_t i, double& x, double& y) const;
     float tileDirectionAt(int64_t i, FloorWindowCache* wc = nullptr) const;
     // 本线程的私有窗口克隆（首次调用克隆一次，随线程存活；level 换了会自动重建）
     FloorWindowCache* threadWindowCache() const;
@@ -465,6 +471,8 @@ struct LevelData {
     struct TilePositionOffset {
         float offsetX = 0.0f;
         float offsetY = 0.0f;
+        // `stickToFloors`：-1 = 事件没写（继承），0 = 关（行星不跟着轨道动），1 = 开（默认）。
+        int8_t stick = -1;
         // 官方语义（对照 Re_ADOJAS 的移植确认）：false = 偏移**继承**到之后所有层；
         // true = **只作用于本层**。消费方见 applyPositionTrackOffsets()。
         bool  justThisTile = false;
@@ -494,6 +502,16 @@ struct LevelData {
                && !std::isnan(tileHitsoundVolumes[(size_t)floor]);
     }
     std::unordered_map<int, TilePositionOffset> tilePositionOffsets; // sparse
+    // ── 粘性轨道（`stickToFloors`，2026-10-24）─────────────────────────────
+    // 语义（Re_ADOJAS `PositionTrackManager` + `Player.updatePlanetsPosition`）：
+    //   stick = true（默认）→ 行星**跟着**被 PositionTrack 移动后的砖位走；
+    //   stick = false     → 行星走**原始**砖位（轨道自己飘走，行星不跟）。
+    // 只有谱里真的写过 stickToFloors（settings 或事件）时才分配这张表。
+    std::vector<uint8_t> m_tileStick;                     // 1 B/砖；空 = 全 true
+    struct CumOffset { int32_t floor = 0; double x = 0.0, y = 0.0; };  // 到该层为止的累计偏移
+    std::vector<CumOffset> m_cumOffsets;                  // 稀疏（每个事件层一条）
+    bool hasStickOverrides() const { return !m_tileStick.empty(); }
+    bool m_hasStickEvents = false;   // 谱里有没有 PositionTrack 写过 stickToFloors（§粘性轨道）
     std::vector<int> bookmarkFloors;  // Bookmark event floors
 
     // AnimateTrack state overrides (sparse, floor → state)

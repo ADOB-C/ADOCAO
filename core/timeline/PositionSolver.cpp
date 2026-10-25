@@ -47,7 +47,9 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
         // 最后一格看起来"没画出来"（2026-10-18 用户实测：任何谱结尾都偏）。
         int lastIdx = n - 2;
         if (lastIdx < 0) lastIdx = 0;
-        const auto& pivotPos = L.tilePositionAt(lastIdx);
+        double lx = 0.0, ly = 0.0;
+        L.planetPivotAt(lastIdx, lx, ly);
+        const double pivotPos[2] = {lx, ly};
         double startAngle = 0.0;
         if (lastIdx > 0) {
             const auto& prevPos = L.tilePositionAt(lastIdx - 1);
@@ -63,7 +65,9 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
     }
 
     bool isRed = (tileIdx%2==0);
-    const auto& pivotPos = L.tilePositionAt(tileIdx);
+    double pvx = 0.0, pvy = 0.0;
+    L.planetPivotAt(tileIdx, pvx, pvy);          // sticky=false 的层用原始砖位
+    const double pivotPos[2] = {pvx, pvy};
     double startTime = timeline.startTimeAt(tileIdx);
     double duration = timeline.durationAt(tileIdx);
     double progress = (duration>0.0001)?(t-startTime)/duration:1.0;
@@ -103,7 +107,9 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
         // 最后一格看起来"没画出来"（2026-10-18 用户实测：任何谱结尾都偏）。
         int lastIdx = n - 2;
         if (lastIdx < 0) lastIdx = 0;
-        const auto& pivotPos = L.tilePositionAt(lastIdx);
+        double lx = 0.0, ly = 0.0;
+        L.planetPivotAt(lastIdx, lx, ly);
+        const double pivotPos[2] = {lx, ly};
         double startAngle = 0.0;
         if (lastIdx > 0) {
             const auto& prevPos = L.tilePositionAt(lastIdx - 1);
@@ -118,7 +124,9 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
         return;
     }
     bool isRed = (tileIdx%2==0);
-    const auto& pivotPos = L.tilePositionAt(tileIdx);
+    double pvx = 0.0, pvy = 0.0;
+    L.planetPivotAt(tileIdx, pvx, pvy);          // sticky=false 的层用原始砖位
+    const double pivotPos[2] = {pvx, pvy};
     double startTime = timeline.startTimeAt(tileIdx);
     double duration = timeline.durationAt(tileIdx);
     double progress = (duration>0.0001)?(t-startTime)/duration:1.0;

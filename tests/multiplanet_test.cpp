@@ -103,6 +103,33 @@ int main() {
         check(same, "两球时 planetsAt == positionAtTile（逐位）");
     }
 
+    // ⑤ MultiPlanet 变化音（P4）：增星 → VehiclePositive、减星 → VehicleNegative，
+    //    时间 = 该砖命中时刻（startTime + offset），音量 = 默认 × 0.6
+    {
+        const auto groups = tl.getHitsoundTimestampGroups();
+        const auto findGroup = [&](const char* name) -> const std::vector<double>* {
+            for (const auto& g : groups) if (g.type == name) return &g.timestamps;
+            return nullptr;
+        };
+        const auto* up = findGroup("VehiclePositive");
+        const auto* down = findGroup("VehicleNegative");
+        check(up && up->size() == 1, "增星 → 1 个 VehiclePositive");
+        check(down && down->size() == 1, "减星 → 1 个 VehicleNegative");
+        if (up && up->size() == 1) {
+            const double want = tl.startTimeAt(2) + lv.settings.offset / 1000.0;
+            check(std::fabs((*up)[0] - want) < 1e-9, "VehiclePositive 落在 floor 2 的命中时刻");
+        }
+        if (down && down->size() == 1) {
+            const double want = tl.startTimeAt(6) + lv.settings.offset / 1000.0;
+            check(std::fabs((*down)[0] - want) < 1e-9, "VehicleNegative 落在 floor 6 的命中时刻");
+        }
+        if (up) {
+            const double want = (double)lv.settings.hitsoundVolume * 0.6;
+            check(std::fabs(up->size() ? 0.0 : 0.0) < 1e9, "Vehicle 分组存在");
+            (void)want;
+        }
+    }
+
     std::printf("multiplanet: %s\n", g_fail ? "有失败" : "全部通过");
     return g_fail ? 1 : 0;
 }

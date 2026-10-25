@@ -196,9 +196,10 @@
       预计算与时长 + 手动判定（按下并保持 / 松手即判定 / 提前松手算 fail / 按键跨连续 hold 链保持）+
       相机跟随滑动（官方 `camy.SetHoldOffset` + `UpdateFollowCam`）+ 带子跟随起点砖的运行时 MoveTrack。
       参照 Re_ADOJAS `5437c09`（素材+时序）→ `b7f6e2d`（渲染）→ `b480570`/`b7de28d`（判定）→ `3b13075`（相机）→ `de517a9`（MoveTrack）
-- [ ] **MultiPlanet**（N 星布局）：运行时行星池 + 逐砖活动列表 + 2..8 星布局与枢轴模拟；行星数变化时播
-      `VehiclePositive/Negative` 打拍音。
-      参照 Re_ADOJAS `81a04b2`（数据层/枢轴）→ `18761a9`（打拍音）→ `d809709`（池与布局）
+- [x] **MultiPlanet**（N 星布局）—— 2026-10-25 完成（数据层 / 解算 / 渲染 / 打拍音）
+      逐砖表 + 枢轴模拟、正 N 边形布局、8 色行星池与解析式拖尾、`Vehicle±` 打拍音。
+      验收与细节见 `docs/level-loading.md`「MultiPlanet」与 `tests/multiplanet_test.cpp`。
+      仍缺：MP 虚线多边形指示器（纯装饰，未做）
 - [ ] Bloom / Flash 特效：官方 Hidden/VideoBloom shader，`MediumAmount` 定标 = **0.28**（参照 Re_ADOJAS `5931618`/`c34dcf6`）
 
 ### 架构

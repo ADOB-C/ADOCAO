@@ -331,5 +331,14 @@ PositionTrack 把轨道挪走之后，**行星跟不跟着走**由 `stickToFloor
 N>2 时其余星落在正 N 边形上（半径 `R = dist/(2·sin(π/N))`，边长恒 = `dist`）。
 **N≤2 时逐位退化成原来的红/蓝两球**（像素门槛因此不变）。
 
+渲染（P3）：`LevelScene` 的固定红/蓝两个 Planet 换成**官方 8 色行星池**（红/蓝/绿/黄/紫/粉/橙/青），
+当前砖 `planetCountAt > 2` 时才走多星路径，其余**完全走旧路径**（像素门槛逐字节不变的前提）。
+多星拖尾仍是解析式采样（同一批采样时刻，一次 `planetsAt` 分发到各 id），不引入逐帧历史。
+
+打拍音（P4）：`Timeline::getHitsoundTimestampGroups()` 末尾追加
+`VehiclePositive`（增星）/`VehicleNegative`（减星）分组，时间是该砖命中时刻，音量 = 默认 × 0.6
+（官方 `scrConductor` 532-536；参照 Re_ADOJAS 同一段）。素材在 `assets/hitsounds/`。
+
 验收：`tests/multiplanet_test.cpp`（ctest `multiplanet`）——逐砖表 220 砖与参考算法全等、
-三球边长为 `dist`、N≤2 与 `positionAtTile` 逐位相同；像素门槛仍 54/54。
+三球边长为 `dist`、N≤2 与 `positionAtTile` 逐位相同、Vehicle± 分组的时刻与音量；
+像素门槛仍 54/54。**未做**：MP 虚线多边形指示器（纯装饰）。

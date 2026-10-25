@@ -838,6 +838,23 @@ std::vector<HitsoundTimestampGroup> Timeline::getHitsoundTimestampGroups() const
         }
         groups[groupMap[key]].timestamps.push_back(startTimeAt(i) + offsetSec);
     }
+
+    // ── MultiPlanet 变化音（官方 scrConductor 532-536）──────────────────────
+    // 星数与前一砖不同时，在该砖命中时刻播 VehiclePositive（增星）/ VehicleNegative（减星），
+    // 音量 = 默认音量 × 0.6。参照 Re_ADOJAS `preSynthesizeHitsoundsWithProgress` 同一段。
+    if (m_level && m_level->hasMultiPlanet()) {
+        std::vector<double> up, down;
+        for (int i = 1; i < n; i++) {
+            const int prevN = m_level->planetCountAt(i - 1);
+            const int curN = m_level->planetCountAt(i);
+            if (curN == prevN) continue;
+            const double t = startTimeAt(i) + offsetSec;
+            (curN > prevN ? up : down).push_back(t);
+        }
+        const float vehVol = defaultVol * 0.6f;
+        if (!up.empty()) groups.push_back({"VehiclePositive", vehVol, std::move(up)});
+        if (!down.empty()) groups.push_back({"VehicleNegative", vehVol, std::move(down)});
+    }
     return groups;
 }
 

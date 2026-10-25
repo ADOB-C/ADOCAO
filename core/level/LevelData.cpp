@@ -983,6 +983,7 @@ inline void decodeSpecialEvent(const ActionFields& f, CameraSink& sink) {
         ev.flags = flags;
         sink.colors.push_back(std::move(ev));
     } else if (f.type == T::Flash) {
+        if (f.editorOnly) return;      // 编辑器专用事件：播放里不生效（同 PositionTrack，见 buildAction 的注释）
         C::FlashEvent ev;
         ev.floor = f.floor;
         ev.duration = f.hasDuration ? f.duration : 1.0f;

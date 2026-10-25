@@ -257,3 +257,23 @@ Direction-based angle algorithm matching ADOFAI-JS `_parseAngle`. BPM propagatio
 
 `--auto-play` auto-starts playback 0.5s after loading.
 
+## `editorOnly` 事件（2026-10-24 的坑，An-Startist 的 ADOFAN_PIXI 也踩过）
+
+谱面里 `"editorOnly": "Enabled"` 的事件**只在编辑器里生效**，播放/渲染必须完全忽略
+（Re_ADOJAS：`if (event.editorOnly && !isEditorMode) continue;`）。ADOCAO 没有编辑器模式，
+所以它们一律丢弃。
+
+踩坑经过：`parseActionObject` 里 `editorOnly` 原来**只在 rich 模式**下解析，而 `PositionTrack`
+走快路径 → 标志永远是 false → MM2 的 `floor 1414 PositionTrack positionOffset [20,0]`（编辑器专用）
+被当成普通事件，从那一层起整条轨道被推 **+20 世界单位**；相机锚点在 `floor 1408`（早于它），
+于是相机没动、轨道右移，看起来像"相机位置/旋转中心错了"。
+
+现在的处理：
+- `parseActionObject`：`editorOnly` 不再要求 rich（快路径也读）；
+- `buildAction` 收尾：`if (f.editorOnly) keep = false;`（覆盖 Twirl/SetSpeed/Pause/PositionTrack/
+  ScaleRadius/AnimateTrack… 所有快路径事件）；
+- `decodeSpecialEvent` 的 Flash 分支同样直接 return；
+- MoveCamera / RecolorTrack / MoveTrack 走各自的 `k*EditorOnly` 标志，本来就有过滤。
+
+**MM2 里 5 条 editorOnly 事件全是 PositionTrack**（floor 1414 / 2232 / 2650 / 3518 / 5085），
+偏移分别是 [20,0] / [0,10] / [0,10] / [10,0] / [0,4] —— 全是给编辑器摆位用的。

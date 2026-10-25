@@ -14,6 +14,8 @@
 
 namespace adofai {
 
+static constexpr double kPi = 3.14159265358979323846;
+
 // 行星枢轴：`stickToFloors` 只管 **PositionTrack** 的静态偏移（`planetPivotAt`）。
 //
 // **MoveTrack 动画暂不跟**（2026-10-24 回退）：让行星跟着逐砖动画走之后，动画的位移
@@ -90,6 +92,73 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
     glm::dvec2 mv(pivotPos[0]+std::cos(angle)*dist, pivotPos[1]+std::sin(angle)*dist);
     if (isRed) { redOut=pv; blueOut=mv; }
     else       { blueOut=pv; redOut=mv; }
+}
+
+void PositionSolver::planetsAt(const Timeline& timeline, double t, std::vector<PlanetPos>& out) {
+    out.clear();
+    const LevelData& L = *timeline.level();
+    const int64_t nFull = L.tileCount();
+    if (nFull < 2) return;
+    int tileIdx = (int)timeline.findTileIndex(t);
+    if (tileIdx < 0) tileIdx = 0;
+    const int count = L.planetCountAt(tileIdx);
+    if (count <= 2) {
+        glm::dvec2 red{}, blue{};
+        positionAtTile(timeline, t, tileIdx, red, blue);
+        out.push_back({0, red});
+        out.push_back({1, blue});
+        return;
+    }
+
+    int n = count, pivotPos = 0;
+    const uint8_t* ids = L.planetsAt(tileIdx, n, pivotPos);
+    if (n <= 2) {   // 列表退化（理论上不会），回两星口径
+        glm::dvec2 red{}, blue{};
+        positionAtTile(timeline, t, tileIdx, red, blue);
+        out.push_back({0, red});
+        out.push_back({1, blue});
+        return;
+    }
+
+    double px = 0.0, py = 0.0;
+    pivotAt(L, tileIdx, t, px, py);
+    const double startTime = timeline.startTimeAt(tileIdx);
+    const double duration = timeline.durationAt(tileIdx);
+    double progress = (duration > 1e-9) ? (t - startTime) / duration : 1.0;
+    if (progress < 0) progress = 0;
+    if (progress > 1) progress = 1;
+    const double angle = (double)timeline.startAngleAt(tileIdx) +
+                         (double)timeline.totalAngleAt(tileIdx) * progress;
+    const double dist = (double)timeline.tileStartDist(tileIdx) +
+                        ((double)timeline.tileEndDist(tileIdx) - (double)timeline.tileStartDist(tileIdx)) * progress;
+    const double dirSign = timeline.tileIsCW()[tileIdx] ? -1.0 : 1.0;
+    const double inverse = kPi * (n - 2) / n;
+
+    // 移动星的起始角偏移（官方 scrPlanet.Update_RefreshAngles 1625-1631，含 midspin 修正）
+    double angleOffset = dirSign * inverse;
+    if (tileIdx > 0 && L.angleAt(tileIdx - 1) == 999.0) {
+        int prevN = 2, prevPivot = 0;
+        L.planetsAt(tileIdx - 1, prevN, prevPivot);
+        if (prevN > 2) {
+            const double prevDir = timeline.tileIsCW()[tileIdx - 1] ? -1.0 : 1.0;
+            const double prevInverse = kPi * (prevN - 2) / prevN;
+            angleOffset -= prevDir * prevInverse;
+        }
+    }
+    const double num = angle + angleOffset;
+    out.push_back({ids[pivotPos], {px, py}});                                  // 枢轴星
+    const int moverIdx = (pivotPos + 1) % n;
+    out.push_back({ids[moverIdx], {px + std::cos(num) * dist, py + std::sin(num) * dist}});
+
+    const double R = dist / (2.0 * std::sin(kPi / n));
+    const double num4 = num - dirSign * inverse / 2.0;
+    const double cx = px + std::cos(num4) * R;
+    const double cy = py + std::sin(num4) * R;
+    for (int j = 1; j <= n - 2; ++j) {
+        const int id = ids[(pivotPos + 1 + j) % n];
+        const double a = num4 + dirSign * 2.0 * kPi * (-(double)(j + 1) - n / 2.0) / n;
+        out.push_back({(uint8_t)id, {cx + std::cos(a) * R, cy + std::sin(a) * R}});
+    }
 }
 
 void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tileIdx, glm::dvec2& redOut, glm::dvec2& blueOut) {

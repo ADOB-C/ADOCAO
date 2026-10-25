@@ -312,3 +312,7 @@ add_test(NAME anim_timing COMMAND anim_timing_test)
 add_executable(sticky_track_test sticky_track_test.cpp)
 target_link_libraries(sticky_track_test PRIVATE adocao_core)
 add_test(NAME sticky_track COMMAND sticky_track_test)
+
+add_executable(multiplanet_test multiplanet_test.cpp)
+target_link_libraries(multiplanet_test PRIVATE adocao_core)
+add_test(NAME multiplanet COMMAND multiplanet_test)

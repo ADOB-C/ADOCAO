@@ -52,6 +52,12 @@ public:
                            glm::dvec2& redOut, glm::dvec2& blueOut);
     static void positionAtTile(const Timeline& timeline, double t, int tileIdx,
                                glm::dvec2& redOut, glm::dvec2& blueOut);
+    // ── MultiPlanet（N 颗星）─────────────────────────────────────────────
+    // 参考实现 Re_ADOJAS `Player.applyMultiPlanetLayout`（官方 scrPlanet.UpdatePlanet 稳态）：
+    // 枢轴星在砖心，移动星在半径 r 处，其余星落在正 N 边形上（边长 = r）。
+    // N<=2 时逐位退化成 positionAtTile 的结果（保证既有像素门槛不变）。
+    struct PlanetPos { uint8_t id; glm::dvec2 pos; };
+    static void planetsAt(const Timeline& timeline, double t, std::vector<PlanetPos>& out);
 
     // Sample [startTime, endTime]. The head is bound to the planet position the
     // caller passes in, so the trail can never lead the planet along the track.

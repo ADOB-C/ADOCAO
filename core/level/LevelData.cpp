@@ -336,6 +336,7 @@ inline LevelData::FastAction::Type eventTypeOf(KeyRef k) {
     if (keyIs(k, "Flash"))         return T::Flash;          // → flashEvents（全屏闪屏）
     if (keyIs(k, "MoveTrack"))     return T::MoveTrack;      // → moveTrackEvents（轨道动画）
     if (keyIs(k, "ScaleRadius"))   return T::ScaleRadius;    // 轨道半径缩放（烘进砖位）
+    if (keyIs(k, "MultiPlanet"))   return T::MultiPlanet;    // 多星布局（逐砖表，见 buildPlanetTables）
     return T::Other;
 }
 
@@ -355,6 +356,7 @@ struct ActionFields {
     float offX = 0.0f, offY = 0.0f;
     bool justThisTile = false;
     bool hasStickToFloors = false, stickToFloors = true;   // PositionTrack 的"粘性轨道"开关
+    bool hasPlanets = false; int planets = 2;              // MultiPlanet 的星数（2..8）
     std::string hitsound, trackDisappear, trackAnimation;
 
     // ── 以下只给 MoveCamera / RepeatEvents 用（rich 模式才填；热路径一个字段都不碰） ──
@@ -755,7 +757,29 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
             }
             break;
         case 'p':
-            if (keyIs(key, "plane")) {
+            if (keyIs(key, "planets")) {
+                // "planets": "ThreePlanets" | "3" | 3 —— 与参考 parseMultiPlanetCount 同口径
+                if (*v == '"') {
+                    std::string str;
+                    if (!stringValue(v, vEnd, str)) return false;
+                    static const struct { const char* word; int n; } kWords[] = {
+                        {"Two", 2}, {"Three", 3}, {"Four", 4}, {"Five", 5},
+                        {"Six", 6}, {"Seven", 7}, {"Eight", 8},
+                    };
+                    int count = 0;
+                    if (!str.empty() && str[0] >= '0' && str[0] <= '9') {
+                        count = std::atoi(str.c_str());
+                    } else {
+                        for (const auto& w : kWords) {
+                            if (str.compare(0, std::strlen(w.word), w.word) == 0) { count = w.n; break; }
+                        }
+                    }
+                    if (count > 0) { f.planets = count; f.hasPlanets = true; }
+                } else {
+                    int n2;
+                    if (parseInt(v, vEnd, n2)) { f.planets = n2; f.hasPlanets = true; }
+                }
+            } else if (keyIs(key, "plane")) {
                 std::string tmp;
                 if (!stringValue(v, vEnd, tmp)) return false;
                 f.flashPlane = std::move(tmp); f.hasFlashPlane = true;
@@ -892,6 +916,9 @@ inline bool buildAction(const ActionFields& f, LevelData::FastAction& a, bool& k
         break;
     case T::ScaleRadius:
         a.val1 = f.hasScale ? f.scaleX : 1.0f;
+        break;
+    case T::MultiPlanet:
+        a.val1 = (float)(f.hasPlanets ? f.planets : 2);
         break;
     case T::SetHitsound:
         a.strId = g_internOwner ? g_internOwner->internActionStr(f.hitsound) : 0;
@@ -3198,6 +3225,7 @@ void LevelData::refreshDerivedCaches() {
     struct SSEv { int floor = 0; float val = 0.0f; bool isMultiplier = false; };
     std::vector<SSEv> ssEvents;
     bool& hasStickEvents = m_hasStickEvents;   // 成员：applyPositionTrackOffsets 也要用
+    std::vector<std::pair<int64_t,int>> multiEvents;   // (floor, 星数)，保持文件序
     // 按需分配：没有任何 SetSpeed 事件时这 n x 12 B 是白占的（实测 25 万层的无害谱上，
     // 峰值快照里就有一块 250001 x 12 = 3,000,012 B 的分配）。1e8 层就是 1.2 GB。
     // 空 vector 与原来逐位等价：默认构造的 SS 全 false/0，下面那个逐层循环体什么都不做。
@@ -3224,6 +3252,8 @@ void LevelData::refreshDerivedCaches() {
             tileHasSetSpeed[floor] = true;
             ssEvents.push_back({floor, a.val1, a.flag});
             break;
+        case FastAction::MultiPlanet:
+            multiEvents.push_back({(int64_t)floor, (int)std::lround(a.val1)}); break;
         case FastAction::PositionTrack:
             tilePositionOffsets[floor] = {a.val1, a.val2,
                                           (int8_t)(a.strId == 1u ? 1 : (a.strId == 0u ? 0 : -1)),
@@ -3252,6 +3282,9 @@ void LevelData::refreshDerivedCaches() {
         default: break;
         }
     }
+
+    // MultiPlanet 逐砖表：只在这张谱真有该事件时才建（否则空表 = 恒 2 颗）
+    buildPlanetTables(multiEvents);
 
     float runningBPM = settings.bpm;
     // 空 = 本谱一条 SetSpeed 都没有：tileBPMs 上面已经 assign 成全 settings.bpm，
@@ -3295,6 +3328,130 @@ void LevelData::refreshDerivedCaches() {
     std::sort(bookmarkFloors.begin(), bookmarkFloors.end());
     bookmarkFloors.erase(std::unique(bookmarkFloors.begin(), bookmarkFloors.end()),
                          bookmarkFloors.end());
+}
+
+void LevelData::buildPlanetTables(const std::vector<std::pair<int64_t, int>>& events) {
+    m_numPlanets.clear();
+    m_planetListRef.clear();
+    m_planetPivotPos.clear();
+    m_planetLists.clear();
+    if (events.empty()) return;
+    const int64_t n = (int64_t)tiles.size();
+    if (n <= 0) return;
+
+    m_numPlanets.assign((size_t)n, 2);
+    m_planetListRef.assign((size_t)n, 0);
+    m_planetPivotPos.assign((size_t)n, 0);
+
+    // 去重表：同一组行星列表只存一份（多数谱只有 [0,1] / [0,1,2] 两种）
+    std::map<std::array<uint8_t, 9>, uint16_t> listIndex;
+    auto listRefOf = [&](const uint8_t* ids, int len) -> uint16_t {
+        std::array<uint8_t, 9> key{};
+        key[0] = (uint8_t)len;
+        for (int i = 0; i < len; ++i) key[1 + i] = ids[i];
+        auto it = listIndex.find(key);
+        if (it != listIndex.end()) return it->second;
+        const uint16_t ref = (uint16_t)m_planetLists.size();
+        PlanetList l;
+        l.len = (uint8_t)len;
+        for (int i = 0; i < len; ++i) l.ids[i] = ids[i];
+        m_planetLists.push_back(l);
+        listIndex.emplace(key, ref);
+        return ref;
+    };
+    listRefOf(nullptr, 0);   // 占位：ref 0 留给"默认两星"（不该被用到）
+
+    // 与参考实现一致：列表初值 [0,1]，池 [2..7]；枢轴在列表里的下标 chosenPos，
+    // 增删星的参照是**前一砖**的枢轴 prevPivotPos。
+    uint8_t planetIds[8] = {0, 1, 0, 0, 0, 0, 0, 0};
+    int numPlanets = 2;
+    uint8_t pool[8] = {2, 3, 4, 5, 6, 7, 0, 0};
+    int poolLen = 6;
+    int chosenPos = 0;
+    int prevPivotPos = 0;
+
+    auto applyCount = [&](int req) {
+        if (req < 2) req = 2;
+        if (req > 8) req = 8;
+        if (req == numPlanets) return;
+        const uint8_t moverId = planetIds[chosenPos];
+        const uint8_t refId = planetIds[prevPivotPos];
+        if (req > numPlanets) {
+            for (int k = 1; k <= req - numPlanets; ++k) {
+                if (poolLen <= 0) break;
+                const uint8_t id = pool[0];
+                for (int i = 1; i < poolLen; ++i) pool[i - 1] = pool[i];
+                --poolLen;
+                const int at = prevPivotPos + k - 1;   // 插到参照星之前
+                for (int i = numPlanets; i > at; --i) planetIds[i] = planetIds[i - 1];
+                planetIds[at] = id;
+                ++numPlanets;
+            }
+        } else {
+            const int remove = numPlanets - req;
+            int positions[8] = {0};
+            int posCount = 0;
+            for (int k = 1; posCount < remove && k <= numPlanets; ++k) {
+                const int pos = (prevPivotPos - k + numPlanets) % numPlanets;
+                if (planetIds[pos] == moverId) continue;   // 本砖枢轴永不被移除
+                positions[posCount++] = pos;
+            }
+            std::sort(positions, positions + posCount);
+            uint8_t removed[8] = {0};
+            int removedCount = 0;
+            for (int k = posCount - 1; k >= 0; --k) {
+                removed[removedCount++] = planetIds[positions[k]];
+                for (int i = positions[k]; i + 1 < numPlanets; ++i) planetIds[i] = planetIds[i + 1];
+                --numPlanets;
+            }
+            for (int k = removedCount - 1; k >= 0; --k) {   // 插回池首（顺序与参考一致）
+                if (poolLen >= 8) break;
+                for (int i = poolLen; i > 0; --i) pool[i] = pool[i - 1];
+                pool[0] = removed[k];
+                ++poolLen;
+            }
+        }
+        chosenPos = 0;
+        for (int i = 0; i < numPlanets; ++i) if (planetIds[i] == moverId) { chosenPos = i; break; }
+        prevPivotPos = 0;
+        for (int i = 0; i < numPlanets; ++i) if (planetIds[i] == refId) { prevPivotPos = i; break; }
+    };
+
+    size_t ei = 0;
+    for (int64_t i = 0; i < n; ++i) {
+        while (ei < events.size() && events[ei].first == i) {
+            applyCount(events[ei].second);
+            // 前一砖是 midspin 时，它直接继承新的星数（参考实现同一行）
+            if (i > 0 && angleAt(i - 1) == 999.0)   // 原始角度（midspin），不是解析后的 direction
+                m_numPlanets[(size_t)i - 1] = (uint8_t)numPlanets;
+            ++ei;
+        }
+        m_numPlanets[(size_t)i] = (uint8_t)numPlanets;
+        m_planetListRef[(size_t)i] = listRefOf(planetIds, numPlanets);
+        m_planetPivotPos[(size_t)i] = (uint8_t)std::min<int>(chosenPos, numPlanets - 1);
+        prevPivotPos = chosenPos;
+        if (numPlanets > 2 && angleAt(i) == 999.0)
+            chosenPos = (chosenPos - 1 + numPlanets) % numPlanets;   // midspin：prev
+        else
+            chosenPos = (chosenPos + 1) % numPlanets;                // 常规：next
+    }
+    LOG_I("MultiPlanet: %d 条事件，行星列表表 %zu 种（最大 %d 颗）", (int)events.size(),
+          m_planetLists.size() - 1, 8);
+
+    // 诊断：`ADOCAO_MP_DUMP=a-b` 打印该区间的逐砖行星表（与参考实现对拍用）
+    if (const char* rng = std::getenv("ADOCAO_MP_DUMP")) {
+        int a = 0, b = 0;
+        if (std::sscanf(rng, "%d-%d", &a, &b) == 2) {
+            if (b >= (int)n) b = (int)n - 1;
+            for (int i = a; i <= b; ++i) {
+                int cnt = 0, pivot = 0;
+                const uint8_t* ids = planetsAt(i, cnt, pivot);
+                std::string list;
+                for (int k = 0; k < cnt; ++k) { list += std::to_string(ids[k]); if (k + 1 < cnt) list += ","; }
+                LOG_I("mp[%d] n=%d pivot=%d ids=%s", i, cnt, pivot, list.c_str());
+            }
+        }
+    }
 }
 
 void LevelData::planetPivotAt(int64_t i, double& x, double& y) const {

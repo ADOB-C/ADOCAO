@@ -392,7 +392,7 @@ struct LevelData {
         uint16_t strId2 = 0;
         // MoveCamera / RepeatEvents **不留在 actions 里**（keep=false）：它们走 cameraEvents /
         // repeatEvents 两个富结构。这两个枚举值只用于"解析时认出它"。
-        enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, MoveCamera, RepeatEvents, ColorTrack, RecolorTrack, Flash, MoveTrack, Other, ScaleRadius } type = Other;
+        enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, MoveCamera, RepeatEvents, ColorTrack, RecolorTrack, Flash, MoveTrack, Other, ScaleRadius, MultiPlanet } type = Other;
         bool flag = false;
         float val1 = 0, val2 = 0;
     };
@@ -511,6 +511,31 @@ struct LevelData {
     struct CumOffset { int32_t floor = 0; double x = 0.0, y = 0.0; };  // 到该层为止的累计偏移
     std::vector<CumOffset> m_cumOffsets;                  // 稀疏（每个事件层一条）
     bool hasStickOverrides() const { return !m_tileStick.empty(); }
+
+    // ── MultiPlanet（多星布局）────────────────────────────────────────────
+    // 参考实现（Re_ADOJAS `Player.ts` 3050-3160）：逐砖 `numPlanets` + 行星颜色 id 列表 +
+    // 枢轴在列表里的下标。**只有谱里真出现 MultiPlanet 事件时才分配**（默认空 = 恒 2 颗）。
+    struct PlanetList { uint8_t len = 0; uint8_t ids[8] = {}; };
+    std::vector<uint8_t> m_numPlanets;      // 1 B/砖
+    std::vector<uint16_t> m_planetListRef;  // 2 B/砖：去重列表表下标
+    std::vector<uint8_t> m_planetPivotPos;  // 1 B/砖：枢轴在列表中的位置
+    std::vector<PlanetList> m_planetLists;
+    bool hasMultiPlanet() const { return !m_numPlanets.empty(); }
+    int planetCountAt(int64_t i) const {
+        return m_numPlanets.empty() || (size_t)i >= m_numPlanets.size() ? 2 : (int)m_numPlanets[(size_t)i];
+    }
+    // 该砖的行星 id 列表（len 个；调用方不持有指针）。找不到/没事件时返回 2 星默认值。
+    const uint8_t* planetsAt(int64_t i, int& n, int& pivotPos) const {
+        if (m_numPlanets.empty() || (size_t)i >= m_numPlanets.size()) {
+            static const uint8_t kDefault[2] = {0, 1};
+            n = 2; pivotPos = 0; return kDefault;
+        }
+        const PlanetList& l = m_planetLists[m_planetListRef[(size_t)i]];
+        n = l.len;
+        pivotPos = (int)m_planetPivotPos[(size_t)i];
+        if (pivotPos >= n) pivotPos = 0;
+        return l.ids;
+    }
     bool m_hasStickEvents = false;   // 谱里有没有 PositionTrack 写过 stickToFloors（§粘性轨道）
     std::vector<int> bookmarkFloors;  // Bookmark event floors
 
@@ -598,6 +623,9 @@ private:
     void calculateTilePositions();
     void convertPathToAngles();
     void applyPositionTrackOffsets();
+    // MultiPlanet 逐砖表（参考实现 Re_ADOJAS `Player.ts` 3050-3160 的移植）。
+    // 没有 MultiPlanet 事件时**不分配任何表**（恒 2 颗，零开销）。
+    void buildPlanetTables(const std::vector<std::pair<int64_t, int>>& events);
     static float pathCharToAngle(char c);
 };
 

@@ -307,3 +307,29 @@ PositionTrack 把轨道挪走之后，**行星跟不跟着走**由 `stickToFloor
 护栏：`tests/sticky_track_test.cpp`（ctest `sticky_track`）三组用例：settings=false、
 事件 `stickToFloors: "Disabled"`、默认 true —— 都用"同谱不带事件"的基准谱对比位置，
 并断言 `planetPivotAt` / `stickyAt`。
+
+## MultiPlanet（多星布局，2026-10-25）
+
+逐砖表：`numPlanets`(u8) / `planetListRef`(u16) / `planetPivotPos`(u8) + 去重列表表。
+**只有谱里真出现 `MultiPlanet` 事件时才分配**（否则空表 = 恒 2 颗，零开销）——
+与 `stickToFloors` 同一套惰性策略。
+
+规则（照抄 Re_ADOJAS `Player.ts` 3050-3160，逐项对拍过）：
+- 列表初值 `[0,1]`（红/蓝），池 `[2..7]`；`planets` 字段是 `"TwoPlanets"/"ThreePlanets"/…` 或数字，钳到 2..8；
+- **增星**：新星插到"参照星"（**前一砖**的枢轴）之前；
+- **减星**：移除参照星的**前驱**（就是那些不在轨道上的星），被移除的星插回池首；
+- 每砖记录后推进枢轴：常规 `next`，**midspin 且 N>2** 用 `prev`；
+- 前一砖是 midspin 时，它**直接继承**新的星数。
+
+两个坑（都踩过）：
+1. **midspin 判定要用原始角度**（`angleAt(i)==999`），不能用 `tiles[i].direction` ——
+   后者是解析后的方向角，恒不为 999，于是枢轴全按 `next` 推进（实测 220 砖里 133 砖错位）；
+2. 增删星的**参照是前一砖的枢轴**，不是当前砖 —— 写成当前砖会在每次切换时错一拍。
+
+布局（`PositionSolver::planetsAt`，参考 `applyMultiPlanetLayout`）：
+枢轴星在砖心，移动星在半径 `dist` 处、角度 = 移动角 + `dirSign·inverse(N)`（midspin 再减一项）；
+N>2 时其余星落在正 N 边形上（半径 `R = dist/(2·sin(π/N))`，边长恒 = `dist`）。
+**N≤2 时逐位退化成原来的红/蓝两球**（像素门槛因此不变）。
+
+验收：`tests/multiplanet_test.cpp`（ctest `multiplanet`）——逐砖表 220 砖与参考算法全等、
+三球边长为 `dist`、N≤2 与 `positionAtTile` 逐位相同；像素门槛仍 54/54。

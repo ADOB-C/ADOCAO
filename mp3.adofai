@@ -1,0 +1,7 @@
+{
+      "angleData": [0,90,180,270,0,90,180,270,0,90,180,270],
+      "settings": {"bpm": 120, "offset": 0, "countdownTicks": 0, "pitch": 100,
+                   "trackColor": "debb7b", "backgroundColor": "000000",
+                   "trackStyle": "Standard", "trackAnimation": "None",
+                   "trackDisappearAnimation": "None"},
+      "actions": [{"floor":2,"eventType":"MultiPlanet","planets":"ThreePlanets"},{"floor":6,"eventType":"MultiPlanet","planets":"TwoPlanets"}]}

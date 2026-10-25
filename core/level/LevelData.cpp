@@ -629,7 +629,9 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
                 f.hasEvent = true;
             } else if (rich && keyIs(key, "ease")) {
                 if (easeIdOf(v, vEnd, f.easeId)) f.hasEase = true;
-            } else if (rich && keyIs(key, "editorOnly")) {
+            } else if (keyIs(key, "editorOnly")) {
+                // **快路径也要读**：以前只有 rich 才解析，于是 PositionTrack 这类走快路径的事件
+                // 永远拿不到 editorOnly → 编辑器专用事件在播放里被照单全收（MM2 的 +20 就是这么来的）。
                 bool b; if (parseBoolValue(v, vEnd, b) && b) f.editorOnly = true;
             } else if (rich && keyIs(key, "executeOnCurrentFloor")) {
                 bool b; if (parseBoolValue(v, vEnd, b)) f.executeOnCurrentFloor = b;
@@ -894,6 +896,12 @@ inline bool buildAction(const ActionFields& f, LevelData::FastAction& a, bool& k
            f.type != T::MoveCamera && f.type != T::RepeatEvents &&
            f.type != T::ColorTrack && f.type != T::RecolorTrack &&
            f.type != T::Flash && f.type != T::MoveTrack;   // 后六者进富结构
+    // **编辑器专用事件**（`editorOnly: "Enabled"`）在播放/渲染里一律不生效：
+    // Re_ADOJAS 是 `if (event.editorOnly && !isEditorMode) continue;`，而 ADOCAO 没有编辑器模式。
+    // 2026-10-24 真踩过：MM2 的 floor 1414 `PositionTrack positionOffset [20,0]` 是编辑器专用，
+    // 我们照收 → 从那一层起整条轨道被推 +20 世界单位；相机锚点在 1408（早于它），
+    // 于是轨道整体偏到画面右边，看着像"相机/旋转中心不对"。
+    if (f.editorOnly) keep = false;
     return true;
 }
 

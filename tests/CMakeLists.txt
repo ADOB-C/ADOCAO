@@ -316,3 +316,8 @@ add_test(NAME sticky_track COMMAND sticky_track_test)
 add_executable(multiplanet_test multiplanet_test.cpp)
 target_link_libraries(multiplanet_test PRIVATE adocao_core)
 add_test(NAME multiplanet COMMAND multiplanet_test)
+
+# 测试侧工具（不进 ctest、不随产品发布）：重复 N 遍写成 .adocao。
+# 按 AGENTS.md「本项目不该具备产出谱面的能力」，这类生成器只放 tests/。
+add_executable(gen_repeat_adocao tools/gen_repeat_adocao.cpp)
+target_link_libraries(gen_repeat_adocao PRIVATE adocao_core adocao_archive)

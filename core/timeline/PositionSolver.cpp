@@ -14,6 +14,18 @@
 
 namespace adofai {
 
+// 行星枢轴：`stickToFloors` 只管 **PositionTrack** 的静态偏移（`planetPivotAt`）。
+//
+// **MoveTrack 动画暂不跟**（2026-10-24 回退）：让行星跟着逐砖动画走之后，动画的位移
+// 会在相邻采样点之间造成几十~上百单位的大跳，拖尾直接拉成贯穿全屏的直线
+// （用户："你这个直线也是才出现的"）。参考实现是靠 `MoveTrackManager` 里
+// "按历史时刻重建位置"给拖尾专门兜住的 —— 那套还没移植，所以先保持"不跟动画"，
+// 等把动画布局本身对齐 + 拖尾能重建历史位置之后再打开。
+static void pivotAt(const LevelData& L, int64_t idx, double t, double& x, double& y) {
+    (void)t;
+    L.planetPivotAt(idx, x, y);
+}
+
 void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& redOut, glm::dvec2& blueOut) {
     const LevelData& L = *timeline.level();   // ③ 切片 4：走访问器，不直接碰 tiles[]
     const int64_t nFull = L.tileCount();   // #0：int64 算，收窄前显式判
@@ -48,7 +60,7 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
         int lastIdx = n - 2;
         if (lastIdx < 0) lastIdx = 0;
         double lx = 0.0, ly = 0.0;
-        L.planetPivotAt(lastIdx, lx, ly);
+        pivotAt(L, lastIdx, t, lx, ly);
         const double pivotPos[2] = {lx, ly};
         double startAngle = 0.0;
         if (lastIdx > 0) {
@@ -66,7 +78,7 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
 
     bool isRed = (tileIdx%2==0);
     double pvx = 0.0, pvy = 0.0;
-    L.planetPivotAt(tileIdx, pvx, pvy);          // sticky=false 的层用原始砖位
+    pivotAt(L, tileIdx, t, pvx, pvy);            // sticky=false 的层用原始砖位
     const double pivotPos[2] = {pvx, pvy};
     double startTime = timeline.startTimeAt(tileIdx);
     double duration = timeline.durationAt(tileIdx);
@@ -108,7 +120,7 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
         int lastIdx = n - 2;
         if (lastIdx < 0) lastIdx = 0;
         double lx = 0.0, ly = 0.0;
-        L.planetPivotAt(lastIdx, lx, ly);
+        pivotAt(L, lastIdx, t, lx, ly);
         const double pivotPos[2] = {lx, ly};
         double startAngle = 0.0;
         if (lastIdx > 0) {
@@ -125,7 +137,7 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
     }
     bool isRed = (tileIdx%2==0);
     double pvx = 0.0, pvy = 0.0;
-    L.planetPivotAt(tileIdx, pvx, pvy);          // sticky=false 的层用原始砖位
+    pivotAt(L, tileIdx, t, pvx, pvy);            // sticky=false 的层用原始砖位
     const double pivotPos[2] = {pvx, pvy};
     double startTime = timeline.startTimeAt(tileIdx);
     double duration = timeline.durationAt(tileIdx);

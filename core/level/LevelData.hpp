@@ -3,7 +3,9 @@
 #include <cmath>
 #include <cstdint>
 #include <mutex>
+#include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <map>
 #include <unordered_map>
@@ -38,9 +40,21 @@ struct LevelData {
     // 目的：容器 v7 的 schema 从实际 JSON 自动发现类型/字段，做到"新增事件类型不改格式"。
     // 默认关（false）→ 播放路径的内存与行为完全不变。
     bool preserveRawJson = false;
-    std::vector<std::string> rawActionsJson;
+    // 原始切片（pack 期捕获）：**不再给每条 action 复制 std::string**（那是 44 GB 的真凶）。
+    // 现在存 (offset, length) 指向 `rawBlob`：mmap 加载时直接指向映射区（零拷贝），
+    // 从内存缓冲加载时才复制一份。访问用 rawAction(i) / rawActionCount()。
+    std::string rawBlob;                                  // 只有非 mmap 路径才真正占内存
+    std::vector<std::pair<uint32_t, uint32_t>> rawActionSpans;
     std::string rawDecorationsJson;
     std::string rawSettingsJson;   // settings 对象原样（回写时用它，避免逐键建模）
+    size_t rawActionCount() const { return rawActionSpans.size(); }
+    std::string_view rawAction(size_t i) const {
+        if (i >= rawActionSpans.size()) return {};
+        const auto& s = rawActionSpans[i];
+        return std::string_view(rawBlob.data() + s.first, s.second);
+    }
+    // 拥有文件映射（loadFromFile 用；loadFromBuffer 时不设）
+    std::shared_ptr<class MappedFile> mappedFile;
     // 解析原始成员；失败只警告（pack 会退回旧段），不影响已经解析好的数据。
     bool captureRawMembers(const char* data, size_t length);
     // **v7 容器专用入口**：把一条事件的 JSON 对象喂进来，走与 JSON 路径**同一套**字段映射

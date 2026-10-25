@@ -638,22 +638,23 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
 
     // ---- v7：自描述事件库（schema + 列 + 裁剪记录）----
     // 只写"v6 装不下/会丢"的那部分内容的**无损**表示；播放路径仍读 v6 段（这里不改变语义）。
-    if ((opts.withV7Events || opts.v7Only) && !level.rawActionsJson.empty()) {
+    if ((opts.withV7Events || opts.v7Only) && level.rawActionCount() > 0) {
         // **只写 v6 段装不下的类型**（去重）：Camera/Colour/Flash/MoveTrack/Repeat 与
         // Actions 里那 9 类播放事件已经有定长段了，再写一遍纯属重复（实测 16 KB）。
         // v7 的价值在"v6 会整体丢弃的那部分"：MoveDecorations/SetFilter*/Bloom/装饰…
         static const std::set<std::string> kLegacyStored = {
             "Twirl","SetSpeed","PositionTrack","SetHitsound","Bookmark","Pause","AnimateTrack",
             "MoveCamera","ColorTrack","RecolorTrack","Flash","MoveTrack","RepeatEvents","ScaleRadius"};
-        std::vector<std::string> evs;
+        std::vector<std::string> evs;   // 只装"v6 装不下"的事件（通常很少），不是全部 action
         std::vector<int64_t> floors;   // 与 evs 平行（缺 floor 记 -1）
-        evs.reserve(level.rawActionsJson.size());
-        for (const auto& js : level.rawActionsJson) {
+        evs.reserve(level.rawActionCount());
+        for (size_t ai = 0; ai < level.rawActionCount(); ++ai) {
+            const std::string_view js = level.rawAction(ai);
             rapidjson::Document d;
-            d.Parse(js.c_str(), js.size());
+            d.Parse(js.data(), js.size());
             const char* t = (d.HasParseError() || !d.HasMember("eventType")) ? "" : d["eventType"].GetString();
             if (!(opts.v7IncludeLegacy || opts.v7Only) && kLegacyStored.count(t)) continue;   // 已由 v6 段承载
-            evs.push_back(js);
+            evs.emplace_back(js);
             floors.push_back(d.HasParseError() || !d.HasMember("floor") || !d["floor"].IsInt64()
                                  ? -1 : d["floor"].GetInt64());
         }

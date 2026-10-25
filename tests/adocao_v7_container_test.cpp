@@ -49,7 +49,7 @@ int main() {
     LevelData lv;
     lv.preserveRawJson = true;
     check(lv.loadFromString(json), "加载源谱");
-    check(!lv.rawActionsJson.empty(), "捕获了 actions 原始切片");
+    check(lv.rawActionCount() > 0, "捕获了 actions 原始切片");
     check(!lv.rawDecorationsJson.empty(), "捕获了 decorations 原始切片");
 
     adocao::PackOptions opts;
@@ -100,9 +100,10 @@ int main() {
     rapidjson::Document deco;
     deco.Parse(lv.rawDecorationsJson.c_str(), lv.rawDecorationsJson.size());
     size_t nonLegacy = 0;
-    for (const auto& js : lv.rawActionsJson) {
+    for (size_t ai = 0; ai < lv.rawActionCount(); ++ai) {
+        const std::string_view js = lv.rawAction(ai);
         rapidjson::Document a;
-        a.Parse(js.c_str(), js.size());
+        a.Parse(js.data(), js.size());
         const std::string t = a["eventType"].GetString();
         if (t == "Twirl" || t == "SetSpeed" || t == "PositionTrack" || t == "SetHitsound" ||
             t == "Bookmark" || t == "Pause" || t == "AnimateTrack" || t == "MoveCamera" ||
@@ -115,9 +116,10 @@ int main() {
 
     // 逐事件：解析后按 (eventType, floor) 匹配，比较关键字段
     size_t matched = 0;
-    for (const auto& js : lv.rawActionsJson) {
+    for (size_t ai = 0; ai < lv.rawActionCount(); ++ai) {
+        const std::string_view js = lv.rawAction(ai);
         rapidjson::Document a;
-        a.Parse(js.c_str(), js.size());
+        a.Parse(js.data(), js.size());
         for (const auto& e : events) {
             rapidjson::Document b;
             b.Parse(e.c_str(), e.size());

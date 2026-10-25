@@ -1,3 +1,4 @@
+#include "core/util/MappedFile.hpp"
 #include "LevelData.hpp"
 #include "core/timeline/Timeline.hpp"
 #include "FloorWindow.hpp"   // ③ 切片 4：按块物化缓存（~LevelData 需要完整类型）
@@ -2311,66 +2312,87 @@ bool LevelData::ingestEventJson(const char* begin, const char* end, std::string&
 }
 
 bool LevelData::captureRawMembers(const char* data, size_t length) {
-    rawActionsJson.clear();
+    rawActionSpans.clear();
     rawDecorationsJson.clear();
     rawSettingsJson.clear();
     if (!data || length == 0) return false;
-    // **先过 cleanJson**：ADOFAI 谱面里广泛存在重复逗号/缺逗号（重特效谱尤其常见，
-    // 如 PLUM_MEGAMIX_2 的 `"requiredMods": [],,`），RapidJSON 会直接拒绝。
-    // 注意：cleanJson 是逐字符复现旧编辑器的容错行为，快路径与它必须等价（见 JsonCleaner.hpp）。
-    std::string cleaned;
-    rapidjson::Document d;
-    d.Parse<rapidjson::kParseTrailingCommasFlag | rapidjson::kParseCommentsFlag>(data, length);
-    if (d.HasParseError()) {
-        cleaned = cleanJson(std::string(data, length));
-        d.Parse<rapidjson::kParseTrailingCommasFlag | rapidjson::kParseCommentsFlag>(cleaned.data(),
-                                                                                    cleaned.size());
-    }
-    if (d.HasParseError() || !d.IsObject()) return false;
-    auto ai = d.FindMember("actions");
-    if (ai != d.MemberEnd() && ai->value.IsArray()) {
-        rawActionsJson.reserve(ai->value.Size());
-        for (const auto& v : ai->value.GetArray()) {
-            rapidjson::StringBuffer buf;
-            rapidjson::Writer<rapidjson::StringBuffer> w(buf);
-            if (!v.Accept(w)) return false;
-            rawActionsJson.emplace_back(buf.GetString(), buf.GetSize());
+
+    // **流式扫描，不进 DOM、不复制每条 action**（2026-10-25）。
+    // 以前：`rapidjson::Document` 解析整份 JSON + 每条 action 一个 std::string
+    //        → 1.35 亿砖 / 6.5 GB 的谱 footprint 44 GB、换出 139 GB。
+    // 现在：用快路径同款 skipContainer 走一遍顶层对象，只记 (offset,length)。
+    //       mmap 加载时这些切片直接指向映射区（零拷贝）；否则复制一份原文当 blob。
+    const bool zeroCopy = mappedFile && mappedFile->mapped() &&
+                          data >= mappedFile->data() && data < mappedFile->data() + mappedFile->size();
+    if (!zeroCopy) rawBlob.assign(data, length);
+    // 偏移一律相对**原始输入**计算：rawBlob 是它的逐字节副本，所以两种路径的偏移都通用
+    // （写成 rawBlob.data() 会让 loadFromString 那条路的指针相减来自两个不同对象 —— UB）。
+    const char* base = data;
+
+    const char* p = data;
+    const char* e = data + length;
+    auto ws = [](const char* q, const char* end) { while (q < end && (*q == ' ' || *q == '\t' || *q == '\n' || *q == '\r')) ++q; return q; };
+    p = ws(p, e);
+    if (p >= e || *p != '{') return false;
+    ++p;
+    bool ok = false;
+    for (;;) {
+        p = ws(p, e);
+        if (p >= e) return false;
+        if (*p == '}') { ok = true; break; }
+        if (*p == ',') { ++p; continue; }
+        if (*p != '"') return false;
+        // key
+        const char* keyStart = p + 1;
+        const char* keyEnd = keyStart;
+        while (keyEnd < e && *keyEnd != '"') { if (*keyEnd == '\\') ++keyEnd; ++keyEnd; }
+        if (keyEnd >= e) return false;
+        const std::string_view key(keyStart, (size_t)(keyEnd - keyStart));
+        p = ws(keyEnd + 1, e);
+        if (p >= e || *p != ':') return false;
+        p = ws(p + 1, e);
+        const char* valueStart = p;
+        const char* valueEnd = skipContainer(p, e);   // 与快路径同一个跳过器
+        if (!valueEnd) return false;
+
+        if (key == "actions" && *valueStart == '[') {
+            // 逐个元素记切片（元素都是对象；字符串/数字/嵌套数组也一并兼容）
+            const char* q = ws(valueStart + 1, valueEnd);
+            for (;;) {
+                q = ws(q, valueEnd);
+                if (q >= valueEnd) break;
+                if (*q == ']') break;
+                if (*q == ',') { ++q; continue; }
+                const char* itemEnd = skipContainer(q, valueEnd);
+                if (!itemEnd) return false;
+                rawActionSpans.push_back({(uint32_t)(q - base), (uint32_t)(itemEnd - q)});
+                q = itemEnd;
+            }
+        } else if (key == "settings" && *valueStart == '{') {
+            rawSettingsJson.assign(valueStart, (size_t)(valueEnd - valueStart));
+        } else if (key == "decorations" && *valueStart == '[') {
+            rawDecorationsJson.assign(valueStart, (size_t)(valueEnd - valueStart));
         }
+        p = valueEnd;
     }
-    auto si = d.FindMember("settings");
-    if (si != d.MemberEnd() && si->value.IsObject()) {
-        rapidjson::StringBuffer buf;
-        rapidjson::Writer<rapidjson::StringBuffer> w(buf);
-        if (!si->value.Accept(w)) return false;
-        rawSettingsJson.assign(buf.GetString(), buf.GetSize());
-    }
-    auto di = d.FindMember("decorations");
-    if (di != d.MemberEnd() && di->value.IsArray()) {
-        rapidjson::StringBuffer buf;
-        rapidjson::Writer<rapidjson::StringBuffer> w(buf);
-        if (!di->value.Accept(w)) return false;
-        rawDecorationsJson.assign(buf.GetString(), buf.GetSize());
-    }
+    if (!ok) return false;
+    if (rawActionSpans.empty() && rawSettingsJson.empty()) return false;
+    LOG_I("preserveRawJson: 捕获 %zu 条 action 切片（%s，%.0f MB）", rawActionSpans.size(),
+          zeroCopy ? "指向 mmap" : "复制原文", (double)length / (1024.0 * 1024.0));
     return true;
 }
 
 bool LevelData::loadFromFile(const std::string& filepath, ProgressCb onProgress, bool exportOnly) {
     if (onProgress) onProgress(0.05f, "Reading file...");
-    std::ifstream file(filepath, std::ios::binary);
-    if (!file.is_open()) {
+    // **mmap，不复制整份文件**（2026-10-25）：以前 `std::string content(size)` 对 6.5 GB 的谱
+    // 就是 6.5 GB 堆内存，直接把人挤到 swap。映射之后解析器照样看到连续内存，但文件页由内核按需调页。
+    auto map = std::make_shared<MappedFile>();
+    if (!map->open(filepath)) {
         LOG_E("Cannot open level file: %s", filepath.c_str());
         return false;
     }
-    file.seekg(0, std::ios::end);
-    std::streamoff size = file.tellg();
-    if (size <= 0) {
-        LOG_E("Cannot open level file: %s", filepath.c_str());
-        return false;
-    }
-    file.seekg(0, std::ios::beg);
-    std::string content((size_t)size, '\0');
-    file.read(&content[0], size);
-    return loadFromBuffer(content.data(), content.size(), onProgress, exportOnly);
+    mappedFile = map;   // LevelData 持有映射：pack 期捕获的原始切片直接指向它
+    return loadFromBuffer(map->data(), map->size(), onProgress, exportOnly);
 }
 
 bool LevelData::loadFromString(const std::string& jsonStr, ProgressCb onProgress, bool exportOnly) {

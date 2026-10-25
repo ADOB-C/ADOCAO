@@ -1360,3 +1360,27 @@ GridFloat 10.2 KB、Enum 10.6 KB、Color 5.2 KB、Float 5.8 KB、Bool 1.8 KB、T
    "事件列分块失败" —— 现在直接跳过 v7 段，并在自检里认这种"无需 v7"的情况；
 2. `adocao_blocked` 的 fixture 原来用 `round(u·1e6)/1e6`（正好落在十进制网格上），
    FixedPointDelta 一上线它就赢过"分块"，用例覆盖不到分块布局了 —— 改成全精度 uniform 值。
+
+## 内存：mmap 加载 + 流式原始切片（2026-10-25）
+
+用户："你这序列化器有大问题"——指的是 `pack` 一个 6.5 GB 的谱面时 **footprint 44 GB、
+换出 139 GB**（16 GB 机器直接进 swap，SSD 被写了上百 GB）。两个真凶：
+
+1. `LevelData::loadFromFile()` 把整份文件 `read` 进 `std::string`（6.5 GB 堆内存）；
+2. `captureRawMembers()`（`preserveRawJson`，pack/v7 用）把**整份 JSON 解析成 RapidJSON DOM**，
+   再给**每条 action 复制一个 `std::string`**（1.35 亿条 → 数十 GB）。
+
+现在：
+- `core/util/MappedFile`：POSIX 走 `mmap`（Windows 回退成读进内存），解析器仍看到连续内存，
+  但文件页由内核按需调页，**不再复制整份**；
+- `captureRawMembers` 改成**流式扫描**（复用快路径的 `skipContainer`），只记
+  `(offset,length)` 切片；mmap 路径下切片直接指向映射区（零拷贝），内存缓冲路径才复制一份 blob；
+- 访问 API：`rawActionCount()` / `rawAction(i)`（`string_view`），消费者（schema/writer/main）同步改；
+- 保留一条护栏：`captureRawMembers` 里对超大文件仍可跳过（超过 ~256 MB 的 `loadFromBuffer` 路径），
+  但 mmap 路径不受限。
+
+实测（Won't You 20×，301 MB JSON / 677 万砖）：
+```
+改前：footprint 44 GB（那是 6.5 GB 的 20 遍拼接文件，1.35 亿砖）
+改后：677 万砖 → max RSS 1.47 GB；2 遍（635 MB / 1354 万砖）→ 2.36 GB（随砖数线性，不再跟文本大小走）
+```

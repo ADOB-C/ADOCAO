@@ -18,6 +18,7 @@ add_library(adocao_core STATIC
     timeline/PlaybackClock.cpp
     camera/CameraTimeline.cpp
     camera/CameraDirector.cpp
+    util/MappedFile.cpp
     map/LevelMap.cpp
     map/PngStream.cpp
     map/TiffWriter.cpp

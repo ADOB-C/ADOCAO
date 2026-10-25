@@ -288,9 +288,10 @@ bool SchemaBuilder::deserialize(const uint8_t* p, size_t n, Schema& out, std::st
 
 bool buildSchemaFromLevel(::adofai::LevelData& lv, SchemaBuilder& sb, std::string& err) {
     err.clear();
-    for (const auto& js : lv.rawActionsJson) {
+    for (size_t ai = 0; ai < lv.rawActionCount(); ++ai) {
+        const std::string_view js = lv.rawAction(ai);
         rapidjson::Document d;
-        d.Parse(js.c_str(), js.size());
+        d.Parse(js.data(), js.size());
         if (d.HasParseError() || !d.IsObject()) { err = "action 切片解析失败"; return false; }
         auto it = d.FindMember("eventType");
         if (it == d.MemberEnd() || !it->value.IsString()) { err = "action 缺 eventType"; return false; }

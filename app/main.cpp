@@ -444,7 +444,7 @@ int main(int argc, char* argv[]) {
             std::string serr;
             if (true) {
                 std::printf("原始成员: %zu 条 action + decorations %zu B\n",
-                            lv.rawActionsJson.size(), lv.rawDecorationsJson.size());
+                            lv.rawActionCount(), lv.rawDecorationsJson.size());
                 // 事件列的真实体积（v7 的预期大小）：建列后按"列字节 + 位图 + 字典 + schema"合计
                 // 裁剪：只保留指定类型（playable = v5 能力面；minimal = 影响几何/计时的）
                 static const std::set<std::string> kPlayable = {
@@ -459,12 +459,13 @@ int main(int argc, char* argv[]) {
                 std::vector<uint8_t> srcs;
                 size_t dropped = 0;
                 (void)serr;
-                for (const auto& js : lv.rawActionsJson) {
+                for (size_t ai = 0; ai < lv.rawActionCount(); ++ai) {
+                    const std::string_view js = lv.rawAction(ai);
                     rapidjson::Document d;
-                    d.Parse(js.c_str(), js.size());
+                    d.Parse(js.data(), js.size());
                     const char* t = (d.HasParseError() || !d.HasMember("eventType")) ? "" : d["eventType"].GetString();
                     if (allow && !allow->count(t)) { ++dropped; continue; }
-                    evs.push_back(js);
+                    evs.emplace_back(js);
                     srcs.push_back(0);
                 }
                 if (!lv.rawDecorationsJson.empty()) {
@@ -524,7 +525,7 @@ int main(int argc, char* argv[]) {
                                 (double)(z + adocao::zstdEstimate(sb.serialize())) / 1024.0,
                                 (double)(z + adocao::zstdEstimate(sb.serialize())) / 1024.0);
                     if (dropped) std::printf("  裁剪: 事件 %zu → %zu（丢掉 %zu 条，preset=%s）\n",
-                                             lv.rawActionsJson.size() + (lv.rawDecorationsJson.empty() ? 0 : 1),
+                                             lv.rawActionCount() + (lv.rawDecorationsJson.empty() ? 0 : 1),
                                              evs.size(), dropped, packEventsPreset.c_str());
                 } else {
                     std::fprintf(stderr, "事件列构建失败: %s\n", cerr.c_str());
@@ -544,15 +545,24 @@ int main(int argc, char* argv[]) {
             const std::set<std::string>& allow =
                 (packEventsPreset == "minimal") ? kMinimal : kPlayable;
             std::vector<std::string> kept;
-            kept.reserve(lv.rawActionsJson.size());
-            for (const auto& js : lv.rawActionsJson) {
+            kept.reserve(lv.rawActionCount());
+            for (size_t ai = 0; ai < lv.rawActionCount(); ++ai) {
+                const std::string_view js = lv.rawAction(ai);
                 rapidjson::Document d;
-                d.Parse(js.c_str(), js.size());
+                d.Parse(js.data(), js.size());
                 const char* t = (d.HasParseError() || !d.HasMember("eventType")) ? "" : d["eventType"].GetString();
-                if (allow.count(t)) kept.push_back(js);
+                if (allow.count(t)) kept.emplace_back(js);
                 else ++droppedForV7;
             }
-            lv.rawActionsJson = std::move(kept);
+            // 过滤后的切片：内容变了，必须自持一份 blob（不能再指向 mmap 区）
+            lv.rawBlob.clear();
+            lv.rawActionSpans.clear();
+            lv.rawActionSpans.reserve(kept.size());
+            for (const auto& js : kept) {
+                const uint32_t off = (uint32_t)lv.rawBlob.size();
+                lv.rawBlob += js;
+                lv.rawActionSpans.push_back({off, (uint32_t)js.size()});
+            }
             if (!lv.rawDecorationsJson.empty()) {
                 rapidjson::Document dd;
                 dd.Parse(lv.rawDecorationsJson.c_str(), lv.rawDecorationsJson.size());

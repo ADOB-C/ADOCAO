@@ -10,6 +10,7 @@
 #include <cstring>
 #include <new>
 #include "archive/AdocaoReader.hpp"   // .adocao 解码（注册进 backend 钩子）
+#include "archive/AssetPack.hpp"     // 资产包 ADOCAO-data.tar.xz（注册进 backend 钩子）
 
 
 namespace adofai {
@@ -383,7 +384,9 @@ ArchiveBackend backend() {
 }
 
 void install() {
-    setArchiveBackend(backend());
+    ArchiveBackend be = backend();
+    be.readAssetPack = &readAssetFromPack;   // 资产包（ADOCAO-data.tar.xz）
+    setArchiveBackend(be);
     // ③ 切片 4：把"按块重算每砖数据"注册给 core（明文路径也要用；core 不依赖 archive）
     installFloorRecompute(&adocao::computeFloorWindow);
 }

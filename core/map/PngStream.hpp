@@ -6,7 +6,7 @@
 #include <vector>
 
 // 流式 PNG 写出（RGBA8，8bit，非隔行）：一行一行喂，内存只占一行 + deflate 状态。
-// 用依赖里已有的 miniz tdefl 做 zlib 压缩，所以不需要 libpng / zlib / ffmpeg。
+// 压缩走 zlib（`PngDeflate.hpp` 把 zlib 名字映射成 `mz_*`），所以不需要 libpng / ffmpeg。
 // 这是为"1 像素 = 1 层"那种 1.9M x 0.78M 的画布准备的：整张图 5.7 TB，攒缓冲是不可能的。
 class PngStreamWriter {
 public:

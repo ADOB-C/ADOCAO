@@ -25,6 +25,9 @@ add_library(adocao_archive STATIC
     AdocaoWindow.cpp
     # v3 的判据统计（`--codec-report` 的"为什么"）：纯诊断，不参与任何编码决策
     AdocaoDiagnostics.cpp
+    # 资产包 `ADOCAO-data.tar.xz`（xz(tar(assets/…))）：解压 + tar 索引，供 core 的
+    # DataFile 通过钩子读取。2026-10-25 起资产包不再用 zip（miniz 依赖已删）。
+    AssetPack.cpp
     # Re_ADOJAS 的 `.ilytx`（xz(tar(ilybin))）：解 ilybin 的核心二进制
     Ilybin.cpp
     #   …… 再把它翻译成等价的 .adofai 明文，交回 core 那条唯一路径（不建第二条解析链）

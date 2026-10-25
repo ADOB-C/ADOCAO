@@ -57,7 +57,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     `adofai::ma_device`，跟真类型成两个东西。
 - 资产查找走 `adofai::assetOptions()`（`core/util/AssetPaths.{hpp,cpp}`）：库默认只认"相对当前目录"、
   不找 zip、不找 data 目录；**产品名与布局集中在 `app/AssetSetup.cpp::configureAssetPaths()`**
-  （zip = `ADOCAO-data.zip`、dataDir = `ADOCAO-data`、roots = CWD→exe 目录→macOS bundle 的 `../Resources`→上溯 3 级；
+  （资产包 = `ADOCAO-data.tar.xz`、dataDir = `ADOCAO-data`、roots = CWD→exe 目录→macOS bundle 的 `../Resources`→上溯 3 级；
   非 Windows 优先 CWD，Windows 优先 exe 旁）。hitsounds 的相对目录同理由 `HitsoundManager::setDefaultHitsoundSubdir`
   设进来。**改这些名字/顺序时别退回 `core/util/DataFile.cpp` 里**——那里现在一个产品名都没有。
 - **模块依赖：core 不依赖 archive**（2026-10 解耦，依赖倒置）。`core/level/ByteSource.{hpp,cpp}` 只有
@@ -86,12 +86,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   验过 4/4 也挡不住这个（brew 的 lzma 5.8.4 ≥ 5.6）。注意 `tests/level_parse_test.cpp`
   **自己**在用 lzma/zstd API 造压缩样本（`lzma_easy_buffer_encode` / `ZSTD_compress`），所以那个
   测试目标的 include 与链接依赖不能跟着删。
-- **`ADOCAO_ASSET_ZIP`**（根 CMake，默认 ON）：OFF 时 `DataFile.cpp` 不编 zip 那条路
-  （`ADOCAO_HAVE_MINIZ`），core 不链 miniz。**这是 OFF 能成立的前提**：PNG 写出统一走 zlib
-  （`core/map/PngDeflate.hpp` 把 zlib 名字映射成 `mz_*`，`PngBand`/`PngStream` 共用），
-  于是 miniz 的唯一使用者只剩 `DataFile`。实测 OFF：core 里 0 个 `mz_` 符号、`adocao image`
-  解码后像素与 ON 完全一致（连 PNG 文件字节数都相同）、门槛子集逐字节相同。
-  注意 `core/map/**` 不进 ADOFAI.Lib（见 PLAN.md），所以库里 OFF 天然成立、也不需要 zlib。
+- **资产包：`ADOCAO-data.tar.xz`**（2026-10-25 起，替代 `ADOCAO-data.zip`）。xz 里的 tar，
+  条目名就是 `assets/shaders/...`；解压 + tar 索引在 **archive 模块**（`archive/AssetPack.cpp`，
+  用已有的 liblzma），core 只通过 `ArchiveBackend::readAssetPack` 钩子读。
+  **因此 miniz 这个依赖整个删掉了**（它此前只服务 zip），`ADOCAO_ASSET_ZIP` 选项一并退休。
+  打包：`tar -cJf ADOCAO-data.tar.xz -C . assets`（CI 的 release.yml 也这么打）。
+  查找顺序：资产包 → `ADOCAO-data/` 目录 → 各搜索根下的相对路径（磁盘 `assets/` 仍可用，
+  所以开发期不打包也能跑）。
+
 - **`tiles` 不能先 `resize(n)` 再 `push_back` 末尾那块 extra 砖**：libc++ 会按 2× 增长 → 容量永久停在 2n
   → 每层从 24 B 变成 **48 B**（`calculateTilePositions`，`core/level/LevelData.cpp`）。正确写法是先
   `reserve(n + 1)` 再 `resize(n)`。实测：修复前 `cap = 2n`（三张谱一致）、修复后 `cap = n + 2`；
@@ -343,7 +345,7 @@ A WinUI 3 C# launcher lived in a separate repo at `../ADOCAO_WinUI3_Launcher/` �
 **Linux / macOS:** `chmod +x build.sh && ./build.sh` — 首次运行提问；已有 `build/` 缓存后不带参数运行即增量构建（不提问、不重新 configure；改选项需带参数如 `-U -Portable`）
 **Manual:** `mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && cmake --build . --parallel`
 
-Minimum CMake 3.20. C++20. OpenGL 4.3+ required. Dependencies via FetchContent (GLFW, glm, RapidJSON, Dear ImGui, miniaudio, stb, miniz, tinyfiledialogs).
+Minimum CMake 3.20. C++20. OpenGL 4.3+ required. Dependencies via FetchContent (GLFW, glm, RapidJSON, Dear ImGui, miniaudio, stb, zlib/liblzma/zstd, tinyfiledialogs).
 
 `--debug` flag enables debug console, disables hitsounds by default.
 

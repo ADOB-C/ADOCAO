@@ -173,21 +173,9 @@ set(SDL2_LIBRARY "SDL2_LIBRARY-NOTFOUND" CACHE FILEPATH "" FORCE)
 set(STEAMAUDIO_LIBRARY "STEAMAUDIO_LIBRARY-NOTFOUND" CACHE FILEPATH "" FORCE)
 FetchContent_MakeAvailable(miniaudio)
 
-# miniz (single-file zip library, public domain)
-# 只服务"资产打成一个 zip"那条路（ADOCAO-data.zip）。ADOFAI.Lib 里它对应
-# ADOFAI_LIB_ASSET_ZIP=OFF：库默认零产品布局、也不背 miniz。
-option(ADOCAO_ASSET_ZIP "资产 zip 支持（私有链 miniz，OFF 则只从磁盘找资产）" ON)
-if(ADOCAO_ASSET_ZIP)
-    FetchContent_Declare(
-        miniz
-        GIT_REPOSITORY https://github.com/richgel999/miniz.git
-        GIT_TAG 3.0.2
-        GIT_SHALLOW TRUE
-    )
-    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-    FetchContent_MakeAvailable(miniz)
-    target_include_directories(miniz PUBLIC ${miniz_SOURCE_DIR})
-endif()
+# 资产包：`ADOCAO-data.tar.xz`（xz 里的 tar，条目名就是 `assets/shaders/...`）。
+# 2026-10-25 起不再用 zip —— 读包走 archive 模块的钩子（liblzma 已经在那儿），
+# 于是 **miniz 这个依赖整个删掉了**（`ADOCAO_ASSET_ZIP` 选项一并退休）。
 
 # tinyfiledialogs (single-header C library)
 FetchContent_Declare(

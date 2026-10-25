@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
 
 // 谱面容器识别 + "解压字节从哪来"的**接口**（2026-10 解耦）。
 //
@@ -56,8 +58,13 @@ using WholeDecoder = bool (*)(const char* data, size_t length, LevelArchiveKind 
                               std::string& out, std::string& reason,
                               const std::function<void(float)>& onProgress);
 
-// 后端能力：三个都可以为空（= 该能力不可用）。由 archive 模块注册。
+// 资产包里读一个条目（`"assets/shaders/tile.vert"` → 字节）。返回 false = 包不存在/没有这个条目。
+// 实现和 `.adocao`/`.xz` 一样放在 archive 模块（那儿才有 liblzma），core 只认这个钩子。
+using AssetPackReader = bool (*)(const char* name, std::vector<uint8_t>& out);
+
+// 后端能力：四个都可以为空（= 该能力不可用）。由 archive 模块注册。
 struct ArchiveBackend {
+    AssetPackReader readAssetPack = nullptr;
     WholeDecoder decodeWhole = nullptr;
     WindowSource* (*makeWindow)() = nullptr;
     AdocaoDecoder decodeAdocao = nullptr;

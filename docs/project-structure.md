@@ -35,7 +35,7 @@
 | `render/`    | Shader、Shaders.hpp(回退 GLSL)、PlanetTrail、CullSIMD                         | ~500  | 否               |
 | `shaders/`   | 运行时 GLSL 资产                                                              | —     | 资产              |
 | `track/`     | TileGeometry(**纯几何**)、TileMesh(456, GL)                                  | ~740  | 部分              |
-| `util/`      | Logger、ThreadPool、DataFile(miniz)、Easing                                 | ~500  | 是               |
+| `util/`      | Logger、ThreadPool、DataFile(资产包钩子)、Easing                                 | ~500  | 是               |
 
 CMake：单一根 `CMakeLists.txt`（352 行），一个 `add_executable(adocao)`，源文件按注释分组平铺。
 
@@ -73,7 +73,8 @@ CMake：单一根 `CMakeLists.txt`（352 行），一个 `add_executable(adocao)
    > ✅ **P5 已解决（2026-09）**：资产并入 `assets/` 后四处同步为：
    > `app/LevelScene.cpp` 的 `compileShaders()`（"assets/shaders/…"）、`audio/HitsoundManager.cpp` 的
    > `findAssetsDir()`（"assets/hitsounds/…"）、`app/CMakeLists.txt` POST_BUILD（拷贝到
-   > `build/assets/{hitsounds,shaders}`）、`.github/workflows/release.yml`（`zip -r ADOCAO-data.zip ../assets`）。
+   > `build/assets/{hitsounds,shaders}`）、`.github/workflows/release.yml`（`zip -r ADOCAO-data.zip ../assets`；
+   > 2026-10-25 起改成 `tar -cJf ADOCAO-data.tar.xz -C .. assets`，zip/miniz 依赖已删）。
 8. **文档漂移**：`AGENTS.md`/`README.md` 曾残留 GPU compute culling 等已移除功能的描述（2.0.0 起已不需要，现已彻底清理）与不全的 CLI 标志表；重构完成后仍需统一核对目录命名等描述。
 
 ### 1.3 现状依赖图（真实 include 关系，已抽掉标准库）
@@ -183,7 +184,7 @@ ADOCAO/
         ┌───────▼───────────▼─────┐
         │ adocao_core             │  ← 唯一的纯逻辑层，禁止 include：
         │ level / timeline /      │    glad、GLFW、imgui、miniaudio、
-        │ util                    │    任何平台头；只许 std/glm/rapidjson/miniz
+        │ util                    │    任何平台头；只许 std/glm/rapidjson
         └─────────────────────────┘
 ```
 

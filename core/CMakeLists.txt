@@ -52,12 +52,9 @@ else()
 endif()
 
 target_include_directories(adocao_core PUBLIC ${CMAKE_SOURCE_DIR})
-if(ADOCAO_ASSET_ZIP)
-    target_compile_definitions(adocao_core PRIVATE ADOCAO_HAVE_MINIZ=1)
-    target_link_libraries(adocao_core PUBLIC glm::glm miniz)
-else()
-    target_link_libraries(adocao_core PUBLIC glm::glm)
-endif()
+# 资产包不再用 zip：`ADOCAO-data.tar.xz` 由 archive 模块解（liblzma 已经在那儿），
+# 所以 core 不需要 miniz（PNG 写出用的是 zlib，见上面的 FetchContent）。2026-10-25：删掉 miniz。
+target_link_libraries(adocao_core PUBLIC glm::glm)
 
 # RapidJSON is header-only; expose its include directory to consumers that use
 # LevelData.hpp (which includes <rapidjson/document.h>).

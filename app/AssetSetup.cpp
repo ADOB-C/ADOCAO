@@ -39,7 +39,7 @@ void configureAssetPaths() {
 
     adofai::AssetOptions opts;
     opts.roots = std::move(roots);
-    opts.zipName = "ADOCAO-data.zip";
+    opts.packName = "ADOCAO-data.tar.xz";
     opts.dataDir = "ADOCAO-data";
     adofai::setAssetOptions(std::move(opts));
 

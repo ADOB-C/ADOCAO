@@ -42,7 +42,7 @@ bool PngStreamWriter::openCommon(const std::string& path, uint32_t width, uint32
     ihdr.push_back(0); ihdr.push_back(0); ihdr.push_back(0);
     if (!writeChunk("IHDR", ihdr.data(), ihdr.size())) return false;
 
-    // 用 miniz 的 zlib 兼容层做流式 deflate：IDAT 必须是**一条** zlib 流，
+    // 用 zlib 做流式 deflate（名字经 PngDeflate.hpp 映射成 mz_*）：IDAT 必须是**一条** zlib 流，
     // 所以不能一段一段地各自压缩。
     mz_stream* zs = (mz_stream*)std::calloc(1, sizeof(mz_stream));
     m_defl = zs;

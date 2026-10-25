@@ -77,9 +77,9 @@ jobs:
       - name: Build
         run: cmake --build build --parallel $(nproc)
 
-      - name: Package data
+      - name: Package data (tar.xz)
         run: |
-          cd build && zip -r ADOCAO-data.zip ../assets
+          cd build && tar -cJf ADOCAO-data.tar.xz -C .. assets
 
       - name: Package (historical release name)
         run: cp build/ADOCAO ADOCAO-Linux
@@ -89,7 +89,7 @@ jobs:
         with:
           files: |
             ADOCAO-Linux
-            build/ADOCAO-data.zip
+            build/ADOCAO-data.tar.xz
 
   macOS:
     runs-on: macos-14

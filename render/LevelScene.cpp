@@ -185,8 +185,20 @@ bool LevelScene::init(const SceneConfig& cfg, const LevelData& level, const Time
 
     // Render-layer planets. The core timeline/clock only produce pure frame
     // data; the scene owns the actual GL drawable Planet objects.
-    m_redPlanet = std::make_unique<Planet>(glm::vec3(1.0f, 0.0f, 0.0f), cfg.showTrail);
-    m_bluePlanet = std::make_unique<Planet>(glm::vec3(0.0f, 0.0f, 1.0f), cfg.showTrail);
+    // 官方配色（Re_ADOJAS Player.PLANET_DEFS）：红/蓝/绿/黄/紫/粉/橙/青
+    static const glm::vec3 kPlanetColors[8] = {
+        {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f},
+        {0.302f, 0.702f, 0.0f},   // 4db300
+        {1.0f, 0.8f, 0.0f},        // ffcc00
+        {0.702f, 0.102f, 1.0f},    // b31aff
+        {1.0f, 0.102f, 0.702f},    // ff1ab3
+        {1.0f, 0.4f, 0.102f},      // ff661a
+        {0.102f, 0.8f, 0.902f},    // 1acce6
+    };
+    for (int i = 0; i < 8; ++i) m_planetPool[i] = std::make_unique<Planet>(kPlanetColors[i], cfg.showTrail);
+    m_redPlanet = m_planetPool[0].get();
+    m_bluePlanet = m_planetPool[1].get();
+    m_planetActive[0] = m_planetActive[1] = true;
     return true;
 }
 
@@ -210,10 +222,7 @@ void LevelScene::buildSync(const LevelData& level) {
     const size_t rss0 = m_residentBytes ? m_residentBytes() : 0;
     m_tileMesh->build(level, m_fillColor, m_strokeColor, m_buildTimeline);
     logResidentDelta(m_residentBytes, "TileMesh", rss0);
-    if (m_redPlanet) {
-        m_redPlanet->buildGPU();
-        m_bluePlanet->buildGPU();
-    }
+    for (auto& p : m_planetPool) if (p) p->buildGPU();
     m_meshReady = true;
 }
 
@@ -278,8 +287,27 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
     // **不要**在这里窄化成 float：绝对世界坐标到 6.84e7 时 float ulp = 8 砖（primer-final），
     // 行星会被量化到与砖块不同的格点上（用户实测"行星也不对了"）。Planet 现在存 double，
     // 相机相对化在 Planet::draw 里用 double 做完再窄化。
-    m_redPlanet->position = glm::dvec3(frame.redPosition.x, frame.redPosition.y, 9.5);
-    m_bluePlanet->position = glm::dvec3(frame.bluePosition.x, frame.bluePosition.y, 9.5);
+    // 只在**当前砖真的有 3+ 颗**时才走多星路径：N=2 的段（以及没有 MultiPlanet 的谱）
+    // 完全走旧路径，保证像素门槛逐字节不变。（N=2 时列表布局与旧的奇偶口径等价，见
+    // tests/multiplanet_test.cpp 的逐位断言。）
+    const int64_t curTile = timeline.findTileIndex(frame.timeInLevel);
+    const bool multi = m_level && m_level->hasMultiPlanet() &&
+                       m_level->planetCountAt(curTile) > 2;
+    if (!multi) {
+        m_redPlanet->position = glm::dvec3(frame.redPosition.x, frame.redPosition.y, 9.5);
+        m_bluePlanet->position = glm::dvec3(frame.bluePosition.x, frame.bluePosition.y, 9.5);
+        m_planetActive[0] = m_planetActive[1] = true;
+    } else {
+        // MultiPlanet：逐砖列表激活 N 颗（位置由 PositionSolver::planetsAt 算，含正 N 边形布局）
+        std::vector<PositionSolver::PlanetPos> pos;
+        PositionSolver::planetsAt(timeline, frame.timeInLevel, pos);
+        m_planetActive.fill(false);
+        for (const auto& pp : pos) {
+            if (pp.id >= 8) continue;
+            m_planetActive[pp.id] = true;
+            m_planetPool[pp.id]->position = glm::dvec3(pp.pos.x, pp.pos.y, 9.5);
+        }
+    }
 
     if (!m_showTrail || !m_redPlanet->trail || !m_bluePlanet->trail) return;
 
@@ -305,6 +333,32 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
         win = PositionSolver::trailWindow(timeline, frame.timeInLevel, sc);
     }
     std::vector<glm::dvec2> redPts, bluePts;
+    if (multi) {
+        // MultiPlanet：每颗行星各自的解析式拖尾（同一批采样时刻，一次 planetsAt 分发到各 id）
+        profile::Scoped _s("trailSampleMp");
+        const double span = frame.timeInLevel - win.startTime;
+        int n = (int)std::ceil(span * win.sampleRate) + 1;
+        if (n < 2) n = 2;
+        for (auto& v : m_mpTrailPts) v.clear();
+        std::vector<PositionSolver::PlanetPos> tmp;
+        for (int k = 0; k < n; ++k) {
+            const double tt = win.startTime + span * ((double)k / (double)(n - 1));
+            PositionSolver::planetsAt(timeline, tt, tmp);
+            for (const auto& pp : tmp)
+                if (pp.id < 8) m_mpTrailPts[pp.id].push_back(pp.pos);
+        }
+        for (int id = 0; id < 8; ++id) {
+            const auto& pts = m_mpTrailPts[(size_t)id];
+            if (!m_planetActive[(size_t)id] || pts.size() < 2) {
+                m_planetPool[(size_t)id]->setTrailPoints(nullptr, 0, 0);
+                continue;
+            }
+            std::vector<double> xy(pts.size() * 2);
+            for (size_t i = 0; i < pts.size(); ++i) { xy[i*2] = pts[i].x; xy[i*2+1] = pts[i].y; }
+            m_planetPool[(size_t)id]->setTrailPoints(xy.data(), (int)pts.size(), n);
+        }
+        return;   // 两球路径不再走（MultiPlanet 谱）
+    }
     {
         profile::Scoped _s("trailSample");
         PositionSolver::sampleTrailRange(timeline, win.startTime, frame.timeInLevel, win.sampleRate,
@@ -529,18 +583,26 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     // Trails（RAII 段：别显式调析构，那会跟作用域结束时的析构重复累加）
     {
         profile::Scoped _s("trails");
-        if (m_showTrail && (playing || ended) && m_redPlanet && m_redPlanet->trail) {
-            m_redPlanet->trail->draw(*m_trailShader, camera, camera.targetX(), camera.targetY());
-            m_bluePlanet->trail->draw(*m_trailShader, camera, camera.targetX(), camera.targetY());
+        if (m_showTrail) {
+            for (int id = 0; id < 8; ++id) {
+                auto& pl = m_planetPool[(size_t)id];
+                if (!pl || !pl->trail) continue;
+                if (!m_planetActive[(size_t)id]) continue;
+                pl->trail->draw(*m_trailShader, camera, camera.targetX(), camera.targetY());
+            }
         }
     }
 
     // Planets
     {
         profile::Scoped _s("planets");
-        if ((playing || ended) && m_redPlanet && m_redPlanet->gpuBuilt()) {
-            m_redPlanet->draw(*m_planetShader, camera, camera.targetX(), camera.targetY());
-            m_bluePlanet->draw(*m_planetShader, camera, camera.targetX(), camera.targetY());
+        if (playing || ended) {
+            for (int id = 0; id < 8; ++id) {
+                auto& pl = m_planetPool[(size_t)id];
+                if (!pl || !pl->gpuBuilt()) continue;
+                if (!m_planetActive[(size_t)id]) continue;
+                pl->draw(*m_planetShader, camera, camera.targetX(), camera.targetY());
+            }
         }
     }
 

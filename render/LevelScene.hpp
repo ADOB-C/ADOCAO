@@ -4,6 +4,9 @@
 #include "core/timeline/TileAnimation.hpp"
 #include "core/util/Scheduler.hpp"   // Handle 是**按值**成员 → 需要完整类型
 
+#include <array>
+#include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
 #include <future>
 #include <memory>
 #include <string>
@@ -85,8 +88,14 @@ private:
     // 由 init() 传入、buildSync() 消费 —— 生命周期同样由调用方（GameWindow）保证。
     const adofai::Timeline* m_buildTimeline = nullptr;
     bool m_trackColorOverride = false;            // --fill/--stroke：整条轨道用同一套颜色
-    std::unique_ptr<adofai::Planet> m_redPlanet;
-    std::unique_ptr<adofai::Planet> m_bluePlanet;
+    // 行星池：官方 8 颗（红/蓝/绿/黄/紫/粉/橙/青）。没有 MultiPlanet 的谱只用前两颗，
+    // 与旧行为逐位一致；有 MultiPlanet 时按逐砖列表激活/停用（见 applyFrame）。
+    std::array<std::unique_ptr<adofai::Planet>, 8> m_planetPool;
+    std::array<bool, 8> m_planetActive{};
+    adofai::Planet* m_redPlanet = nullptr;
+    adofai::Planet* m_bluePlanet = nullptr;
+    // 解析式拖尾的每颗行星采样点（只在 MultiPlanet 谱里用）
+    std::array<std::vector<glm::dvec2>, 8> m_mpTrailPts;
 
     // Build-time config snapshots (config object outlives the scene, but the
 

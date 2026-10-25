@@ -914,3 +914,27 @@ scripts/ref-ab.sh "$CHART" --time 180.46 --skew 4.94
 
 **HUD 的 Map Time 是 canvas 画的**（`document.body.innerText` 里没有），
 所以没法自动读它对齐，只能显式给 skew。
+
+### 12.2 直接跑参考实现的相机来对拍（`scripts/ref-camera.sh`）
+
+`ADOCAO_CAM_DUMP` 只能证明"我们的链条自洽"，证明不了"和权威实现一致"。所以加了
+`scripts/ref-camera.sh`：把 `~/Repos/Re_ADOJAS/src/lib/Player/CameraController.ts` 用 esbuild
+打成 CJS（纯数学、无 GL 依赖），喂**同一份** MoveCamera 事件 + 我们的逐砖网格，逐帧驱动到目标时刻。
+
+```bash
+ADOCAO_TRACKVIS_DUMP=2 ./build/adocao --capture /tmp/x.png --level <chart> ...   # 先出网格
+scripts/ref-camera.sh <chart.adofai> 180.15 185.15 190.16      # 或 --tiles 1550 1609
+```
+
+MM2（`t=180~190`，那段"固定相机 + 世界旋转"）实测两边**逐项吻合**：
+
+| t | 我们的 cam（`state:`） | 我们 zoom（内部→ADOFAI） | 我们 rot | 参考 cam | 参考 zoom | 参考 rot |
+|---|---|---|---|---|---|---|
+| 180.15 | (333.31, 108.47) | 46.7 → 469.7 | 2.7 | (333.31, 108.47) | 469.8 | 2.7 |
+| 185.15 | (332.76, 108.47) | 523.0 → 41.9 | 224.3 | (332.76, 108.47) | 44.1 | 226.7 |
+| 190.16 | (332.76, 108.47) | 43.9 → 499.7 | 720.0 | (332.76, 108.47) | 500.0 | 720.0 |
+
+（我们日志里的 zoom 是**内部**值：`adoZoom = 21937.8427 / internalZoom`。）
+
+**结论**：MM2 那段的相机位置、旋转、zoom 与参考一致；"位置/转心不一样"是**时间基准**
+差（`Map Time` vs 关卡时间，§12.1 的 4.94 s），不是相机算错。

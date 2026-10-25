@@ -236,6 +236,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   抓"libc++ 间接带头 / clang 宽容、GCC 报错"这类只在 CI 红的问题 —— 2026-10-23/24 连踩两次：
   `<cmath>` 缺失、`(void)y0;`（`y0` 是 `<math.h>` 的 Bessel 函数）。`--jobs N`、可接目录前缀过滤；
   Apple SDK/miniaudio 那些 GCC 解析不了的头会记 SKIP 而不是 FAIL）
+  `scripts/ref-camera.sh <谱> <秒...>`（把 Re_ADOJAS 的 `CameraController` 用 esbuild 打成 CJS，
+  逐帧驱动到目标时刻，打印 cam/zoom/rot 与我们的 `state:` 对照 —— 相机类问题**先跑它**，
+  别靠读代码猜；用法见 `docs/camera.md` §12.2）
   `scripts/push-ci.sh`（push → gh run watch；`--watch` 默认输出平台耗时/产物）
   `scripts/run.sh --debugger` | `scripts/release.sh`（支持 x.y.z-AlphaN/-BetaN/-RcN）
   `scripts/make-app.sh`（macOS：把 `build/adocao` + `assets/` 打成自包含的 `build/adocao.app`，含 ad-hoc 签名；CI 的 macOS job 也用同一个脚本）

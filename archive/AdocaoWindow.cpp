@@ -21,8 +21,8 @@ constexpr float  kPiF = 3.14159265f;
 // `Timeline::totalAngleAt` + `durationAt` 的**生产路径**公式（逐字照抄，包括浮点类型与
 // 常量 3.14159265f；`precalcTileRange` 是另一条 A/B 参考实现，别照抄那一份）。
 // 第 i 层的 duration 由 tileIsCW / tileBPM / preAngleDir / preExtraRot 决定。
-float rotationDuration(double rawAngleData, float preAngleDir, bool isCW, float currentBPM,
-                       float extraRotation) {
+double rotationDuration(double rawAngleData, float preAngleDir, bool isCW, float currentBPM,
+                        float extraRotation) {
     double relAngle;
     if (rawAngleData == 999.0) {
         relAngle = 0.0;
@@ -41,8 +41,12 @@ float rotationDuration(double rawAngleData, float preAngleDir, bool isCW, float 
     if (isCW) totalAngle = -totalAngle;
     if (isCW) totalAngle -= extraRotation * 2.0f * kPiF;
     else      totalAngle += extraRotation * 2.0f * kPiF;
-    const float rotationAmount = std::abs(totalAngle) / (2.0f * kPiF);
-    return rotationAmount * 2.0f * (60.0f / currentBPM);
+    // 最后这步必须与 `Timeline::durationFromTotalAngle` 逐字相同：**全程 double**
+    // （`totalAngle` 与 `currentBPM` 仍是 float，存的是原值，但换算不在 float 里做）。
+    // 2026-10-26：`87b2576` 把生产路径改成 double 时漏了这个副本，导致窗口重算的
+    // tileStartTimes 与全量数组差到 float 量化量级（adocao_window / adocao_checkpoints 红）。
+    const double rotationAmount = std::abs((double)totalAngle) / (2.0 * 3.14159265358979323846);
+    return rotationAmount * 2.0 * (60.0 / (double)currentBPM);
 }
 
 }  // namespace

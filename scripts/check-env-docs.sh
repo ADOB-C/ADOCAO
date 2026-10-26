@@ -30,5 +30,5 @@ for n in $all; do
 done
 
 count=$(printf '%s\n' $all | grep -c .)
-echo "check-env-docs: $count 个环境变量（源码 getenv/flag + 脚本）全部已在 $DOC 登记"
-[ "$missing" = 0 ] || { echo "有环境变量没写进 $DOC（规则见该页顶部）"; exit 1; }
+echo "check-env-docs: $count 个环境变量（源码 getenv/flag + 脚本）全部已在 ${DOC} 登记"
+[ "$missing" = 0 ] || { echo "有环境变量没写进 ${DOC}（规则见该页顶部）"; exit 1; }

@@ -102,6 +102,7 @@
 | `ADOCAO_CAM_DUMP` | 诊断 | 打印每次运镜事件的应用（floor / relativeTo / 时长 / 目标 / camParent / 旋转 / zoom）|
 | `ADOCAO_ANIM_DUMP_TILE` | 诊断 | 打印该砖各通道的关键帧（`<n>`；排查"砖看不见"） |
 | `ADOCAO_ANIM_DUMP_TIME` | 诊断 | 配合上一项：在该时刻采样并打印 hidden 判定 |
+| `ADOCAO_MP_DUMP` | 诊断 | `a-b`：打印该楼层区间的逐砖行星表（星数/列表下标/枢轴位），与参考实现对拍用 |
 | `ADOFAO_GATE_HOME` | 路径 | `~/Projects/.ADOCAO/gate` | 像素门槛基线目录（**注意拼写是 ADOFAO**，历史遗留，勿"顺手修正"） |
 
 ## 8. 相关但**不是**环境变量的东西

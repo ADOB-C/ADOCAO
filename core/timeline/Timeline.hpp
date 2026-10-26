@@ -192,7 +192,7 @@ private:
     std::vector<float> m_tileBPM;
     std::vector<bool>  m_tileIsCW;
     std::vector<Anchor> m_anchors;   // ③ 切片 1：见 anchors()
-    std::vector<double> m_blockStartTimes;   // 每 kBlockStride 层一份（窗口物化的起点）
+    std::vector<double> m_blockStartTimes;   // 每 kBlockStride 层一份；**平移前**的前缀和
     // ③ 切片 2 起时长是"按块重算"的前缀来源；2026-10-16 起**不再存**（27 MB）：`durationAt(i)`
     // 由 `angleAt(i)` + `m_tileBPM[i]` + `m_tileIsCW[i]` 现算，口径与 `precalculateTiming` 逐字相同。
     bool   m_blocksRecomputable = false;

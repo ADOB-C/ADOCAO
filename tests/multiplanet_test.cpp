@@ -9,6 +9,7 @@
 //   ③ N<=2 时 planetsAt 与 positionAtTile **逐位相同**（像素门槛不变的前提）。
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -51,8 +52,11 @@ int main() {
     const char* evs =
         R"({"floor":2,"eventType":"MultiPlanet","planets":"ThreePlanets"},)"
         R"({"floor":6,"eventType":"MultiPlanet","planets":"TwoPlanets"})";
-    writeChart("mp3.adofai", evs);
-    LevelData lv; Timeline tl; load("mp3.adofai", lv, tl);
+    // 写进系统临时目录：以前写 CWD，从仓库根跑一次就把 mp3.adofai 留在了仓库里（真被提交过）。
+    const std::string chartPath =
+        (std::filesystem::temp_directory_path() / "adocao_multiplanet_test.adofai").string();
+    writeChart(chartPath.c_str(), evs);
+    LevelData lv; Timeline tl; load(chartPath.c_str(), lv, tl);
 
     check(lv.planetCountAt(0) == 2 && lv.planetCountAt(1) == 2, "floor 0/1 仍是两球");
     check(lv.planetCountAt(2) == 3 && lv.planetCountAt(5) == 3, "floor 2..5 三球");

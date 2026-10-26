@@ -379,24 +379,36 @@ void Timeline::precalculateTiming() {
     m_tileIsCW[n - 1] = isCW;
     m_tileBPM[n - 1] = currentBPM;
 
-    // Phase 3: Prefix sum
-    double totalTime = 0.0;
+    // Phase 3: Prefix sum —— **先平移、后累加**（不变量，见下）。
+    //
+    // 平移量 = 平移前的 startTime[1]，也就是 durationAt(0)。把它放在累加**之前**（从 -shift 起算），
+    // 而不是"从头累加、最后整条数组 -= shift"：两种写法数学等价，但只有这一种保证
+    // **从任意内部值继续向前累加都能复刻同一串 double**。窗口重算有三条路
+    // （Timeline::recomputeBlock、LevelData 的 FloorWindowCache、.adocao 的 checkpoint），
+    // 它们全部是"从存下来的某个 startTime 起、按层序加 durationAt" —— 后置平移会让
+    // `(S_i - shift)` 再参与加法，与 `S_i` 参与加法的舍入不同（实测 1 ULP，
+    // 把 timeline_anchor / adocao_window 打红）。先平移就没有这个分叉。
+    // startTime[1] 仍是精确的 0：(-d0) + d0 == 0。
+    const double shift = (n > 1) ? (double)durationAt(0) : 0.0;
+    double totalTime = -shift;
 
     for (int i = 0; i < n - 1; i++) {
         m_tileStartTimes[i] = totalTime;
         totalTime += (double)durationAt(i);   // 时长不存了：后面按块重算用同一个 durationAt() 现算
     }
     if (n > 0) m_tileStartTimes[n - 1] = totalTime;
+    const double preShiftTotal = totalTime + shift;   // 平移前的总时长（只用于日志/统计）
     // 注意：这是**平移前**的赋值 → 恒为 0（等价于"t<0 的倒计时段"阈值）。
     // 平移后 startTimeAt(0) 是负的一砖时长；PositionSolver 用 firstStartTime() 区分
     // "倒计时绕砖 0 转"与"正常沿砖走"，保持 0 是当前行为。
     m_firstStartTime = 0.0;
 
-    double preShiftTotal = totalTime;
-    if (n > 1) {
-        double shift = m_tileStartTimes[1];
-        for (int i = 0; i < n; i++) m_tileStartTimes[i] -= shift;
-    }
+    // 窗口物化的块基点 = 稠密数组在块首层的值。因为数组本身就是"从 -shift 起的前缀和"，
+    // 从任一块基点继续累加都与数组逐位相同 —— 重算路径不需要知道 shift。
+    m_blockStartTimes.clear();
+    m_blockStartTimes.reserve((size_t)((n + kBlockStride - 1) / kBlockStride));
+    for (int64_t i = 0; i < (int64_t)n; i += kBlockStride)
+        m_blockStartTimes.push_back(m_tileStartTimes[(size_t)i]);
 
     // Phase 4: Last tile — use pre-built index instead of scanning all actions.
     // Export mode has no tile geometry, so this phase is only needed for normal
@@ -588,14 +600,6 @@ void Timeline::precalculateTiming() {
             m_anchors.push_back(a);
         }
         LOG_D("Timeline: %zu 个锚点（每 %lld 层）", m_anchors.size(), (long long)kAnchorStride);
-
-        // 窗口物化的块起始时间（kBlockStride 粒度，8 B/份）。**原样抄自同一支数组**，
-        // 所以与"从 4096 锚点起累加到同一层"的中间值逐位相同 —— 从更近的块起点重新累加
-        // 得到的仍是同一串 double（同一顺序、同一操作），这就是块粒度可以自由变细的原因。
-        m_blockStartTimes.clear();
-        m_blockStartTimes.reserve((size_t)((n + kBlockStride - 1) / kBlockStride));
-        for (int64_t i = 0; i < (int64_t)n; i += kBlockStride)
-            m_blockStartTimes.push_back(m_tileStartTimes[(size_t)i]);
 
         // ③ 切片 3：粗索引（每锚点一份 TrackVis 时间，26 KB 换掉 103 MB）+ 单调性判据。
         // **必须在锚点记完之后建**（它在 Phase 5 之后，早建会遍历空数组）。
@@ -877,6 +881,8 @@ int Timeline::findTileIndex(double t) const {
     // 窗口化：先在**块起始时间**上二分（每 kBlockStride 层一份，startTime 单调不减：
     // duration 恒 ≥ 0），再在那一块内二分取"最后一个 startTime <= t"的层。
     // 与原实现（锚点二分 + 4096 层块内扫描）同值：块更细，但单调性前提一样。
+    // 块基点存的是**平移前**的前缀和，所以比较前要减 shift —— 这一步与 Phase 3 的
+    // `m_tileStartTimes[i] -= shift` 是**同一个操作、同一对 double**，结果逐位相同。
     int64_t lo = 0, hi = (int64_t)m_blockStartTimes.size() - 1, aEnd = -1;
     while (lo <= hi) {
         const int64_t m = (lo + hi) / 2;

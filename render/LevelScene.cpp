@@ -591,7 +591,9 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
     // Trails（RAII 段：别显式调析构，那会跟作用域结束时的析构重复累加）
     {
         profile::Scoped _s("trails");
-        if (m_showTrail) {
+        // 和行星同一条件：**暂停/未播放时不画拖尾**（原来就是 `playing || ended`，
+        // 改行星池时漏掉了这个判断 → 暂停后拖尾停在屏幕上"不消失"）。
+        if (m_showTrail && (playing || ended)) {
             for (int id = 0; id < 8; ++id) {
                 auto& pl = m_planetPool[(size_t)id];
                 if (!pl || !pl->trail) continue;

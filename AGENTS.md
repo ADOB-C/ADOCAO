@@ -240,6 +240,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `assets/shaders/*` 逐字相同）
 - 待办（已筛选）：`TODO.md`（未完成清单 + 遥远的未来：MoveTrack）
 - 已彻底删除：GPU compute culling（2.0.0 起不需要，勿再引入）
+- **本项目是"查看器"，不该具备"产出谱面"的能力**（2026-10-25 用户拍板；原话："首先这个项目不应该
+  具备输出能力，有也放 tests/"）。判据：凡是**把谱面写成文件**（`.adocao` / `.adofai` / 任何容器）
+  的功能，一律不进产品面 —— 需要就放 `tests/`（测试/工具目标，不随产品发布）。
+  * **已经进了产品面的**：`adocao pack`（`archive/AdocaoWriter.*` + `app/main.cpp` 的 `pack` 子命令，
+    2026-10-07 的 `39fae2c` 落地）。按这条规则它应该搬去 `tests/tools/`；**动手前先问用户**
+    （会动回归测试的调用方式）。
+  * **保留**：`adocao image` / `tiles` / `stitch`（出图）与 `adocao export`（hitsound WAV）——
+    那是查看器自身的输出，不是"产出谱面"。
+  * 推论：查 `.adocao` 写入/压缩相关的问题时，别顺手扩 `AdocaoWriter` 的公开能力；
+    要造测试数据就在 `tests/` 里拼。
+
 - **不要盯 CI、不要长超时、不要轮询后台任务**（2026-10-22 用户明确，三条一起）：
   * push 之后**不必**等 CI：用户会收到失败邮件并主动告知。真要等就**用现成的
     `scripts/push-ci.sh`**（它处理重试、失败摘要、`--stats` 平台耗时），**别手搓**

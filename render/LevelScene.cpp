@@ -297,6 +297,14 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
         m_redPlanet->position = glm::dvec3(frame.redPosition.x, frame.redPosition.y, 9.5);
         m_bluePlanet->position = glm::dvec3(frame.bluePosition.x, frame.bluePosition.y, 9.5);
         m_planetActive[0] = m_planetActive[1] = true;
+        // 从多星段**退出来**时，第 3..8 颗的行星/拖尾必须显式清掉：
+        // 两球路径永远不会再写它们，于是上一段的大圈拖尾会**一直留在屏幕上**
+        // （2026-10-25 用户截图："拖尾不消失"）。
+        for (int id = 2; id < 8; ++id) {
+            if (!m_planetActive[(size_t)id]) continue;
+            m_planetActive[(size_t)id] = false;
+            m_planetPool[(size_t)id]->setTrailPoints(nullptr, 0, 0);
+        }
     } else {
         // MultiPlanet：逐砖列表激活 N 颗（位置由 PositionSolver::planetsAt 算，含正 N 边形布局）
         std::vector<PositionSolver::PlanetPos> pos;

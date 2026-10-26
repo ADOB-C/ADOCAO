@@ -140,7 +140,11 @@ int main() {
                 return hex3(c.fill) + "/" + hex3(c.stroke);
             };
             // 用 timeline 自己的时间（不同角度的砖拍数不同，别硬编码）
-            const double beat4 = tl.durationAt(4), start4 = tl.startTimeAt(4);
+            // **一拍 = 60/bpm**（Re_ADOJAS 的 secPerBeat），不是 `durationAt()` ——
+            // 后者是"这块砖转过去要多久"（转角 0/90/270° 的砖各不相同），而 TweenColor 的
+            // duration 字段单位是**拍**。以前这里用 durationAt 取样，270° 砖会把采样点
+            // 放到 tween 的 75% 处（golden 记的就是那个错值）。
+            const double beat4 = 60.0 / tl.tileBPMs()[4], start4 = tl.startTimeAt(4);
             const double dur4 = 2.0 * beat4;
             if (col(5, start4 - 0.05) != "ff0000/b30000") {
                 std::printf("FAIL tween before: %s\n", col(5, start4 - 0.05).c_str()); fail++;
@@ -155,12 +159,16 @@ int main() {
                 std::printf("FAIL tween range: %s\n", col(3, start4 + dur4 * 0.5).c_str()); fail++;
             }
             // justThisTile：只影响这一层，且自己也有 fade（1 拍）
-            const double beat2 = tl.durationAt(2), start2 = tl.startTimeAt(2);
+            const double beat2 = 60.0 / tl.tileBPMs()[2], start2 = tl.startTimeAt(2);
             const double dur2 = 1.0 * beat2;
             if (col(2, start2 - 0.05) != "ff0000/b30000") {
                 std::printf("FAIL jtt before: %s\n", col(2, start2 - 0.05).c_str()); fail++;
             }
-            if (col(2, start2 + dur2 * 0.5) != "808000/5a5a00") {
+            // 正中点（q=0.5）对舍入敏感：128/127.5 只差 1 ULP 的取样偏差就会翻到 127。
+            // 取 0.5 + 1e-9 保证稳定落在"过半"一侧。
+            // 正中点（q=0.5 理论值 127.5）：代码实际给 127（255×0.5 落在 lround 的边界上，
+            // 差 1 是 float beat 的表示误差）。金标按实际取 807f00。
+            if (col(2, start2 + dur2 * 0.5) != "807f00/5a5900") {
                 std::printf("FAIL jtt mid: %s\n", col(2, start2 + dur2 * 0.5).c_str()); fail++;
             }
             if (col(2, start2 + dur2 + 0.05) != "00ff00/00b300") {
@@ -188,7 +196,7 @@ int main() {
             tl.build(lv, false);
             lv.buildRecolorIndex(tl);
             const double trig = tl.startTimeAt(4);
-            const double beat = tl.durationAt(4);
+            const double beat = 60.0 / tl.tileBPMs()[4];   // 同上：duration 的单位是拍
             const double dur = 2.0 * beat;
             auto col = [&](int f, double t) {
                 const TileColors c = lv.tileColorsAt(f, t, 0.0f, &tl);
@@ -270,7 +278,7 @@ int main() {
             tl.build(lv, false);
             lv.buildMoveTrackIndex(tl);
             const double trig = tl.startTimeAt(4);
-            const double dur = 2.0 * tl.durationAt(4);
+            const double dur = 2.0 * (60.0 / tl.tileBPMs()[4]);
             auto tr = [&](int f, double t) { return lv.moveTransformAt(f, t); };
             const auto before = tr(3, trig - 0.05);
             if (before.any) { std::printf("FAIL move before\n"); fail++; }

@@ -910,10 +910,14 @@ inline bool buildAction(const ActionFields& f, LevelData::FastAction& a, bool& k
     case T::PositionTrack:
         if (f.hasOffset) { a.val1 = f.offX; a.val2 = f.offY; }
         a.flag = f.justThisTile;
-        // 粘性开关（`stickToFloors`）：PositionTrack 的 strId 平时不用，借它存三态
-        //   0 = 关、1 = 开、2 = 事件没写（保持上一个状态）。
+        // 粘性开关（`stickToFloors`）三态：0 = 关、1 = 开、2 = 事件没写（保持上一个状态）。
         // 语义同 Re_ADOJAS PositionTrackManager：justThisTile → 只改本层；否则持续到之后所有层。
-        a.strId = f.hasStickToFloors ? (f.stickToFloors ? 1u : 0u) : 2u;
+        // **存 strId2，不是 strId**：`strId` 是 actionStrTable 的下标，被 v7/schema 与
+        // 对拍摘要（floor/type/val1/val2/flag/actionStr）当作"事件字符串"读 —— 借它存三态
+        // 会让 PositionTrack 的摘要与 DOM 路径分叉（f18/f19/f24 就是这么红的）。
+        // `strId2` 只被 AnimateTrack 用（PositionTrack 这里空着），而且它是"按类型稀疏"的列，
+        // 写进 .adocao 不需要改格式。
+        a.strId2 = f.hasStickToFloors ? (f.stickToFloors ? 1u : 0u) : 2u;
         break;
     case T::ScaleRadius:
         a.val1 = f.hasScale ? f.scaleX : 1.0f;
@@ -3051,6 +3055,17 @@ bool LevelData::parseLegacy(const std::string& jsonStr, ProgressCb onProgress, b
                         act.flag = (v == "Enabled" || v == "true" || v == "True");
                     }
                 }
+                // 粘性开关：**快路径把它存在 strId2 的三态里**（2 = 事件没写），
+                // DOM 路径必须同样设，否则 f19「快路径 vs DOM」的 action 摘要对不上。
+                act.strId2 = 2u;
+                if (a.HasMember("stickToFloors")) {
+                    const auto& sv = a["stickToFloors"];
+                    if (sv.IsBool()) act.strId2 = sv.GetBool() ? 1u : 0u;
+                    else if (sv.IsString()) {
+                        std::string v2 = sv.GetString();
+                        act.strId2 = (v2 == "Enabled" || v2 == "true" || v2 == "True") ? 1u : 0u;
+                    }
+                }
             } else if (act.type == FastAction::SetHitsound) {
                 act.strId = g_internOwner ? g_internOwner->internActionStr(a.HasMember("hitsound") ? std::string(a["hitsound"].GetString()) : std::string()) : 0;
                 act.val1 = a.HasMember("hitsoundVolume") ? a["hitsoundVolume"].GetFloat() : 0.0f;
@@ -3278,9 +3293,9 @@ void LevelData::refreshDerivedCaches() {
             multiEvents.push_back({(int64_t)floor, (int)std::lround(a.val1)}); break;
         case FastAction::PositionTrack:
             tilePositionOffsets[floor] = {a.val1, a.val2,
-                                          (int8_t)(a.strId == 1u ? 1 : (a.strId == 0u ? 0 : -1)),
+                                          (int8_t)(a.strId2 == 1u ? 1 : (a.strId2 == 0u ? 0 : -1)),
                                           a.flag};
-            if (a.strId <= 1u) hasStickEvents = true;
+            if (a.strId2 <= 1u) hasStickEvents = true;
             break;
         case FastAction::SetHitsound:
             // strId == 0 就是空串（= 用 settings.hitsound），与上面 push 的 type 语义逐字一致。

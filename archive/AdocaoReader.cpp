@@ -398,14 +398,16 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
             a.floor = (int)floors[i];
             a.type = (LevelData::FastAction::Type)(uint8_t)t;
             a.strId = (mStr & bit) ? (uint16_t)strs[ks++] : 0;
-            a.strId2 = (i < strs2.size()) ? (uint16_t)strs2[i] : 0;
+            // strId2 也是**按类型的稀疏列**（mask 里只有用到它的类型才有条目），
+            // 不能用稠密下标 i 去取（那样混合类型的事件会把后面的值整体错位）。
+            a.strId2 = (mS2 & bit) ? (uint16_t)strs2[k2i++] : 0;
             a.flag = (flags[i] != 0);
             const uint32_t x1 = (mV1 & bit) ? v1[k1++] : 0u;
             const uint32_t x2 = (mV2 & bit) ? v2[k2++] : 0u;
             std::memcpy(&a.val1, &x1, 4);
             std::memcpy(&a.val2, &x2, 4);
         }
-        if (strs2.size() != m) { err = "actions.strId2 列长度不符（文件损坏）"; return false; }
+        if (strs2.size() != k2i) { err = "actions.strId2 列长度不符（文件损坏）"; return false; }
         if (ks != strs.size() || k1 != v1.size() || k2 != v2.size()) {
             err = "actions 稀疏列的条数与掩码不符（文件损坏）";
             return false;

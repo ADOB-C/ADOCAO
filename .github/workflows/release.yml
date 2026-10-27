@@ -34,11 +34,12 @@ jobs:
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DADOCAO_PORTABLE=ON \
+            -DADOCAO_BUILD_TESTS=OFF \
             -DADOCAO_ZOOM_LEVEL=Hyper
 
       - name: Build
         shell: msys2 {0}
-        run: cmake --build build --parallel
+        run: cmake --build build --target adocao --parallel
 
       - name: Package (historical release name)
         shell: msys2 {0}
@@ -72,10 +73,11 @@ jobs:
       - name: Configure
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DADOCAO_BUILD_TESTS=OFF \
             -DADOCAO_ZOOM_LEVEL=Hyper
 
       - name: Build
-        run: cmake --build build --parallel $(nproc)
+        run: cmake --build build --target adocao --parallel $(nproc)
 
       - name: Package data (tar.xz)
         run: |
@@ -109,10 +111,11 @@ jobs:
       - name: Configure
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DADOCAO_BUILD_TESTS=OFF \
             -DADOCAO_ZOOM_LEVEL=Hyper
 
       - name: Build
-        run: cmake --build build --parallel $(sysctl -n hw.ncpu)
+        run: cmake --build build --target adocao --parallel $(sysctl -n hw.ncpu)
 
       - name: Package .app bundle (binary + assets, ad-hoc signed)
         run: scripts/make-app.sh

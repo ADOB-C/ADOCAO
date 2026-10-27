@@ -285,5 +285,10 @@ add_subdirectory(audio)
 add_subdirectory(app)
 
 # ---- Tests ----
-enable_testing()
-add_subdirectory(tests)
+# `-DADOCAO_BUILD_TESTS=OFF`：**发版构建**不该把 30 多个测试/工具可执行文件也编一遍
+# （Release 只需要 `adocao` 这一个产物）。默认 ON，本地与 build.yml 都照常跑测试。
+option(ADOCAO_BUILD_TESTS "构建 tests/（发版时可关）" ON)
+if(ADOCAO_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

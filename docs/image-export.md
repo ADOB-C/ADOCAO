@@ -60,8 +60,8 @@
 
 | 布局 + 压缩 | 体积 | libtiff / ImageMagick | macOS 预览（ImageIO） |
 |---|---|---|---|
-| `tile` + `zstd` | 68,639 B | ✓ | ✗ |
-| **`tile` + `deflate`（默认）** | 123,086 B | ✓ | ✗ |
+| **`tile` + `zstd`（默认，2026-10-27 起）** | 68,639 B | ✓ | ✗ |
+| **`tile` + `deflate`**（旧默认） | 123,086 B | ✓ | ✗ |
 | `strip` + `zstd` | 67,863 B | ✓ | ✗（Compression=50000 不支持） |
 | `strip` + `deflate` | 123,624 B | ✓ | **✓** |
 
@@ -69,8 +69,13 @@
 
 - **要 macOS 预览/快速查看能打开** → `--tiff-layout strip --tiff-compress deflate`；
 - **要随机访问（看右下角只解几块）且体积最小** → 默认 `tile + zstd`（用 ImageMagick/libtiff 看）；
-- **默认 `tile + deflate`**：布局按用户要求保持 tiled（随机访问好），压缩从 zstd 换成 deflate
-  （zstd 只有 libtiff/ImageMagick 认，ffmpeg 直接报错；Krita/Kdenlive 静帧两条都行）；
+- **默认 `tile + zstd`**（2026-10-27 用户拍板）：布局保持 tiled（随机访问好），压缩用 zstd
+  （体积小 1.8×；只有 libtiff/ImageMagick/Krita/Kdenlive 认，ffmpeg 会报
+  `Unknown compression method 50000`）。要跟 ffmpeg 打交道就显式
+  `--tiff-layout strip --tiff-compress deflate`；
+- 为什么默认能换：Windows 包此前因为 PNG 写出链了 **动态 zlib**（release 的 exe 要求
+  `zlib1.dll`，Issue #1）。现在 Portable/Windows 强制静态 zlib，且 TIFF 默认走 zstd ——
+  单 exe 不再依赖任何第三方 DLL；
 - 走 **MLT→FFmpeg** 的环节（Kdenlive 图片序列/proxy）必须 `--tiff-layout strip` ——
   ffmpeg 不读 tiled 且**不报错**（解出全黑）；
 - 体积优先：`--tiff-compress zstd`（小 1.8×，但 ffmpeg / macOS 预览都不认）。

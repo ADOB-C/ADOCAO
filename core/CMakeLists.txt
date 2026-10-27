@@ -28,7 +28,16 @@ add_library(adocao_core STATIC
 # 分带并行 PNG 写入器**必须**用 zlib：miniz 的 mz_deflate/mz_inflate 在这条用法下会吞行、
 # 也无法解开自己写的流，拿它跑出来的 PNG 是坏的（而坏 PNG 比编译失败糟糕得多）。
 # 系统没有就自己取一份 —— 之前"退回 miniz"的写法会让 Windows 便携版静默产出坏图。
-find_package(ZLIB QUIET)
+# **Portable/Windows 下强制用静态 zlib**（2026-10-27，Issue #1）：
+# MSYS2 里的 `find_package(ZLIB)` 会命中 `libz.dll.a`（zlib1.dll 的导入库），产出的 exe
+# 运行时要求 `zlib1.dll` —— 那正是用户报的 "未找到 zlib1.dll"。Portable 的语义是**单 exe**，
+# 所以这两类构建跳过 find_package，直接走下面的 FetchContent（zlibstatic）。
+if(WIN32 OR ADOCAO_PORTABLE)
+    set(ZLIB_FOUND OFF)
+    message(STATUS "PngBand: Portable/Windows → 强制静态 zlib（不链 zlib1.dll）")
+else()
+    find_package(ZLIB QUIET)
+endif()
 if(NOT ZLIB_FOUND)
     include(FetchContent)
     FetchContent_Declare(

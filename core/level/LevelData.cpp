@@ -3292,9 +3292,8 @@ void LevelData::refreshDerivedCaches() {
         case FastAction::MultiPlanet:
             multiEvents.push_back({(int64_t)floor, (int)std::lround(a.val1)}); break;
         case FastAction::PositionTrack:
-            tilePositionOffsets[floor] = {a.val1, a.val2,
-                                          (int8_t)(a.strId2 == 1u ? 1 : (a.strId2 == 0u ? 0 : -1)),
-                                          a.flag};
+            tilePositionOffsets[floor] = {a.val1, a.val2, a.flag,
+                                          (int8_t)(a.strId2 == 1u ? 1 : (a.strId2 == 0u ? 0 : -1))};
             if (a.strId2 <= 1u) hasStickEvents = true;
             break;
         case FastAction::SetHitsound:

@@ -485,11 +485,16 @@ struct LevelData {
     struct TilePositionOffset {
         float offsetX = 0.0f;
         float offsetY = 0.0f;
-        // `stickToFloors`：-1 = 事件没写（继承），0 = 关（行星不跟着轨道动），1 = 开（默认）。
-        int8_t stick = -1;
         // 官方语义（对照 Re_ADOJAS 的移植确认）：false = 偏移**继承**到之后所有层；
         // true = **只作用于本层**。消费方见 applyPositionTrackOffsets()。
+        //
+        // ⚠️ 字段顺序：`justThisTile` 必须紧跟两个 offset —— 测试与历史代码用
+        // `{x, y, justThisTile}` 的**位置初始化**；把新字段插在中间会让 `true` 落到别的成员上
+        // （2026-10-27 真踩过：`stick` 插在中间 → 点加型被当成继承型，checkpoint 的 cum 全歪）。
+        // 新字段一律**追加在末尾**，并且要有默认值。
         bool  justThisTile = false;
+        // `stickToFloors`：-1 = 事件没写（继承），0 = 关（行星不跟着轨道动），1 = 开（默认）。
+        int8_t stick = -1;
     };
 
     // Per-tile event data (computed from actions)

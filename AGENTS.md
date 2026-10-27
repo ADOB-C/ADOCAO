@@ -257,6 +257,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     `gh run list` + `gh run watch` + 20 分钟超时 —— 那是白占一次工具调用的时间。
   * 命令超时别动辄十几二十分钟（真跑过 28 分钟）；短命令给 ≤120 s，长任务放后台。
   * **不要用 `job_output` 轮询**后台任务：任务结束会**自动注入上下文**，反复 poll 是纯浪费。
+- **多会话协作走文件信箱**（2026-10-27 用户拍板）：两个 DSH 会话之间**不能** `send_message`
+  （工具直接拒绝：`belongs to another parent session`，同级会话互发是禁止的）。所以共用
+  **`build/asm/handoff/`** 这个目录（在 `build/` 下，已 gitignore，**不进仓库**）：
+  * 一条消息一个文件，命名 **`YYYY-MM-DD-HHMM-<from>.md`**（`from` = `perf` / `arch` 这类短代号）；
+  * 看消息**按文件名排序取最新的**；回复**新建文件**，不要覆盖对方的；
+  * 每条建议写清四段：① 我做了什么（commit）② 我看到的现状（命令 + 输出）③ 请你做什么 /
+    我问的问题 ④ 我接下来要做什么（避免两边同时改同一个文件）；
+  * **结论性的东西**（不变量、分工、根因）要复制进 `docs/` 或 commit message，
+    别只留在信箱里 —— 信箱是过程，文档才是资产。
 - 脚本：`scripts/check-gcc.sh`（**推之前用真 GCC 扫一遍**：`-fsyntax-only` 跑 114 个 TU、~30 s，
   抓"libc++ 间接带头 / clang 宽容、GCC 报错"这类只在 CI 红的问题 —— 2026-10-23/24 连踩两次：
   `<cmath>` 缺失、`(void)y0;`（`y0` 是 `<math.h>` 的 Bessel 函数）。`--jobs N`、可接目录前缀过滤；

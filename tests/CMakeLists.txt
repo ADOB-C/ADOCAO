@@ -321,3 +321,8 @@ add_test(NAME multiplanet COMMAND multiplanet_test)
 # 按 AGENTS.md「本项目不该具备产出谱面的能力」，这类生成器只放 tests/。
 add_executable(gen_repeat_adocao tools/gen_repeat_adocao.cpp)
 target_link_libraries(gen_repeat_adocao PRIVATE adocao_core adocao_archive)
+
+# 测试侧工具（不进 ctest、不随产品发布）：原来的 `adocao pack` 子命令。
+# AGENTS.md：查看器不该具备"产出谱面"的能力，需要就放 tests/。
+add_executable(pack_adocao tools/pack_adocao.cpp)
+target_link_libraries(pack_adocao PRIVATE adocao_core adocao_archive)

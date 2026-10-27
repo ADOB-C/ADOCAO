@@ -1,7 +1,7 @@
 # `.adocao` 二进制容器规范（v1）
 
 > 状态：**v2 已落地**（列级 `Rle`/`DeltaRleVarint` + 稀疏载荷列 + 段级 zstd；读写都在）。**读写都已落地** —— `archive/AdocaoFormat.hpp`、`archive/AdocaoColumns.{hpp,cpp}`、
-> `archive/AdocaoWriter.{hpp,cpp}`、`archive/AdocaoReader.{hpp,cpp}`、CLI `adocao pack`。
+> `archive/AdocaoWriter.{hpp,cpp}`、`archive/AdocaoReader.{hpp,cpp}`、CLI `pack_adocao`（tests/tools，2026-10-27 从产品 CLI 搬出）。
 > 读取路径已接通：core 的 `sniffLevelArchive` 认 magic `ADO1` → `LevelData::loadFromBuffer`
 > 经 `ArchiveBackend::decodeAdocao` 钩子分派（**core 不依赖 archive**，依赖倒置不变）→
 > 填好 `LevelData` 后与两条 JSON 路径**共用同一个 `finishLoad()` 收尾**。
@@ -254,7 +254,7 @@ docs/camera.md §2.3。两段都**只在非空时写**；旧文件没有它们 �
 
 ## 5. 实测
 
-`adocao pack <谱> <out.adocao> --codec-report` 打印每列的编码、元素数、朴素/编码后字节、
+`pack_adocao <谱> <out.adocao> --codec-report` 打印每列的编码、元素数、朴素/编码后字节、
 字典项数与位宽。
 
 **MYC（6,770,912 层 / 6,181,981 action）：611.18 MB → 19.58 MB = 3.033 B/层（31×，0 换页）**
@@ -732,7 +732,7 @@ v2 是"一列选一个 codec"；v3 拆成两层，候选空间 7 → 5 变换 ×
 ### 8.4 判据（`--codec-report` 打出来的东西）—— ✅ 已实现（步骤 ① + ①'）
 
 现在是"每个候选真编一遍取最小"—— 稳定但**看不见"为什么"**。判据表已经落地在
-`archive/AdocaoDiagnostics.{hpp,cpp}`（**纯诊断**：不参与任何编码决策），`adocao pack --codec-report`
+`archive/AdocaoDiagnostics.{hpp,cpp}`（**纯诊断**：不参与任何编码决策），`pack_adocao --codec-report`
 会紧跟着列明细打印它，外加一句"估算字节/值最小"的建议。测试谱与生成器见
 `tests/gen_adocao_charts.py` → `tests/charts/diag_*.adofai`（七张，见下表），
 自测 `tests/adocao_diagnostics_test.cpp`（ctest `adocao_diagnostics`，含负向对照）。
@@ -989,7 +989,7 @@ QuomodocunquizE **108928 = 108928**、Unity.wav_rate **21,079,240 B**（与 v2 �
 ### 强制分块：`kMustBlockBytes = 128 MB`（窗口化是**要求**，不是优化）
 
 分块把一个列切成 k 个独立可解压单元，而**独立单元必然输给一整条实心流**（熵表摊薄、
-每帧各付头部与字典）。实测（`adocao pack --codec-report` 的"分块：单块 → 分块"行）：
+每帧各付头部与字典）。实测（`pack_adocao --codec-report` 的"分块：单块 → 分块"行）：
 
 | 谱 / 列 | 单块 | 分块 | 比 |
 |---|---|---|---|
@@ -1035,7 +1035,7 @@ QuomodocunquizE **108928 = 108928**、Unity.wav_rate **21,079,240 B**（与 v2 �
 ## 8.12 `Derived` 段的 checkpoint（⑧ —— ✅ 已实现 2026-10-15）
 
 > 实现：`archive/AdocaoCheckpoints.{hpp,cpp}`（计算 / 编解码 / **续算对拍**）；
-> `adocao pack --checkpoints` 写出；`unpackLevel(..., DerivedInfo*)` 读回。
+> `pack_adocao --checkpoints` 写出；`unpackLevel(..., DerivedInfo*)` 读回。
 > 自测：`tests/adocao_checkpoints_test.cpp`（ctest `adocao_checkpoints`）。
 
 ### 记录（96 B 定长，全部小端；字段一律 **f64**，不许 f32 —— §8.8 的实测理由）
@@ -1097,7 +1097,7 @@ MYC      6770912 层 → 1654 条（30401 B / 容器 36568 B）｜从快照重�
   按这个比例外推 2³¹−1 层：524,288 条 × 80 B = 42 MB 裸 → **≈ 9.8 MB**（§2 当初的估算是 19.4 MB）。
 * 因为它天生是 O(n/4096) 字节，**默认不写**（`PackOptions::withCheckpoints = false`）——
   这样默认的 v3 文件仍然与 v2 **逐字节同大小**（§8.11）。要 ③ 的 O(1) seek / 窗口化就
-  `adocao pack <谱> <out> --checkpoints`。
+  `pack_adocao <谱> <out> --checkpoints`。
 * ⚠️ 已知缺口（留给 ③）：`timeSec/bpm` 现在**算得出、存得下、验得过**，但**还没有任何消费方**
   —— 真正的窗口化加载器（③）才是它的第一个用户。在那之前，`preserved` 段（§8.7）仍未实现。
 
@@ -1236,7 +1236,7 @@ SetSpeed 314 层，**全部 0 不一致**。
   三态用 flags 区分（bit0 有 null / bit1 有缺失 / bit2 全 null / bit3 pair 的分量有 null）。
   序列化往返逐字节确定（同输入两次打包相同）。
 - `LevelData::preserveRawJson`（**只在 pack 用**）：用 RapidJSON 捕获 `actions` 每条事件的原始切片
-  与整个 `decorations` 数组；默认关，播放路径零成本。`adocao pack --schema-report` 打印统计。
+  与整个 `decorations` 数组；默认关，播放路径零成本。`pack_adocao --schema-report` 打印统计。
 
 ### 9.2 实测（Hello 2025，3.41 MB / 11,233 事件 / 1,233 装饰）
 
@@ -1272,7 +1272,7 @@ GridFloat 10.2 KB、Enum 10.6 KB、Color 5.2 KB、Float 5.8 KB、Bool 1.8 KB、T
 
 ### 9.4 裁剪导出实测（回答"屏蔽事件能回到 v5 体积吗"）
 
-`adocao pack --schema-report --events=all|playable|minimal`（schema 在**裁剪之后**建）：
+`pack_adocao --schema-report --events=all|playable|minimal`（schema 在**裁剪之后**建）：
 
 | 预设 | 保留类型 | 事件数 | 列字节 | **整段 zstd-19** |
 |---|---|---|---|---|

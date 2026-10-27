@@ -123,19 +123,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   一起回退，只回退其中一行会得出错误结论（本次就因此错误地排除了自己的改动）。
 - **`.adocao`（自研二进制容器，v3）**：列式 + **每列按其取值基数选编码**
   （`Dict`/`Const`/`DeltaVarint`/`BitPack`/`Rle`/`DeltaRleVarint`/`Raw` + 段级 zstd），**逐位无损**、
-  坏数据明确失败、编码器自检（编完解回来逐位比，最坏退回 `Raw`）。CLI：`adocao pack <谱> <out.adocao> [--codec-report]`。
+  坏数据明确失败、编码器自检（编完解回来逐位比，最坏退回 `Raw`）。CLI：`pack_adocao <谱> <out.adocao> [--codec-report]`。
   接入方式：core 只按 magic `ADO1` 分派（`ArchiveBackend::decodeAdocao` 钩子，**core 依旧不依赖 archive**），
   解开后与两条 JSON 路径**共用同一个 `finishLoad()`**；`.adocao` 与 JSON 出的图逐字节相同（MYC 677 万层验过）。
   实测：MYC 611.18 MB → **6,120 B**（10.5 万倍）、v300 300.95 MB → 6,128 B、The Moon 15.60 MB → 3,544 B、
   angles360（人工谱）→ 9,344 B（字典主导）。规范 + 逐项实测分析见 `docs/adocao-format.md`（§5.1–§5.11）。
   **v3 ⑥ 分块已落地**（`archive/AdocaoBlocked.*`：4096 一块、块内自选、帧级 zstd 与 seek 粒度解耦；
   段级"实编取最小"→ **v3 文件大小与 v2 完全相同**，裸数据 ≥128 MB 才**强制分块**；
-  **v3 ⑧ `Derived` checkpoint 也已落地**（每 4096 层一条 96 B 快照，`adocao pack --checkpoints`，默认关；
+  **v3 ⑧ `Derived` checkpoint 也已落地**（每 4096 层一条 96 B 快照，`pack_adocao --checkpoints`，默认关；
   验收 = 从快照重算 position **逐位 memcmp**，含 1 ULP 反面对照；详见 `docs/adocao-format.md` §8.11/§8.12）。
   **③ 的第一半已落地**（`archive/AdocaoWindow.*`：从 checkpoint + 一块数据重算出窗口的
   `Tile/tileBPMs/tileStartTimes`，与全量加载**逐位 memcmp**；`ActionIndex` 段 = 按层索引，8 B/4096 层；
   详见 `docs/adocao-format.md` §8.13。加载器/渲染**还没接**，所以 D1 的 RSS 还不能宣称）。
-  **v3 判据统计已落地**（`archive/AdocaoDiagnostics.{hpp,cpp}`，纯诊断、不参与编码）：`adocao pack --codec-report`
+  **v3 判据统计已落地**（`archive/AdocaoDiagnostics.{hpp,cpp}`，纯诊断、不参与编码）：`pack_adocao --codec-report`
   会打印"每列长什么样"（环绕率 raw/masked、值集/差分基数、**整数域 Δ² 的 varint 字节数**、窗口唯一数、
   粗网格判定、空间自重叠率）。两条别踩的口径：**残差只在整数域算**（浮点域的 Δ² 被量化噪声淹没）、
   **十进制网格要精确判定 `k/10^e == v`**；测试谱七张 `tests/charts/diag_*.adofai`（生成器
@@ -243,9 +243,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **本项目是"查看器"，不该具备"产出谱面"的能力**（2026-10-25 用户拍板；原话："首先这个项目不应该
   具备输出能力，有也放 tests/"）。判据：凡是**把谱面写成文件**（`.adocao` / `.adofai` / 任何容器）
   的功能，一律不进产品面 —— 需要就放 `tests/`（测试/工具目标，不随产品发布）。
-  * **已经进了产品面的**：`adocao pack`（`archive/AdocaoWriter.*` + `app/main.cpp` 的 `pack` 子命令，
-    2026-10-07 的 `39fae2c` 落地）。按这条规则它应该搬去 `tests/tools/`；**动手前先问用户**
-    （会动回归测试的调用方式）。
+  * **曾经进了产品面、2026-10-27 已搬走**：`adocao pack`（2026-10-07 的 `39fae2c` 落地）→ 现在是
+    `tests/tools/pack_adocao.cpp`（CMake 目标 `pack_adocao`，不随产品发布）。产品 CLI 只剩
+    `image` / `tiles` / `stitch` / `export`。搬走后产品不再链接 lzma **编码器**（实测 −56 KB）。
   * **保留**：`adocao image` / `tiles` / `stitch`（出图）与 `adocao export`（hitsound WAV）——
     那是查看器自身的输出，不是"产出谱面"。
   * 推论：查 `.adocao` 写入/压缩相关的问题时，别顺手扩 `AdocaoWriter` 的公开能力；

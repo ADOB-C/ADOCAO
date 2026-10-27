@@ -144,7 +144,11 @@ add_custom_command(TARGET adocao POST_BUILD
 )
 
 # Copy MinGW runtime DLLs next to EXE
-if(MINGW)
+# **Portable 构建不拷**：`-static` 已经把 libstdc++/libgcc/winpthread 全链进来了（这也是单 exe
+# 的意义）。不跳的话，POST_BUILD 会在某些 toolchain 上拿到 `-print-file-name=` 返回的**裸文件名**
+# 去 copy，直接把构建打红（2026-10-27 真踩过：删掉 pack 后链接成功、拷贝却报
+# "Error copying file (if different) from libwinpthread-1.dll"）。
+if(MINGW AND NOT ADOCAO_PORTABLE)
     # 运行时 DLL 不在编译器旁边也能找到：直接问编译器（`-print-file-name=` 返回 sysroot 里的路径）。
     # 旧实现假设 `${CMAKE_CXX_COMPILER}` 同目录有 DLL —— Homebrew 的 mingw 放在
     # `toolchain-x86_64/x86_64-w64-mingw32/lib/`，于是 POST_BUILD 报"复制失败"。
@@ -154,7 +158,9 @@ if(MINGW)
     foreach(dll libgcc_s_seh-1.dll libgcc_s_dw2-1.dll libstdc++-6.dll libwinpthread-1.dll)
         execute_process(COMMAND "${CMAKE_CXX_COMPILER}" -print-file-name=${dll}
                         OUTPUT_VARIABLE _p OUTPUT_STRIP_TRAILING_WHITESPACE)
-        if(EXISTS "${_p}")
+        # 只要**绝对路径且真的存在**的结果：`-print-file-name=` 找不到时会原样返回裸文件名，
+        # 而构建目录里恰好有上一次拷过去的同名文件 → EXISTS 为真，拷的却是相对路径（会失败）。
+        if(IS_ABSOLUTE "${_p}" AND EXISTS "${_p}")
             list(APPEND MINGW_DLLS "${_p}")
         endif()
     endforeach()

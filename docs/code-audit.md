@@ -80,7 +80,7 @@
 | `-Wall -Wextra -Wunused*`（排除第三方/链接重复） | **0 告警** |
 | 头文件 accessor 零调用扫描 | **0**（脚本：`X() const { return ...; }` 且全仓零调用） |
 | 成员字段出现次数 ≤2 扫描 | 仅剩 `TileMesh::m_fill/m_stroke`（memcpy 使用）与测试里的字符串护栏 |
-| `adocao pack angles360` 与审计前字节比 | **完全相同** |
+| `pack_adocao angles360` 与审计前字节比 | **完全相同** |
 | 剔除粒度 4096/8192/16384 同帧 PNG | **逐字节相同** |
 | Windows 构建（MinGW） | 通过 |
 | 工作区 | clean |

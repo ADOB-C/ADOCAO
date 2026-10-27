@@ -81,7 +81,7 @@ ilytx 的载荷是 tar，不是 JSON，所以 `WindowParser` 在首块就发现 
 **主动让路**（日志：`ilytx（tar 容器）只能整份解压`），由整份解压那条路接手。
 
 代价是 ilytx 会**先试一次窗口、再整份解压**（多一次解压）。当前不优化：ilytx 的体量在
-几十 MB 内，xz 解压是亚秒级；真到 2³¹ 层那种规模，正确做法是先用 `adocao pack` 转成
+几十 MB 内，xz 解压是亚秒级；真到 2³¹ 层那种规模，正确做法是先用 `pack_adocao` 转成
 列式容器（那时才是 seek / 内存与 n 解耦的形态）。
 
 ## 5. 已知取舍
@@ -116,7 +116,7 @@ node tests/gen_ilytx_fixtures.mjs      # 重新生成 tests/level_fixtures/ilytx
 | `ilytx_missing_level.ilytx` / `_truncated` / `_badmagic` | **必须干净失败**（不许静默产半份谱面） |
 
 端到端另外验过：`adocao image` 出图，`.ilytx` 与参照 `.adofai` 的 PNG **逐字节相同**
-（5565 层，1024×1024）；`adocao pack` 把 `.ilytx` 转成 `.adocao` 后出图也逐字节相同。
+（5565 层，1024×1024）；`pack_adocao` 把 `.ilytx` 转成 `.adocao` 后出图也逐字节相同。
 
 ## 7. 诊断
 

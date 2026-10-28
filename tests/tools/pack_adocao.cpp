@@ -24,10 +24,12 @@
 #include "archive/AdocaoSchema.hpp"
 #include "archive/AdocaoReader.hpp"   // v7 自检要 unpackLevel
 #include "archive/AdocaoWriter.hpp"
+#include "archive/Install.hpp"   // 读 .adocao 也要注册（loadFromFile 按 magic 分派）
 
 using namespace adofai;
 
 int main(int argc, char** argv) {
+    adofai::archive::install();   // .xz / .adocao 的解码钩子（漏了就只能读明文）
     std::vector<std::string> pos;
     bool packV7 = false, packV7Only = false, codecReport = false, packCheckpoints = false;
     bool packSchemaReport = false;

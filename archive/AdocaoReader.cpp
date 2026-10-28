@@ -342,7 +342,12 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
             return false;
         }
         const uint32_t cols = rdU32(p);
-        if (cols != 7) {
+        // **向后兼容 6 列**：`actions.strId2` 是后加的（`c5758e2` 的 AnimateTrack），
+        // 而容器版本号没动 → 2026-10-16 之前写的 .adocao（例如
+        // `build/singularity_circle_1min.adocao`）是 6 列，直接判"文件损坏"会让它们永远读不了。
+        // 6 列 = 老的列序，缺的那列按 0 处理（那时没有人用 strId2）。
+        const bool haveS2 = (cols == 7);
+        if (cols != 7 && cols != 6) {
             err = "actions 列数不是 7（是 " + std::to_string(cols) + "）";
             return false;
         }
@@ -377,10 +382,16 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
         };
         std::vector<uint32_t> strs, strs2, v1, v2;
         uint32_t mStr = 0, mS2 = 0, mV1 = 0, mV2 = 0;
+        // 6 列布局：floors, types, strId(稀疏), flags, val1(稀疏), val2(稀疏)
+        const size_t iS2 = haveS2 ? 3 : SIZE_MAX;
+        const size_t iFlags = haveS2 ? 4 : 3;
+        const size_t iV1 = haveS2 ? 5 : 4;
+        const size_t iV2 = haveS2 ? 6 : 5;
         if (!decI(cp[0], cn[0], floors, actLegacy) || !decU(cp[1], cn[1], types, actLegacy) ||
-            !readSparse(mStr, strs, cp[2], cn[2]) || !decU(cp[3], cn[3], strs2, actLegacy) ||
-            !decU(cp[4], cn[4], flags, actLegacy) ||
-            !readSparse(mV1, v1, cp[5], cn[5]) || !readSparse(mV2, v2, cp[6], cn[6])) {
+            !readSparse(mStr, strs, cp[2], cn[2]) ||
+            (haveS2 && !decU(cp[iS2], cn[iS2], strs2, actLegacy)) ||
+            !decU(cp[iFlags], cn[iFlags], flags, actLegacy) ||
+            !readSparse(mV1, v1, cp[iV1], cn[iV1]) || !readSparse(mV2, v2, cp[iV2], cn[iV2])) {
             err = "actions 某列解码失败";
             return false;
         }
@@ -401,14 +412,14 @@ bool unpackLevel(const uint8_t* data, size_t length, LevelData& out, std::string
             // strId2 是**稠密列**（writer 的 ColPlan 里 sparse=false，长度恒为 m）：
             // 不能用掩码去取。2026-10-27 我误判成稀疏列，把整条容器解码打红了
             // （adocao_v7_container / parity 的往返 / roundtrip_json / checkpoints 一起红）。
-            a.strId2 = (i < strs2.size()) ? (uint16_t)strs2[i] : 0;
+            a.strId2 = (!haveS2) ? 0u : (i < strs2.size() ? (uint16_t)strs2[i] : 0u);
             a.flag = (flags[i] != 0);
             const uint32_t x1 = (mV1 & bit) ? v1[k1++] : 0u;
             const uint32_t x2 = (mV2 & bit) ? v2[k2++] : 0u;
             std::memcpy(&a.val1, &x1, 4);
             std::memcpy(&a.val2, &x2, 4);
         }
-        if (strs2.size() != m) { err = "actions.strId2 列长度不符（文件损坏）"; return false; }
+        if (haveS2 && strs2.size() != m) { err = "actions.strId2 列长度不符（文件损坏）"; return false; }
         if (ks != strs.size() || k1 != v1.size() || k2 != v2.size()) {
             err = "actions 稀疏列的条数与掩码不符（文件损坏）";
             return false;

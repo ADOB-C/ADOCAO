@@ -33,10 +33,12 @@ bool computeCheckpoints(const LevelData& level, uint32_t stride,
 
     // 与 applyPositionTrackOffsets 同一套语义：非 justThisTile 的偏移**累进**（本层及之后都吃到），
     // justThisTile 是**点加**（只作用于本层）。这里按层号升序推进，所以只需要按 floor 排序的事件。
-    std::vector<std::pair<int64_t, LevelData::TilePositionOffset>> offs(
-        level.tilePositionOffsets.begin(), level.tilePositionOffsets.end());
-    std::sort(offs.begin(), offs.end(),
-              [](const auto& a, const auto& b) { return a.first < b.first; });
+    // 每层可以有多条（按文件序）：展平成 (floor, offset) 再按 floor 稳定排序。
+    std::vector<std::pair<int64_t, LevelData::TilePositionOffset>> offs;
+    for (const auto& kv : level.tilePositionOffsets)
+        for (const LevelData::TilePositionOffset& o : kv.second) offs.push_back({kv.first, o});
+    std::stable_sort(offs.begin(), offs.end(),
+                     [](const auto& a, const auto& b) { return a.first < b.first; });
     size_t oi = 0;
 
     std::vector<std::pair<int64_t, const LevelData::FastAction*>> acts;
@@ -317,13 +319,16 @@ bool FloorWindowCache::materialize(int64_t block) const {
         }
         auto it = m_level->tilePositionOffsets.find((int)i);
         if (it != m_level->tilePositionOffsets.end()) {
-            LevelData::FastAction a;
-            a.floor = (int)i;
-            a.type = LevelData::FastAction::PositionTrack;
-            a.val1 = it->second.offsetX;
-            a.val2 = it->second.offsetY;
-            a.flag = it->second.justThisTile;     // true = 点加（只本层）
-            ev.push_back(a);
+            for (const LevelData::TilePositionOffset& o : it->second) {   // 同层多条，保文件序
+                LevelData::FastAction a;
+                a.floor = (int)i;
+                a.type = LevelData::FastAction::PositionTrack;
+                a.val1 = o.offsetX;
+                a.val2 = o.offsetY;
+                a.flag = o.justThisTile;          // true = 点加（只本层）
+                a.strId2 = (o.stick == 1) ? 1u : (o.stick == 0 ? 0u : 2u);
+                ev.push_back(a);
+            }
         }
     }
     in.events = &ev;

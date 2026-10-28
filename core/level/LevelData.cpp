@@ -3292,8 +3292,9 @@ void LevelData::refreshDerivedCaches() {
         case FastAction::MultiPlanet:
             multiEvents.push_back({(int64_t)floor, (int)std::lround(a.val1)}); break;
         case FastAction::PositionTrack:
-            tilePositionOffsets[floor] = {a.val1, a.val2, a.flag,
-                                          (int8_t)(a.strId2 == 1u ? 1 : (a.strId2 == 0u ? 0 : -1))};
+            tilePositionOffsets[floor].push_back(
+                {a.val1, a.val2, a.flag,
+                 (int8_t)(a.strId2 == 1u ? 1 : (a.strId2 == 0u ? 0 : -1))});
             if (a.strId2 <= 1u) hasStickEvents = true;
             break;
         case FastAction::SetHitsound:
@@ -3500,8 +3501,9 @@ void LevelData::planetPivotAt(int64_t i, double& x, double& y) const {
                                [](int32_t v, const CumOffset& o) { return v < o.floor; });
     if (it != m_cumOffsets.begin()) { const CumOffset& o = *(it - 1); cx = o.x; cy = o.y; }
     auto po = tilePositionOffsets.find((int)i);
-    if (po != tilePositionOffsets.end() && po->second.justThisTile) {
-        cx += po->second.offsetX; cy += po->second.offsetY;
+    if (po != tilePositionOffsets.end()) {
+        for (const TilePositionOffset& o : po->second)
+            if (o.justThisTile) { cx += o.offsetX; cy += o.offsetY; }
     }
     x -= cx; y -= cy;
 }
@@ -3530,15 +3532,20 @@ void LevelData::applyPositionTrackOffsets() {
     struct StickEv { bool stick = true; bool justThisTile = false; };
     std::vector<std::pair<int, StickEv>> stickEvents;
     for (const auto& kv : tilePositionOffsets) {
-        if (kv.second.stick < 0) continue;
-        StickEv se; se.stick = kv.second.stick != 0; se.justThisTile = kv.second.justThisTile;
-        stickEvents.push_back({kv.first, se});
+        for (const TilePositionOffset& o : kv.second) {
+            if (o.stick < 0) continue;
+            StickEv se; se.stick = o.stick != 0; se.justThisTile = o.justThisTile;
+            stickEvents.push_back({kv.first, se});
+        }
     }
     std::sort(stickEvents.begin(), stickEvents.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });
     size_t oi2 = 0;
     int curStick = -1;
-    std::vector<std::pair<int, TilePositionOffset>> sorted(tilePositionOffsets.begin(), tilePositionOffsets.end());
+    std::vector<std::pair<int, TilePositionOffset>> sorted;
+    sorted.reserve(tilePositionOffsets.size());
+    for (const auto& kv : tilePositionOffsets)
+        for (const TilePositionOffset& o : kv.second) sorted.push_back({kv.first, o});
     std::sort(sorted.begin(), sorted.end(), [](auto& a, auto& b) { return a.first < b.first; });
     size_t oi = 0;
 

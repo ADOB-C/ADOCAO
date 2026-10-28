@@ -171,10 +171,11 @@ size_t verifyCheckpointResume(const LevelData& level, const FloorCheckpoint& ck,
     if (i1 <= i0) return 0;
 
     // 事件游标：只用于 [i0, i1) 这一段（**包含 floor == i0**，§8.8 不变量 3）
-    std::vector<std::pair<int64_t, LevelData::TilePositionOffset>> offs(
-        level.tilePositionOffsets.begin(), level.tilePositionOffsets.end());
-    std::sort(offs.begin(), offs.end(),
-              [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::vector<std::pair<int64_t, LevelData::TilePositionOffset>> offs;
+    for (const auto& kv : level.tilePositionOffsets)
+        for (const LevelData::TilePositionOffset& o : kv.second) offs.push_back({kv.first, o});
+    std::stable_sort(offs.begin(), offs.end(),
+                     [](const auto& a, const auto& b) { return a.first < b.first; });
     size_t oi = 0;
     while (oi < offs.size() && offs[oi].first < (int64_t)i0) ++oi;
 

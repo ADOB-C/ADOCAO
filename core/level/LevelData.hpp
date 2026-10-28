@@ -520,7 +520,9 @@ struct LevelData {
         return floor >= 0 && (size_t)floor < tileHitsoundVolumes.size()
                && !std::isnan(tileHitsoundVolumes[(size_t)floor]);
     }
-    std::unordered_map<int, TilePositionOffset> tilePositionOffsets; // sparse
+    // 稀疏：**每层可以有多条**（按文件顺序），不能是"一层一条"——那会让同层的
+    // `justThisTile` 与继承型互相覆盖（2026-10-28 修）。
+    std::unordered_map<int, std::vector<TilePositionOffset>> tilePositionOffsets;
     // ── 粘性轨道（`stickToFloors`，2026-10-24）─────────────────────────────
     // 语义（Re_ADOJAS `PositionTrackManager` + `Player.updatePlanetsPosition`）：
     //   stick = true（默认）→ 行星**跟着**被 PositionTrack 移动后的砖位走；

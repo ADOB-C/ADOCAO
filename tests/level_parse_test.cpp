@@ -84,6 +84,15 @@ void hashMap(const V& m, H& hh) {
         const auto& v = m.at(k);
         if constexpr (std::is_same_v<std::decay_t<decltype(v)>, std::string>) hh.str(v);
         else if constexpr (std::is_floating_point_v<std::decay_t<decltype(v)>>) hh.f32(v);
+        else if constexpr (std::is_same_v<std::decay_t<decltype(v)>,
+                                          std::vector<LevelData::TilePositionOffset>>) {
+            // 每层可以有多条（2026-10-28）：条数也必须进摘要，否则"少了一条"看不出来。
+            hh.u64(v.size());
+            for (const LevelData::TilePositionOffset& o : v) {
+                hh.f32(o.offsetX); hh.f32(o.offsetY); hh.bytes(&o.justThisTile, 1);
+                hh.bytes(&o.stick, 1);
+            }
+        }
         else { hh.f32(v.offsetX); hh.f32(v.offsetY); hh.bytes(&v.justThisTile, 1); }
     }
 }

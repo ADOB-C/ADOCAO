@@ -121,7 +121,24 @@ int main() {
                     (double)last / 100.0, worst, smallest);
     }
 
-    // ---- ④ 容量口径（与日志里的数字同源，改常数时这里会响）----
+    // ---- ④ style 字段只有 3 位：**颜色绝不能编进键**（0x000000..0xFFFFFF 装不下）----
+    // 这条是"特征化测试"：它把键里 style 的宽度钉住 —— 谁哪天为了按颜色缓存几何而把颜色塞进
+    // style（16.7M 个值），键会静默碰撞成"画错砖"；要扩宽就必须同时改这里、容量推理与文档。
+    {
+        for (int st = 0; st < 8; st++)
+            for (int st2 = st + 1; st2 < 8; st2++)
+                if (packKey(0, 0, false, (uint8_t)st) == packKey(0, 0, false, (uint8_t)st2)) {
+                    check(false, "style 字段在 0..7 内就有碰撞");
+                    return 1;
+                }
+        if (packKey(0, 0, false, 8) != packKey(0, 0, false, 0)) {
+            check(false, "style 字段不再是 3 位（文档/容量推理要同步改）");
+            return 1;
+        }
+        std::printf("ok   style 字段 3 位：0..7 无碰撞、8 与 0 重合（颜色不许进键）\n");
+    }
+
+    // ---- ⑤ 容量口径（与日志里的数字同源，改常数时这里会响）----
     {
         if (capacity(4096, 29, 1024) != 144631) { check(false, "GPU 路容量口径变了"); return 1; }
         if (capacity(4096, 142, 1024) != 29537) { check(false, "CPU 回退路容量口径变了"); return 1; }

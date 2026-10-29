@@ -481,6 +481,14 @@ bit1 ssUp / bit2 ssDown，判据 = 改造前 `buildIcons()` 的 `tileBPMs[i]/til
    驱动实际给的尺寸、GL 错误码、容量闸的数字）。**负向对照验过**：临时把 GL 上限那一步去掉 →
    `请求 1024x19819，驱动实际给 0x0，GL 错误 0x0501` + 驱动侧 `texture unloadable` 同时出现。
 
+**颜色不在这个键里**（别把 16.7M 种颜色算进容量）：`styleOfTile()` 只把 `trackStyle` 映射成
+**6 个几何档位**（Standard/Neon/NeonLight/Basic/Gems/Minimal，其它一律 Standard —— 与 Re_ADOJAS
+`FLOOR_FUNCS[trackStyle] || Standard` 同口径），而 `trackColor` 的 `0x000000..0xFFFFFF` 走
+**逐实例** fill/stroke（只对可见砖上传，6 float）。实测：200 砖 / 200 种不同 `trackColor` →
+**2 个形状**（同一角度下的 stroke + fill 两种）。所以阶梯的上界是 `25 × 2 × 6 = 300`，与颜色数无关。
+反过来说：**绝不要为了"按颜色缓存几何"把颜色编进 style** —— 键里的 style 只有 **3 位**，
+16.7M 个值会静默碰撞成"画错砖"（`tests/shape_key_test.cpp` 把这条字段宽度钉住了）。
+
 两个容易踩的地方：① `build()` 与 `deriveRange()` 的键必须用**同一个** `m_shapeQuantum`
 （挡位不同 → 键全对不上 → 每块砖都退回形状 0，画面全错，日志会喊"形状键在表里找不到"）；
 ② GLSL 3.3 的 CPU 回退路（`ADOCAO_CPU_GEOMETRY=1`）贴的是**槽位表**，142 texel/形状 →

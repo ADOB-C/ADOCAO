@@ -53,7 +53,12 @@ void PlaybackClock::stop() {
     if (!m_timeline) return;
     m_isPlaying = false;
     m_elapsedTime = 0.0;
-    LOG_D("Playback stopped");
+    // **必须重算帧**：以前只把 elapsed 归零，`m_frame` 还停在被停住的那一刻
+    // （行星/相机/砖的可见性都来自这一帧）→ 用户看到"退出播放没有回到初始状态"。
+    m_currentTileIndex = 0;
+    m_reportedEnd = false;
+    updateFrame();
+    LOG_D("Playback stopped（回到 t=0）");
 }
 
 double PlaybackClock::timeInLevel() const {

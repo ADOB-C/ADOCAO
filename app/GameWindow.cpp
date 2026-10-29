@@ -69,7 +69,12 @@ static void jumpToTile(Timeline& timeline, PlaybackClock& clock, AudioEngine& au
         // from the beginning against a level that thinks it is hours in.
         clock.startAt(glfwGetTime(), audioPos, offsetSec);
         hs.resetAt(audioPos);
-        if (!hasMusic && audio.isPlaying()) audio.pause();
+        // **设备必须处于播放态**：`hs.resetAt()` 只挪光标，混音回调由设备驱动。
+        // 之前这里是 `if (!hasMusic && audio.isPlaying()) audio.pause();` —— 从暂停态
+        // 选砖开始（无音乐 / 目标超出音乐末尾）时设备根本没启动 → 打拍音完全没声
+        // （用户 2026-10-28 报的第二个 bug）。没音乐时 `play()` 只启设备（decoder 为空），
+        // 正好是我们要的：只出打拍音。
+        audio.play();
     }
 }
 
@@ -444,7 +449,22 @@ void GameWindow::handleInput() {
                 m_hitsoundMgr->resetAt(0);
                 m_musicPending = true;  // always delay audio start by audioStartOffset (pre-roll)
             }
-        } else { m_playback->stop(); m_audioEngine->pause(); m_musicPending = false; }
+        } else {
+            // 停止 = **回到初始状态**（用户 2026-10-28：退出播放没回去）。
+            // 原来只 stop + pause：时钟归零了，但帧/相机/音色光标都停在停住那一刻。
+            m_playback->stop();                       // 内部已 updateFrame() → 行星/可见性回到 t=0
+            m_audioEngine->pause();
+            m_audioEngine->seek(0.0f);
+            m_hitsoundMgr->resetAt(0.0f);
+            m_hitsoundMgr->stop();
+            m_musicPending = false;
+            m_selectedTile = -1;
+            if (m_level->tileCount() > 0) {
+                const auto& p0 = m_level->tilePositionAt(0);
+                m_camCtrl.snapTo(p0[0], p0[1]);
+            }
+            LOG_I("playback: 停止 → 回到初始状态（t=0，相机回起点，音色光标归零）");
+        }
     }
     m_wasSpacePressed = spacePressed;
 

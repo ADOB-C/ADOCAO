@@ -93,10 +93,13 @@ add_test(NAME floor_window_cache
 
 # ③ 切片 1：Timeline 锚点（每 4096 层）与全量数组逐位对拍
 add_executable(adocao_timeline_anchor_test timeline_anchor_test.cpp)
+add_executable(adocao_playback_stop_test playback_stop_test.cpp)
+target_link_libraries(adocao_playback_stop_test PRIVATE adocao_core adocao_render)
 target_link_libraries(adocao_timeline_anchor_test PRIVATE adocao_core adocao_archive)
 add_test(NAME timeline_anchor
          COMMAND adocao_timeline_anchor_test ${CMAKE_SOURCE_DIR}/tests/charts/angles360.adofai
                  "${CMAKE_SOURCE_DIR}/tests/charts/diag_glide.adofai")
+add_test(NAME playback_stop COMMAND adocao_playback_stop_test)
 
 # ④ 粗块 AABB 索引：与全扫逐元素对拍（含反面对照）
 add_executable(adocao_cull_index_test cull_index_test.cpp)

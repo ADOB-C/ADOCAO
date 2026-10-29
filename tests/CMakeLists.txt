@@ -77,6 +77,11 @@ add_executable(adocao_bit_span_test bit_span_test.cpp)
 target_link_libraries(adocao_bit_span_test PRIVATE adocao_core)
 add_test(NAME bit_span COMMAND adocao_bit_span_test)
 
+# 形状表的量化档位 / 键打包（纯逻辑；表装不下时的后果是**静默黑屏** —— Issue #2）
+add_executable(adocao_shape_key_test shape_key_test.cpp)
+target_link_libraries(adocao_shape_key_test PRIVATE adocao_core)
+add_test(NAME shape_key COMMAND adocao_shape_key_test)
+
 # ③ 切片 4 另一半：angleData 的紧凑存储（释放前后逐位对拍 + 反面对照）
 add_executable(adocao_angle_store_test angle_store_test.cpp)
 target_link_libraries(adocao_angle_store_test PRIVATE adocao_core adocao_archive)

@@ -128,6 +128,7 @@ void TileMesh::visSetRange(size_t a, size_t b, bool v) {
 void TileMesh::destroy() {
     destroyStaticGL();
     m_shapes.clear(); m_shapeIndex.clear();
+    m_shapeQuantum = 1;      // 下一份谱面重新按容量选；提前 return 的小谱也不该继承上一份的档位
     m_level = nullptr;
     m_chunkX.clear(); m_chunkY.clear();
     m_visible.clear(); m_cullIndex.clear(); m_nTiles = 0;
@@ -240,15 +241,52 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     // **不要 reserve()**：迭代序就是绘制序，而 reserve 会改变 libc++ 的桶增长序列 →
     // 迭代序变 → 深度量化后相邻砖重叠处的胜者变（实测 MYC t=30s 会翻 278 个像素，
     // 全部是 stroke/fill 谁在上面）。改造前没有 reserve，这里也不加。
+    //
+    // 容量自适应（Issue #2）：唯一形状数可能远超形状表能装下的量（那个谱 3,583,664 砖里有
+    // 3,560,627 个唯一形状 → 纹理 1024×100839，比 `GL_MAX_TEXTURE_SIZE` 大一倍多 → 驱动
+    // 拒收 → `texelFetch` 全 0 → 每块砖塌陷 → **黑屏且零报错**）。所以这里按
+    // `shapekey::kQuantumLadder` 逐档放粗 (sa, ea) 的量化精度，直到装得下（末档 90° 必然收敛）。
+    // 只有"0.01° 装不下"的谱面才会多跑几趟；正常谱面第一趟就 break，行为与之前逐位相同。
+    const int shapeRows = shapeTableRows();
+    const int texelsPerShape = m_cpuGeometry ? (int)TileShape::kTotalSlots
+                                             : (int)TileShape::kTexelsPerShape;
+    const size_t shapeCap = shapeTableCapacity();
     std::unordered_map<GeoKey, std::vector<int>, GeoKeyHash> shapeGroups;
-    for (int i = 0; i < n; i++) {
-        float sa, ea; bool mid;
-        TileShape::keyForTile(level, i, sa, ea, mid);
-        const uint8_t style = styleOfTile(level, i, m_timeline);
-        GeoKey k{(int)std::round(sa * 100.0f), (int)std::round(ea * 100.0f), mid, style};
-        shapeGroups[k].push_back(i);
+    for (int li = 0; li < shapekey::kQuantumCount; li++) {
+        const int quantum = shapekey::kQuantumLadder[li];
+        const bool coarsest = (li + 1 == shapekey::kQuantumCount);
+        m_shapeQuantum = quantum;
+        shapeGroups.clear();
+        bool overflow = false;
+        for (int i = 0; i < n; i++) {
+            float sa, ea; bool mid;
+            TileShape::keyForTile(level, i, sa, ea, mid);
+            const uint8_t style = styleOfTile(level, i, m_timeline);
+            GeoKey k{shapekey::angleKey(sa, quantum), shapekey::angleKey(ea, quantum), mid, style};
+            auto it = shapeGroups.find(k);
+            if (it == shapeGroups.end()) {
+                // 末档**不再放弃**：90° 下 (sa, ea) 只有 16 种组合，真装不下就是驱动的
+                // GL_MAX_TEXTURE_SIZE 离谱到不可用 —— 那也没有别的退路了，让守卫去喊。
+                if (!coarsest && shapeGroups.size() >= shapeCap) { overflow = true; break; }
+                it = shapeGroups.emplace(k, std::vector<int>()).first;
+            }
+            it->second.push_back(i);
+        }
+        if (!overflow) break;
+        LOG_W("TileMesh: 形状数超过形状表容量（上限 %zu 个 = %d 行 × %d texel/形状、行宽 %d；"
+              "行数再高就超过 kMaxShapeRows/GL_MAX_TEXTURE_SIZE 了）→ 量化 %.2f° 装不下，"
+              "放粗到 %.2f°",
+              shapeCap, shapeRows, texelsPerShape, (int)TileShape::kTexW,
+              (double)quantum / 100.0,
+              (double)shapekey::kQuantumLadder[li + 1] / 100.0);
     }
-    LOG_D("TileMesh::build: %zu unique shapes", shapeGroups.size());
+    if (m_shapeQuantum != 1) {
+        LOG_W("TileMesh: 形状表量化精度 0.01° → %.2f°（%zu 个形状装下 %zu 的容量；"
+              "砖的几何按放粗后的角度生成，位置/时长不受影响）",
+              (double)m_shapeQuantum / 100.0, shapeGroups.size(), shapeCap);
+    }
+    LOG_D("TileMesh::build: %zu unique shapes（量化 %.2f°）", shapeGroups.size(),
+          (double)m_shapeQuantum / 100.0);
 
     m_shapes.reserve(shapeGroups.size());
     m_level = &level;
@@ -268,11 +306,14 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     for (auto& kv : shapeGroups) {
         const GeoKey& key = kv.first;
         const uint32_t shapeIdx = (uint32_t)m_shapes.size();
-        Shape sh = TileShape::buildShape(key.sa / 100.0f, key.ea / 100.0f, key.mid,
+        // 档位 1 时 `key * 1.0f / 100.0f` 与改造前的 `key / 100.0f` 逐位相同
+        const float sa = shapekey::angleFromKey(key.sa, m_shapeQuantum);
+        const float ea = shapekey::angleFromKey(key.ea, m_shapeQuantum);
+        Shape sh = TileShape::buildShape(sa, ea, key.mid,
                                          styleWidthOf(key.style), styleLengthOf(key.style),
                                          key.style == 4);   // 4 = Gems
         m_shapes.push_back(sh);
-        m_shapeIndex[packShapeKey(key.sa / 100.0f, key.ea / 100.0f, key.mid, key.style)] = shapeIdx;
+        m_shapeIndex[packShapeKey(sa, ea, key.mid, key.style)] = shapeIdx;
     }
     // 绘制顺序 = **按砖号（= 层号）升序**（2026-10-15 起）：所以不再需要 `m_drawOrder` 那支
     // 4 B/砖 的排列数组（MYC 27 MB、2³¹−1 外推 **8.6 GB**）——剔除与上传**直接用下标**（下标即
@@ -395,6 +436,55 @@ void TileMesh::buildSlotTable() {
           TileShape::kTexW, m_slotRows, texels.size() * sizeof(float) / 1024);
 }
 
+// 形状表能有多少行：驱动上限与显存预算取小（见 hpp 的 kMaxShapeRows）。
+// 调用方必须已经**有 GL 上下文**（build() 里就是这么调的）。
+int TileMesh::shapeTableRows() const {
+    int rows = kMaxShapeRows;
+    GLint glMax = 0;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &glMax);
+    if (glMax > 0 && (int)glMax < rows) rows = (int)glMax;
+    // 驱动瞎报（或未来某个 GL 实现上限很小）时也留一口气：64 行仍能装 2260 个形状，
+    // 而 90° 档最多 16 种 (sa, ea) × mid × style —— 容量闸不会把自己逼进死胡同。
+    return std::max(rows, 64);
+}
+
+size_t TileMesh::shapeTableCapacity() const {
+    const int texelsPer =
+        m_cpuGeometry ? (int)TileShape::kTotalSlots : (int)TileShape::kTexelsPerShape;
+    return shapekey::capacity(shapeTableRows(), texelsPer, (int)TileShape::kTexW);
+}
+
+// 守卫（Issue #2）：纹理**没建出来**时 `texelFetch` 一律返回 0 → 每块砖的 mask=0 → 整个
+// 轨道塌陷成零面积，画面纯黑，而且我们自己**一个错误都看不到**（Intel 驱动只在调试输出里
+// 嘀咕一句 "texture unloadable"）。所以装完直接问驱动这张纹理到底在不在。
+// 归零的口径：`glGetTexLevelParameteriv` 对一个没建成的层级返回宽高 0。
+void TileMesh::checkShapeTexture() const {
+    const GLuint tex = m_cpuGeometry ? m_slotTex : m_shapeTex;
+    const int wantRows = m_cpuGeometry ? m_slotRows : m_shapeRows;
+    const GLenum err = glGetError();      // 取走 glTexImage2D 留下的错误码（有就报出来）
+    if (tex == 0 || wantRows <= 0) {
+        LOG_E("TileMesh: 形状表纹理没生成（纹理 %u，行数 %d，形状 %zu）", (unsigned)tex, wantRows,
+              m_shapes.size());
+        return;
+    }
+    glBindTexture(GL_TEXTURE_2D, tex);
+    GLint tw = 0, th = 0;
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tw);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &th);
+    if (tw != TileShape::kTexW || th != wantRows) {
+        LOG_E("TileMesh: 形状表纹理没建成（请求 %dx%d，驱动实际给 %dx%d，GL 错误 0x%04x，"
+              "%zu 个形状）→ 所有砖会塌陷成零面积（**黑屏**）。"
+              "形状表的容量闸应该已经挡住这个尺寸：%d 行 × %d texel/形状 = 最多 %zu 个形状",
+              (int)TileShape::kTexW, wantRows, (int)tw, (int)th, (unsigned)err, m_shapes.size(),
+              (int)shapeTableRows(),
+              (int)(m_cpuGeometry ? TileShape::kTotalSlots : TileShape::kTexelsPerShape),
+              shapeTableCapacity());
+    } else if (err != GL_NO_ERROR) {
+        LOG_W("TileMesh: 形状表纹理正常（%dx%d），但之前留有 GL 错误 0x%04x", (int)tw, (int)th,
+              (unsigned)err);
+    }
+}
+
 void TileMesh::buildStaticGL() {
     const TileShape::Recipe* rc = TileShape::recipeTable();
     std::vector<float> recipes;
@@ -422,6 +512,7 @@ void TileMesh::buildStaticGL() {
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, TileShape::kTexW, m_shapeRows, 0, GL_RGBA,
                      GL_FLOAT, texels.data());
     }
+    checkShapeTexture();
 
     glGenVertexArrays(1, &m_vao);
     glBindVertexArray(m_vao);
@@ -469,8 +560,10 @@ void TileMesh::buildStaticGL() {
     glVertexAttribPointer(8, 2, GL_FLOAT, GL_FALSE, stride, (void*)(17 * sizeof(float)));
     glVertexAttribDivisor(8, 1);
     glBindVertexArray(0);
-    LOG_D("TileMesh::buildStaticGL: shapeTex %dx%d, %d 槽位, %d 索引", TileShape::kTexW, m_shapeRows,
-          TileShape::kTotalSlots, TileShape::kIndexCount);
+    // CPU 回退路贴的是槽位表（形状表 **不建**），日志别把两者混成一个名字
+    LOG_D("TileMesh::buildStaticGL: %s %dx%d, %d 槽位, %d 索引",
+          m_cpuGeometry ? "slotTex" : "shapeTex", TileShape::kTexW,
+          m_cpuGeometry ? m_slotRows : m_shapeRows, TileShape::kTotalSlots, TileShape::kIndexCount);
 }
 
 // ---- 剔除 + 压实 ------------------------------------------------------

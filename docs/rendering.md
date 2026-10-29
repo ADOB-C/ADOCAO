@@ -286,7 +286,7 @@ Tiles and icons use depth test ON with per-instance Z values encoding far-to-nea
 - **静态配方表**（VBO，175 项）：每个 canonical 槽位 `(part, layer*64+slot, k0, k1)` ——
   砖 6 个 part × 2 层（描边/填充）共 142 槽；索引表 110 个三角形（330 索引），**所有形状共用一份**。
   图标（twirl / ssUp / ssDn）不是 part：`aIconBits` 进 FS，由 `tile.frag` 在砖心画圆。
-- **形状表**（RGBA32F 纹理 + `texelFetch`）：每个形状 12 条 8-float 记录 + 1 条活动位掩码。
+- **形状表**（RGBA32F 纹理 + `texelFetch`）：每个形状 14 条 8-float 记录（7 part × 2 层）+ 1 条活动位掩码 = **29 texel**。
   记录内容 = `render/TileShape.cpp::buildShape()` 存下来的参数（cos/sin/pow 的结果都在这里）。
 - **每实例（每帧上传、只含可见）**：`[offX, offY, offZ, shape, iconBits]` — 5 floats。
 - 颜色/不透明度走 **uniform**（改造前是逐实例 `[fill*3, stroke*3, opacity]` 7 floats，28 B/实例）。
@@ -451,6 +451,49 @@ bit1 ssUp / bit2 ssDown，判据 = 改造前 `buildIcons()` 的 `tileBPMs[i]/til
 - 旧实现是 `mid ? createTileMesh(eA,eA,sc)`（`ang == 0` 分支 = 圆 r=0.30 + 方块，看着像"大圆+菱形/发卡弯"），已删除。
 - 谱面里中旋是 `angleData` 里的**数字 999**（不是 `"!"`；`"!"` 只是编辑器的显示/`LevelData` 字符映射）。
   本地实测：The Moon - Coal 1307 个、Singularity 442、Won't You Make a Song with Me 11、Fledgling 9。
+
+### 形状表的容量闸（2026-10-28，Issue #2）
+
+形状表是**一张** `1024 × rows` 的 RGBA32F 纹理（`TileShape::kTexW` × rows，**29 texel/形状** =
+7 part × 2 层 × 2 texel + 1 条标志），行号 = 实例里的形状号。它有两个上限，**任一越界就整条轨道消失**：
+
+* 驱动的 `GL_MAX_TEXTURE_SIZE`：Intel UHD 与 macOS 都是 **16384** 行；
+* 显存预算：`TileMesh::kMaxShapeRows = 4096` 行（1024×4096×16 B = **67 MB**；真实谱面实测
+  MyC 294 / Singularity 9,349 / The Moon 215 个形状，129,600 砖的 `shapes_exhaustive` 也装得下）。
+
+**超过上限时的失败是静默的**，这是 Issue #2 的全部内容：谱面 `hertz.adofai` 有 3,583,664 砖、
+**3,560,627 个唯一形状**（BPM 65536 的谱面几乎每块砖的角度都不同）→ 行数 100,839 ≫ 16384 →
+`glTexImage2D` 被驱动拒绝 → 纹理"不完整" → `texelFetch` 一律返回 0 → 每块砖的活动位掩码 = 0 →
+所有 part 塌成零面积 → **画面纯黑，程序不卡死、日志一条错都没有**（Intel 驱动只在调试输出里嘀咕
+一句 `texture unloadable`）。
+
+现在两道防线（`render/ShapeKey.hpp` + `render/TileMesh.cpp`）：
+
+1. **容量闸 + 量化阶梯**：`build()` 先按 `shapeTableRows()`（= min(4096, GL 上限)，下限 64）算出能装
+   多少个形状，然后逐档放粗 `(sa, ea)` 的量化精度
+   `0.01° → 0.1° → 0.25° → 0.5° → 1° → 2° → 5° → 10° → 22.5° → 50° → 90°`，直到装得下，
+   每放粗一档打一条 `LOG_W`。**末档 90° 时 (sa, ea) 只剩 ≤5×5 种组合**，× mid × style 也只有几百种 →
+   阶梯一定收敛（`tests/shape_key_test.cpp` 把这条不变量钉住了）。
+   只有 0.01° 装不下的谱面才会多跑几趟；正常谱面第一趟就收工，键/几何/出图**逐位不变**。
+   放粗只改砖的**角度**（几何），**位置与时长完全不受影响**。
+2. **纹理守卫** `checkShapeTexture()`：装完直接问驱动这张纹理在不在
+   （`glGetTexLevelParameteriv` 的宽高 + `glGetError`），没建成就是一条 `LOG_E`（含请求尺寸、
+   驱动实际给的尺寸、GL 错误码、容量闸的数字）。**负向对照验过**：临时把 GL 上限那一步去掉 →
+   `请求 1024x19819，驱动实际给 0x0，GL 错误 0x0501` + 驱动侧 `texture unloadable` 同时出现。
+
+两个容易踩的地方：① `build()` 与 `deriveRange()` 的键必须用**同一个** `m_shapeQuantum`
+（挡位不同 → 键全对不上 → 每块砖都退回形状 0，画面全错，日志会喊"形状键在表里找不到"）；
+② GLSL 3.3 的 CPU 回退路（`ADOCAO_CPU_GEOMETRY=1`）贴的是**槽位表**，142 texel/形状 →
+同样的 4096 行只装得下 **29,537** 个形状，所以那条路的量化会更早放粗（同一套阶梯，同一个守卫）。
+
+验收：`ctest -R shape_key`（档位 1 与改造前逐位相同 / 键无碰撞 / 阶梯收敛 / 容量口径）+
+像素门槛 **54/54 逐字节相同**（GPU 路与 `ADOCAO_CPU_GEOMETRY=1` 两条都跑过）。
+
+复现配方（不要往仓库里塞大文件）：`angleData` 每砖取 `round(uniform(0,360),4)` 的谱面，
+700,000 砖 → 699,811 形状 → 修之前 `1024×19819` 也被拒（本机 `GL_MAX_TEXTURE_SIZE` = 16384），
+修之后量化落到 1°（129,628 形状 / 3,672 行）；同帧非黑像素 0.30% → 14.41%。
+另一条独立口径：1° 与 5°（CPU 回退路）两帧逐像素只差 **1.17%**（全是边缘），说明放粗是"边缘移动"
+而不是"画面走样"。
 
 **逐位对拍的两种口径**：两个对拍测试的默认口径是**几何尺度上的绝对容差 1e-5 砖**
 （打印 `逐位相同 / 非逐位但在容差内 / 最大偏差`），`ADOCAO_TILE_EXACT=1` 才要求**逐位**：

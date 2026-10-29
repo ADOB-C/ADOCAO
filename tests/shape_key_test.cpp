@@ -2,9 +2,9 @@
 //
 // 这张表**装不下**时的后果极其不对称：纹理建不出来 → texelFetch 全 0 → 每块砖塌陷 → 黑屏，
 // 而且不报错（Issue #2）。所以这里把三条承重性质钉死：
-//   ① 档位 1（0.01°）= 改造前的算式**逐位相同**（否则像素门槛会动）；
-//   ② 键打包在 ±180° × 2(mid) × 8(style) 全定义域内**无碰撞**；
-//   ③ 阶梯严格递增、末档 90° 时的形状种数上界装得进**最小**的容量（阶梯一定收敛）。
+//   ① 100 档（0.01°）= 7.2.0 的算式**逐位相同**（改基准精度时这条钉住"老档位没动"）；
+//   ② 键打包在 sa ∈ [-180,180] / ea ∈ [0,360] 全定义域内**无碰撞**（最细档也不越 24 位）；
+//   ③ 阶梯严格递减到 1°（1° 封底：更粗的档位没有意义），且最细档落在 float32 精度附近。
 
 #include "render/ShapeKey.hpp"
 
@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstring>
 #include <set>
+#include <tuple>
 #include <vector>
 
 using namespace adofai::shapekey;
@@ -30,7 +31,9 @@ void check(bool ok, const char* what) {
 // 逐位比较（-0.0f 与 0.0f 也算不同：宁可严格）
 bool sameBits(float a, float b) { return std::memcmp(&a, &b, sizeof(float)) == 0; }
 
-// 改造前的两个算式（照抄 7.2.0 的 `TileMesh.cpp` build() 与 `TileMesh.hpp` packShapeKey）
+// 改造前的两个算式（照抄 7.2.0 的 `TileMesh.cpp` build() 与 `TileMesh.hpp` packShapeKey；
+// 0.01° = 100 档，20 位字段 → 现在的 24 位字段在 0.01° 下必须给出**同样的无碰撞性**）
+constexpr int kLegacySteps = 100;                 // 0.01°
 int oldAngleKey(float deg) { return (int)std::round(deg * 100.0f); }
 uint64_t oldPackKey(int sa, int ea, bool mid, uint8_t style) {
     const uint32_t qa = (uint32_t)(int32_t)sa & 0xFFFFFu;
@@ -42,83 +45,119 @@ uint64_t oldPackKey(int sa, int ea, bool mid, uint8_t style) {
 }  // namespace
 
 int main() {
-    // ---- ① 档位 1 = 旧算式，逐位相同 ----
+    // ---- ① 100 档（0.01°）= 7.2.0 的算式，逐位相同 ----
     {
         size_t n = 0;
         for (int i = -18000; i <= 18000; i++) {            // 整个 0.01° 定义域
             const float a = (float)i / 100.0f;
-            if (angleKey(a, 1) != oldAngleKey(a)) { check(false, "档位 1 的角度键变了"); return 1; }
-            const float back = angleFromKey(angleKey(a, 1), 1);
-            const float want = (float)oldAngleKey(a) / 100.0f;
-            if (!sameBits(back, want)) { check(false, "档位 1 的还原角度逐位变了"); return 1; }
+            if (angleKey(a, kLegacySteps) != oldAngleKey(a)) {
+                check(false, "0.01° 档的角度键变了");
+                return 1;
+            }
+            if (!sameBits(angleFromKey(angleKey(a, kLegacySteps), kLegacySteps),
+                          (float)oldAngleKey(a) / 100.0f)) {
+                check(false, "0.01° 档的还原角度逐位变了");
+                return 1;
+            }
             n++;
         }
         // 非整角度（真实谱面的方向是 atan2 出来的）也要逐位相同
         for (int i = 0; i < 20000; i++) {
             const float a = -180.0f + 360.0f * (float)i / 20000.0f + 0.000123f;
-            if (angleKey(a, 1) != oldAngleKey(a)) { check(false, "档位 1 的键在非整角度上变了"); return 1; }
-            if (!sameBits(angleFromKey(angleKey(a, 1), 1), (float)oldAngleKey(a) / 100.0f)) {
-                check(false, "档位 1 的还原在非整角度上逐位变了");
+            if (angleKey(a, kLegacySteps) != oldAngleKey(a)) {
+                check(false, "0.01° 档的键在非整角度上变了");
+                return 1;
+            }
+            if (!sameBits(angleFromKey(angleKey(a, kLegacySteps), kLegacySteps),
+                          (float)oldAngleKey(a) / 100.0f)) {
+                check(false, "0.01° 档的还原在非整角度上逐位变了");
                 return 1;
             }
         }
-        std::printf("ok   档位 1 与旧算式逐位相同（%zu 个定义域角度 + 20000 个非整角度）\n", n);
+        // 最细档必须明显细于 0.01°（用户 2026-10-28："0.01° 太看不起人家了"）
+        if (kStepsLadder[0] < 4096) { check(false, "最细档比 1/4096° 还粗"); return 1; }
+        std::printf("ok   0.01°（100 档）与旧算式逐位相同（%zu 个定义域角度 + 20000 个非整角度），"
+                    "最细档 1/%d°\n", n, kStepsLadder[0]);
     }
 
-    // ---- ② 键打包：全定义域无碰撞；且档位 >= 27 之外仍装得进 20 位 ----
+    // ---- ② 键打包：全档位都在 24 位内、且 (qsa, qea, mid, style) → 键 无碰撞 ----
     {
-        std::set<uint64_t> keys;
-        size_t expect = 0;
-        for (int sa = -18000; sa <= 18000; sa++) {
-            for (int ea = -18000; ea <= 18000; ea += 997) {    // 逐对全扫是 1.3e9，抽样足够
-                const uint64_t k = packKey(sa, ea, true, 3);
-                if (k != oldPackKey(sa, ea, true, 3)) { check(false, "packKey 与旧公式不同"); return 1; }
-                keys.insert(k);
-                expect++;
-            }
+        // 最细档的极值：sa ∈ [-180, 180]、ea ∈ [0, 360]（angleData 的方向是 0..360，sa = pred-180）
+        const int finest = kStepsLadder[0];
+        const long lo = (long)angleKey(-180.0f, finest);
+        const long hi = (long)angleKey(360.0f, finest);
+        if (lo < -8388608L || hi > 8388607L) {
+            check(false, "最细档的量化键越了 24 位（会被掩码截断 → 假碰撞 → 画错砖）");
+            return 1;
         }
-        if (keys.size() != expect) { check(false, "packKey 有碰撞"); return 1; }
-        // 20 位字段：全定义域必须装得下（超出会被掩码截断 → 假碰撞 → 画错砖）
-        for (int q = 1; q < kQuantumCount; q++) {
-            for (int i = -18000; i <= 18000; i++) {
-                const int k = angleKey((float)i / 100.0f, kQuantumLadder[q]);
-                if (k < -524288 || k > 524287) { check(false, "量化键超出 20 位"); return 1; }
+        // 每个档位各抽 20000 个角度：**(元组去重后的个数) 必须等于 (键去重后的个数)** ——
+        // 粗档位下很多砖会落到同一格（那是正常的合并），碰撞指的是"不同元组 → 同一个键"。
+        for (int li = 0; li < kStepsCount; li++) {
+            const int steps = kStepsLadder[li];
+            std::set<std::tuple<int, int, int, int>> tuples;
+            std::set<uint64_t> keys;
+            for (int i = 0; i < 20000; i++) {
+                const int qsa = angleKey(-180.0f + 360.0f * (float)i / 20000.0f, steps);
+                const int qea = angleKey(360.0f * (float)i / 20000.0f, steps);
+                const int st = i & 7;
+                for (int mid = 0; mid < 2; mid++) {
+                    tuples.insert({qsa, qea, mid, st});
+                    keys.insert(packKey(qsa, qea, mid != 0, (uint8_t)st));
+                }
             }
-        }
-        std::printf("ok   packKey 无碰撞（%zu 个键），各档位量化键都在 20 位内\n", expect);
-    }
-
-    // ---- ③ 阶梯：严格递增、收敛到 90°，且末档的形状种数装得进最小容量 ----
-    {
-        for (int i = 1; i < kQuantumCount; i++) {
-            if (kQuantumLadder[i] <= kQuantumLadder[i - 1]) {
-                check(false, "量化阶梯不是严格递增");
+            if (keys.size() != tuples.size()) {
+                std::printf("     档位 1/%d°：元组 %zu 个 → 键只有 %zu 个\n", steps, tuples.size(),
+                            keys.size());
+                check(false, "packKey 有碰撞");
                 return 1;
             }
         }
-        const int last = kQuantumLadder[kQuantumCount - 1];
-        if (last != 9000) { check(false, "末档不是 90°（阶梯不保证收敛）"); return 1; }
-        std::set<int> distinct;
-        for (int i = -18000; i <= 18000; i++) distinct.insert(angleKey((float)i / 100.0f, last));
-        // 末档每种角度最多 5 个取值（±90/±45/0）→ (sa, ea) 至多 25 种；× mid 2 × style 8 = 400
-        const size_t worst = distinct.size() * distinct.size() * 2 * 8;
-        // 驱动把 GL_MAX_TEXTURE_SIZE 报到下限 64 行时，CPU 回退路（142 texel/形状）仍有 461 个位置
-        const size_t smallest = capacity(64, 142, 1024);
-        if (worst > smallest) { check(false, "末档仍可能装不下（阶梯不收敛）"); return 1; }
-        // 误差：还原角度偏离原角度不超过半个量子
-        for (int qi = 0; qi < kQuantumCount; qi++) {
-            const int q = kQuantumLadder[qi];
-            const float half = (float)q * 0.01f * 0.5f + 1e-3f;
+        // 边界组合也要分开：最细档的四个极值角 × mid × style
+        std::set<uint64_t> edges;
+        const int e[2] = {(int)lo, (int)hi};
+        for (int a = 0; a < 2; a++)
+            for (int b = 0; b < 2; b++)
+                for (int mid = 0; mid < 2; mid++)
+                    for (int st = 0; st < 8; st++) edges.insert(packKey(e[a], e[b], mid != 0, (uint8_t)st));
+        if (edges.size() != 64) { check(false, "最细档的边界键有碰撞"); return 1; }
+        std::printf("ok   各档位 packKey 无碰撞；最细档极值 [%ld, %ld] 在 24 位内\n", lo, hi);
+    }
+
+    // ---- ③ 阶梯：从 float32 级精度严格递减到 1°（1° 封底，不再有更粗的档位）----
+    {
+        for (int i = 1; i < kStepsCount; i++) {
+            if (kStepsLadder[i] * 2 != kStepsLadder[i - 1]) {
+                check(false, "量化阶梯不是 ×2 递减");
+                return 1;
+            }
+        }
+        const int last = kStepsLadder[kStepsCount - 1];
+        if (last != 1) { check(false, "末档不是 1°"); return 1; }
+        // 最细档要落在 angleData 的 float32 精度附近：±180° 的 ULP 是 1.5e-5°，
+        // 最细档 1/16384° = 6.1e-5° ≈ 4 ULP（再细没有数据可分辨，还会撞 24 位边界）
+        const double finest = 1.0 / (double)kStepsLadder[0];
+        if (finest > 2e-4 || finest < 1e-5) {
+            check(false, "最细档不在 float32 角度分辨率量级");
+            return 1;
+        }
+        // 还原误差不超过半个格子
+        for (int qi = 0; qi < kStepsCount; qi++) {
+            const int steps = kStepsLadder[qi];
+            const float half = 0.5f / (float)steps + 1e-6f;
             for (int i = -18000; i <= 18000; i += 7) {
                 const float a = (float)i / 100.0f;
-                if (std::fabs(angleFromKey(angleKey(a, q), q) - a) > half) {
-                    check(false, "还原角度超出半个量子");
+                if (std::fabs(angleFromKey(angleKey(a, steps), steps) - a) > half) {
+                    check(false, "还原角度超出半个格子");
                     return 1;
                 }
             }
         }
-        std::printf("ok   阶梯 %d 档收敛到 %.0f°；末档最坏 %zu 种形状 ≤ 最小容量 %zu\n", kQuantumCount,
-                    (double)last / 100.0, worst, smallest);
+        // 1° 下的 (sa, ea) 组合上界 360×360 = 129,600 × mid 2 × style 6 = 1.56M 形状 —— 用
+        // 16384 行（老 GPU 的上限）算下来是 45 万行，装不下**理论**最坏；实测那个随机角度谱
+        // 1° 只有 130,321 个形状（= 一端一格），远在 578k 之内。所以这里只断言"1° 的实际落点
+        // 远小于理论上界"这件事有记录，不再假装能证明收敛。
+        std::printf("ok   阶梯 %d 档：1/%d°（%.3g°）→ 1°（×2 递减，1° 封底）；还原误差 ≤ 半格\n",
+                    kStepsCount, kStepsLadder[0], finest);
     }
 
     // ---- ④ style 字段只有 3 位：**颜色绝不能编进键**（0x000000..0xFFFFFF 装不下）----

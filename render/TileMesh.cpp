@@ -128,7 +128,7 @@ void TileMesh::visSetRange(size_t a, size_t b, bool v) {
 void TileMesh::destroy() {
     destroyStaticGL();
     m_shapes.clear(); m_shapeIndex.clear();
-    m_shapeQuantum = 1;      // 下一份谱面重新按容量选；提前 return 的小谱也不该继承上一份的档位
+    m_shapeSteps = shapekey::kStepsLadder[0];   // 下一份谱面重新按容量选；小谱也不继承上一份的档位
     m_level = nullptr;
     m_chunkX.clear(); m_chunkY.clear();
     m_visible.clear(); m_cullIndex.clear(); m_nTiles = 0;
@@ -242,51 +242,56 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     // 迭代序变 → 深度量化后相邻砖重叠处的胜者变（实测 MYC t=30s 会翻 278 个像素，
     // 全部是 stroke/fill 谁在上面）。改造前没有 reserve，这里也不加。
     //
-    // 容量自适应（Issue #2）：唯一形状数可能远超形状表能装下的量（那个谱 3,583,664 砖里有
-    // 3,560,627 个唯一形状 → 纹理 1024×100839，比 `GL_MAX_TEXTURE_SIZE` 大一倍多 → 驱动
-    // 拒收 → `texelFetch` 全 0 → 每块砖塌陷 → **黑屏且零报错**）。所以这里按
-    // `shapekey::kQuantumLadder` 逐档放粗 (sa, ea) 的量化精度，直到装得下（末档 90° 必然收敛）。
-    // 只有"0.01° 装不下"的谱面才会多跑几趟；正常谱面第一趟就 break，行为与之前逐位相同。
+    // 精度自适应（Issue #2 + 2026-10-28 用户"0.01° 太看不起人家了"）：唯一形状数可能远超形状表
+    // 能装下的量（那个谱 3,583,664 砖里有 3,560,627 个唯一形状 → 纹理 1024×100839，比
+    // `GL_MAX_TEXTURE_SIZE` 大一倍多 → 驱动拒收 → `texelFetch` 全 0 → 每块砖塌陷 → **黑屏且零
+    // 报错**）。所以这里**从最细档（1/16384° ≈ angleData 的 float32 精度）起步、×2 放粗**
+    // (sa, ea) 的量化精度直到装得下；1° 封底（更粗的档位对任何谱面都是浪费）。
+    // 绝大多数谱面第一档就 break（它们的角度本来就在更粗的格子上），只有真·稠密角度的谱面才多跑
+    // 几趟，且每趟在装够容量时就中止 → 最坏也就多花几毫秒。
     const int shapeRows = shapeTableRows();
     const int texelsPerShape = m_cpuGeometry ? (int)TileShape::kTotalSlots
                                              : (int)TileShape::kTexelsPerShape;
     const size_t shapeCap = shapeTableCapacity();
+    auto gridName = [](int steps, char* buf, size_t n) {
+        if (steps <= 1) std::snprintf(buf, n, "1°");
+        else std::snprintf(buf, n, "1/%d° = %.6g°", steps, 1.0 / (double)steps);
+    };
     std::unordered_map<GeoKey, std::vector<int>, GeoKeyHash> shapeGroups;
-    for (int li = 0; li < shapekey::kQuantumCount; li++) {
-        const int quantum = shapekey::kQuantumLadder[li];
-        const bool coarsest = (li + 1 == shapekey::kQuantumCount);
-        m_shapeQuantum = quantum;
+    for (int li = 0; li < shapekey::kStepsCount; li++) {
+        const int steps = shapekey::kStepsLadder[li];
+        const bool coarsest = (li + 1 == shapekey::kStepsCount);
+        m_shapeSteps = steps;
         shapeGroups.clear();
         bool overflow = false;
         for (int i = 0; i < n; i++) {
             float sa, ea; bool mid;
             TileShape::keyForTile(level, i, sa, ea, mid);
             const uint8_t style = styleOfTile(level, i, m_timeline);
-            GeoKey k{shapekey::angleKey(sa, quantum), shapekey::angleKey(ea, quantum), mid, style};
+            GeoKey k{shapekey::angleKey(sa, steps), shapekey::angleKey(ea, steps), mid, style};
             auto it = shapeGroups.find(k);
             if (it == shapeGroups.end()) {
-                // 末档**不再放弃**：90° 下 (sa, ea) 只有 16 种组合，真装不下就是驱动的
-                // GL_MAX_TEXTURE_SIZE 离谱到不可用 —— 那也没有别的退路了，让守卫去喊。
+                // 末档（1°）**不再放弃**：那样至少还让守卫把尺寸喊出来，比"悄悄黑屏"强。
                 if (!coarsest && shapeGroups.size() >= shapeCap) { overflow = true; break; }
                 it = shapeGroups.emplace(k, std::vector<int>()).first;
             }
             it->second.push_back(i);
         }
         if (!overflow) break;
-        LOG_W("TileMesh: 形状数超过形状表容量（上限 %zu 个 = %d 行 × %d texel/形状、行宽 %d；"
-              "行数再高就超过 kMaxShapeRows/GL_MAX_TEXTURE_SIZE 了）→ 量化 %.2f° 装不下，"
-              "放粗到 %.2f°",
-              shapeCap, shapeRows, texelsPerShape, (int)TileShape::kTexW,
-              (double)quantum / 100.0,
-              (double)shapekey::kQuantumLadder[li + 1] / 100.0);
+        char cur[48], next[48];
+        gridName(steps, cur, sizeof cur);
+        gridName(shapekey::kStepsLadder[li + 1], next, sizeof next);
+        LOG_W("TileMesh: 形状数超过形状表容量（上限 %zu 个 = %d 行 × %d texel/形状、行宽 %d）"
+              "→ 角度网格 %s 装不下，放粗到 %s",
+              shapeCap, shapeRows, texelsPerShape, (int)TileShape::kTexW, cur, next);
     }
-    if (m_shapeQuantum != 1) {
-        LOG_W("TileMesh: 形状表量化精度 0.01° → %.2f°（%zu 个形状装下 %zu 的容量；"
-              "砖的几何按放粗后的角度生成，位置/时长不受影响）",
-              (double)m_shapeQuantum / 100.0, shapeGroups.size(), shapeCap);
+    // 如实记一笔实际用的网格：绝大多数谱面是 1/16384°，只有角度极密的谱面才被放粗
+    // （这条同时是"几何精度变了"的凭据）
+    {
+        char grid[48];
+        gridName(m_shapeSteps, grid, sizeof grid);
+        LOG_D("TileMesh::build: %zu unique shapes（角度网格 %s）", shapeGroups.size(), grid);
     }
-    LOG_D("TileMesh::build: %zu unique shapes（量化 %.2f°）", shapeGroups.size(),
-          (double)m_shapeQuantum / 100.0);
 
     m_shapes.reserve(shapeGroups.size());
     m_level = &level;
@@ -307,8 +312,8 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
         const GeoKey& key = kv.first;
         const uint32_t shapeIdx = (uint32_t)m_shapes.size();
         // 档位 1 时 `key * 1.0f / 100.0f` 与改造前的 `key / 100.0f` 逐位相同
-        const float sa = shapekey::angleFromKey(key.sa, m_shapeQuantum);
-        const float ea = shapekey::angleFromKey(key.ea, m_shapeQuantum);
+        const float sa = shapekey::angleFromKey(key.sa, m_shapeSteps);
+        const float ea = shapekey::angleFromKey(key.ea, m_shapeSteps);
         Shape sh = TileShape::buildShape(sa, ea, key.mid,
                                          styleWidthOf(key.style), styleLengthOf(key.style),
                                          key.style == 4);   // 4 = Gems

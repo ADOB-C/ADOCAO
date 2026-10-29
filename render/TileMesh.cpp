@@ -242,13 +242,12 @@ void TileMesh::build(const LevelData& level, const std::string& fillColorHex,
     // 迭代序变 → 深度量化后相邻砖重叠处的胜者变（实测 MYC t=30s 会翻 278 个像素，
     // 全部是 stroke/fill 谁在上面）。改造前没有 reserve，这里也不加。
     //
-    // 精度自适应（Issue #2 + 2026-10-28 用户"0.01° 太看不起人家了"）：唯一形状数可能远超形状表
-    // 能装下的量（那个谱 3,583,664 砖里有 3,560,627 个唯一形状 → 纹理 1024×100839，比
-    // `GL_MAX_TEXTURE_SIZE` 大一倍多 → 驱动拒收 → `texelFetch` 全 0 → 每块砖塌陷 → **黑屏且零
-    // 报错**）。所以这里**从最细档（1/16384° ≈ angleData 的 float32 精度）起步、×2 放粗**
-    // (sa, ea) 的量化精度直到装得下；1° 封底（更粗的档位对任何谱面都是浪费）。
-    // 绝大多数谱面第一档就 break（它们的角度本来就在更粗的格子上），只有真·稠密角度的谱面才多跑
-    // 几趟，且每趟在装够容量时就中止 → 最坏也就多花几毫秒。
+    // 容量自适应（Issue #2）：唯一形状数可能远超形状表能装下的量（那个谱 3,583,664 砖里有
+    // 3,560,627 个唯一形状 → 纹理 1024×100839，比 `GL_MAX_TEXTURE_SIZE` 大一倍多 → 驱动
+    // 拒收 → `texelFetch` 全 0 → 每块砖塌陷 → **黑屏且零报错**）。所以**基准档 0.01° 先试**，
+    // 装不下才逐档放粗到 1°（1° 以上没有意义，见 ShapeKey.hpp）。**没碰壁就不动**：正常谱面
+    // 第一趟就 break，几何与 7.2.0 逐位相同；只有角度真的稠密到 0.01° 装不下的谱面才多跑几趟，
+    // 且每趟在装够容量时就中止 → 最坏也就多花零点几秒。
     const int shapeRows = shapeTableRows();
     const int texelsPerShape = m_cpuGeometry ? (int)TileShape::kTotalSlots
                                              : (int)TileShape::kTexelsPerShape;

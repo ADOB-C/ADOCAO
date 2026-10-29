@@ -110,7 +110,7 @@ public:
         std::vector<uint32_t> shape;
         std::vector<uint8_t> icon;
     };
-    // 形状键打包：sa/ea 各 24 位（角度 ×每秒度数），mid 1 位、style 3 位 —— 无冲突。
+    // 形状键打包：sa/ea 各 20 位（角度 ×每秒度数），mid 1 位、style 3 位 —— 无冲突。
     // **build() 与 deriveRange() 必须用同一个 m_shapeSteps**（同一台机器上两者都对同一个
     // 谱面各算一遍；档位不同 → 键全对不上 → 每块砖都退回形状 0）。
     uint64_t packShapeKey(float sa, float ea, bool mid, uint8_t style = 0) const {
@@ -124,8 +124,8 @@ public:
     static constexpr int kMaxShapeRows = 4096;
     int shapeTableRows() const;             // min(kMaxShapeRows, GL_MAX_TEXTURE_SIZE)，下限 64
     size_t shapeTableCapacity() const;      // 上述行数能装多少个形状（GPU/CPU 路 texel 数不同）
-    // 本次 build 实际用的量化档位（诊断用）：每度多少格。100 = 0.01°（7.2.0 的固定值），
-    // 16384 = 6.1e-5°（最细，≈ angleData 的 float32 精度），1 = 1°（最粗）
+    // 本次 build 实际用的量化档位（诊断用）：每度多少格。100 = 0.01°（基准档，与 7.2.0 逐位相同），
+    // 1 = 1°（最粗，只有"装不下"的谱面才会被放粗到这里）
     int shapeSteps() const { return m_shapeSteps; }
     // `wc`（可选）= 调用线程自己的 provider 窗口克隆（并行剔除用；nullptr = 共享缓存）
     void deriveRange(const LevelData& level, int64_t i0, int64_t i1, DerivedRange& out,
@@ -162,8 +162,9 @@ private:
     bool m_cpuGeometry = false;
     mutable size_t m_instCapacity = 0;   // 实例缓冲容量（draw() 里会按需增长）
     int m_shapeRows = 0;
-    // 形状 (sa, ea) 的量化档位：**每度多少格**（见 render/ShapeKey.hpp）。build() 里从最细档
-    // 1/16384° 起步、×2 放粗到装得下为止；deriveRange() 必须用同一个值（否则键全对不上）。
+    // 形状 (sa, ea) 的量化档位：**每度多少格**（见 render/ShapeKey.hpp）。**基准 0.01°**，
+    // 只有装不下才开始放粗（0.02 → 0.04 → 0.1 → 0.2 → 0.5 → 1°）；
+    // deriveRange() 必须用同一个值（否则键全对不上）。
     int m_shapeSteps = shapekey::kStepsLadder[0];
     float m_fill[3] = {1, 1, 1}, m_stroke[3] = {0, 0, 0};
 

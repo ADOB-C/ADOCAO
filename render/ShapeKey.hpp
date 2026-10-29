@@ -2,20 +2,22 @@
 //
 // 为什么需要"精度档位"：GPU 端的形状表是一张 `kTexW` × rows 的 RGBA32F 纹理，
 // 一行 1024 texel、每个形状 29 texel（`TileShape::kTexelsPerShape`）。行数被两个上限夹住：
-//   ① 驱动的 `GL_MAX_TEXTURE_SIZE`（Intel UHD / macOS / 2011 年的 GTX 590 都是 16384）；
+//   ① 驱动的 `GL_MAX_TEXTURE_SIZE`（Intel UHD、macOS、2011 年的 GTX 590 都是 16384）；
 //   ② 显存预算（`TileMesh::kMaxShapeRows` = 4096 行 = 67 MB）。
 // 唯一形状数超过容量时**唯一安全的做法**是把 (sa, ea) 量化得粗一点（见下面的阶梯），
 // **不能"照旧上传"**：纹理建不出来时 `texelFetch` 全返回 0 → 每块砖的 mask=0 → 所有砖塌陷成
 // 零面积，画面纯黑，而且**一个错误都不报**（Issue #2：3,583,664 砖 / 3,560,627 形状 →
 // 1024×100839 → Intel 驱动直接 "texture unloadable"，用户只看到黑屏）。
 //
-// **基准精度（2026-10-28 用户："0.01° 太看不起人家了"）**：不拿 0.01° 当起点 —— angleData 是
-// float32，`±180°` 处的 ULP 只有 **1.5e-5°**，0.01° 比它粗三个数量级，等于把谱面的角度随手抹平
-// （这一步会改几何：见 `docs/rendering.md`「形状表的容量闸」）。所以阶梯从
-// **1/16384° = 6.1e-5°**（≈ 4 ULP，已在数据精度下限附近，再细没有意义）起，**×2 放粗**
-// （每档只放大 2 倍，落点离容量上限不会超过 2 倍），到 **1° 封底**：1° 网格下 (sa, ea) 最多
-// 360×360（实测那个随机角度谱 1° → 130,321 个形状），配上 mid×style 也仍在老 GPU 的 16384 行
-// （578k 形状）之内 —— 更粗的档位纯属浪费。
+// **基准档 0.01° 不许动**（用户 2026-10-28："没碰壁根本不用动啊"）。曾经试过把基准提到
+// float32 量级（1/16384° = 6.1e-5°）：5 张门槛谱全部落在最细档，但只有 Singularity 的
+// 18 块砖几何真的变了 → 像素门槛动 152 px、要重存基线。**没有一张谱是"装不下"才需要精度**，
+// 所以退回来了 —— 精度只在**容量装不下**时放粗，永远不主动改几何。0.01° 换来的表也小得可笑
+// （MyC 294 / Singularity 9,349 / The Moon 215 个形状，最大的 angles360 也才 138 行）。
+//
+// 放粗阶梯（每档最多 2.5 倍，1° 封底）：0.01° → 0.02° → 0.04° → 0.1° → 0.2° → 0.5° → 1°。
+// **1° 以上直接删掉**（用户："1° 以上可以删了，GTX 590 来了都能存"）：1° 网格下 (sa, ea) 最多
+// 360×360，那个随机角度谱实测 1° 就是 130,321 个形状 = 3,691 行，离 16384 行还差四倍多。
 #pragma once
 
 #include <cmath>
@@ -25,26 +27,25 @@
 namespace adofai {
 namespace shapekey {
 
-// 量化档位：**每度多少格**（steps/degree），从细到粗。末档 1 = 1°。
-inline constexpr int kStepsLadder[] = {16384, 8192, 4096, 2048, 1024, 512, 256,
-                                       128,   64,   32,   16,   8,    4,   2, 1};
+// 量化档位：**每度多少格**（steps/degree），从细到粗。0.01° = 100 档（历史行为），末档 1 = 1°。
+inline constexpr int kStepsLadder[] = {100, 50, 25, 10, 5, 2, 1};
 inline constexpr int kStepsCount = (int)(sizeof(kStepsLadder) / sizeof(kStepsLadder[0]));
 
-// 角度（度）→ 量化整数。100 档（0.01°）与改造前的 `round(deg * 100.0f)` 逐位相同。
+// 角度（度）→ 量化整数。100 档（0.01°）就是 7.2.0 的算式 `round(deg * 100.0f)`，逐位相同。
 inline int angleKey(float deg, int steps) { return (int)std::lround(deg * (float)steps); }
 
-// 量化整数 → 角度（度）。100 档与 `key / 100.0f` 逐位相同。
+// 量化整数 → 角度（度）。100 档就是 `key / 100.0f`，逐位相同。
 inline float angleFromKey(int key, int steps) { return (float)key / (float)steps; }
 
-// 形状键：sa/ea 各 **24 位**、mid 1 位、style 3 位（共 52 位，uint64 富余）。
-// 24 位装 ±8,388,607；最细档 16384 下 sa ∈ [-180, 180]、ea ∈ [0, 360] →
-// |键| ≤ 360×16384 = 5,898,240 ✓ —— 这也是"最细只能到 16384"的原因，再细就撞 24 位边界。
-// 100 档（0.01°）下 |键| ≤ 36000，与改造前逐位相同。
+// 形状键：sa/ea 各 **20 位**、mid 1 位、style 3 位（与 7.2.0 同一布局）。
+// 20 位装 ±524,288；最细档 100 下 sa ∈ [-180,180]、ea ∈ [0,360] → |键| ≤ 36,000 ✓。
+// style 只有 3 位是**刻意**的：颜色（0x000000..0xFFFFFF，16.7M 个值）不进这个键，
+// 它走逐实例 fill/stroke（见 docs/rendering.md）。
 inline uint64_t packKey(int qsa, int qea, bool mid, uint8_t style = 0) {
-    const uint32_t a = (uint32_t)qsa & 0xFFFFFFu;
-    const uint32_t b = (uint32_t)qea & 0xFFFFFFu;
-    return (uint64_t)a | ((uint64_t)b << 24) | (mid ? (1ull << 48) : 0ull) |
-           ((uint64_t)(style & 0x7u) << 49);
+    const uint32_t a = (uint32_t)qsa & 0xFFFFFu;
+    const uint32_t b = (uint32_t)qea & 0xFFFFFu;
+    return (uint64_t)a | ((uint64_t)b << 20) | (mid ? (1ull << 40) : 0ull) |
+           ((uint64_t)(style & 0x7u) << 41);
 }
 
 // 一张 texW × rows 的表能放多少个形状（向下取整到整行）。

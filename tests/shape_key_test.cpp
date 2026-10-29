@@ -2,9 +2,9 @@
 //
 // 这张表**装不下**时的后果极其不对称：纹理建不出来 → texelFetch 全 0 → 每块砖塌陷 → 黑屏，
 // 而且不报错（Issue #2）。所以这里把三条承重性质钉死：
-//   ① 100 档（0.01°）= 7.2.0 的算式**逐位相同**（改基准精度时这条钉住"老档位没动"）；
-//   ② 键打包在 sa ∈ [-180,180] / ea ∈ [0,360] 全定义域内**无碰撞**（最细档也不越 24 位）；
-//   ③ 阶梯严格递减到 1°（1° 封底：更粗的档位没有意义），且最细档落在 float32 精度附近。
+//   ① 100 档（0.01°）= 7.2.0 的算式**逐位相同**（基准档 = 历史行为，改它就会动像素）；
+//   ② 键打包在 sa ∈ [-180,180] / ea ∈ [0,360] 全定义域内**无碰撞**，且各档位都在 20 位内；
+//   ③ 阶梯就是 0.01° → 0.02° → 0.04° → 0.1° → 0.2° → 0.5° → 1°（**1° 封底**，不再有更粗档）。
 
 #include "render/ShapeKey.hpp"
 
@@ -74,20 +74,18 @@ int main() {
                 return 1;
             }
         }
-        // 最细档必须明显细于 0.01°（用户 2026-10-28："0.01° 太看不起人家了"）
-        if (kStepsLadder[0] < 4096) { check(false, "最细档比 1/4096° 还粗"); return 1; }
-        std::printf("ok   0.01°（100 档）与旧算式逐位相同（%zu 个定义域角度 + 20000 个非整角度），"
-                    "最细档 1/%d°\n", n, kStepsLadder[0]);
+        std::printf("ok   0.01°（100 档）= 基准档，与旧算式逐位相同"
+                    "（%zu 个定义域角度 + 20000 个非整角度）\n", n);
     }
 
     // ---- ② 键打包：全档位都在 24 位内、且 (qsa, qea, mid, style) → 键 无碰撞 ----
     {
-        // 最细档的极值：sa ∈ [-180, 180]、ea ∈ [0, 360]（angleData 的方向是 0..360，sa = pred-180）
+        // 最细档（0.01°）的极值：sa ∈ [-180, 180]、ea ∈ [0, 360]（angleData 方向 0..360，sa = pred-180）
         const int finest = kStepsLadder[0];
         const long lo = (long)angleKey(-180.0f, finest);
         const long hi = (long)angleKey(360.0f, finest);
-        if (lo < -8388608L || hi > 8388607L) {
-            check(false, "最细档的量化键越了 24 位（会被掩码截断 → 假碰撞 → 画错砖）");
+        if (lo < -524288L || hi > 524287L) {
+            check(false, "0.01° 档的量化键越了 20 位（会被掩码截断 → 假碰撞 → 画错砖）");
             return 1;
         }
         // 每个档位各抽 20000 个角度：**(元组去重后的个数) 必须等于 (键去重后的个数)** ——
@@ -120,30 +118,39 @@ int main() {
                 for (int mid = 0; mid < 2; mid++)
                     for (int st = 0; st < 8; st++) edges.insert(packKey(e[a], e[b], mid != 0, (uint8_t)st));
         if (edges.size() != 64) { check(false, "最细档的边界键有碰撞"); return 1; }
-        std::printf("ok   各档位 packKey 无碰撞；最细档极值 [%ld, %ld] 在 24 位内\n", lo, hi);
+        std::printf("ok   各档位 packKey 无碰撞；0.01° 档极值 [%ld, %ld] 在 20 位内\n", lo, hi);
     }
 
-    // ---- ③ 阶梯：从 float32 级精度严格递减到 1°（1° 封底，不再有更粗的档位）----
+    // ---- ③ 阶梯：0.01° → … → 1°（1° 封底，更粗的档位已删除）----
     {
-        for (int i = 1; i < kStepsCount; i++) {
-            if (kStepsLadder[i] * 2 != kStepsLadder[i - 1]) {
-                check(false, "量化阶梯不是 ×2 递减");
+        const int want[] = {100, 50, 25, 10, 5, 2, 1};
+        if (kStepsCount != (int)(sizeof(want) / sizeof(want[0]))) {
+            check(false, "阶梯档数变了");
+            return 1;
+        }
+        for (int i = 0; i < kStepsCount; i++) {
+            if (kStepsLadder[i] != want[i]) {
+                check(false, "阶梯档位变了（0.01/0.02/0.04/0.1/0.2/0.5/1°）");
+                return 1;
+            }
+            if (i && kStepsLadder[i] >= kStepsLadder[i - 1]) {
+                check(false, "阶梯不是严格递减");
+                return 1;
+            }
+            // 每档最多 2.5 倍：落点离容量上限不会差太多
+            if (i && kStepsLadder[i - 1] > kStepsLadder[i] * 5 / 2) {
+                check(false, "相邻两档差超过 2.5 倍");
                 return 1;
             }
         }
-        const int last = kStepsLadder[kStepsCount - 1];
-        if (last != 1) { check(false, "末档不是 1°"); return 1; }
-        // 最细档要落在 angleData 的 float32 精度附近：±180° 的 ULP 是 1.5e-5°，
-        // 最细档 1/16384° = 6.1e-5° ≈ 4 ULP（再细没有数据可分辨，还会撞 24 位边界）
-        const double finest = 1.0 / (double)kStepsLadder[0];
-        if (finest > 2e-4 || finest < 1e-5) {
-            check(false, "最细档不在 float32 角度分辨率量级");
-            return 1;
-        }
+        if (kStepsLadder[0] != 100) { check(false, "基准档不是 0.01°"); return 1; }
+        if (kStepsLadder[kStepsCount - 1] != 1) { check(false, "末档不是 1°"); return 1; }
         // 还原误差不超过半个格子
         for (int qi = 0; qi < kStepsCount; qi++) {
             const int steps = kStepsLadder[qi];
-            const float half = 0.5f / (float)steps + 1e-6f;
+            // 半个格子 + 1e-4°：float32 在 ±180° 处的 ULP 就有 1.5e-5°，
+            // 乘/除各一次会再放大几个 ULP（实测 -179.929993 在 0.02° 档差 0.0100098）
+            const float half = 0.5f / (float)steps + 1e-4f;
             for (int i = -18000; i <= 18000; i += 7) {
                 const float a = (float)i / 100.0f;
                 if (std::fabs(angleFromKey(angleKey(a, steps), steps) - a) > half) {
@@ -152,12 +159,8 @@ int main() {
                 }
             }
         }
-        // 1° 下的 (sa, ea) 组合上界 360×360 = 129,600 × mid 2 × style 6 = 1.56M 形状 —— 用
-        // 16384 行（老 GPU 的上限）算下来是 45 万行，装不下**理论**最坏；实测那个随机角度谱
-        // 1° 只有 130,321 个形状（= 一端一格），远在 578k 之内。所以这里只断言"1° 的实际落点
-        // 远小于理论上界"这件事有记录，不再假装能证明收敛。
-        std::printf("ok   阶梯 %d 档：1/%d°（%.3g°）→ 1°（×2 递减，1° 封底）；还原误差 ≤ 半格\n",
-                    kStepsCount, kStepsLadder[0], finest);
+        std::printf("ok   阶梯 %d 档：0.01° → 0.02° → 0.04° → 0.1° → 0.2° → 0.5° → 1°（1° 封底）\n",
+                    kStepsCount);
     }
 
     // ---- ④ style 字段只有 3 位：**颜色绝不能编进键**（0x000000..0xFFFFFF 装不下）----

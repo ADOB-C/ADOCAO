@@ -486,8 +486,17 @@ bool HitsoundManager::preSynthesizeRawPcm(const std::vector<float>& samples, dou
 
 void HitsoundManager::resetAt(float audioPosSec) {
     m_readCursor = (size_t)(audioPosSec * (float)m_sampleRate);
-    if (m_readCursor >= m_buffer.size() / 2) m_readCursor = 0;
+    const size_t frames = m_buffer.size() / 2;
+    const bool clamped = (m_readCursor >= frames);
+    if (clamped) m_readCursor = 0;
     m_playing = true;
+    // 从中间开始时"没打拍音"这类问题，光看代码猜不出来 —— 打一行实际光标/长度出来。
+    // （0.01 s 以下视为"从头开始"，不刷屏。）
+    if (audioPosSec > 0.01f) {
+        LOG_I("hitsound seek: pos=%.3fs cursor=%zu/%zu frames (sr=%d, ch=%d, %s)",
+              (double)audioPosSec, m_readCursor, frames, m_sampleRate, channels(),
+              clamped ? "越界→回到 0" : "ok");
+    }
 }
 
 void HitsoundManager::stop() {

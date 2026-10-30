@@ -39,15 +39,21 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
     if (n < 2) return;
     int tileIdx = timeline.findTileIndex(t);
 
-    // Before first tile: orbit backward at constant BPM
+    // 倒计时（t < 0）：蓝星绕首砖的枢轴转 —— **相位接在砖 0 的"终点角"上**。
+    // 这样 t→0⁻ 时蓝星正好落在 p1（= 砖 1 的枢轴位置），而 t=0 起走砖 1 的行程
+    // （红蓝交换角色、位置不变）→ 两星位置**连续**。
+    // 旧写法把它钉在起点角（`rotation+180` = `startAngleAt(0)`）上：整块砖的角度被吞掉，
+    // t=0 那一帧蓝星从枢轴对侧横跨 2 格跳到 p1（用户 2026-10-29："开头蓝球是传送过去的，
+    // 不是正常转过去"，任何谱都能复现）。半径仍是 1（倒计时两星贴身自转，不跟着 dist 外推）。
     if (t < timeline.firstStartTime()) {
         const auto& p0 = L.tilePositionAt(0);
         double bpm = timeline.tileBPMs()[0];
         bool cw = timeline.tileIsCW()[0];
-        double startAngle = (timeline.level()->settings.rotation + 180.0) * 3.14159265358979 / 180.0;
+        // 终点角 = 起点角 + 本砖总角（弧度）；倒计时里随着 t 前进往回退，dt=0 时正好是终点角
+        double endAngle = (double)timeline.startAngleAt(0) + (double)timeline.totalAngleAt(0);
         double dt = timeline.firstStartTime() - t;
         double rps = (bpm / 60.0) * 3.14159265358979;
-        double angle = cw ? (startAngle + dt * rps) : (startAngle - dt * rps);
+        double angle = cw ? (endAngle + dt * rps) : (endAngle - dt * rps);
         double dist = 1.0;
         glm::dvec2 mv(p0[0] + std::cos(angle) * dist, p0[1] + std::sin(angle) * dist);
         glm::dvec2 pv(p0[0], p0[1]);
@@ -171,12 +177,14 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
     const int n = (int)nFull;
     if (n < 2) return;
     if (t < timeline.firstStartTime()) {
+        // 与 positionAt 的倒计时分支**逐字同源**（见那里的说明：相位必须接在砖 0 的终点角上，
+        // 否则 t=0 会跳 2 格）。
         const auto& p0 = L.tilePositionAt(0);
         double bpm = timeline.tileBPMs()[0]; bool cw = timeline.tileIsCW()[0];
-        double startAngle = (timeline.level()->settings.rotation + 180.0) * 3.14159265358979 / 180.0;
+        double endAngle = (double)timeline.startAngleAt(0) + (double)timeline.totalAngleAt(0);
         double dts = timeline.firstStartTime() - t;
         double rps = (bpm / 60.0) * 3.14159265358979;
-        double angle = cw ? (startAngle + dts * rps) : (startAngle - dts * rps);
+        double angle = cw ? (endAngle + dts * rps) : (endAngle - dts * rps);
         glm::dvec2 mv(p0[0] + std::cos(angle), p0[1] + std::sin(angle));
         glm::dvec2 pv(p0[0], p0[1]);
         redOut = pv; blueOut = mv;

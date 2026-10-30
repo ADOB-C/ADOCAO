@@ -77,6 +77,11 @@ add_executable(adocao_bit_span_test bit_span_test.cpp)
 target_link_libraries(adocao_bit_span_test PRIVATE adocao_core)
 add_test(NAME bit_span COMMAND adocao_bit_span_test)
 
+# 倒计时（t<0）的两星位置必须与 t=0 连续（用户 2026-10-29："开头蓝球是传送过去的"）
+add_executable(adocao_countdown_pose_test countdown_pose_test.cpp)
+target_link_libraries(adocao_countdown_pose_test PRIVATE adocao_core)
+add_test(NAME countdown_pose COMMAND adocao_countdown_pose_test)
+
 # 形状表的量化档位 / 键打包（纯逻辑；表装不下时的后果是**静默黑屏** —— Issue #2）
 add_executable(adocao_shape_key_test shape_key_test.cpp)
 target_link_libraries(adocao_shape_key_test PRIVATE adocao_core)

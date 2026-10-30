@@ -200,6 +200,13 @@
       逐砖表 + 枢轴模拟、正 N 边形布局、8 色行星池与解析式拖尾、`Vehicle±` 打拍音。
       验收与细节见 `docs/level-loading.md`「MultiPlanet」与 `tests/multiplanet_test.cpp`。
       仍缺：MP 虚线多边形指示器（纯装饰，未做）
+- [ ] **MultiPlanet ≥3 星：每个砖边界有两颗星跳 1 砖**（2026-10-29 探针发现，与"倒计时相位"
+      那条 bug 不同源 —— 那条已修，见 `tests/countdown_pose_test.cpp`）。3 星谱实测
+      （`angleData` 12 砖 / 120 BPM / floor 0 `MultiPlanet=ThreePlanets`）：
+      t=1.0⁻ → `id1 (1,0) id2 (0.5,0.866) id0 (0,0)`；t=1.0⁺ → `id2 (0,0) id0 (0.5,−0.866)
+      id1 (1,0)` —— id2/id0 各跳 1.0 砖。逐砖换位时"枢轴星"换了身份，但 N 边形布局给的是
+      **按 pivotPos 轮转**的位置，没有把上一砖的落点接上。要修得先对齐参考实现
+      `scrPlanet.UpdatePlanet` 的角色轮转（我们 `planetsAt` 的 `moverIdx`/`inverse` 只对了稳态）。
 - [ ] Bloom / Flash 特效：官方 Hidden/VideoBloom shader，`MediumAmount` 定标 = **0.28**（参照 Re_ADOJAS `5931618`/`c34dcf6`）
 
 ### 架构

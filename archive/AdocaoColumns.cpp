@@ -147,6 +147,7 @@ const char* codecName(Codec c) {
         case Codec::BitPack: return "BitPack";
         case Codec::Rle: return "Rle";
         case Codec::DeltaRleVarint: return "DeltaRleVarint";
+        case Codec::FixedPointDelta: return "FixedPointDelta";   // double 列专用（十进制网格）
         // 段级取值（16/17）不会从列头来 —— codecName 只打印列级。但枚举是同一个，
         // 这里列全是为了让 -Wswitch 守住"新增列编码必须取名字"（漏了是编译警告，
         // 不是运行期才发现）；不加 default 正是为了保住这个检查。

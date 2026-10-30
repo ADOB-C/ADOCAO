@@ -642,9 +642,13 @@ bool packLevel(const LevelData& level, std::vector<uint8_t>& out, std::string& e
         // **只写 v6 段装不下的类型**（去重）：Camera/Colour/Flash/MoveTrack/Repeat 与
         // Actions 里那 9 类播放事件已经有定长段了，再写一遍纯属重复（实测 16 KB）。
         // v7 的价值在"v6 会整体丢弃的那部分"：MoveDecorations/SetFilter*/Bloom/装饰…
+        // **ScaleRadius 不在这里**（2026-10-29，ADOFAI.Lib 报）：v6 的 Actions 段只存了
+        // `val1 = scale`（它被烘进砖位），**原始事件 JSON 丢了** → 从 `.adocao` 反向导出
+        // `.adofai` 时写不出这条事件（Lib 的 `canExport` 只能拒绝）。把它交给 v7 事件段
+        // 原样保存（每条 ~60 B，Won't You 全谱 40 条 ≈ 2.4 KB），导出侧就能无损还原。
         static const std::set<std::string> kLegacyStored = {
             "Twirl","SetSpeed","PositionTrack","SetHitsound","Bookmark","Pause","AnimateTrack",
-            "MoveCamera","ColorTrack","RecolorTrack","Flash","MoveTrack","RepeatEvents","ScaleRadius"};
+            "MoveCamera","ColorTrack","RecolorTrack","Flash","MoveTrack","RepeatEvents"};
         std::vector<std::string> evs;   // 只装"v6 装不下"的事件（通常很少），不是全部 action
         std::vector<int64_t> floors;   // 与 evs 平行（缺 floor 记 -1）
         evs.reserve(level.rawActionCount());

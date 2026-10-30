@@ -83,6 +83,10 @@ bool gatherTyped(const ColumnView& v, uint64_t from, uint64_t to, std::vector<T>
         if (bytesDecoded) *bytesDecoded += v.containerSize;
         return true;
     }
+    // 分块视图的 `blockElems` 必须是正数：容器解析那边已经拒绝 0（AdocaoBlocked.cpp），
+    // 但这里是**唯一做除法**的地方 —— 再挡一次，避免将来有人手工构造 ColumnView 时
+    // 直接踩整数除零（UB）。ADOFAI.Lib 的告警里那条 `b / 0 * 0` 就是这种形态。
+    if (v.blockElems == 0) return false;
     const uint64_t firstBlock = from / v.blockElems;
     const uint64_t lastBlock = (to - 1) / v.blockElems;
     out.reserve((size_t)(to - from));
@@ -341,7 +345,7 @@ bool FloorWindowSource::readBlock(uint64_t block, FloorBlock& out, std::string& 
     if (types.size() != m || flags.size() != m) { err = "窗口化：actions 列长度不一致"; return false; }
 
     out.actions.resize(m);
-    size_t ks = 0, ks2 = 0, k1 = 0, k2 = 0;
+    size_t ks = 0, k1 = 0, k2 = 0;
     for (size_t i = 0; i < m; ++i) {
         LevelData::FastAction& a = out.actions[i];
         const uint32_t t = types[i];

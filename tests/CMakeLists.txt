@@ -77,6 +77,11 @@ add_executable(adocao_bit_span_test bit_span_test.cpp)
 target_link_libraries(adocao_bit_span_test PRIVATE adocao_core)
 add_test(NAME bit_span COMMAND adocao_bit_span_test)
 
+# ScaleRadius 的原始事件必须活着穿过 .adocao（ADOFAI.Lib 的导出被它卡住，2026-10-29）
+add_executable(adocao_scale_radius_raw_test scale_radius_raw_test.cpp AdocaoJsonWriter.cpp)
+target_link_libraries(adocao_scale_radius_raw_test PRIVATE adocao_archive)
+add_test(NAME scale_radius_raw COMMAND adocao_scale_radius_raw_test)
+
 # 倒计时（t<0）的两星位置必须与 t=0 连续（用户 2026-10-29："开头蓝球是传送过去的"）
 add_executable(adocao_countdown_pose_test countdown_pose_test.cpp)
 target_link_libraries(adocao_countdown_pose_test PRIVATE adocao_core)

@@ -200,13 +200,30 @@
       逐砖表 + 枢轴模拟、正 N 边形布局、8 色行星池与解析式拖尾、`Vehicle±` 打拍音。
       验收与细节见 `docs/level-loading.md`「MultiPlanet」与 `tests/multiplanet_test.cpp`。
       仍缺：MP 虚线多边形指示器（纯装饰，未做）
-- [ ] **MultiPlanet ≥3 星：每个砖边界有两颗星跳 1 砖**（2026-10-29 探针发现，与"倒计时相位"
-      那条 bug 不同源 —— 那条已修，见 `tests/countdown_pose_test.cpp`）。3 星谱实测
-      （`angleData` 12 砖 / 120 BPM / floor 0 `MultiPlanet=ThreePlanets`）：
-      t=1.0⁻ → `id1 (1,0) id2 (0.5,0.866) id0 (0,0)`；t=1.0⁺ → `id2 (0,0) id0 (0.5,−0.866)
-      id1 (1,0)` —— id2/id0 各跳 1.0 砖。逐砖换位时"枢轴星"换了身份，但 N 边形布局给的是
-      **按 pivotPos 轮转**的位置，没有把上一砖的落点接上。要修得先对齐参考实现
-      `scrPlanet.UpdatePlanet` 的角色轮转（我们 `planetsAt` 的 `moverIdx`/`inverse` 只对了稳态）。
+- [ ] **MultiPlanet 加星循环少加一半（≥4 星直接少一颗）**（2026-10-29 探针发现，
+      **修法明确**：`applyCount` 的 `++numPlanets` 写在了增星循环体内，而循环条件是
+      `k <= req - numPlanets` —— 每插一颗就把剩余额度吃掉一颗。参考实现是在 if/else **之后**
+      才 `numPlanets = planetIds.length`。实测本机：请求 2/3/4/5/6/7/8 星 → 实得
+      **2/3/3/4/4/5/5**（3 星恰好正确，所以 `tests/multiplanet_test.cpp` 没抓到 —— 它只用了
+      `ThreePlanets`）。修法：循环体里去掉 `++numPlanets`，循环后 `numPlanets = 实际长度`。
+- [ ] **MultiPlanet ≥3 星：每个砖边界有两颗星跳 1 砖**（2026-10-29 探针诊断完成，
+      **结论：不是我们抄错，参考实现同样会跳**，所以修 = 主动偏离权威，需用户裁决）。
+      3 星谱实测（`angleData` 12 砖 / 120 BPM / floor 0 `ThreePlanets`）：t=1.0⁻ →
+      `id1 (1,0) id2 (0.5,0.866) id0 (0,0)`；t=1.0⁺ → `id2 (0,0) id0 (0.5,−0.866) id1 (1,0)`
+      —— id0/id2 各跳 **1.000** 砖，只有原本在砖心的那颗不动。
+      **机制**（算清了的）：移动星的角度是 `num = angle + dirSign·inverse`，progress=1 时
+      `angle = endAngle`（指向下一砖心）→ 落点偏离砖心 `2·sin(inverse/2)` = n=3 时 **1.0** 砖；
+      而恰好落在砖心的是 N 边形上 loop 里那颗"多余星"（n=3 实测 id0 精确落在 (0,0)）。
+      逐砖表把 **mover** 定成下一砖枢轴（+1 推进）→ 于是"该在砖心的星"与"真在砖心的星"错位。
+      **归因依据**：`PositionSolver::planetsAt` 与 Re_ADOJAS `applyMultiPlanetLayout`（Player.ts
+      6090-6130）逐行相同（`inverse`/`num`/`num4`/`R`/循环角公式全同），逐砖表也与参考
+      Player.ts 3050-3160 的算法逐砖相同（3 星 ids/pivotPos 实测 `[2,0,1]` / 1,2,0,1,2 全等）→
+      **参考实现画出来也是这个跳**。
+      **若要走"连续化"**：候选改法是让 offset 随 progress 衰减——
+      `num = angle + dirSign·inverse·(1−progress)`（progress=1 时落点正好是下一砖心、
+      与 +1 推进的角色轮转自洽）。但要自己验：3/4/5/8 星逐砖边界连续、
+      **N≤2 逐位不变**（两星路径根本不走这段，但仍要跑像素门槛 54/54）、
+      并出一版 ref-ab 说明"我们与参考在这里不一致，是有意的"。
 - [ ] Bloom / Flash 特效：官方 Hidden/VideoBloom shader，`MediumAmount` 定标 = **0.28**（参照 Re_ADOJAS `5931618`/`c34dcf6`）
 
 ### 架构

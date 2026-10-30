@@ -344,3 +344,8 @@ target_link_libraries(gen_repeat_adocao PRIVATE adocao_core adocao_archive)
 # AGENTS.md：查看器不该具备"产出谱面"的能力，需要就放 tests/。
 add_executable(pack_adocao tools/pack_adocao.cpp)
 target_link_libraries(pack_adocao PRIVATE adocao_core adocao_archive)
+
+# 轨道动画探针（诊断工具，不进 ctest）：瞬跳普查 + 跟随动画的成本量级。
+# 结论与口径见 docs/level-loading.md「跟随 MoveTrack 动画」。
+add_executable(anim_probe tools/anim_probe.cpp)
+target_link_libraries(anim_probe PRIVATE adocao_core)

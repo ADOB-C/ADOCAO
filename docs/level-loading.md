@@ -308,6 +308,57 @@ PositionTrack 把轨道挪走之后，**行星跟不跟着走**由 `stickToFloor
 事件 `stickToFloors: "Disabled"`、默认 true —— 都用"同谱不带事件"的基准谱对比位置，
 并断言 `planetPivotAt` / `stickyAt`。
 
+### 跟随 MoveTrack 动画（2026-10-30 探针结论：**可以做，而且不必改成帧计算**）
+
+以前记过"要让行星跟着 MoveTrack 走，得把公式法换成帧计算法，拖尾那套解析式采样顶不住" ——
+**这个结论是错的**。事实是：
+
+* `LevelData::moveTransformAt(floor, t)`（`LevelData.cpp:2123`）与
+  `TileAnimation::sample(tile, t, out)`（`TileAnimation.hpp:47`）**本来就是关于 t 的纯函数**
+  （前者线性扫描该砖所在块的 MoveTrack 列表 + 缓动插值，后者关键帧查询，无动画砖走 false 快路径）；
+  `render/LevelScene.cpp:482 trackXformAt()` 已经把两者组合成"给 (tile, t) 出变换"的求值器 ——
+  也就是说随便哪个历史时刻都算得出来。
+* 参考实现也是这条路：`MoveTrackManager::getTilePositionAtTime(tileIndex, queryTime)`，注释写着
+  *"Used by trail rendering to reconstruct historical positions when stickToFloors is on"* ——
+  它的拖尾同样是按时间重算，不是帧历史。
+* 我们的行星之所以不跟，只是因为 `PositionSolver::pivotAt()` 里写着 `(void)t;`（吃静态的
+  `planetPivotAt`）。
+
+**瞬跳普查（全谱 2 ms 步进、抽 300 块有动画的砖）**：
+
+| 谱面 | 有动画砖 | 关键帧 | 抽到的砖里真的动过 | >0.1 砖/步 的阶跃 | 最大位移/旋转（单步） |
+|---|---|---|---|---|---|
+| `He_He_He` | 2,903 / 2,904 | 37,389 | **247 / 300** | **4,341** | **5.18 砖** / 1.23 rad |
+| `Cardboard Box - The Limit Does Not Exist` | 1,348 | 5,785 | 有 | 10 | 0.33 砖 |
+| `IDPLMA` | 36,526 / 37,039 | 180,199 | 有（只转/缩放） | 0 | Δpos 0 / **2.89 rad** / scale 0.97 |
+| `Lost Requiem(1)` | 11,837 | 65,994 | 只缩放 | 0 | scale 0.79 |
+| `Hello (BPM) 2025` / `2021` / `Frangen` / `Fallen Symphony` / `goTe` | 2–7k | — | **只有不透明度** | 0 | 0 |
+
+两点结论：
+
+1. **很多谱的"轨道动画"其实只有不透明度**（2025 / 2021 / Frangen / Fallen Symphony / goTe）→
+   跟不跟动画对它们没有区别；真正要跟的是 `He_He_He`、`Cardboard Box`、`IDPLMA` 这类。
+2. **瞬跳是真实语义**：`He_He_He` 最坏那几处都是"静止 (0,0) → 一步跳到 (3.75,−2.48)"，
+   典型的 `duration: 0` MoveTrack（从当前值瞬间到目标）。行星跟上去之后拖尾当然会画出一条
+   直线 —— 那是砖真的瞬移了，参考实现同样会画。2026-10-24 把它当成"公式法的锅"是误判。
+
+**成本实测**（模拟拖尾 800 Hz × 0.74 s = 592 采样点，每点算当前砖 + 前后邻居，各一次
+`sample` + 一次 `moveTransformAt`）：
+
+```
+He_He_He (2,903 块动画砖)   0.043 ms/帧
+Hello (BPM) 2025 (7,336 块)  0.049 ms/帧
+```
+
+即 **0.25~0.3 % 的 16 ms 帧预算**，不需要缓存/LRU。
+
+**要做的三步**（都不破"拖尾必须解析式采样"这条铁律）：
+① `planetPivotAt(i)` → `planetPivotAt(i, t)`：静态 PositionTrack 偏移之后再叠 MoveTrack 的
+活变换（位置/旋转/缩放绕砖心；`trackXformAt` 的 `out[6]/out[7]` 就是砖心偏移）；
+② `startAngle/startDist/endDist` 改按**活邻居位置**算（参考实现就是 `atan2(prevLive−pivotLive)`、
+`|nextLive−pivotLive|`），否则行星弧线会和砖对不上 —— 这就是上面"已知近似"那条；
+③ 拖尾每个采样点调同一组纯函数（成本见上）。
+
 ## MultiPlanet（多星布局，2026-10-25）
 
 逐砖表：`numPlanets`(u8) / `planetListRef`(u16) / `planetPivotPos`(u8) + 去重列表表。

@@ -171,6 +171,11 @@
          （运镜已经不再受影响，但它和运镜是同一类问题）。
       ⑤ 砖上图标在 `rotation ≠ 0` 时**跟着世界转**，Re_ADOJAS 会反向补偿保持正立（`updateTileChildSpriteRotations`）。
          现有像素基线全在 0°，抓不到；要对齐得把图标拆成独立绘制 + 传逆旋角（见 docs/camera.md §12.2）。
+- [ ] **行星跟随 MoveTrack 动画**（2026-10-30 探针结论：可做且便宜，0.043–0.049 ms/帧；
+      `moveTransformAt`/`TileAnimation::sample` 已是纯函数，参考实现 `getTilePositionAtTime`
+      同样按时间重建）。三步：`planetPivotAt(i,t)` 叠活变换 → `startAngle/startDist/endDist`
+      改按活邻居 → 拖尾每采样点调同一组纯函数。普查数据见 `docs/level-loading.md`
+      「跟随 MoveTrack 动画」（He_He_He 有 4,341 处 >0.1 砖/2 ms 的瞬跳，多数谱只有不透明度动画）。
 - [ ] PositionTrack：relativeTo、rotation、scale、opacity、stickToFloors
       （`justThisTile` **已完成** 2026-10-11：官方语义 = **只作用于本层**（点加）；缺省/`"Disabled"` 才是
       "本层及之后所有层"。消费侧在 `applyPositionTrackOffsets()`，回归用例 `tests/position_offset_test.cpp`。

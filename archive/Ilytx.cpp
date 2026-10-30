@@ -6,7 +6,6 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
-#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -101,14 +100,27 @@ bool findMember(const char* tar, size_t length, const char* want, const char*& d
     return false;
 }
 
-// double → JSON 数字（**最短往返**表示，locale 无关；`%g` 会受 LC_NUMERIC 影响 ✗）
+// double → JSON 数字（**最短往返**表示）。
+//
+// 为什么不用 `std::to_chars`：它的浮点重载在 Apple libc++ 里是 **macOS 13.3+** 才有的符号
+// （`error: 'to_chars' is unavailable: introduced in macOS 13.3`）。我们想把产物的最低系统
+// 钉在 **12.0**（`scripts/make-app.sh` 的 `LSMinimumSystemVersion` 就是 12.0），所以这里用
+// "15/16/17 位有效数字里取第一个能还原的" —— 与 to_chars 的最短往返等效，且只依赖 C 库。
+//
+// locale：`%g` 的小数点受 LC_NUMERIC 影响，但我们全程不调 `setlocale()`（默认 "C"），
+// 与 `tests/ilytx_test.cpp` 的逐位对拍口径一致。
 bool appendNumber(std::string& out, double v) {
     if (!std::isfinite(v)) return false;
     char buf[40];
-    const auto res = std::to_chars(buf, buf + sizeof(buf), v);
-    if (res.ec != std::errc{}) return false;
-    out.append(buf, res.ptr);
-    return true;
+    for (int prec = 15; prec <= 17; prec++) {
+        const int n = std::snprintf(buf, sizeof(buf), "%.*g", prec, v);
+        if (n <= 0 || (size_t)n >= sizeof(buf)) return false;
+        double back = 0.0;
+        if (std::strtod(buf, nullptr) != v) continue;   // 还不了原 → 加一位再试
+        out.append(buf, (size_t)n);
+        return true;
+    }
+    return false;   // 17 位仍还不了原（正常 double 不会走到）
 }
 
 // settings 段里的成员（去掉 data 三段，避免与我们的 angleData/actions/decorations 重复）。

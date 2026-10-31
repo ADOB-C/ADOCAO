@@ -414,22 +414,40 @@ Hello (BPM) 2025 (7,336 块)  0.049 ms/帧
 **同一份实现里两条路自相矛盾**。我们按用户口径统一到后者（半径只跟 ScaleRadius），
 并用 `tests/stick_anim_test.cpp` ⑤ 钉住："邻居被搬走时行星位置/半径必须与不搬时完全相同"。
 
-### ScaleRadius 接上半径（2026-10-31）
+### 半径 = 相邻砖心间距（2026-10-31，补齐"半径永远是 1"的账）
 
 以前的真实情况：`Timeline::tileStartDist/tileEndDist` 对**所有非末层恒返回 1.0f**
 （`Timeline.hpp` 里就是 `return (i + 1 == m_distCount) ? m_lastStartDist : 1.0f;` —— 它们**不是**
 从砖位算出来的距离），所以行星的绕行半径**永远是 1**，`ScaleRadius` 只通过"烘进砖位"改变了
 枢轴位置，**从没影响过半径**。用户 2026-10-30 那句"把 ScaleRadius 接上"指的就是这个。
 
-现在：
+现在（`PositionSolver::armRadiusAt`）：
 
-* `LevelData` 在 `applyRadiusScaleOffsets()` 里同时保留 `m_radiusScaleEvents`（`floor → scale`）
-  与继承后的 `m_tileRadiusScale`（**惰性**：谱里没有 ScaleRadius 就不分配）；
-  `radiusScaleAt(floor)` 是它的访问器（默认 1）。
-* 行星/拖尾的绕行半径 = 参考实现纯时间函数的同一套：
-  `orbitR = r(i) + (r(i+1) − r(i)) · progress`（`PositionSolver::orbitRadiusAt`）——
-  注意它是**提前一砖**开始变的（砖 i 里就插到 r(i+1)），与参考实现 `rTail = radiusScale[i+1]` 一致。
-* 实测（Won't You / MYC，tile 1123~1130 的 `scale: 90`）：实测半径 **0.9000**（以前是 1.0）。
+```
+半径(progress) = |p_i − p_{i−1}|  +  (|p_{i+1} − p_i| − |p_i − p_{i−1}|) · progress
+```
+
+即**到相邻砖心的实际距离**在砖内线性插值（`p` = 已经烘过 ScaleRadius 与 PositionTrack 偏移的
+静态砖位）。这也是参考实现**装载器**的口径（它算 `tileStartDist/tileEndDist` 时就是
+`sqrt((p_{i±1} − p_i)²)`），而且让行星在 progress 0/1 时**正好落在前后砖心**。
+
+**为什么不是"只按 radiusScale"**（我最初就是这么写的，被用户当场否掉）：`2.64e6` 那张谱的
+"线圈"是 **PositionTrack** 把砖搬出来的（谱里有 4,190 条 PositionTrack，最大间距 **70.7 砖**），
+而 `radiusScale` 那段是 1 —— 只按 `radiusScale` 的话行星会在原地绕 1 砖，用户看到的就是
+"半径没变"。实测同一张谱：
+
+| 砖 | `radiusScale`（旧口径） | 间距（新口径） |
+|---|---|---|
+| 146（ScaleRadius 200 段） | 2.00 | 2.000 → 2.000 |
+| 78846（PositionTrack 线圈） | **1.00** | **1.000 → 3.000** |
+| 788159 | **1.00** | **70.661 → 1.000** |
+
+`LevelData` 仍然保留 `radiusScaleAt(floor)`（继承表，惰性），它现在只用于诊断/测试 ——
+半径由"烘好的砖位"体现，ScaleRadius 的贡献已经在间距里。
+
+* **动画（MoveTrack/AnimateTrack）不算进半径**：那是"活"位移，按用户口径只挪枢轴（见上一节）；
+  本节的间距取的是**静态**砖位。
+* 实测（Won't You / MYC，tile 1123~1130 的 `scale: 90`）：半径 **0.9000**（以前是 1.0）。
 
 顺带修掉一个**同源的老 bug**：烘偏移用的方向以前是 `tiles[i-1].direction + π`
 （= 上一砖的**出口方向**），而不是"指向上一砖心"的方向 —— 转弯处差一个转角，

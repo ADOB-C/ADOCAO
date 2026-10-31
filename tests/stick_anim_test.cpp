@@ -122,13 +122,16 @@ int main() {
                         at0.blue.x, at0.blue.y, wantMover.x, wantMover.y);
             return 1;
         }
-        const double rStatic = (double)lv.radiusScaleAt(tile);   // 半径 = ScaleRadius（这里恒 1）
+        // 半径 = 到上一砖心的距离（静态砖位；ScaleRadius 已烘进砖位，所以这里也等于 radiusScale）
+        const auto curP = lv.tilePositionAt(tile);
+        const auto prevP = lv.tilePositionAt(tile - 1);
+        const double rStatic = std::hypot(curP[0] - prevP[0], curP[1] - prevP[1]);
         const double rGot = dist(at0.blue, at0.red);
         if (std::fabs(rGot - rStatic) > 1e-9) {
             std::printf("FAIL 半径被位移带歪了：%.6f vs 静态 %.6f\n", rGot, rStatic);
             return 1;
         }
-        std::printf("ok   ② 砖起点处移动星 = 上一砖 + (3,0)，半径 %.3f = ScaleRadius\n", rGot);
+        std::printf("ok   ② 砖起点处移动星 = 上一砖 + (3,0)，半径 %.3f = 相邻砖心间距\n", rGot);
 
         // ── ④ 拖尾解析式采样 vs 直接算行星位置（逐点一致） ──
         const double trailT = t;
@@ -194,7 +197,9 @@ int main() {
             std::printf("FAIL ⑤ 上一砖的位移影响了半径/角度：%.6f vs %.6f\n", pa.blue.x, pb.blue.x);
             return 1;
         }
-        const double rStatic = (double)b.radiusScaleAt(tile);
+        const auto curB = b.tilePositionAt(tile);
+        const auto prevB = b.tilePositionAt(tile - 1);
+        const double rStatic = std::hypot(curB[0] - prevB[0], curB[1] - prevB[1]);
         if (std::fabs(dist(pb.blue, pb.red) - rStatic) > 1e-9) {
             std::printf("FAIL ⑤ 半径被邻居位移带歪：%.6f vs 静态 %.6f\n", dist(pb.blue, pb.red),
                         rStatic);
@@ -203,10 +208,9 @@ int main() {
         std::printf("ok   ⑤ 邻居被搬 (0,5) 时行星位置/半径与不搬时完全相同（半径 %.3f）\n", rStatic);
     }
 
-    // ── ⑥ 半径 = ScaleRadius（含"砖内从 r_i 插到 r_{i+1}"） ─────────────
+    // ── ⑥ 半径 = 相邻砖心间距（ScaleRadius 烘进砖位后 = scale，砖内线性插值） ──────
     // 以前 `Timeline::tileStartDist/tileEndDist` 对**所有**非末层恒返回 1.0f（注释写着
-    // "0..n-2 上恒为 1.0f"），所以 ScaleRadius 从来没影响到半径 —— 这就是用户 2026-10-30
-    // 说的"把 ScaleRadius 接上"。
+    // "0..n-2 上恒为 1.0f"），所以半径永远是 1：ScaleRadius 与 PositionTrack 搬砖都不影响它。
     {
         const char* kJson = R"({"angleData":[180,180,180,180,180,180,180,180],
           "settings":{"bpm":120,"offset":0,"countdownTicks":0,"pitch":100,"rotation":0,
@@ -257,7 +261,7 @@ int main() {
                 return 1;
             }
         }
-        std::printf("ok   ⑥ 半径 = ScaleRadius（砖 2 @0.5、砖 3 从 0.5 插到 1.0）\n");
+        std::printf("ok   ⑥ 半径 = 间距插值（砖 2 @0.5、砖 3 从 0.5 插到 1.0）\n");
     }
 
     if (g_fail) {

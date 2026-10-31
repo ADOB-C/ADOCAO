@@ -88,6 +88,31 @@ tile 20 的 opacity 关键帧从 `0.000:1.000 …` 变成 `0.000:0.000 6.082:0.0
 zoom 400），视野里就那几块砖，全在 8 拍以内 → 这条路径零覆盖。补了 `trackvis_fade_ahead`
 （同一张谱 t=2.0、zoom 12）。
 
+### 3.2 第一条关键帧之前要回落 base（2026-10-31，同上一条的后半）
+
+上一条修完立刻炸出下一个症状：**"暂停的时候什么都没有了"**。
+
+两个原因叠在一起：
+
+* `Channel::sample()` 在**第一条关键帧之前**返回首帧的值。appear 的首帧是"还没出现"（0），
+  于是整条轨道在 t<0 就是黑的；
+* `LevelScene::updateTileVisibility()` 把这个负时间**夹成了 0** —— 夹完正好落进
+  "首帧=0"的区间，于是开场/暂停必黑。
+
+参考实现的语义相反：`TimelineManager.sample()` 在首帧之前返回 `undefined`，
+**调用方回落到实体的 base 值**（透明度 1 = 可见）。所以：
+
+* `Channel::sampleOr(t, base)` 新增（`sample()` 保持原样，别的地方还在用）；
+  `TileAnimation::sample()` 与 `hiddenAt()` 全部改走它；
+* `hiddenAt()` 对 `t < 0` 直接返回"不可见 = 否"（我们的关键帧都在 t ≥ 0，t<0 只可能是倒计时）；
+* `updateTileVisibility()` 不再把负时间夹到 0（旧注释那句"倒计时按 t=0 处理"正是在这个
+  夹取上栽的 —— 它想避免的黑屏，恰恰是这个夹取造成的）。
+
+复现口径：2.64e6 那张谱 `--capture-time -1`（= 停止态 `timeInLevel = -preRoll`）——
+修前整屏只剩行星，修后整条轨道都在；`--capture-time 0.3` 仍是"行星前后约 9 块砖"。
+`track_visibility` 的 ④ 钉这一条（负向对照：把 `sampleOr` 换回 `sample` → opacity 0 ≠ 1，
+立刻 FAIL）。
+
 ## 4. 迁移步骤（每一步都要能验收）
 
 1. **核心**：`core/timeline/Keyframes.{hpp,cpp}`（通道/采样/Kill-complete）+ ctest

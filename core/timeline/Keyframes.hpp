@@ -37,6 +37,12 @@ public:
     // 采样：t 之前最后一个关键帧；若它开启了 tween 且下一帧在 t 之后 → 插值。
     float sample(double t) const;
 
+    // 同 `sample`，但**第一条关键帧之前**返回 `base`（= 这块砖的基准值）。
+    // 这是参考实现的语义：`TimelineManager.sample()` 在首帧之前返回 `undefined`，
+    // 调用方回落到 base。差别只在"倒计时（t < 0）"这段 —— 用 `sample` 会取到首帧的值
+    // （appear 动画首帧是"还没出现"的 0），于是暂停/开场整条轨道都不见了。
+    float sampleOr(double t, float base) const;
+
     // t <= t0 时把 keyframe 值设为 v，**不**保留其后 tween（Re_ADOJAS 的 instantKeyframe）。
     void instantKeyframe(double t0, float v);
 
@@ -59,7 +65,7 @@ struct TileKeyframes {
     bool activeAt(double t) const { return t >= rangeStart && t < rangeEnd; }
     // 超过任何关键帧之后的状态就是"最后一帧的值"；没有关键帧时返回 fallback。
     float value(const Channel& c, double t, float fallback) const {
-        return c.empty() ? fallback : c.sample(t);
+        return c.sampleOr(t, fallback);
     }
 };
 

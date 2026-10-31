@@ -357,6 +357,10 @@ def main():
     # 这个状态必须**拉远**才有意义 —— 现有的 singularity_mid/sr_radius_ramp 都贴得很近，
     # 视野里只有几块砖，看不到"前方该不该有轨道"。
     state("trackvis_fade_ahead", SING, "time", "2.0", 12.0)
+    # 倒计时 / 停止态：`timeInLevel = -preRoll` 是**负的**。参考实现在第一条关键帧之前
+    # 回落到 base（可见），我们曾经把负时间夹成 0 又取到 appear 首帧的 0 → 整屏黑
+    # （用户 2026-10-31："暂停的时候什么都没有了"）。这个状态就是那一秒。
+    state("trackvis_countdown", SING, "time", "-1.0", 25.0)
     with open(STATES_PATH, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
 

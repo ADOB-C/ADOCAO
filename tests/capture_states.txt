@@ -64,3 +64,4 @@ singularity_mid|~/Documents/Charts/15. Singularity at 2.64e+6 BPM/15. Singularit
 sr_radius_ramp|~/Documents/Charts/15. Singularity at 2.64e+6 BPM/15. Singularity at 2.64e+6 BPM.adofai|tile|158|400.0|1280x720|
 
 trackvis_fade_ahead|~/Documents/Charts/15. Singularity at 2.64e+6 BPM/15. Singularity at 2.64e+6 BPM.adofai|time|2.0|12.0|1280x720|
+trackvis_countdown|~/Documents/Charts/15. Singularity at 2.64e+6 BPM/15. Singularity at 2.64e+6 BPM.adofai|time|-1.0|25.0|1280x720|

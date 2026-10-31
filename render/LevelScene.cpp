@@ -419,7 +419,10 @@ void LevelScene::updateTileVisibility(const Timeline& timeline, double t, bool p
         if (!m_tileAnim) return;
         if (!m_animVisDirty) return;
         m_animVisDirty = false;
-        const double tt = (t < 0.0) ? 0.0 : t;
+        // **不要**把负时间夹到 0：倒计时（t < 0）在参考实现里是"第一条关键帧之前 → 回落 base"，
+        // 全部可见。夹成 0 会取到 appear 首帧的 0，于是开场/暂停整条轨道是黑的
+        // （2026-10-31 用户："暂停的时候什么都没有了"）。
+        const double tt = t;
         const auto& entries = m_tileAnim->entries();
         if (m_animVisState.size() != entries.size()) m_animVisState.assign(entries.size(), 2);
         for (size_t i = 0; i < entries.size(); ++i) {

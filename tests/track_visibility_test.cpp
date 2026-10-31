@@ -69,6 +69,14 @@ int main() {
         TileAnimSample s1{};
         anim.sample(1, tl.startTimeAt(1) + 0.5, s1);
         near("① tile 1 @入场后 opacity", s1.opacity, 1.0);
+
+        // ④ 倒计时（t < 0）：参考实现的 `sample()` 在**第一条关键帧之前**返回 undefined，
+        // 调用方回落到 base（透明 1 = 可见）。我们的 `Channel::sample` 会把首帧的值
+        // （appear 的"还没出现"= 0）当成 t<0 的值 —— 于是开场/暂停整条轨道是黑的。
+        TileAnimSample sNeg{};
+        anim.sample(20, -2.0, sNeg);
+        near("④ tile 20 @t=-2 opacity（首帧之前回落 base）", sNeg.opacity, 1.0);
+        check("④ tile 20 @t=-2 可见（倒计时不许黑屏）", !anim.hiddenAt(20, -2.0));
     }
 
     // ---- ③ 只有 disappear 的砖不能被 t=0 基准帧连带隐藏 ----

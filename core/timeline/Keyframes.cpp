@@ -55,6 +55,11 @@ void Channel::addTween(double t0, double t1, float from, float to, Ease e, float
     else m_keys.insert(at1, Key{t1, to, 255});
 }
 
+float Channel::sampleOr(double t, float base) const {
+    if (m_keys.empty() || t < m_keys.front().time) return base;
+    return sample(t);
+}
+
 float Channel::sample(double t) const {
     if (m_keys.empty()) return 0.0f;
     if (t <= m_keys.front().time) return m_keys.front().value;

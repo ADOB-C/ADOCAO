@@ -276,9 +276,9 @@ void TileAnimation::build(const LevelData& lv, const Timeline& tl) {
     // 建帧完：缓存每块砖"区间之前/之后是否完全不可见"
     for (TileKeyframes& f : m_frames) {
         const auto visible = [](const TileKeyframes& g, double t) {
-            const float op = g.opacity.empty() ? 1.0f : g.opacity.sample(t);
-            const float sx = g.scaleX.empty() ? 1.0f : g.scaleX.sample(t);
-            const float sy = g.scaleY.empty() ? 1.0f : g.scaleY.sample(t);
+            const float op = g.opacity.sampleOr(t, 1.0f);
+            const float sx = g.scaleX.sampleOr(t, 1.0f);
+            const float sy = g.scaleY.sampleOr(t, 1.0f);
             return !(op <= 0.002f || (std::fabs(sx) <= 0.002f && std::fabs(sy) <= 0.002f));
         };
         f.hiddenBefore = !visible(f, f.rangeStart - 1.0);
@@ -343,11 +343,15 @@ bool TileAnimation::hiddenAt(int64_t tile, double t) const {
     const uint32_t idx = frameIndexFor(tile);
     if (idx == UINT32_MAX) return false;
     const TileKeyframes& f = m_frames[idx];
+    // 倒计时/未开始（t < 0）：参考实现在**第一条关键帧之前**回落到 base（可视）。
+    // 我们的关键帧都在 t >= 0，所以 t < 0 一律"还没进入动画"，按 base 处理 ——
+    // 否则开场/暂停时整条轨道是黑的（2026-10-31 用户："暂停的时候什么都没有了"）。
+    if (t < 0.0) return false;
     if (t < f.rangeStart) return f.hiddenBefore;
     if (t >= f.rangeEnd) return f.hiddenAfter;
-    const float op = f.opacity.empty() ? 1.0f : f.opacity.sample(t);
-    const float sx = f.scaleX.empty() ? 1.0f : f.scaleX.sample(t);
-    const float sy = f.scaleY.empty() ? 1.0f : f.scaleY.sample(t);
+    const float op = f.opacity.sampleOr(t, 1.0f);
+    const float sx = f.scaleX.sampleOr(t, 1.0f);
+    const float sy = f.scaleY.sampleOr(t, 1.0f);
     return op <= 0.002f || (std::fabs(sx) <= 0.002f && std::fabs(sy) <= 0.002f);
 }
 
@@ -356,12 +360,15 @@ bool TileAnimation::sample(int64_t tile, double t, TileAnimSample& out) const {
     if (idx == UINT32_MAX) return false;
     const TileKeyframes& f = m_frames[idx];
     out = TileAnimSample{};
-    out.posX = f.posX.empty() ? 0.0f : f.posX.sample(t);
-    out.posY = f.posY.empty() ? 0.0f : f.posY.sample(t);
-    out.rot = f.rot.empty() ? 0.0f : f.rot.sample(t);
-    out.scaleX = f.scaleX.empty() ? 1.0f : f.scaleX.sample(t);
-    out.scaleY = f.scaleY.empty() ? 1.0f : f.scaleY.sample(t);
-    out.opacity = f.opacity.empty() ? 1.0f : f.opacity.sample(t);
+    // **首帧之前一律回落 base**（参考实现 `sample()` 在首帧之前返回 undefined，调用方用
+    // base）。差别只在倒计时（t < 0）：用 `sample()` 会取到 appear 首帧的 0，
+    // 于是"暂停/开场整条轨道不见"—— 2026-10-31 用户实测就是这句"暂停的时候什么都没有了"。
+    out.posX = f.posX.sampleOr(t, 0.0f);
+    out.posY = f.posY.sampleOr(t, 0.0f);
+    out.rot = f.rot.sampleOr(t, 0.0f);
+    out.scaleX = f.scaleX.sampleOr(t, 1.0f);
+    out.scaleY = f.scaleY.sampleOr(t, 1.0f);
+    out.opacity = f.opacity.sampleOr(t, 1.0f);
     out.animated = true;
     return true;
 }

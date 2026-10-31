@@ -6,6 +6,15 @@
 > 未完成清单已定稿（移除：~~GPU compute culling~~——2.0.0 起已不需要，彻底删除；~~Decoration~~）。
 > MoveTrack 保留，归入「遥远的未来」，仅记录不排期。已完成项保留在文末作历史。
 
+## 待查（偶发，尚无复现）
+
+- [ ] `adocao_window` 在 **Linux CI** 上偶发失败：`tileStartTimes` 1612/9000 处逐位不一致
+      （提交 `6f94317` 的 run 41225860225；同一份测试在 `398775c` 的 run 41226440590 全绿，
+      Windows/macOS 也一直绿）。测试是纯内存的（不落临时文件），所以像是某处**未初始化内存**
+      或与分配顺序相关的差异，而不是逻辑错。下次复现时先在 Linux 上把该测试连跑 20 次
+      （`ctest --test-dir build -R adocao_window --repeat until-fail:20`）并开
+      `ADOCAO_BLOCK_DEBUG`（如果那条路径有的话）定位首个不一致的层号。
+
 ## 并行模型（`docs/parallelism.md`，2026-10-16 拍板）
 
 - [ ] ① 调度器骨架（`core/util/Scheduler`：模板 `parallelFor` + 两条车道 + 嵌套护栏 + `ADOCAO_JOBS=1`）

@@ -362,12 +362,35 @@ Hello (BPM) 2025 (7,336 块)  0.049 ms/帧
 
 即 **0.25~0.3 % 的 16 ms 帧预算**，不需要缓存/LRU。
 
-**要做的三步**（都不破"拖尾必须解析式采样"这条铁律）：
-① `planetPivotAt(i)` → `planetPivotAt(i, t)`：静态 PositionTrack 偏移之后再叠 MoveTrack 的
-活变换（位置/旋转/缩放绕砖心；`trackXformAt` 的 `out[6]/out[7]` 就是砖心偏移）；
-② `startAngle/startDist/endDist` 改按**活邻居位置**算（参考实现就是 `atan2(prevLive−pivotLive)`、
-`|nextLive−pivotLive|`），否则行星弧线会和砖对不上 —— 这就是上面"已知近似"那条；
-③ 拖尾每个采样点调同一组纯函数（成本见上）。
+**已实现（2026-10-30，`tests/stick_anim_test.cpp` 钉住）**，三步都没破"拖尾必须解析式采样"：
+
+1. **共享求值器** `core/timeline/TileXform.hpp::tileXformAt(lv, anim, tile, t)`：MoveTrack（解析式）+
+   AnimateTrack（关键帧，覆盖前者）。渲染的 `trackXformAt` 与行星/拖尾现在调**同一个函数**
+   （以前渲染那份是内联在 `LevelScene.cpp` 里的，分叉过一次就会"头跟了、尾巴没跟"）。
+2. **活枢轴 + 活邻居**：`PositionSolver` 里 `livePivot()` = `planetPivotAt(i)`（已含 PositionTrack
+   与 stick 语义）+ 动画位移；`startAngle/startDist/endDist` 在**三块砖里任一有位移**时改用
+   `atan2(prevLive−pivotLive)`、`sqrt` 活距离（与装载器同一个 `sqrt` 算式）。三块砖都没位移 →
+   仍走原来的静态数组，**逐位不变**。
+   *旋转/缩放拖动不了枢轴*：着色器是绕砖的起点（= 枢轴）转/缩的，参考实现也只取
+   `tileMesh.position`。
+3. **拖尾**：`loadTrailTileConstsLive()` 在每个采样点按 tt 重算那 6 个常量（没有位移的砖仍走
+   缓存常量）。`stick_anim` 的 ④ 断言"拖尾每点 == 直接算行星位置"（实测最大偏差 2.6e-15 砖）。
+
+接线：`PlaybackClock::setTileAnimation()`（GameWindow 每帧把 `LevelScene::animation()` 递进去，
+因为时钟**先于**场景算位置）；`PositionSolver` 的 5 个入口都多一个
+`const TileAnimation* anim = nullptr`，不传就是旧行为。
+
+**实测成本**（`He_He_He`，2,903 块动画砖，`sampleTrailRange` 594 点 × 40 次平均）：
+不带动画 **0.004 ms/帧** → 带动画 **0.058 ms/帧**（+0.054，≈ 16 ms 帧预算的 0.3%）。
+
+**顺带修掉的旧账**：`stickyAt()` 在 `m_tileStick` 表为空时一律返回 true —— 若谱面写着
+`stickToFloors: false` 但**一条 PositionTrack 都没有**，`applyPositionTrackOffsets` 会早退、
+表不分配，于是"不跟"被误判成"跟"。PositionTrack 时期没暴露（没有偏移要减），
+跟随动画时会立刻错（`stick_anim` ③ 抓的就是这个）。
+
+**已知近似**（仍在）：行星的 `startDist/endDist` 在**没有动画**的谱面上仍按静态砖位算（那本来就对）；
+`planetPivotAt` 的 `stick=false` 分支只减 PositionTrack 的累计偏移，不减动画位移 —— 与参考实现
+一致（动画位移靠 `useStickToFloor` 整个跳过）。
 
 ## MultiPlanet（多星布局，2026-10-25）
 

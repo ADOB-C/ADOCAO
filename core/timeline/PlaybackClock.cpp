@@ -122,7 +122,8 @@ void PlaybackClock::updateFrame() {
             m_frame.elapsedMs = m_elapsedTime;
             m_currentTileIndex = n - 2;
             m_frame.tileIndex = m_currentTileIndex;
-            PositionSolver::positionAt(*m_timeline, t, m_frame.redPosition, m_frame.bluePosition);
+            PositionSolver::positionAt(*m_timeline, t, m_frame.redPosition, m_frame.bluePosition,
+                                      m_tileAnim);
             return;
         }
     }
@@ -131,7 +132,8 @@ void PlaybackClock::updateFrame() {
     m_frame.elapsedMs = m_elapsedTime;
     m_frame.tileIndex = m_currentTileIndex;
 
-    PositionSolver::positionAt(*m_timeline, t, m_frame.redPosition, m_frame.bluePosition);
+    PositionSolver::positionAt(*m_timeline, t, m_frame.redPosition, m_frame.bluePosition,
+                                      m_tileAnim);
 
     if (!m_reportedEnd && n >= 2 && m_currentTileIndex >= n - 2) {
         m_reportedEnd = true;

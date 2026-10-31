@@ -6,6 +6,7 @@
 namespace adofai {
 
 class Timeline;
+class TileAnimation;
 
 struct PlaybackFrame {
     double timeInLevel = 0.0;
@@ -22,6 +23,10 @@ public:
     PlaybackClock() = default;
 
     void attachTimeline(const Timeline* timeline) { m_timeline = timeline; }
+    // 轨道动画（MoveTrack/AnimateTrack）。给了之后行星就按"粘性轨道"跟随被搬走的砖
+    // （见 PositionSolver 与 docs/level-loading.md「跟随 MoveTrack 动画」）。
+    // 不持有它：生命周期由渲染侧（LevelScene）管。
+    void setTileAnimation(const TileAnimation* anim) { m_tileAnim = anim; }
 
     void start(double wallClockSec);
     void startAt(double wallClockSec, float audioPosSec, float offsetSec);
@@ -42,6 +47,7 @@ public:
     const PlaybackFrame& frame() const { return m_frame; }
 
 private:
+    const TileAnimation* m_tileAnim = nullptr;
     const Timeline* m_timeline = nullptr;
     bool m_isPlaying = false;
     double m_elapsedTime = 0.0;

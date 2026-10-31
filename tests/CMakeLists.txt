@@ -77,6 +77,11 @@ add_executable(adocao_bit_span_test bit_span_test.cpp)
 target_link_libraries(adocao_bit_span_test PRIVATE adocao_core)
 add_test(NAME bit_span COMMAND adocao_bit_span_test)
 
+# 粘性轨道 + 轨道动画：行星/拖尾跟着被 MoveTrack 搬走的砖走（2026-10-30）
+add_executable(adocao_stick_anim_test stick_anim_test.cpp)
+target_link_libraries(adocao_stick_anim_test PRIVATE adocao_core)
+add_test(NAME stick_anim COMMAND adocao_stick_anim_test)
+
 # ScaleRadius 的原始事件必须活着穿过 .adocao（ADOFAI.Lib 的导出被它卡住，2026-10-29）
 add_executable(adocao_scale_radius_raw_test scale_radius_raw_test.cpp AdocaoJsonWriter.cpp)
 target_link_libraries(adocao_scale_radius_raw_test PRIVATE adocao_archive)

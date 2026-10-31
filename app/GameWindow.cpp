@@ -557,6 +557,14 @@ void GameWindow::update(float deltaMs) {
     double now = glfwGetTime();
 
     // Playback update
+    // 行星跟随轨道动画：`PlaybackClock`（下面先算位置）与 `LevelScene` 必须拿**同一份**
+    // 动画求值器，否则头跟了、尾巴没跟（2026-10-24 那条假直线就是这么来的）。
+    // 懒建 + 幂等；`applyFrame` 里也会调一次（顺序无关）。
+    if (m_scene && m_timeline) {
+        m_scene->ensureTileAnimation(*m_timeline);
+        m_playback->setTileAnimation(m_scene->animation());
+    }
+
     {
     profile::Scoped _sPlayback("playback-sync");
     if (m_playback->isPlaying()) {

@@ -7,6 +7,7 @@
 namespace adofai {
 
 class Timeline;
+class TileAnimation;
 
 // Pure position solver: turns a Timeline + time into red/blue planet positions
 // (or trail sample points). No GL/audio dependency.
@@ -48,16 +49,22 @@ public:
     static TrailWindow trailWindow(const Timeline& timeline, double t,
                                    const TrailSamplingConfig& cfg);
 
+    // `anim`（可选）= 该谱的轨道动画（MoveTrack/AnimateTrack 关键帧）。给了就按"粘性轨道"
+    // 语义跟随被动画搬走的砖：枢轴 + 相邻砖的活位置一起算（参考实现
+    // `Player.updatePlanetsPosition` 的 `useStickToFloor` 分支）。nullptr = 现有静态行为。
     static void positionAt(const Timeline& timeline, double t,
-                           glm::dvec2& redOut, glm::dvec2& blueOut);
+                           glm::dvec2& redOut, glm::dvec2& blueOut,
+                           const TileAnimation* anim = nullptr);
     static void positionAtTile(const Timeline& timeline, double t, int tileIdx,
-                               glm::dvec2& redOut, glm::dvec2& blueOut);
+                               glm::dvec2& redOut, glm::dvec2& blueOut,
+                               const TileAnimation* anim = nullptr);
     // ── MultiPlanet（N 颗星）─────────────────────────────────────────────
     // 参考实现 Re_ADOJAS `Player.applyMultiPlanetLayout`（官方 scrPlanet.UpdatePlanet 稳态）：
     // 枢轴星在砖心，移动星在半径 r 处，其余星落在正 N 边形上（边长 = r）。
     // N<=2 时逐位退化成 positionAtTile 的结果（保证既有像素门槛不变）。
     struct PlanetPos { uint8_t id; glm::dvec2 pos; };
-    static void planetsAt(const Timeline& timeline, double t, std::vector<PlanetPos>& out);
+    static void planetsAt(const Timeline& timeline, double t, std::vector<PlanetPos>& out,
+                          const TileAnimation* anim = nullptr);
 
     // Sample [startTime, endTime]. The head is bound to the planet position the
     // caller passes in, so the trail can never lead the planet along the track.
@@ -67,14 +74,16 @@ public:
                                  float sampleRate,
                                  const glm::dvec2& redHead, const glm::dvec2& blueHead,
                                  std::vector<glm::dvec2>& redOut,
-                                 std::vector<glm::dvec2>& blueOut);
+                                 std::vector<glm::dvec2>& blueOut,
+                                 const TileAnimation* anim = nullptr);
 
     // Convenience: window ending at endTime with the given duration.
     static void sampleTrail(const Timeline& timeline, double endTime,
                             float trailDuration, float sampleRate,
                             const glm::dvec2& redHead, const glm::dvec2& blueHead,
                             std::vector<glm::dvec2>& redOut,
-                            std::vector<glm::dvec2>& blueOut);
+                            std::vector<glm::dvec2>& blueOut,
+                            const TileAnimation* anim = nullptr);
 
     // Track covered per second at time t, in tiles, counting the arc swept by
     // the tile's relative angle as path length. This is the metric the optional

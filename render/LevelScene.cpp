@@ -15,6 +15,7 @@
 #include "core/timeline/Timeline.hpp"
 #include "core/timeline/PlaybackClock.hpp"   // PlaybackFrame
 #include "core/timeline/PositionSolver.hpp"
+#include "core/timeline/TileXform.hpp"
 #include "core/util/Logger.hpp"
 #include "core/util/Env.hpp"
 #include "core/util/Scheduler.hpp"
@@ -271,6 +272,8 @@ static float camera_pixelsPerTile(int fbHeight, float zoom) {
     return fbHeight > 0 ? (float)fbHeight * zoom / 1200.0f : 0.0f;
 }
 
+void LevelScene::ensureTileAnimation(const Timeline& timeline) { buildTileAnimation(timeline); }
+
 void LevelScene::buildTileAnimation(const Timeline& timeline) {
     if (m_tileAnimBuilt) return;
     m_tileAnimBuilt = true;
@@ -308,7 +311,7 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
     } else {
         // MultiPlanet：逐砖列表激活 N 颗（位置由 PositionSolver::planetsAt 算，含正 N 边形布局）
         std::vector<PositionSolver::PlanetPos> pos;
-        PositionSolver::planetsAt(timeline, frame.timeInLevel, pos);
+        PositionSolver::planetsAt(timeline, frame.timeInLevel, pos, m_tileAnim.get());
         m_planetActive.fill(false);
         for (const auto& pp : pos) {
             if (pp.id >= 8) continue;
@@ -351,7 +354,7 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
         std::vector<PositionSolver::PlanetPos> tmp;
         for (int k = 0; k < n; ++k) {
             const double tt = win.startTime + span * ((double)k / (double)(n - 1));
-            PositionSolver::planetsAt(timeline, tt, tmp);
+            PositionSolver::planetsAt(timeline, tt, tmp, m_tileAnim.get());
             for (const auto& pp : tmp)
                 if (pp.id < 8) m_mpTrailPts[pp.id].push_back(pp.pos);
         }
@@ -371,7 +374,7 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
         profile::Scoped _s("trailSample");
         PositionSolver::sampleTrailRange(timeline, win.startTime, frame.timeInLevel, win.sampleRate,
                                          frame.redPosition, frame.bluePosition,
-                                         redPts, bluePts);
+                                         redPts, bluePts, m_tileAnim.get());
     }
 
     // 【诊断，env 门控】拖尾点哈希：A/B "按块物化 provider" 是否改变了拖尾
@@ -491,17 +494,13 @@ void trackXformAt(void* ctx, uint32_t tile, float out[8]) {
         return dash ? std::atol(dash + 1) : std::atol(e);
     }();
     const auto* c = static_cast<const TrackXformCtx*>(ctx);
-    const LevelData::MoveTransform tr = c->level->moveTransformAt((int64_t)tile, c->time);
     // 逐砖关键帧时间轴（Re_ADOJAS 模型）：MoveTrack + AnimateTrack 建在同一条时间轴上。
-    adofai::TileAnimSample an;
-    if (c->anim && c->anim->sample((int64_t)tile, c->time, an)) {
-        out[0] = an.rot;  out[1] = an.scaleX; out[2] = an.scaleY;
-        out[3] = an.opacity;
-        out[4] = an.posX; out[5] = an.posY;
-    } else {
-        out[0] = tr.rotDelta; out[1] = tr.scaleX; out[2] = tr.scaleY;
-        out[3] = tr.alpha;    out[4] = tr.moveX;  out[5] = tr.moveY;
-    }
+    // **与行星/拖尾同一个求值器**（core/timeline/TileXform.hpp）：那边也要在任意历史时刻
+    // 问"这块砖在哪"，两条路分叉过一次（头跟了动画、尾巴没跟 → 拉出假直线），别再分叉。
+    const TileXform xf = tileXformAt(*c->level, c->anim, (int64_t)tile, c->time);
+    out[0] = (float)xf.rot;   out[1] = (float)xf.scaleX; out[2] = (float)xf.scaleY;
+    out[3] = (float)xf.opacity;
+    out[4] = (float)xf.moveX; out[5] = (float)xf.moveY;
     if (g_dbgTile >= 0 && (long)tile >= g_dbgTile && (long)tile <= g_dbgTileHi) {
         const float dir = c->level->tileDirectionAt((int64_t)tile);
         const float sa = c->timeline ? c->timeline->startAngleAt((int64_t)tile) : 0.0f;

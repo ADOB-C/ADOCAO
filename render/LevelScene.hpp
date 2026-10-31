@@ -57,6 +57,9 @@ public:
     // Apply the latest playback frame to planet positions and trail samples
     // (call only while playing).
     void applyFrame(const adofai::PlaybackFrame& frame, const adofai::Timeline& timeline);
+    // 轨道动画（MoveTrack/AnimateTrack）懒建；**幂等**。GameWindow 在每帧推进播放前调一次，
+    // 好让 `PlaybackClock`（它先算行星位置）也能拿到同一份动画去跟随。
+    void ensureTileAnimation(const adofai::Timeline& timeline);
 
     // GameWindow reports the measured work time (ms, excluding vsync/sleep) of
     // the previous frame. Used by the trail sample-rate governor.

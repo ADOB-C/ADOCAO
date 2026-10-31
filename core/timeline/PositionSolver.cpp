@@ -1,6 +1,7 @@
 #include "core/timeline/PositionSolver.hpp"
 #include <cstdlib>   // getenv（诊断）
 #include "core/timeline/Timeline.hpp"
+#include "core/timeline/TileXform.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -28,7 +29,34 @@ static void pivotAt(const LevelData& L, int64_t idx, double t, double& x, double
     L.planetPivotAt(idx, x, y);
 }
 
-void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& redOut, glm::dvec2& blueOut) {
+// 行星枢轴在 t 时刻的**活**位置：静态枢轴（已含 PositionTrack 偏移与 stickToFloors 语义）
+// 再叠轨道动画的位移。
+//
+// 为什么只叠位移、不叠旋转/缩放：着色器（`assets/shaders/tile.vert`）是绕**砖的起点**
+// （= 这个枢轴）转/缩的，枢轴本身不动；参考实现也只取 `tileMesh.position`
+// （= 砖起点 + positionOffset）。所以旋转/缩放不改变行星的轨道中心 —— 这是权威口径。
+//
+// `stick=false` 的砖行星不跟它走（PositionTrack 那套已经由 `planetPivotAt` 减回原始位；
+// 动画位移同样不能加），判据与参考实现的 `useStickToFloor` 一致。
+//
+// `moved` 用"或"累积：调用方要的是"这三块砖里**有没有**活位移"。
+static void livePivot(const LevelData& L, const TileAnimation* anim, int64_t idx, double t,
+                      double& x, double& y, bool& moved) {
+    L.planetPivotAt(idx, x, y);
+    if (!anim || idx < 0 || idx >= L.tileCount()) return;
+    if (!L.stickyAt(idx)) return;
+    const TileXform xf = tileXformAt(L, anim, idx, t);
+    if (xf.moveX != 0.0 || xf.moveY != 0.0) moved = true;
+    x += xf.moveX;
+    y += xf.moveY;
+}
+
+// 与装载器同一个算式（`sqrt(dx*dx+dy*dy)`），不要用 hypot：静态值就是 `tileStartDist`/
+// `tileEndDist` 里存的同一个 sqrt，算式相同才逐位相同（邻居没动画时我们要逐位不变）。
+static double distOf(double dx, double dy) { return std::sqrt(dx * dx + dy * dy); }
+
+void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& redOut,
+                                glm::dvec2& blueOut, const TileAnimation* anim) {
     const LevelData& L = *timeline.level();   // ③ 切片 4：走访问器，不直接碰 tiles[]
     const int64_t nFull = L.tileCount();   // #0：int64 算，收窄前显式判
     if (!fitsInt32(nFull)) {
@@ -85,22 +113,35 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
     }
 
     bool isRed = (tileIdx%2==0);
-    double pvx = 0.0, pvy = 0.0;
-    pivotAt(L, tileIdx, t, pvx, pvy);            // sticky=false 的层用原始砖位
+    // 活几何：枢轴与**相邻砖**都按 t 时刻的活位置算（粘性轨道 + 轨道动画）。
+    // 三块砖都没有位移时 `live=false`，下面全走原来的静态数组 —— 逐位不变。
+    double pvx = 0.0, pvy = 0.0, prvx = 0.0, prvy = 0.0, nxtx = 0.0, nxty = 0.0;
+    bool live = false;
+    livePivot(L, anim, tileIdx, t, pvx, pvy, live);
+    if (tileIdx > 0) livePivot(L, anim, tileIdx - 1, t, prvx, prvy, live);
+    if (tileIdx + 1 < n - 1) livePivot(L, anim, tileIdx + 1, t, nxtx, nxty, live);
     const double pivotPos[2] = {pvx, pvy};
     double startTime = timeline.startTimeAt(tileIdx);
     double duration = timeline.durationAt(tileIdx);
     double progress = (duration>0.0001)?(t-startTime)/duration:1.0;
     if (progress<0) progress=0; if (progress>1) progress=1;
-    double angle = (double)timeline.startAngleAt(tileIdx)+(double)timeline.totalAngleAt(tileIdx)*progress;
-    double dist = (double)timeline.tileStartDist(tileIdx)+((double)timeline.tileEndDist(tileIdx)-(double)timeline.tileStartDist(tileIdx))*progress;
+    const double startAngle = live && tileIdx > 0
+                                  ? std::atan2(prvy - pvy, prvx - pvx)
+                                  : (double)timeline.startAngleAt(tileIdx);
+    const double startDist = live && tileIdx > 0 ? distOf(prvx - pvx, prvy - pvy)
+                                                 : (double)timeline.tileStartDist(tileIdx);
+    const double endDist = live && tileIdx + 1 < n - 1 ? distOf(nxtx - pvx, nxty - pvy)
+                                                       : (double)timeline.tileEndDist(tileIdx);
+    double angle = startAngle+(double)timeline.totalAngleAt(tileIdx)*progress;
+    double dist = startDist + (endDist - startDist) * progress;
     glm::dvec2 pv(pivotPos[0],pivotPos[1]);
     glm::dvec2 mv(pivotPos[0]+std::cos(angle)*dist, pivotPos[1]+std::sin(angle)*dist);
     if (isRed) { redOut=pv; blueOut=mv; }
     else       { blueOut=pv; redOut=mv; }
 }
 
-void PositionSolver::planetsAt(const Timeline& timeline, double t, std::vector<PlanetPos>& out) {
+void PositionSolver::planetsAt(const Timeline& timeline, double t, std::vector<PlanetPos>& out,
+                               const TileAnimation* anim) {
     out.clear();
     const LevelData& L = *timeline.level();
     const int64_t nFull = L.tileCount();
@@ -110,7 +151,7 @@ void PositionSolver::planetsAt(const Timeline& timeline, double t, std::vector<P
     const int count = L.planetCountAt(tileIdx);
     if (count <= 2) {
         glm::dvec2 red{}, blue{};
-        positionAtTile(timeline, t, tileIdx, red, blue);
+        positionAtTile(timeline, t, tileIdx, red, blue, anim);
         out.push_back({0, red});
         out.push_back({1, blue});
         return;
@@ -120,23 +161,32 @@ void PositionSolver::planetsAt(const Timeline& timeline, double t, std::vector<P
     const uint8_t* ids = L.planetsAt(tileIdx, n, pivotPos);
     if (n <= 2) {   // 列表退化（理论上不会），回两星口径
         glm::dvec2 red{}, blue{};
-        positionAtTile(timeline, t, tileIdx, red, blue);
+        positionAtTile(timeline, t, tileIdx, red, blue, anim);
         out.push_back({0, red});
         out.push_back({1, blue});
         return;
     }
 
-    double px = 0.0, py = 0.0;
-    pivotAt(L, tileIdx, t, px, py);
+    // 活几何（与两星路径同源）：枢轴 + 相邻砖按 t 时刻的活位置算；没有位移就走静态数组。
+    double px = 0.0, py = 0.0, prvx = 0.0, prvy = 0.0, nxtx = 0.0, nxty = 0.0;
+    bool live = false;
+    livePivot(L, anim, tileIdx, t, px, py, live);
+    if (tileIdx > 0) livePivot(L, anim, tileIdx - 1, t, prvx, prvy, live);
+    if (tileIdx + 1 < nFull - 1) livePivot(L, anim, tileIdx + 1, t, nxtx, nxty, live);
     const double startTime = timeline.startTimeAt(tileIdx);
     const double duration = timeline.durationAt(tileIdx);
     double progress = (duration > 1e-9) ? (t - startTime) / duration : 1.0;
     if (progress < 0) progress = 0;
     if (progress > 1) progress = 1;
-    const double angle = (double)timeline.startAngleAt(tileIdx) +
-                         (double)timeline.totalAngleAt(tileIdx) * progress;
-    const double dist = (double)timeline.tileStartDist(tileIdx) +
-                        ((double)timeline.tileEndDist(tileIdx) - (double)timeline.tileStartDist(tileIdx)) * progress;
+    const double startAngle = live && tileIdx > 0
+                                  ? std::atan2(prvy - py, prvx - px)
+                                  : (double)timeline.startAngleAt(tileIdx);
+    const double startDist = live && tileIdx > 0 ? distOf(prvx - px, prvy - py)
+                                                 : (double)timeline.tileStartDist(tileIdx);
+    const double endDist = live && tileIdx + 1 < nFull - 1 ? distOf(nxtx - px, nxty - py)
+                                                           : (double)timeline.tileEndDist(tileIdx);
+    const double angle = startAngle + (double)timeline.totalAngleAt(tileIdx) * progress;
+    const double dist = startDist + (endDist - startDist) * progress;
     const double dirSign = timeline.tileIsCW()[tileIdx] ? -1.0 : 1.0;
     const double inverse = kPi * (n - 2) / n;
 
@@ -167,7 +217,9 @@ void PositionSolver::planetsAt(const Timeline& timeline, double t, std::vector<P
     }
 }
 
-void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tileIdx, glm::dvec2& redOut, glm::dvec2& blueOut) {
+void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tileIdx,
+                                    glm::dvec2& redOut, glm::dvec2& blueOut,
+                                    const TileAnimation* anim) {
     const LevelData& L = *timeline.level();   // ③ 切片 4：走访问器，不直接碰 tiles[]
     const int64_t nFull = L.tileCount();   // #0：int64 算，收窄前显式判
     if (!fitsInt32(nFull)) {
@@ -213,15 +265,27 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
         return;
     }
     bool isRed = (tileIdx%2==0);
-    double pvx = 0.0, pvy = 0.0;
-    pivotAt(L, tileIdx, t, pvx, pvy);            // sticky=false 的层用原始砖位
+    // 与 positionAt 主分支**同一套活几何**（见那里的说明）：枢轴 + 相邻砖按 t 时刻的活位置算；
+    // 三块砖都没有位移时 `live=false`，下面全走静态数组 —— 逐位不变。
+    double pvx = 0.0, pvy = 0.0, prvx = 0.0, prvy = 0.0, nxtx = 0.0, nxty = 0.0;
+    bool live = false;
+    livePivot(L, anim, tileIdx, t, pvx, pvy, live);
+    if (tileIdx > 0) livePivot(L, anim, tileIdx - 1, t, prvx, prvy, live);
+    if (tileIdx + 1 < n - 1) livePivot(L, anim, tileIdx + 1, t, nxtx, nxty, live);
     const double pivotPos[2] = {pvx, pvy};
     double startTime = timeline.startTimeAt(tileIdx);
     double duration = timeline.durationAt(tileIdx);
     double progress = (duration>0.0001)?(t-startTime)/duration:1.0;
     if (progress<0) progress=0; if (progress>1) progress=1;
-    double angle = (double)timeline.startAngleAt(tileIdx)+(double)timeline.totalAngleAt(tileIdx)*progress;
-    double dist = (double)timeline.tileStartDist(tileIdx)+((double)timeline.tileEndDist(tileIdx)-(double)timeline.tileStartDist(tileIdx))*progress;
+    const double startAngle = live && tileIdx > 0
+                                  ? std::atan2(prvy - pvy, prvx - pvx)
+                                  : (double)timeline.startAngleAt(tileIdx);
+    const double startDist = live && tileIdx > 0 ? distOf(prvx - pvx, prvy - pvy)
+                                                 : (double)timeline.tileStartDist(tileIdx);
+    const double endDist = live && tileIdx + 1 < n - 1 ? distOf(nxtx - pvx, nxty - pvy)
+                                                       : (double)timeline.tileEndDist(tileIdx);
+    double angle = startAngle + (double)timeline.totalAngleAt(tileIdx) * progress;
+    double dist = startDist + (endDist - startDist) * progress;
     glm::dvec2 pv(pivotPos[0],pivotPos[1]);
     glm::dvec2 mv(pivotPos[0]+std::cos(angle)*dist, pivotPos[1]+std::sin(angle)*dist);
     if (isRed) { redOut=pv; blueOut=mv; }
@@ -364,6 +428,29 @@ inline void loadTrailTileConsts(const Timeline& timeline, int tileIdx, int n, do
     c.tileMain = (n >= 2) && (tileIdx < n - 1);
 }
 
+// 把"只依赖 tileIdx"的常量换成 **t 时刻的活值**（粘性轨道 + 轨道动画）。
+// 与 `positionAtTile` 的 `live` 分支同一套算式：枢轴 + 相邻砖按活位置，rotate/scale 不动枢轴。
+// 返回 false = 这三块砖都没有位移，调用方继续用缓存好的静态常量（逐位不变、也不多花时间）。
+inline bool loadTrailTileConstsLive(const Timeline& timeline, const TileAnimation* anim,
+                                    int tileIdx, int n, double tt, TrailTileConsts& c) {
+    if (!anim) return false;
+    const LevelData& L = *timeline.level();
+    double px = 0.0, py = 0.0, prvx = 0.0, prvy = 0.0, nxtx = 0.0, nxty = 0.0;
+    bool live = false;
+    livePivot(L, anim, tileIdx, tt, px, py, live);
+    if (tileIdx > 0) livePivot(L, anim, tileIdx - 1, tt, prvx, prvy, live);
+    if (tileIdx + 1 < n - 1) livePivot(L, anim, tileIdx + 1, tt, nxtx, nxty, live);
+    if (!live) return false;
+    c.pivotX = px;
+    c.pivotY = py;
+    if (tileIdx > 0) {
+        c.startAngle = std::atan2(prvy - py, prvx - px);
+        c.startDist = distOf(prvx - px, prvy - py);
+    }
+    if (tileIdx + 1 < n - 1) c.endDist = distOf(nxtx - px, nxty - py);
+    return true;
+}
+
 // `positionAtTile` 主分支的算术，逐字照抄（同操作、同顺序、同类型）。
 // 唯一区别：`startTime/duration/startAngle/totalAngle/dist/pivot` 来自已提好的常量。
 inline void trailPointAt(const TrailTileConsts& c, double tt, double& rx, double& ry,
@@ -380,7 +467,10 @@ inline void trailPointAt(const TrailTileConsts& c, double tt, double& rx, double
 
 }  // namespace
 
-void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime, double t, float sampleRate, const glm::dvec2& redHead, const glm::dvec2& blueHead, std::vector<glm::dvec2>& redOut, std::vector<glm::dvec2>& blueOut) {
+void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime, double t,
+                                      float sampleRate, const glm::dvec2& redHead,
+                                      const glm::dvec2& blueHead, std::vector<glm::dvec2>& redOut,
+                                      std::vector<glm::dvec2>& blueOut, const TileAnimation* anim) {
     if (sampleRate <= 0.0f || t <= startTime) return;
 
     const int maxSamples = (int)std::ceil((t - startTime) * sampleRate) + 1;
@@ -431,6 +521,9 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
             loadTrailTileConsts(timeline, tileIdx, n, tileStart, c);
             cTile = tileIdx;
         }
+        // 粘性轨道 + 轨道动画：**每个采样点**都要按 tt 重算枢轴/角度（拖尾必须解析式采样，
+        // 不能拿"进砖那一刻"的常量）。没有位移的砖仍然走缓存常量 —— 与改造前逐位相同。
+        loadTrailTileConstsLive(timeline, anim, tileIdx, n, tt, c);
         if (i < 3 && env::flag("ADOCAO_TRAIL_INPUTS")) {
             const LevelData& L = *timeline.level();
             LOG_I("trail-in[%d] idx=%d tt=%.17g st=%.17g pos=%.17g,%.17g sa=%.17g ta=%.17g dir=%.17g",
@@ -444,7 +537,7 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
         } else {
             // 特例（首砖之前 / 末尾合成砖）：照原样调 positionAtTile，语义与逐位都不动。
             glm::dvec2 r(0), b(0);
-            positionAtTile(timeline, tt, tileIdx, r, b);
+            positionAtTile(timeline, tt, tileIdx, r, b, anim);
             rx = r.x; ry = r.y; bx = b.x; by = b.y;
         }
         redOut[base + samples]  = glm::dvec2(rx, ry);
@@ -459,9 +552,13 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
     blueOut.resize(base + samples);
 }
 
-void PositionSolver::sampleTrail(const Timeline& timeline, double t, float trailDuration, float sampleRate, const glm::dvec2& redHead, const glm::dvec2& blueHead, std::vector<glm::dvec2>& redOut, std::vector<glm::dvec2>& blueOut) {
+void PositionSolver::sampleTrail(const Timeline& timeline, double t, float trailDuration,
+                                 float sampleRate, const glm::dvec2& redHead,
+                                 const glm::dvec2& blueHead, std::vector<glm::dvec2>& redOut,
+                                 std::vector<glm::dvec2>& blueOut, const TileAnimation* anim) {
     if (trailDuration <= 0.0f) return;
-    sampleTrailRange(timeline, t - trailDuration, t, sampleRate, redHead, blueHead, redOut, blueOut);
+    sampleTrailRange(timeline, t - trailDuration, t, sampleRate, redHead, blueHead, redOut, blueOut,
+                     anim);
 }
 
 }  // namespace adofai

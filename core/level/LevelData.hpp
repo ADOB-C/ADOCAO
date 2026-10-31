@@ -449,7 +449,14 @@ struct LevelData {
     // 行星枢轴：`stickToFloors=false` 的层返回**未加 PositionTrack 偏移**的原始位置
     // （默认全 true → 与 tilePositionAt 完全一致）。
     bool stickyAt(int64_t i) const {
-        return m_tileStick.empty() || (size_t)i >= m_tileStick.size() || m_tileStick[(size_t)i] != 0;
+        // 表为空有两种来源，别混：①`settings.stickToFloors=true` 且没人写过事件 →
+        // 该返回 true；②`settings.stickToFloors=false` 但谱里**一条 PositionTrack 都没有** →
+        // `applyPositionTrackOffsets` 直接早退、表没分配，此时必须按 settings 返回 **false**。
+        // （2026-10-30 踩到：粘性轨道 + 轨道动画时，`stickyAt` 说 true → 行星跟着 MoveTrack
+        // 走了，而谱面明写着不跟。PositionTrack 那边以前没暴露，因为"没有偏移要减"，
+        // 但"跟不跟动画"是另一回事。）
+        if (m_tileStick.empty() || (size_t)i >= m_tileStick.size()) return settings.stickToFloors;
+        return m_tileStick[(size_t)i] != 0;
     }
     void planetPivotAt(int64_t i, double& x, double& y) const;
     float tileDirectionAt(int64_t i, FloorWindowCache* wc = nullptr) const;

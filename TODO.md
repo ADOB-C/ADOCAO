@@ -6,6 +6,18 @@
 > 未完成清单已定稿（移除：~~GPU compute culling~~——2.0.0 起已不需要，彻底删除；~~Decoration~~）。
 > MoveTrack 保留，归入「遥远的未来」，仅记录不排期。已完成项保留在文末作历史。
 
+## 待查（2.64e6 那张谱上量到的矛盾）
+
+- [ ] **`--capture-time` 打印的 `tile=` 与行星真实位置对不上**。tile 184069（t=154.985）附近：
+      时间 +0.01 s → `tile=` 从 184,067 跳到 185,826（+1,759 砖），
+      但同一帧的拖尾端点显示行星坐标只前进 **17.9 砖**（(112550.07,85.60) → (112567.96,85.35)）。
+      两者差 100 倍。`--trail-tiles N` 也因此算出离谱的窗口：`--trail-tiles 4000` 得到的
+      span 是 **42.8 s**（按 1,790 砖/秒算应是 2.2 s），拖尾于是只覆盖到一小段。
+      下一步：拿 `Timeline::tileStartTimes` 直接对 `findTileIndex(t)` 做二分回代
+      （`startTimeAt(idx) <= t < startTimeAt(idx+1)` 是否成立），
+      怀疑这张谱有重复/极端密集的 `tileStartTimes`（2.64e6 BPM 段 1 砖 = 5.7 µs，double 够但
+      索引的整数化/线性插值可能选错块）。
+
 ## 待查（偶发，尚无复现）
 
 - [ ] `adocao_window` 在 **Linux CI** 上偶发失败：`tileStartTimes` 1612/9000 处逐位不一致

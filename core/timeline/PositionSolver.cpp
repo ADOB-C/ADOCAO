@@ -344,7 +344,13 @@ PositionSolver::TrailWindow PositionSolver::trailWindow(const Timeline& timeline
                 if (sMax > 1e-9) rate = std::max(rate, tilePathSpeed(timeline, t) / sMax);
             }
         }
-        if (cfg.adaptive || cfg.sagittaPx > 0.0f)
+        // **只有自适应 governor 才夹**。sagitta 是用户显式打开的像素级判据，
+        // 它算多少就是多少 —— 以前把 `sagittaPx > 0` 也算进来，于是
+        // `--trail-sagitta 0.5` 在 2.64e6 BPM 上被 rateMax=4000 夹到 **4000/s**：
+        // 0.01 s 窗口只剩 41 个点（该砖 4,320 砖/秒 → 每砖 0.09 点），整条拖尾塌掉。
+        // 实测（tile 141628）：sagitta 该给的量级是 3.5 万/s（`--trail-samples-per-tile 8`
+        // 在同一帧给出 34,557/s），被夹成 4000 差 8.6 倍。
+        if (cfg.adaptive)
             rate = std::clamp(rate, (double)cfg.rateMin, (double)cfg.rateMax);
     }
 

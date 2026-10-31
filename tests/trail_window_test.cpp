@@ -62,6 +62,26 @@ int main() {
         near("③ 默认上限下 2^18 仍然原样生效", (double)w.sampleRate, 262144.0);
     }
 
+    {
+        // ④ sagitta 是**用户显式**打开的判据，不许被 governor 的 rateMax 夹。
+        // 2026-10-31 实测：2.64e6 BPM 的 tile 141628 上 `--trail-sagitta 0.5` 被
+        // rateMax=4000 夹成 4000/s（0.01 s 窗口 41 点 = 每砖 0.09 点），而该砖实际要 3.5 万/s。
+        PositionSolver::TrailSamplingConfig s4;
+        s4.duration = 0.01f;
+        s4.fixedRate = 100000.0f;
+        s4.rateMax = 4000.0f;
+        s4.sagittaPx = 0.5f;
+        s4.pixelsPerTile = 90.0f;
+        s4.adaptive = false;
+        s4.maxPoints = 262144.0f;
+        const auto w = PositionSolver::trailWindow(tl, t, s4);
+        near("④ sagitta 模式不被 rateMax 夹", (double)w.sampleRate, 100000.0);
+        // 反面对照：把 governor 打开，才该被夹。
+        s4.adaptive = true;
+        const auto w2 = PositionSolver::trailWindow(tl, t, s4);
+        near("④ governor 打开时才会夹到 rateMax", (double)w2.sampleRate, 4000.0, 50.0);
+    }
+
     if (g_fail) { std::printf("trail_window: %d 条失败\n", g_fail); return 1; }
     std::printf("trail_window: 全部通过\n");
     return 0;

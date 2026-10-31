@@ -348,6 +348,15 @@ def main():
     # `orbitRadiusAt` 的 `r0 + (r1-r0)·progress`（常数区间钉不住这一段）。
     # 负向对照（把半径强改回 1.0 再抓同一帧）：1280x720 差 **21,762 px（2.36%）**。
     state("sr_radius_ramp", SING, "tile", "158", 400.0)
+    lines.append("")
+    # 轨道可见性（AnimateTrack 的 appear/disappear）：这张谱 settings 写着
+    # `trackAnimation: Fade` + `beatsAhead: 8` + `beatsBehind: 0`，也就是**行星前方 8 拍以外
+    # 的砖必须不可见**。2026-10-31 修之前，通用的 t=0 基准帧把淡入窗口前的透明度钉成 1，
+    # 于是整条轨道从第一帧就全画出来（用户原话："不应该看见的看见了"）。
+    # 负向对照（把 appear 的 t=0 初始状态丢掉）：1280x720 差约 **11,300 px（1.23%）**。
+    # 这个状态必须**拉远**才有意义 —— 现有的 singularity_mid/sr_radius_ramp 都贴得很近，
+    # 视野里只有几块砖，看不到"前方该不该有轨道"。
+    state("trackvis_fade_ahead", SING, "time", "2.0", 12.0)
     with open(STATES_PATH, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
 

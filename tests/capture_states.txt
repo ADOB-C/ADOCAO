@@ -62,3 +62,5 @@ myc_t30_z25|~/Documents/Charts/Seedbean - Won't You Make a Song with Me (Final_F
 singularity_mid|~/Documents/Charts/15. Singularity at 2.64e+6 BPM/15. Singularity at 2.64e+6 BPM.adofai|tile|500000|25.0|1280x720|
 
 sr_radius_ramp|~/Documents/Charts/15. Singularity at 2.64e+6 BPM/15. Singularity at 2.64e+6 BPM.adofai|tile|158|400.0|1280x720|
+
+trackvis_fade_ahead|~/Documents/Charts/15. Singularity at 2.64e+6 BPM/15. Singularity at 2.64e+6 BPM.adofai|time|2.0|12.0|1280x720|

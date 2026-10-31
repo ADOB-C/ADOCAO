@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <tuple>
+#include <utility>
 
 #include "core/level/LevelData.hpp"
 #include "core/timeline/Timeline.hpp"
@@ -116,6 +118,11 @@ void TileAnimation::build(const LevelData& lv, const Timeline& tl) {
     // ---- 2) AnimateTrack：appear/disappear 各类型建帧（**后**建，覆盖 MoveTrack） ----
     // 类型 id 与 Timeline::animId() 一致：1 Extend 2 Assemble 3 Assemble_Far 4 Grow 5 Grow_Spin
     // 7 Fade 8 Drop 9 Rise | 10 Scatter 11 Scatter_Far 12 Retract 13 Shrink 14 Shrink_Spin
+    std::vector<std::tuple<size_t, uint8_t, int64_t>> appearPins;
+    const auto seeded = [](double seed) {
+        const double x = std::sin(seed * 12.9898 + seed * 78.233) * 43758.5453;
+        return x - std::floor(x);
+    };
     {
         const auto& aT = tl.animAppearType();
         const auto& aS = tl.animAppearStart();
@@ -123,11 +130,12 @@ void TileAnimation::build(const LevelData& lv, const Timeline& tl) {
         const auto& dT = tl.animDisappearType();
         const auto& dS = tl.animDisappearStart();
         const auto& dE = tl.animDisappearEnd();
-        const auto seeded = [](double seed) {
-            const double x = std::sin(seed * 12.9898 + seed * 78.233) * 43758.5453;
-            return x - std::floor(x);
-        };
         const size_t n = aT.size();
+        // appear 动画要求"淡入之前这块砖根本不存在"，而下面那段通用的 t=0 基准帧
+        // （见「补齐 t=0 的基准帧」）会把透明度补成 1 —— 两者冲突时以 appear 自身为准：
+        // 参考实现每个 case 的第一句都是 `addKeyframe(entity, <通道>, 0, <初始状态>, null)`
+        // （Fade → opacity 0、Grow → scale 0、Assemble → 位移随机量、Drop/Rise → ±8 与 scale 0），
+        // 而且**不是** base 值。记下每个帧的 appear 类型，等基准帧补完再覆盖回初始状态。
         for (size_t i = 0; i < n; ++i) {
             const uint8_t at = aT[i], dt = (i < dT.size()) ? dT[i] : 0;
             if (!at && !dt) continue;
@@ -140,6 +148,7 @@ void TileAnimation::build(const LevelData& lv, const Timeline& tl) {
             TileKeyframes& fr = ensureFrame(tile, rStart, rEnd + TileKeyframes::kRangeGrace);
             fr.rangeStart = std::min(fr.rangeStart, rStart);
             fr.rangeEnd = std::max(fr.rangeEnd, rEnd + TileKeyframes::kRangeGrace);
+            if (at) appearPins.emplace_back((size_t)(&fr - m_frames.data()), at, tile);
             // appear：从"起始状态"渐变到 base（位移 0 / 旋转 0 / 缩放 1 / 透明度 1）
             if (at) {
                 const double t0 = aS[i] + animShift, t1 = aE[i] + animShift;
@@ -224,6 +233,44 @@ void TileAnimation::build(const LevelData& lv, const Timeline& tl) {
         };
         seed(f.posX, 0.0f); seed(f.posY, 0.0f); seed(f.rot, 0.0f);
         seed(f.scaleX, 1.0f); seed(f.scaleY, 1.0f); seed(f.opacity, 1.0f);
+    }
+
+    // appear 动画的**起始状态**必须压过上面补的 base 基准帧 —— 参考实现每个 case 的第一句
+    // 就是 `addKeyframe(entity, <通道>, 0, <初始状态>, null)`，它写的不是 base，而是"还没出现"。
+    // 漏掉这一步的症状：`trackAnimation: Fade` + `beatsAhead: 8` 的谱面上，行星前方 8 拍
+    // 以外的砖**全都可见**（0.000:1.000 那条基准帧把淡入窗口前的透明度钉成了 1），
+    // 直到各自的 appearStart 才突然消失再淡回来。2026-10-31 实测 2.64e6 那张：t=0.5 时
+    // tile 3~44 全是 alpha=1.0，而参考实现只该看见 ~9 块。
+    for (const auto& p : appearPins) {
+        TileKeyframes& f = m_frames[std::get<0>(p)];
+        switch (std::get<1>(p)) {
+            case 7:   // Fade
+                f.opacity.addKeyframe(0.0, 0.0f);
+                break;
+            case 1:   // Extend
+            case 4:   // Grow
+            case 5:   // Grow_Spin
+                f.scaleX.addKeyframe(0.0, 0.0f);
+                f.scaleY.addKeyframe(0.0, 0.0f);
+                break;
+            case 2: case 3: {   // Assemble(_Far)：t=0 的随机位移与旋转
+                const double range = (std::get<1>(p) == 3) ? 8.0 : 4.0;
+                const double seed = (double)std::get<2>(p) * 7919.0;
+                const double dx = seeded(seed) * range * 2 - range;
+                const double dy = seeded(seed + 1) * range * 2 - range;
+                const double dr = (seeded(seed + 2) * 150 - 75) * 3.14159265358979323846 / 180.0;
+                f.posX.addKeyframe(0.0, (float)dx);
+                f.posY.addKeyframe(0.0, (float)dy);
+                f.rot.addKeyframe(0.0, (float)dr);
+                break;
+            }
+            case 8: case 9:   // Drop / Rise：先藏在上下 8 格、缩放 0
+                f.posY.addKeyframe(0.0, (std::get<1>(p) == 8) ? 8.0f : -8.0f);
+                f.scaleX.addKeyframe(0.0, 0.0f);
+                f.scaleY.addKeyframe(0.0, 0.0f);
+                break;
+            default: break;
+        }
     }
 
     // 建帧完：缓存每块砖"区间之前/之后是否完全不可见"

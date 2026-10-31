@@ -51,10 +51,42 @@ struct TileAnim {
       逐帧只把"完全透明且缩到 0"的动画砖标不可见（`hiddenAt()` 区间外 O(1) 缓存）
 - [ ] 删除 `m_tileAppearTimes/m_tileDisappearTimes` 与 `recomputeWindow`（现在只是不再用于可见性，
       仍在 build 里算，属于可删的冗余）
-- [ ] 与 Re_ADOJAS 逐通道数值对拍（harness 已就绪）；像素门槛已按新行为重存（54/54）
+- [ ] 与 Re_ADOJAS 逐通道数值对拍（harness 已就绪）；像素门槛已按新行为重存（56/56）
 
 **实测（2025，1080p MSAA4，播放 4 s，`ADOCAO_PROFILE=1`）**：`frame=0.871 ms` 均值
 （`vis=0.180`、`animXform=0.218`、`cull=0.426`）—— 新的关键帧采样没有带来可测的帧时回退。
+
+## 3.1 appear 动画的 t=0 初始状态（2026-10-31 修）
+
+症状（用户原话）：**"不应该看见的看见了"** —— 谱面开头整条轨道都画出来了，而它本该随着行星
+前进逐块浮现。
+
+`TileAnimation::build` 末尾有一段**通用**的 t=0 基准帧：任何通道只要第一帧在 t>0，就在 t=0
+补一个 base 值（位移/旋转 0、缩放/透明度 1）。它修的是 MM2 那个"未来有一条 `scale=0` 的关键帧
+→ `Channel::sample` 在 t=0 就返回 0 → 整条轨道从第一帧起消失"的坑。
+
+但它和 appear 动画**语义冲突**：参考实现每个 appear case 的第一句都是
+
+```ts
+this.addKeyframe(entity, 'opacity', 0, 0, null);   // case 'Fade'
+```
+
+它写的是**"还没出现"的状态（0）**，不是 base（1）。我们的基准帧把 t=0 钉成 1，于是淡入窗口
+之前那块砖是**可见**的，直到 `appearStart` 才突然掉到 0 再淡回来。
+
+修法：建帧时记下每块砖的 appear 类型（`appearPins`），**基准帧补完之后**再按类型覆盖 t=0：
+Fade → `opacity 0`；Extend/Grow/Grow_Spin → `scale 0`；Assemble(_Far) → 随机位移与旋转；
+Drop/Rise → `positionY ±8` 且 `scale 0`。disappear 不碰 t=0（MM2 那类只靠 disappear 的砖
+仍然吃基准帧，不会被误判成不可见）。
+
+实测（2.64e6 那张，spec：`trackAnimation: Fade` / `beatsAhead: 8` / `beatsBehind: 0`）：
+tile 20 的 opacity 关键帧从 `0.000:1.000 …` 变成 `0.000:0.000 6.082:0.000 6.454:1.000 …`，
+`hiddenBefore` 由 0 变 1；t=2.0 zoom12 那一帧 1280x720 少画约 **11,300 px（1.23%）**——
+修前看到的是一条长轨道，修后只剩行星前后约 9 块砖。
+
+**为什么门槛当时没红**：55 个状态全贴得很近（`singularity_mid` zoom 25、`sr_radius_ramp`
+zoom 400），视野里就那几块砖，全在 8 拍以内 → 这条路径零覆盖。补了 `trackvis_fade_ahead`
+（同一张谱 t=2.0、zoom 12）。
 
 ## 4. 迁移步骤（每一步都要能验收）
 

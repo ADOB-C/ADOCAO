@@ -29,36 +29,13 @@ static void pivotAt(const LevelData& L, int64_t idx, double t, double& x, double
     L.planetPivotAt(idx, x, y);
 }
 
-// 行星绕行半径（砖单位）= **到相邻砖心的实际距离**，在砖内线性插值：
-//   progress 0 → |p_i − p_{i−1}|，progress 1 → |p_{i+1} − p_i|（`p` = 已经烘过
-//   PositionTrack 与 ScaleRadius 偏移的静态砖位）。
-//
-// 为什么是这个口径（2026-10-31 用户："每次都强制缩回 1 再改，不是一直 2"）：
-// * 参考实现的**装载器**就是这么存的 —— `startDist = sqrt((p_{i−1} − p_i)²)`、
-//   `endDist = sqrt((p_{i+1} − p_i)²)`（Player.ts 里算 `tileStartDist/tileEndDist` 那段）；
-// * 这样行星在 progress=0/1 时**正好落在前后砖心**（间距 = 半径），任何静态位移
-//   （ScaleRadius 的烘偏移、PositionTrack 的搬砖）都自动跟上；只取 `radiusScale`
-//   会在 PositionTrack 把砖搬远时让行星"原地绕 1 砖"（那正是"半径没变"的观感）。
-// * **动画（MoveTrack/AnimateTrack）不算进来**：它是"活"位移，按用户口径只挪枢轴不改半径。
-// 静态量 → 拖尾那边按砖缓存，不必每采样点重算。
-inline double armRadiusAt(const LevelData& L, int64_t idx, double progress) {
-    double d0 = 1.0, d1 = 1.0;
-    const auto cur = L.tilePositionAt(idx);
-    if (idx > 0) {
-        const auto prev = L.tilePositionAt(idx - 1);
-        d0 = std::sqrt((prev[0] - cur[0]) * (prev[0] - cur[0]) +
-                       (prev[1] - cur[1]) * (prev[1] - cur[1]));
-    } else {
-        d0 = 1.0;   // 砖 0 没有"上一砖"：倒计时段的半径固定 1（与改造前一致）
-    }
-    if (idx + 1 < L.tileCount()) {
-        const auto next = L.tilePositionAt(idx + 1);
-        d1 = std::sqrt((next[0] - cur[0]) * (next[0] - cur[0]) +
-                       (next[1] - cur[1]) * (next[1] - cur[1]));
-    } else {
-        d1 = d0;
-    }
-    return d0 + (d1 - d0) * progress;
+// 行星绕行半径（砖单位）：ScaleRadius 的继承值在砖内从 `r(i)` 线性插到 `r(i+1)`
+// （参考实现 `computePositionsAtTime`：`orbitR = r0 + (rTail − r0)·hp`，rTail 取 i+1）。
+// **与砖间实际距离无关** —— 用户 2026-10-30："只有在 ScaleRadius 的时候再改变半径"。
+inline double orbitRadiusAt(const LevelData& L, int tileIdx, double progress) {
+    const double r0 = (double)L.radiusScaleAt(tileIdx);
+    const double r1 = (double)L.radiusScaleAt((int64_t)tileIdx + 1);
+    return r0 + (r1 - r0) * progress;
 }
 
 // 行星枢轴在 t 时刻的**活**位置：静态枢轴（已含 PositionTrack 偏移与 stickToFloors 语义）
@@ -153,7 +130,7 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
     double progress = (duration>0.0001)?(t-startTime)/duration:1.0;
     if (progress<0) progress=0; if (progress>1) progress=1;
     double angle = (double)timeline.startAngleAt(tileIdx)+(double)timeline.totalAngleAt(tileIdx)*progress;
-    double dist = armRadiusAt(L, tileIdx, progress);
+    double dist = orbitRadiusAt(L, tileIdx, progress);
     glm::dvec2 pv(pivotPos[0],pivotPos[1]);
     glm::dvec2 mv(pivotPos[0]+std::cos(angle)*dist, pivotPos[1]+std::sin(angle)*dist);
     if (isRed) { redOut=pv; blueOut=mv; }
@@ -197,7 +174,7 @@ void PositionSolver::planetsAt(const Timeline& timeline, double t, std::vector<P
     if (progress > 1) progress = 1;
     const double angle = (double)timeline.startAngleAt(tileIdx) +
                          (double)timeline.totalAngleAt(tileIdx) * progress;
-    const double dist = armRadiusAt(L, tileIdx, progress);
+    const double dist = orbitRadiusAt(L, tileIdx, progress);
     const double dirSign = timeline.tileIsCW()[tileIdx] ? -1.0 : 1.0;
     const double inverse = kPi * (n - 2) / n;
 
@@ -286,7 +263,7 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
     double progress = (duration>0.0001)?(t-startTime)/duration:1.0;
     if (progress<0) progress=0; if (progress>1) progress=1;
     double angle = (double)timeline.startAngleAt(tileIdx)+(double)timeline.totalAngleAt(tileIdx)*progress;
-    double dist = armRadiusAt(L, tileIdx, progress);
+    double dist = orbitRadiusAt(L, tileIdx, progress);
     glm::dvec2 pv(pivotPos[0],pivotPos[1]);
     glm::dvec2 mv(pivotPos[0]+std::cos(angle)*dist, pivotPos[1]+std::sin(angle)*dist);
     if (isRed) { redOut=pv; blueOut=mv; }
@@ -421,23 +398,9 @@ inline void loadTrailTileConsts(const Timeline& timeline, int tileIdx, int n, do
     const float totalAngle = timeline.totalAngleAt(tileIdx);
     c.totalAngle = (double)totalAngle;
     c.duration = (double)timeline.durationFromTotalAngle(tileIdx, totalAngle);
-    // 半径：起点 = |p_i − p_{i−1}|，终点 = |p_{i+1} − p_i|（静态砖位，砖内线性插值；
-    // 与行星的 `armRadiusAt` 同一口径 —— 那边每次现算，这里按砖缓存，值一样）
-    {
-        const auto cur = L.tilePositionAt(tileIdx);
-        c.startDist = 1.0;
-        if (tileIdx > 0) {
-            const auto prev = L.tilePositionAt(tileIdx - 1);
-            c.startDist = std::sqrt((prev[0] - cur[0]) * (prev[0] - cur[0]) +
-                                    (prev[1] - cur[1]) * (prev[1] - cur[1]));
-        }
-        c.endDist = c.startDist;
-        if (tileIdx + 1 < n) {
-            const auto next = L.tilePositionAt(tileIdx + 1);
-            c.endDist = std::sqrt((next[0] - cur[0]) * (next[0] - cur[0]) +
-                                  (next[1] - cur[1]) * (next[1] - cur[1]));
-        }
-    }
+    // 半径：起点 = ScaleRadius(i)，终点 = ScaleRadius(i+1)（砖内线性插值，与行星同源）
+    c.startDist = (double)L.radiusScaleAt(tileIdx);
+    c.endDist = (double)L.radiusScaleAt(tileIdx + 1);
     c.isRed = (tileIdx % 2 == 0);
     c.firstStart = timeline.firstStartTime();
     // 与 `positionAtTile` 的分支判据一致：n < 2 或首砖之前走特例；末尾合成砖（>= n-1）也走特例。

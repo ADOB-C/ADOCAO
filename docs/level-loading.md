@@ -443,6 +443,26 @@ Won't You 的砖间距因此与 `scale` 差到 **0.25 砖**。现在按参考实
 `r(159)=1.00`，砖内正在插值）、zoom 400。负向对照（把 `orbitRadiusAt` 强改回 1.0 再抓同一帧）
 差 **21,762 px（2.36%）**，现在是 55/55。
 
+### 极快砖（< 100 µs）的进度阈值（2026-10-31）
+
+`PositionSolver` 里三处 progress 都写成
+
+```cpp
+double progress = (duration > 0.0001) ? (t - startTime) / duration : 1.0;
+```
+
+那个 `0.0001` 是**防除零**，但它同时把所有**短于 100 µs 的砖**钉死在 `progress = 1`
+（= 砖的终点）。2.64e6 BPM 一砖只有 **22.7 µs**（settspeed 绝对 BPM 决定的），于是行星
+永远停在砖心、轨迹变成"砖心连砖心"的**折线**，拖尾跟着变成一条**直线**斜穿轨道带
+（用户 2026-10-31 截图："不应该贴着砖走"）。
+
+修法：三处（`positionAt` / `positionAtTile` / 拖尾的 `trailPointAt`）都改成
+`duration > 0.0`。double 在 t≈157、duration≈2.3e-5 下算商没有精度问题
+（t−start 的绝对误差 ~1e-14，相对 duration 是 4e-10）。
+
+回归：ctest `fast_tile_motion`（BPM 2.64e6 合成谱，砖 34 µs）：砖中点与终点必须差 > 0.05 砖；
+负向对照把阈值改回 0.0001 → `mover 相差 0.000000 砖`，两条 FAIL。
+
 **仍留着的近似**：拖尾的 sagitta 采样率判据还在用"半径 ≈ 1"（`PositionSolver::tilePathSpeed`
 旁边的 `max(tileStartDist, tileEndDist)`），`scale` 很大的谱面采样密度会略欠 —— 只影响折线密度，
 不影响位置。见 `TODO.md`。

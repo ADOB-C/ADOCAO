@@ -127,7 +127,7 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
     const double pivotPos[2] = {pvx, pvy};
     double startTime = timeline.startTimeAt(tileIdx);
     double duration = timeline.durationAt(tileIdx);
-    double progress = (duration>0.0001)?(t-startTime)/duration:1.0;
+    double progress = (duration>0.0)?(t-startTime)/duration:1.0;
     if (progress<0) progress=0; if (progress>1) progress=1;
     double angle = (double)timeline.startAngleAt(tileIdx)+(double)timeline.totalAngleAt(tileIdx)*progress;
     double dist = orbitRadiusAt(L, tileIdx, progress);
@@ -260,7 +260,7 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
     const double pivotPos[2] = {pvx, pvy};
     double startTime = timeline.startTimeAt(tileIdx);
     double duration = timeline.durationAt(tileIdx);
-    double progress = (duration>0.0001)?(t-startTime)/duration:1.0;
+    double progress = (duration>0.0)?(t-startTime)/duration:1.0;
     if (progress<0) progress=0; if (progress>1) progress=1;
     double angle = (double)timeline.startAngleAt(tileIdx)+(double)timeline.totalAngleAt(tileIdx)*progress;
     double dist = orbitRadiusAt(L, tileIdx, progress);
@@ -432,7 +432,7 @@ inline void loadTrailTileConstsLive(const Timeline& timeline, const TileAnimatio
 // 唯一区别：`startTime/duration/startAngle/totalAngle/dist/pivot` 来自已提好的常量。
 inline void trailPointAt(const TrailTileConsts& c, double tt, double& rx, double& ry,
                          double& bx, double& by) {
-    double progress = (c.duration > 0.0001) ? (tt - c.startTime) / c.duration : 1.0;
+    double progress = (c.duration > 0.0) ? (tt - c.startTime) / c.duration : 1.0;
     if (progress < 0) progress = 0; if (progress > 1) progress = 1;
     const double angle = c.startAngle + c.totalAngle * progress;
     const double dist = c.startDist + (c.endDist - c.startDist) * progress;

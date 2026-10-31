@@ -36,7 +36,7 @@ void check(bool ok, const char* what) {
 // 8 块砖、120 BPM、砖 2 被 MoveTrack **瞬时**搬走 (3, 0) 砖。
 // 注意 `startTile`/`endTile` 的 offset 是**相对事件 floor** 的（`[0,"ThisTile"]` = 事件那一砖本身），
 // 写成 `[2,"ThisTile"]` 会解析成 floor+2（踩过一次）。
-std::string chartJson(bool stickToFloors) {
+std::string chartJson(bool stickToFloors, bool movePrevToo = false) {
     std::string s = R"({"angleData":[180,180,180,180,180,180,180,180],
       "settings":{"bpm":120,"offset":0,"countdownTicks":0,"pitch":100,"rotation":0,
                   "trackColor":"debb7b","backgroundColor":"000000","trackStyle":"Standard",
@@ -45,7 +45,12 @@ std::string chartJson(bool stickToFloors) {
     s += R"(},
       "actions":[
         {"floor":2,"eventType":"MoveTrack","startTile":[0,"ThisTile"],"endTile":[0,"ThisTile"],
-         "gapLength":0,"duration":0,"positionOffset":[3,0],"ease":"Linear"}
+         "gapLength":0,"duration":0,"positionOffset":[3,0],"ease":"Linear"})";
+    if (movePrevToo)
+        s += R"(,
+        {"floor":1,"eventType":"MoveTrack","startTile":[0,"ThisTile"],"endTile":[0,"ThisTile"],
+         "gapLength":0,"duration":0,"positionOffset":[0,5],"ease":"Linear"})";
+    s += R"(
       ]})";
     return s;
 }
@@ -106,16 +111,24 @@ int main() {
         std::printf("ok   ① 枢轴星 = 砖位 + (3,0)：带动画 (%.3f,%.3f)、不带 (%.3f,%.3f)\n",
                     with.red.x, with.red.y, without.red.x, without.red.y);
 
-        // ── ② 砖起点处移动星落在上一砖的**活位置**上 ──
+        // ── ② 砖起点处移动星 = 上一砖静态位置 + **本砖位移**（刚体平移） ──
+        // 半径不跟着位移伸缩：这里同时校验 |移动星 − 枢轴| == 静态 startDist。
         const double t0 = tl.startTimeAt(tile);
         const Pose at0 = planets(tl, t0, &anim);
-        const auto prev = lv.tilePositionAt(tile - 1);   // 相邻砖没被搬 → 活位置 = 原始位
-        if (dist(at0.blue, glm::dvec2(prev[0], prev[1])) > 1e-9) {
-            std::printf("FAIL 砖起点处移动星在 (%.6f,%.6f)，上一砖活位置是 (%.6f,%.6f)\n",
-                        at0.blue.x, at0.blue.y, prev[0], prev[1]);
+        const auto prev = lv.tilePositionAt(tile - 1);
+        const glm::dvec2 wantMover(prev[0] + 3.0, prev[1]);
+        if (dist(at0.blue, wantMover) > 1e-9) {
+            std::printf("FAIL 砖起点处移动星在 (%.6f,%.6f)，应为 (%.6f,%.6f)（上一砖 + 本砖位移）\n",
+                        at0.blue.x, at0.blue.y, wantMover.x, wantMover.y);
             return 1;
         }
-        std::printf("ok   ② 砖起点处移动星 = 上一砖活位置 (%.3f,%.3f)\n", at0.blue.x, at0.blue.y);
+        const double rStatic = (double)tl.tileStartDist(tile);
+        const double rGot = dist(at0.blue, at0.red);
+        if (std::fabs(rGot - rStatic) > 1e-9) {
+            std::printf("FAIL 半径被位移带歪了：%.6f vs 静态 %.6f\n", rGot, rStatic);
+            return 1;
+        }
+        std::printf("ok   ② 砖起点处移动星 = 上一砖 + (3,0)，半径 %.3f 不变\n", rGot);
 
         // ── ④ 拖尾解析式采样 vs 直接算行星位置（逐点一致） ──
         const double trailT = t;
@@ -160,6 +173,34 @@ int main() {
         }
         std::printf("ok   ③ stickToFloors=false：枢轴星仍在原始砖位 (%.3f,%.3f)\n", with.red.x,
                     with.red.y);
+    }
+
+    // ── ⑤ 半径只由 ScaleRadius 决定：**邻居被搬走也不影响** ──────
+    // 这条区分两个模型：按"活邻居"重算半径的实现（旧版/参考实现的实况路径）在邻居
+    // 位移 (0,5) 时半径会变；"只有 ScaleRadius 改半径"的实现不会。
+    {
+        LevelData a, b;
+        Timeline ta, tb;
+        TileAnimation anA, anB;
+        if (!load(chartJson(true, false), a, ta, anA) || !load(chartJson(true, true), b, tb, anB)) {
+            std::printf("FAIL ⑤ 合成谱加载失败\n");
+            return 1;
+        }
+        const int64_t tile = 2;
+        const double t = tb.startTimeAt(tile);
+        const Pose pa = planets(ta, t, &anA);
+        const Pose pb = planets(tb, t, &anB);
+        if (dist(pa.blue, pb.blue) > 1e-9) {
+            std::printf("FAIL ⑤ 上一砖的位移影响了半径/角度：%.6f vs %.6f\n", pa.blue.x, pb.blue.x);
+            return 1;
+        }
+        const double rStatic = (double)tb.tileStartDist(tile);
+        if (std::fabs(dist(pb.blue, pb.red) - rStatic) > 1e-9) {
+            std::printf("FAIL ⑤ 半径被邻居位移带歪：%.6f vs 静态 %.6f\n", dist(pb.blue, pb.red),
+                        rStatic);
+            return 1;
+        }
+        std::printf("ok   ⑤ 邻居被搬 (0,5) 时行星位置/半径与不搬时完全相同（半径 %.3f）\n", rStatic);
     }
 
     if (g_fail) {

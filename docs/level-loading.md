@@ -367,10 +367,11 @@ Hello (BPM) 2025 (7,336 块)  0.049 ms/帧
 1. **共享求值器** `core/timeline/TileXform.hpp::tileXformAt(lv, anim, tile, t)`：MoveTrack（解析式）+
    AnimateTrack（关键帧，覆盖前者）。渲染的 `trackXformAt` 与行星/拖尾现在调**同一个函数**
    （以前渲染那份是内联在 `LevelScene.cpp` 里的，分叉过一次就会"头跟了、尾巴没跟"）。
-2. **活枢轴 + 活邻居**：`PositionSolver` 里 `livePivot()` = `planetPivotAt(i)`（已含 PositionTrack
-   与 stick 语义）+ 动画位移；`startAngle/startDist/endDist` 在**三块砖里任一有位移**时改用
-   `atan2(prevLive−pivotLive)`、`sqrt` 活距离（与装载器同一个 `sqrt` 算式）。三块砖都没位移 →
-   仍走原来的静态数组，**逐位不变**。
+2. **只挪枢轴，半径不动**：`livePivot()` = `planetPivotAt(i)`（已含 PositionTrack 与 stick 语义）+
+   动画位移；`startAngle/totalAngle/startDist/endDist` **一律用静态值** ——
+   **半径只由 ScaleRadius 决定**（它已经烘进砖位，`tileStartDist/tileEndDist` 就是它）。
+   用户 2026-10-30 拍板："只有在 ScaleRadius 的时候再改变半径"，理由是行星随砖做**刚体平移**，
+   而不是被相邻砖的位移"拉伸"。
    *旋转/缩放拖动不了枢轴*：着色器是绕砖的起点（= 枢轴）转/缩的，参考实现也只取
    `tileMesh.position`。
 3. **拖尾**：`loadTrailTileConstsLive()` 在每个采样点按 tt 重算那 6 个常量（没有位移的砖仍走
@@ -403,9 +404,18 @@ Hello (BPM) 2025 (7,336 块)  0.049 ms/帧
 表不分配，于是"不跟"被误判成"跟"。PositionTrack 时期没暴露（没有偏移要减），
 跟随动画时会立刻错（`stick_anim` ③ 抓的就是这个）。
 
-**已知近似**（仍在）：行星的 `startDist/endDist` 在**没有动画**的谱面上仍按静态砖位算（那本来就对）；
-`planetPivotAt` 的 `stick=false` 分支只减 PositionTrack 的累计偏移，不减动画位移 —— 与参考实现
-一致（动画位移靠 `useStickToFloor` 整个跳过）。
+**与参考实现的一处有意偏离**（2026-10-30 核对过 upstream `main`）：Re_ADOJAS 的
+**实况路径** `updatePlanetsPosition` 在 stick 时仍然按**活邻居**重算
+`startAngle = atan2(prevMesh−pivot)`、`startDist/endDist = 邻居活距离`
+（`useStickToFloor` 分支，我们最初就是照抄它），于是邻居一被搬走半径就跟着伸缩；
+但它的**纯时间函数** `computePositionsAtTime`（拖尾走这条）已经改成
+`orbitR = tileRadiusScale`（ScaleRadius，段内插值）、注释明写"**不使用砖间实际距离**"，
+并且 `void clippedProgress; void startDist; void endDist;` 直接把那两个量丢掉 ——
+**同一份实现里两条路自相矛盾**。我们按用户口径统一到后者（半径只跟 ScaleRadius），
+并用 `tests/stick_anim_test.cpp` ⑤ 钉住："邻居被搬走时行星位置/半径必须与不搬时完全相同"。
+
+**已知近似**（仍在）：`planetPivotAt` 的 `stick=false` 分支只减 PositionTrack 的累计偏移，
+不减动画位移 —— 与参考实现一致（动画位移靠 `useStickToFloor` 整个跳过）。
 
 ## MultiPlanet（多星布局，2026-10-25）
 

@@ -41,19 +41,15 @@ static void pivotAt(const LevelData& L, int64_t idx, double t, double& x, double
 //
 // `moved` 用"或"累积：调用方要的是"这三块砖里**有没有**活位移"。
 static void livePivot(const LevelData& L, const TileAnimation* anim, int64_t idx, double t,
-                      double& x, double& y, bool& moved) {
+                      double& x, double& y) {
     L.planetPivotAt(idx, x, y);
     if (!anim || idx < 0 || idx >= L.tileCount()) return;
     if (!L.stickyAt(idx)) return;
     const TileXform xf = tileXformAt(L, anim, idx, t);
-    if (xf.moveX != 0.0 || xf.moveY != 0.0) moved = true;
     x += xf.moveX;
     y += xf.moveY;
 }
 
-// 与装载器同一个算式（`sqrt(dx*dx+dy*dy)`），不要用 hypot：静态值就是 `tileStartDist`/
-// `tileEndDist` 里存的同一个 sqrt，算式相同才逐位相同（邻居没动画时我们要逐位不变）。
-static double distOf(double dx, double dy) { return std::sqrt(dx * dx + dy * dy); }
 
 void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& redOut,
                                 glm::dvec2& blueOut, const TileAnimation* anim) {
@@ -113,27 +109,21 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
     }
 
     bool isRed = (tileIdx%2==0);
-    // 活几何：枢轴与**相邻砖**都按 t 时刻的活位置算（粘性轨道 + 轨道动画）。
-    // 三块砖都没有位移时 `live=false`，下面全走原来的静态数组 —— 逐位不变。
-    double pvx = 0.0, pvy = 0.0, prvx = 0.0, prvy = 0.0, nxtx = 0.0, nxty = 0.0;
-    bool live = false;
-    livePivot(L, anim, tileIdx, t, pvx, pvy, live);
-    if (tileIdx > 0) livePivot(L, anim, tileIdx - 1, t, prvx, prvy, live);
-    if (tileIdx + 1 < n - 1) livePivot(L, anim, tileIdx + 1, t, nxtx, nxty, live);
+    // 粘性轨道 + 轨道动画：**枢轴跟着砖走**（平移），但**轨道半径不动** ——
+    // 半径只由 ScaleRadius 决定（它已经烘进砖位，`tileStartDist/tileEndDist` 就是它）。
+    // 用户 2026-10-30："只有在 ScaleRadius 的时候再改变半径"；参考实现的新纯时间函数
+    // `computePositionsAtTime` 也是这个口径（`orbitR = tileRadiusScale` 段内插值，
+    // 并且**显式丢弃** `startDist/endDist`）。所以这里**不**按活邻居重算角度/距离。
+    // 三块砖都没有位移时 `livePivot` 等于 `planetPivotAt`，逐位不变。
+    double pvx = 0.0, pvy = 0.0;
+    livePivot(L, anim, tileIdx, t, pvx, pvy);
     const double pivotPos[2] = {pvx, pvy};
     double startTime = timeline.startTimeAt(tileIdx);
     double duration = timeline.durationAt(tileIdx);
     double progress = (duration>0.0001)?(t-startTime)/duration:1.0;
     if (progress<0) progress=0; if (progress>1) progress=1;
-    const double startAngle = live && tileIdx > 0
-                                  ? std::atan2(prvy - pvy, prvx - pvx)
-                                  : (double)timeline.startAngleAt(tileIdx);
-    const double startDist = live && tileIdx > 0 ? distOf(prvx - pvx, prvy - pvy)
-                                                 : (double)timeline.tileStartDist(tileIdx);
-    const double endDist = live && tileIdx + 1 < n - 1 ? distOf(nxtx - pvx, nxty - pvy)
-                                                       : (double)timeline.tileEndDist(tileIdx);
-    double angle = startAngle+(double)timeline.totalAngleAt(tileIdx)*progress;
-    double dist = startDist + (endDist - startDist) * progress;
+    double angle = (double)timeline.startAngleAt(tileIdx)+(double)timeline.totalAngleAt(tileIdx)*progress;
+    double dist = (double)timeline.tileStartDist(tileIdx)+((double)timeline.tileEndDist(tileIdx)-(double)timeline.tileStartDist(tileIdx))*progress;
     glm::dvec2 pv(pivotPos[0],pivotPos[1]);
     glm::dvec2 mv(pivotPos[0]+std::cos(angle)*dist, pivotPos[1]+std::sin(angle)*dist);
     if (isRed) { redOut=pv; blueOut=mv; }
@@ -167,26 +157,19 @@ void PositionSolver::planetsAt(const Timeline& timeline, double t, std::vector<P
         return;
     }
 
-    // 活几何（与两星路径同源）：枢轴 + 相邻砖按 t 时刻的活位置算；没有位移就走静态数组。
-    double px = 0.0, py = 0.0, prvx = 0.0, prvy = 0.0, nxtx = 0.0, nxty = 0.0;
-    bool live = false;
-    livePivot(L, anim, tileIdx, t, px, py, live);
-    if (tileIdx > 0) livePivot(L, anim, tileIdx - 1, t, prvx, prvy, live);
-    if (tileIdx + 1 < nFull - 1) livePivot(L, anim, tileIdx + 1, t, nxtx, nxty, live);
+    // 活几何（与两星路径同源）：枢轴跟着砖平移；**半径只由 ScaleRadius 决定**（已烘进砖位），
+    // 不按活邻居重算（用户 2026-10-30 的规则，参考实现新纯时间函数同款）。
+    double px = 0.0, py = 0.0;
+    livePivot(L, anim, tileIdx, t, px, py);
     const double startTime = timeline.startTimeAt(tileIdx);
     const double duration = timeline.durationAt(tileIdx);
     double progress = (duration > 1e-9) ? (t - startTime) / duration : 1.0;
     if (progress < 0) progress = 0;
     if (progress > 1) progress = 1;
-    const double startAngle = live && tileIdx > 0
-                                  ? std::atan2(prvy - py, prvx - px)
-                                  : (double)timeline.startAngleAt(tileIdx);
-    const double startDist = live && tileIdx > 0 ? distOf(prvx - px, prvy - py)
-                                                 : (double)timeline.tileStartDist(tileIdx);
-    const double endDist = live && tileIdx + 1 < nFull - 1 ? distOf(nxtx - px, nxty - py)
-                                                           : (double)timeline.tileEndDist(tileIdx);
-    const double angle = startAngle + (double)timeline.totalAngleAt(tileIdx) * progress;
-    const double dist = startDist + (endDist - startDist) * progress;
+    const double angle = (double)timeline.startAngleAt(tileIdx) +
+                         (double)timeline.totalAngleAt(tileIdx) * progress;
+    const double dist = (double)timeline.tileStartDist(tileIdx) +
+                        ((double)timeline.tileEndDist(tileIdx) - (double)timeline.tileStartDist(tileIdx)) * progress;
     const double dirSign = timeline.tileIsCW()[tileIdx] ? -1.0 : 1.0;
     const double inverse = kPi * (n - 2) / n;
 
@@ -265,27 +248,18 @@ void PositionSolver::positionAtTile(const Timeline& timeline, double t, int tile
         return;
     }
     bool isRed = (tileIdx%2==0);
-    // 与 positionAt 主分支**同一套活几何**（见那里的说明）：枢轴 + 相邻砖按 t 时刻的活位置算；
-    // 三块砖都没有位移时 `live=false`，下面全走静态数组 —— 逐位不变。
-    double pvx = 0.0, pvy = 0.0, prvx = 0.0, prvy = 0.0, nxtx = 0.0, nxty = 0.0;
-    bool live = false;
-    livePivot(L, anim, tileIdx, t, pvx, pvy, live);
-    if (tileIdx > 0) livePivot(L, anim, tileIdx - 1, t, prvx, prvy, live);
-    if (tileIdx + 1 < n - 1) livePivot(L, anim, tileIdx + 1, t, nxtx, nxty, live);
+    // 与 positionAt 主分支**同一套口径**（见那里的说明）：枢轴跟着砖平移，
+    // **半径只由 ScaleRadius 决定**（已烘进 `tileStartDist/tileEndDist`），
+    // 不按活邻居重算角度/距离 —— 用户 2026-10-30 的规则，参考实现的新纯时间函数同款。
+    double pvx = 0.0, pvy = 0.0;
+    livePivot(L, anim, tileIdx, t, pvx, pvy);
     const double pivotPos[2] = {pvx, pvy};
     double startTime = timeline.startTimeAt(tileIdx);
     double duration = timeline.durationAt(tileIdx);
     double progress = (duration>0.0001)?(t-startTime)/duration:1.0;
     if (progress<0) progress=0; if (progress>1) progress=1;
-    const double startAngle = live && tileIdx > 0
-                                  ? std::atan2(prvy - pvy, prvx - pvx)
-                                  : (double)timeline.startAngleAt(tileIdx);
-    const double startDist = live && tileIdx > 0 ? distOf(prvx - pvx, prvy - pvy)
-                                                 : (double)timeline.tileStartDist(tileIdx);
-    const double endDist = live && tileIdx + 1 < n - 1 ? distOf(nxtx - pvx, nxty - pvy)
-                                                       : (double)timeline.tileEndDist(tileIdx);
-    double angle = startAngle + (double)timeline.totalAngleAt(tileIdx) * progress;
-    double dist = startDist + (endDist - startDist) * progress;
+    double angle = (double)timeline.startAngleAt(tileIdx)+(double)timeline.totalAngleAt(tileIdx)*progress;
+    double dist = (double)timeline.tileStartDist(tileIdx)+((double)timeline.tileEndDist(tileIdx)-(double)timeline.tileStartDist(tileIdx))*progress;
     glm::dvec2 pv(pivotPos[0],pivotPos[1]);
     glm::dvec2 mv(pivotPos[0]+std::cos(angle)*dist, pivotPos[1]+std::sin(angle)*dist);
     if (isRed) { redOut=pv; blueOut=mv; }
@@ -431,24 +405,14 @@ inline void loadTrailTileConsts(const Timeline& timeline, int tileIdx, int n, do
 // 把"只依赖 tileIdx"的常量换成 **t 时刻的活值**（粘性轨道 + 轨道动画）。
 // 与 `positionAtTile` 的 `live` 分支同一套算式：枢轴 + 相邻砖按活位置，rotate/scale 不动枢轴。
 // 返回 false = 这三块砖都没有位移，调用方继续用缓存好的静态常量（逐位不变、也不多花时间）。
-inline bool loadTrailTileConstsLive(const Timeline& timeline, const TileAnimation* anim,
-                                    int tileIdx, int n, double tt, TrailTileConsts& c) {
-    if (!anim) return false;
+inline void loadTrailTileConstsLive(const Timeline& timeline, const TileAnimation* anim,
+                                   int tileIdx, double tt, TrailTileConsts& c) {
+    if (!anim) return;
     const LevelData& L = *timeline.level();
-    double px = 0.0, py = 0.0, prvx = 0.0, prvy = 0.0, nxtx = 0.0, nxty = 0.0;
-    bool live = false;
-    livePivot(L, anim, tileIdx, tt, px, py, live);
-    if (tileIdx > 0) livePivot(L, anim, tileIdx - 1, tt, prvx, prvy, live);
-    if (tileIdx + 1 < n - 1) livePivot(L, anim, tileIdx + 1, tt, nxtx, nxty, live);
-    if (!live) return false;
-    c.pivotX = px;
-    c.pivotY = py;
-    if (tileIdx > 0) {
-        c.startAngle = std::atan2(prvy - py, prvx - px);
-        c.startDist = distOf(prvx - px, prvy - py);
-    }
-    if (tileIdx + 1 < n - 1) c.endDist = distOf(nxtx - px, nxty - py);
-    return true;
+    // **只挪枢轴**：半径/起始角一律用静态值（半径只由 ScaleRadius 决定 —— 它已烘进砖位，
+    // `tileStartDist/tileEndDist` 就是它）。按活邻居重算半径会随 MoveTrack 位移伸缩，
+    // 违反"只有 ScaleRadius 改半径"（用户 2026-10-30）。
+    livePivot(L, anim, tileIdx, tt, c.pivotX, c.pivotY);
 }
 
 // `positionAtTile` 主分支的算术，逐字照抄（同操作、同顺序、同类型）。
@@ -523,7 +487,7 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
         }
         // 粘性轨道 + 轨道动画：**每个采样点**都要按 tt 重算枢轴/角度（拖尾必须解析式采样，
         // 不能拿"进砖那一刻"的常量）。没有位移的砖仍然走缓存常量 —— 与改造前逐位相同。
-        loadTrailTileConstsLive(timeline, anim, tileIdx, n, tt, c);
+        loadTrailTileConstsLive(timeline, anim, tileIdx, tt, c);
         if (i < 3 && env::flag("ADOCAO_TRAIL_INPUTS")) {
             const LevelData& L = *timeline.level();
             LOG_I("trail-in[%d] idx=%d tt=%.17g st=%.17g pos=%.17g,%.17g sa=%.17g ta=%.17g dir=%.17g",

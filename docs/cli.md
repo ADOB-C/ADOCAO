@@ -178,7 +178,21 @@ between tiles **plus the arc swept by the tile's relative angle**
 advancing. In tiles-length mode the rate is derived from the window instead
 (`tiles x samplesPerTile / windowSeconds`), so the point count is exactly
 `tiles x samplesPerTile` at any BPM (measured: 34 / 65 / 129 points for 8 / 16 / 32
-tiles at BPM 1.5M) and the sample-count cap `maxPoints` (8192) is the only backstop.
+tiles at BPM 1.5M) and the sample-count cap `maxPoints` is the only backstop.
+
+**`maxPoints` 是"点数上限"，不是"采样率上限"** —— 两个数别混。曾经它是 **8192**，
+于是用户把 `--trail-sample-rate` 调到 2^18 时，实际生效的是
+`8192 / 0.4 s = 20480/s`（日志里那句
+`trail: rate × span 超过 maxPoints=8192 … → 实际 20480.0/s` 就是它），
+设置被静默吃掉。2026-10-31 实测：2.64e6 BPM 那张谱的 t=156.78 s（tile 500000）一秒走
+**17.6 万砖**（0.4 s 窗口 = 7.0 万砖），8192 点等于**每 8.6 砖一个点** —— 拖尾直接塌成直线。
+现在上限是 **2^18 = 262144 点**（≈ 6 MB 顶点 + 6 MB 索引/球），
+上面的例子里 `rate=262144` 真的生效、点数 104,859（每砖 1.5 点），
+代价是 `trails=9.5 ms + planets=6.6 ms`／帧（640×360 抓帧口径）。
+点再往上加没有意义 —— 该缩短窗口（`--trail-duration` / `--trail-tiles`），
+因为**采样率改的是折线分辨率，不是历史长度**。
+顶点密度也顺带做了自适应：`n > 20000` 时每个点只切 1 段（`segsPerPoint`，
+原来恒 4 段），否则 10 万点会变成 84 万顶点 × 2 个球。
 
 **Sagitta 判据**（`--trail-sagitta PX`，默认 0=关）：按**屏幕像素**反推采样率，而不是按 BPM。
 圆弧上每步 `s`（砖）的折线偏离 ≈ `s²/(8R)` 砖 → 换算成像素是 `s²·pxPerTile/(8R)`；令其 ≤ PX：

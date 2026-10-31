@@ -288,6 +288,10 @@ add_executable(adocao_tile_animation_test tile_animation_test.cpp)
 target_link_libraries(adocao_tile_animation_test PRIVATE adocao_core)
 add_test(NAME tile_animation COMMAND adocao_tile_animation_test)
 
+add_executable(adocao_trail_window_test trail_window_test.cpp)
+target_link_libraries(adocao_trail_window_test PRIVATE adocao_core)
+add_test(NAME trail_window COMMAND adocao_trail_window_test)
+
 add_executable(adocao_track_visibility_test track_visibility_test.cpp)
 target_link_libraries(adocao_track_visibility_test PRIVATE adocao_core)
 add_test(NAME track_visibility COMMAND adocao_track_visibility_test)

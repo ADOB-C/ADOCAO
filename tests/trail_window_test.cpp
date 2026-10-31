@@ -1,0 +1,68 @@
+// 拖尾窗口/采样率：**用户显式给的固定率不能被"点数上限"静默吃掉**。
+//
+// 2026-10-31 的真事：`--trail-sample-rate 262144`（2^18）在 2.64e6 BPM 那张谱上
+// 实际只跑 20480/s —— 因为 `maxPoints` 当时是 8192，0.4 s 的窗口只能装 8192 点。
+// 那一段一秒走 17.6 万砖，8192 点 = **每 8.6 砖一个点**，拖尾直接塌成直线。
+//
+// 这个测试钉三件事：
+//   ① 上限够大时，`sampleRate` 必须**原样**等于请求值（不许被 rateMax 之类夹）；
+//   ② 上限真的绑住时才截断，且截断值 = maxPoints / span；
+//   ③ 默认上限 ≥ 2^18（回归防线：谁再把它调回几千，②的期望值会立刻对不上）。
+#include "core/level/LevelData.hpp"
+#include "core/timeline/PositionSolver.hpp"
+#include "core/timeline/Timeline.hpp"
+
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+
+using namespace adofai;
+
+static int g_fail = 0;
+static void near(const char* what, double got, double want, double eps = 1e-3) {
+    if (std::fabs(got - want) <= eps) std::printf("ok   %s = %.3f\n", what, got);
+    else { std::printf("FAIL %s: got %.3f want %.3f\n", what, got, want); ++g_fail; }
+}
+static void check(const char* what, bool ok) {
+    if (ok) std::printf("ok   %s\n", what);
+    else { std::printf("FAIL %s\n", what); ++g_fail; }
+}
+
+int main() {
+    const char* json = R"({"angleData":[0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,
+        0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90,0,90],"settings":{"bpm":120}})";
+    LevelData lv; Timeline tl;
+    if (!lv.loadFromBuffer(json, std::strlen(json))) { std::printf("FAIL load\n"); return 1; }
+    tl.build(lv, false);
+    const double t = tl.startTimeAt(10);
+
+    PositionSolver::TrailSamplingConfig cfg;
+    cfg.duration = 0.4f;
+    cfg.fixedRate = 262144.0f;   // = 2^18，用户显式给
+    cfg.adaptive = false;
+    cfg.sagittaPx = 0.0f;
+    cfg.speedAware = false;
+
+    {
+        cfg.maxPoints = 262144.0f;
+        const auto w = PositionSolver::trailWindow(tl, t, cfg);
+        near("① 上限足够 → sampleRate = 请求值", (double)w.sampleRate, 262144.0);
+        check("① 没有被 rateMax(4000) 夹", (double)w.sampleRate > 4000.0);
+    }
+    {
+        cfg.maxPoints = 100.0f;   // 0.4 s 窗口装 100 点 → 250/s
+        const auto w = PositionSolver::trailWindow(tl, t, cfg);
+        near("② 上限绑住 → 截断到 maxPoints/span", (double)w.sampleRate, 250.0);
+    }
+    {
+        cfg.maxPoints = PositionSolver::TrailSamplingConfig{}.maxPoints;   // 默认值
+        check("③ 默认点数上限 ≥ 2^18（8192 那个坑不许回来）",
+              (double)cfg.maxPoints >= 262144.0 - 1e-6);
+        const auto w = PositionSolver::trailWindow(tl, t, cfg);
+        near("③ 默认上限下 2^18 仍然原样生效", (double)w.sampleRate, 262144.0);
+    }
+
+    if (g_fail) { std::printf("trail_window: %d 条失败\n", g_fail); return 1; }
+    std::printf("trail_window: 全部通过\n");
+    return 0;
+}

@@ -55,7 +55,10 @@ void PlanetTrail::setPoints(const double* xy, int count, int maxExpected) {
     ensureGPUResources();
     int n = m_count;
     m_center = (ringAt(0).pos + ringAt(n-1).pos) * 0.5;
-    const int segsPerPoint = 4;
+    // 点的密度够高时 1 段/点就够（Catmull-Rom 已经把折线抹圆了）；4 段/点是给
+    // "8~100 个点画一整条拖尾"那种稀疏情况准备的。7 万点的拖尾用 4 段/点会变成
+    // 84 万个顶点 × 2 个球，白烧显存与带宽。
+    const int segsPerPoint = (n > 20000) ? 1 : 4;
     int totalSegments = (n-1) * segsPerPoint;
     int vertCount = (totalSegments+1)*2, idxCount = totalSegments*6;
     m_verts.resize(vertCount*3); m_indices.resize(idxCount);

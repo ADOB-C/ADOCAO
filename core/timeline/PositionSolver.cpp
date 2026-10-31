@@ -356,7 +356,9 @@ PositionSolver::TrailWindow PositionSolver::trailWindow(const Timeline& timeline
             std::chrono::steady_clock::now().time_since_epoch()).count();
         if (now - lastWarn > 2.0) {
             lastWarn = now;
-            LOG_W("trail: rate × span 超过 maxPoints=%.0f（span=%.3fs）→ 实际 %.1f/s（告警去重 2s）",
+            LOG_W("trail: rate × span 超过点数上限 maxPoints=%.0f（span=%.3fs）→ 实际 %.1f/s；"
+                  "再要更密请缩短拖尾窗口（--trail-duration / --trail-tiles），"
+                  "采样率再高也不会超过这个点数（告警去重 2s）",
                   (double)cfg.maxPoints, span, rate);
         }
     }

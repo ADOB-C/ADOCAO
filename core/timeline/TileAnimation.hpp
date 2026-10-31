@@ -45,6 +45,9 @@ public:
     // 区间外走建帧时缓存好的 hiddenBefore/hiddenAfter（O(1)），区间内才采样。
     bool hiddenAt(int64_t tile, double t) const;
 
+    // 该砖的活跃区间（没有动画帧时返回 false）。事件式可见性要用它定采样范围。
+    bool rangeOf(int64_t tile, double& start, double& end) const;
+
     // 采样：tile 不在索引里 → 返回 false（调用方走"无动画"快路径）。
     bool sample(int64_t tile, double t, TileAnimSample& out) const;
 

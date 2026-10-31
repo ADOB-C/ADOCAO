@@ -360,6 +360,14 @@ void TileAnimation::build(const LevelData& lv, const Timeline& tl) {
           (double)(keyframeCount() * sizeof(Channel::Key)) / 1024.0, (int)m_truncated);
 }
 
+bool TileAnimation::rangeOf(int64_t tile, double& start, double& end) const {
+    const uint32_t idx = frameIndexFor(tile);
+    if (idx == UINT32_MAX) return false;
+    start = m_frames[idx].rangeStart;
+    end = m_frames[idx].rangeEnd;
+    return true;
+}
+
 bool TileAnimation::hiddenAt(int64_t tile, double t) const {
     const uint32_t idx = frameIndexFor(tile);
     if (idx == UINT32_MAX) return false;

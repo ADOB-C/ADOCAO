@@ -3591,33 +3591,61 @@ void LevelData::applyPositionTrackOffsets() {
 
 void LevelData::applyRadiusScaleOffsets() {
     m_hasScaleRadius = false;
-    std::vector<std::pair<int, float>> evs;
+    m_radiusScaleEvents.clear();
     for (const FastAction& a : actions) {
-        if (a.type == FastAction::ScaleRadius) evs.push_back({a.floor, a.val1});
+        if (a.type == FastAction::ScaleRadius) m_radiusScaleEvents.push_back({a.floor, a.val1});
     }
-    if (evs.empty()) return;
-    std::sort(evs.begin(), evs.end(),
+    if (m_radiusScaleEvents.empty()) return;
+    std::sort(m_radiusScaleEvents.begin(), m_radiusScaleEvents.end(),
               [](const auto& x, const auto& y) { return x.first < y.first; });
     m_hasScaleRadius = true;
     const int64_t n = (int64_t)tiles.size();
     if (n < 2) return;
-    float cur = 1.0f;
-    size_t ei = 0;
-    double ox = 0.0, oy = 0.0;
-    for (int64_t i = 0; i < n; ++i) {
-        while (ei < evs.size() && (int64_t)evs[ei].first == i) { cur = evs[ei].second; ++ei; }
-        if (i > 0 && cur != 1.0f) {
-            const double theta = (double)tiles[(size_t)i - 1].direction * 3.14159265358979323846 / 180.0 + 3.14159265358979323846;
-            const double off = 1.0 - (double)cur;
-            ox += std::cos(theta) * off;
-            oy += std::sin(theta) * off;
-        }
-        if (i > 0) {
-            tiles[(size_t)i].position[0] += ox;
-            tiles[(size_t)i].position[1] += oy;
+
+    // 每砖继承的半径比例（与参考实现 `tileRadiusScale` 同口径：事件层起一直继承到下一个事件）
+    m_tileRadiusScale.assign((size_t)n, 1.0f);
+    {
+        float cur = 1.0f;
+        size_t ei = 0;
+        for (int64_t i = 0; i < n; ++i) {
+            while (ei < m_radiusScaleEvents.size() && (int64_t)m_radiusScaleEvents[ei].first == i) {
+                cur = m_radiusScaleEvents[ei].second;
+                ++ei;
+            }
+            m_tileRadiusScale[(size_t)i] = cur;
         }
     }
-    LOG_D("ScaleRadius: %zu 条事件（偏移已烘进砖位）", evs.size());
+
+    // 烘进砖位：事件砖 i 起，把 (1−r_i) 沿"指向上一砖"的方向累加进后续所有砖位
+    // （参考实现 `applyRadiusScaleOffsets` 同款：`theta = tileStartAngle[i]` = atan2(p_{i−1} − p_i)）。
+    //
+    // **必须先算角度再统一平移**：角度要用**未平移**的砖位（参考实现也是拿 `calculateTilePositions`
+    // 的原值算的）。以前这里用 `tiles[i-1].direction + π` 当方向 —— 那是"上一砖的出口方向"，
+    // 转弯处与"指向上一砖心"差一个转角，实测 Won't You 的间距因此与 ScaleRadius 差到 **0.25 砖**。
+    std::vector<double> theta((size_t)n, 0.0);
+    for (int64_t i = 1; i < n; ++i) {
+        const double dx = (double)tiles[(size_t)i - 1].position[0] - (double)tiles[(size_t)i].position[0];
+        const double dy = (double)tiles[(size_t)i - 1].position[1] - (double)tiles[(size_t)i].position[1];
+        theta[(size_t)i] = std::atan2(dy, dx);
+    }
+    double ox = 0.0, oy = 0.0;
+    for (int64_t i = 1; i < n; ++i) {
+        const float r = m_tileRadiusScale[(size_t)i];
+        if (r != 1.0f) {
+            const double off = 1.0 - (double)r;
+            ox += std::cos(theta[(size_t)i]) * off;
+            oy += std::sin(theta[(size_t)i]) * off;
+        }
+        tiles[(size_t)i].position[0] += ox;
+        tiles[(size_t)i].position[1] += oy;
+    }
+    LOG_D("ScaleRadius: %zu 条事件（比例表 + 偏移已烘进砖位）", m_radiusScaleEvents.size());
+}
+
+float LevelData::radiusScaleAt(int64_t floor) const {
+    if (m_tileRadiusScale.empty() || floor < 0 || (size_t)floor >= m_tileRadiusScale.size())
+        return 1.0f;
+    return m_tileRadiusScale[(size_t)floor];
 }
 
 void WinCacheDeleter::operator()(FloorWindowCache* p) const { delete p; }

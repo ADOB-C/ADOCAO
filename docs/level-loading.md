@@ -369,7 +369,7 @@ Hello (BPM) 2025 (7,336 块)  0.049 ms/帧
    （以前渲染那份是内联在 `LevelScene.cpp` 里的，分叉过一次就会"头跟了、尾巴没跟"）。
 2. **只挪枢轴，半径不动**：`livePivot()` = `planetPivotAt(i)`（已含 PositionTrack 与 stick 语义）+
    动画位移；`startAngle/totalAngle/startDist/endDist` **一律用静态值** ——
-   **半径只由 ScaleRadius 决定**（它已经烘进砖位，`tileStartDist/tileEndDist` 就是它）。
+   **半径只由 ScaleRadius 决定**（`LevelData::radiusScaleAt(floor)`，见下面「ScaleRadius 接上半径」）。
    用户 2026-10-30 拍板："只有在 ScaleRadius 的时候再改变半径"，理由是行星随砖做**刚体平移**，
    而不是被相邻砖的位移"拉伸"。
    *旋转/缩放拖动不了枢轴*：着色器是绕砖的起点（= 枢轴）转/缩的，参考实现也只取
@@ -413,6 +413,35 @@ Hello (BPM) 2025 (7,336 块)  0.049 ms/帧
 并且 `void clippedProgress; void startDist; void endDist;` 直接把那两个量丢掉 ——
 **同一份实现里两条路自相矛盾**。我们按用户口径统一到后者（半径只跟 ScaleRadius），
 并用 `tests/stick_anim_test.cpp` ⑤ 钉住："邻居被搬走时行星位置/半径必须与不搬时完全相同"。
+
+### ScaleRadius 接上半径（2026-10-31）
+
+以前的真实情况：`Timeline::tileStartDist/tileEndDist` 对**所有非末层恒返回 1.0f**
+（`Timeline.hpp` 里就是 `return (i + 1 == m_distCount) ? m_lastStartDist : 1.0f;` —— 它们**不是**
+从砖位算出来的距离），所以行星的绕行半径**永远是 1**，`ScaleRadius` 只通过"烘进砖位"改变了
+枢轴位置，**从没影响过半径**。用户 2026-10-30 那句"把 ScaleRadius 接上"指的就是这个。
+
+现在：
+
+* `LevelData` 在 `applyRadiusScaleOffsets()` 里同时保留 `m_radiusScaleEvents`（`floor → scale`）
+  与继承后的 `m_tileRadiusScale`（**惰性**：谱里没有 ScaleRadius 就不分配）；
+  `radiusScaleAt(floor)` 是它的访问器（默认 1）。
+* 行星/拖尾的绕行半径 = 参考实现纯时间函数的同一套：
+  `orbitR = r(i) + (r(i+1) − r(i)) · progress`（`PositionSolver::orbitRadiusAt`）——
+  注意它是**提前一砖**开始变的（砖 i 里就插到 r(i+1)），与参考实现 `rTail = radiusScale[i+1]` 一致。
+* 实测（Won't You / MYC，tile 1123~1130 的 `scale: 90`）：实测半径 **0.9000**（以前是 1.0）。
+
+顺带修掉一个**同源的老 bug**：烘偏移用的方向以前是 `tiles[i-1].direction + π`
+（= 上一砖的**出口方向**），而不是"指向上一砖心"的方向 —— 转弯处差一个转角，
+Won't You 的砖间距因此与 `scale` 差到 **0.25 砖**。现在按参考实现用
+`atan2(p_{i−1} − p_i)`（**先算完全部角度、再统一平移**，因为角度必须用未平移的砖位），
+误差归零（实测 tile 1123~1130 间距 = 0.90000）。
+像素门槛不变（54/54）：门槛里唯一的 ScaleRadius 谱是 MYC，它的 `myc_t30_z25` 抓在 t=30.0，
+而第一条事件在 t=30.18。
+
+**仍留着的近似**：拖尾的 sagitta 采样率判据还在用"半径 ≈ 1"（`PositionSolver::tilePathSpeed`
+旁边的 `max(tileStartDist, tileEndDist)`），`scale` 很大的谱面采样密度会略欠 —— 只影响折线密度，
+不影响位置。见 `TODO.md`。
 
 **已知近似**（仍在）：`planetPivotAt` 的 `stick=false` 分支只减 PositionTrack 的累计偏移，
 不减动画位移 —— 与参考实现一致（动画位移靠 `useStickToFloor` 整个跳过）。

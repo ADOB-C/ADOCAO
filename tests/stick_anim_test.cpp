@@ -122,13 +122,13 @@ int main() {
                         at0.blue.x, at0.blue.y, wantMover.x, wantMover.y);
             return 1;
         }
-        const double rStatic = (double)tl.tileStartDist(tile);
+        const double rStatic = (double)lv.radiusScaleAt(tile);   // 半径 = ScaleRadius（这里恒 1）
         const double rGot = dist(at0.blue, at0.red);
         if (std::fabs(rGot - rStatic) > 1e-9) {
             std::printf("FAIL 半径被位移带歪了：%.6f vs 静态 %.6f\n", rGot, rStatic);
             return 1;
         }
-        std::printf("ok   ② 砖起点处移动星 = 上一砖 + (3,0)，半径 %.3f 不变\n", rGot);
+        std::printf("ok   ② 砖起点处移动星 = 上一砖 + (3,0)，半径 %.3f = ScaleRadius\n", rGot);
 
         // ── ④ 拖尾解析式采样 vs 直接算行星位置（逐点一致） ──
         const double trailT = t;
@@ -194,13 +194,70 @@ int main() {
             std::printf("FAIL ⑤ 上一砖的位移影响了半径/角度：%.6f vs %.6f\n", pa.blue.x, pb.blue.x);
             return 1;
         }
-        const double rStatic = (double)tb.tileStartDist(tile);
+        const double rStatic = (double)b.radiusScaleAt(tile);
         if (std::fabs(dist(pb.blue, pb.red) - rStatic) > 1e-9) {
             std::printf("FAIL ⑤ 半径被邻居位移带歪：%.6f vs 静态 %.6f\n", dist(pb.blue, pb.red),
                         rStatic);
             return 1;
         }
         std::printf("ok   ⑤ 邻居被搬 (0,5) 时行星位置/半径与不搬时完全相同（半径 %.3f）\n", rStatic);
+    }
+
+    // ── ⑥ 半径 = ScaleRadius（含"砖内从 r_i 插到 r_{i+1}"） ─────────────
+    // 以前 `Timeline::tileStartDist/tileEndDist` 对**所有**非末层恒返回 1.0f（注释写着
+    // "0..n-2 上恒为 1.0f"），所以 ScaleRadius 从来没影响到半径 —— 这就是用户 2026-10-30
+    // 说的"把 ScaleRadius 接上"。
+    {
+        const char* kJson = R"({"angleData":[180,180,180,180,180,180,180,180],
+          "settings":{"bpm":120,"offset":0,"countdownTicks":0,"pitch":100,"rotation":0,
+                      "trackColor":"debb7b","backgroundColor":"000000","trackStyle":"Standard",
+                      "trackAnimation":"None","trackDisappearAnimation":"None"},
+          "actions":[
+            {"floor":2,"eventType":"ScaleRadius","scale":50},
+            {"floor":4,"eventType":"ScaleRadius","scale":100}
+          ]})";
+        LevelData lv;
+        Timeline tl;
+        TileAnimation anim;
+        if (!lv.loadFromBuffer(kJson, std::strlen(kJson))) {
+            std::printf("FAIL ⑥ 合成谱加载失败\n");
+            return 1;
+        }
+        tl.build(lv, false);
+        anim.build(lv, tl);
+        if (!lv.hasScaleRadiusEvents()) {
+            check(false, "⑥ hasScaleRadiusEvents 没置位");
+            return 1;
+        }
+        // 比例表：砖 0..1 = 1、砖 2..3 = 0.5、砖 4.. = 1
+        const double want[] = {1.0, 1.0, 0.5, 0.5, 1.0, 1.0};
+        for (int i = 0; i < 6; i++) {
+            if (std::fabs((double)lv.radiusScaleAt(i) - want[i]) > 1e-6) {
+                std::printf("FAIL ⑥ radiusScaleAt(%d)=%.3f，应为 %.3f\n", i,
+                            (double)lv.radiusScaleAt(i), want[i]);
+                return 1;
+            }
+        }
+        // 插值口径 = 参考实现 `orbitR = radiusScale(i) + (radiusScale(i+1) − …)·hp`：
+        // 半径在**砖 i 里**从 r(i) 走到 r(i+1)，所以事件砖 2 的影响从砖 1 就开始（提前一砖）。
+        //   砖 1（1 → 0.5）：frac 0.5 → 0.75
+        //   砖 2（0.5 → 0.5）：→ 0.5
+        //   砖 3（0.5 → 1）：frac 0 → 0.5、frac 0.5 → 0.75、frac→1 → 1
+        //   砖 4（1 → 1）：→ 1
+        struct Case { int tile; double frac; double want; };
+        const Case cases[] = {{1, 0.5, 0.75}, {2, 0.0, 0.5}, {2, 0.5, 0.5}, {3, 0.0, 0.5},
+                              {3, 0.5, 0.75}, {3, 0.999999, 1.0}, {4, 0.5, 1.0}};
+        for (const Case& c : cases) {
+            const double t = tl.startTimeAt(c.tile) + (double)tl.durationAt(c.tile) * c.frac;
+            const Pose p = planets(tl, t, &anim);
+            const double r = dist(p.red, p.blue);
+            if (std::fabs(r - c.want) > 2e-3) {
+                std::printf("FAIL ⑥ 砖 %d frac %.3f 半径 %.4f，应为 %.3f\n", c.tile, c.frac, r,
+                            c.want);
+                return 1;
+            }
+        }
+        std::printf("ok   ⑥ 半径 = ScaleRadius（砖 2 @0.5、砖 3 从 0.5 插到 1.0）\n");
     }
 
     if (g_fail) {

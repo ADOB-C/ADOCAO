@@ -589,12 +589,19 @@ scripts/capture-gate.sh check
 `<name>|<chart>|<tile|time>|<值>|<zoom>|<WxH>|[额外开关]`。按**砖号**抓帧（`--capture-tile`）而不是按秒 ——
 6 千砖的谱面上按秒给的时刻会随砖时长累积漂移。脚本会断言日志里的 `tile=` 与清单一致（防"抓错时刻"
 这种静默失败），并记录 RSS / `unique shapes` / draw 次数。差异像素统计要 Pillow：
-`ADOCAO_GATE_PY=<带 Pillow 的 python3>`。**基线不入库**（驱动相关），`store` 一次、`check` 多次；默认落在 `~/Projects/.ADOCAO/gate/baseline`（`ADOFAO_GATE_HOME` 可改）—— 别写 `/tmp`，会被系统清掉；也别写进仓库，`git clean -xdf` 会连它一起删。
+`ADOCAO_GATE_PY=<带 Pillow 的 python3>`。**基线不入库**（驱动相关），`store` 一次、`check` 多次；默认落在工作区 `.gate/baseline`（`ADOFAO_GATE_HOME` 可改）—— 别写 `/tmp`，会被系统清掉；也别写进仓库，`git clean -xdf` 会连它一起删。
 三条已标定过的灵敏度：砖的绘制顺序反转 → MYC 那帧 278 个像素变；**图标放回拖尾之后**
 （旧 bug 行为）→ 8 个 `*_under_trail` 状态红 13700~29241 个像素（maxdelta ~220）；
+**行星半径改回恒 1**（ScaleRadius 不接半径的旧行为）→ `sr_radius_ramp` 红 **21,762 个像素（2.36%）**；
 而把一处融合拆成 1 ULP 级扰动 → **7/7 状态完全相同**（8-bit 输出看不出来）—— 所以 ULP 级的
 正确性由上面那两个逐位测试负责，别指望 PNG。清单支持第 7 个可选字段传额外开关
 （例如 `--trail-tiles 8`，用来让拖尾真的扫到图标）。
+
+**覆盖的盲区要主动补**（2026-10-31 真踩过）：`sr_radius_ramp` 之前，门槛里两张带 ScaleRadius 的
+谱面（MYC、2.64e6）**都抓在 scale=100 的区间** —— MYC 抓 t=30.0 而第一条事件在 t≈30.18，
+`singularity_mid` 抓 tile 500000 而最后一个事件在 floor 179565。于是"半径从 ScaleRadius 来"这个
+改动**在像素层零覆盖**，54/54 全绿属于"网没兜到这里"而不是"改动无害"。判据：**新功能上线时
+要指名道姓说出哪个状态会因为它变红**，说不出来就是没覆盖（现成的答案在负向对照里量）。
 
 **怎么"实际看"**（本轮就是这么验的，别再靠脑补）：
 1. 几何层：`tools/tile-geometry-lab/dump.sh`（编的就是 `render/TileGeometry.cpp` 本人）→ 顶点 JSON →

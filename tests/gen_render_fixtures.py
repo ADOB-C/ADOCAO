@@ -337,9 +337,17 @@ def main():
     state("moon_t1_z25", MOON, "time", "1.0", 25.0)
     state("myc_t30_z25", MYC, "time", "30.0", 25.0)
     lines.append("")
+    SING = f"{CHARTS}/15. Singularity at 2.64e+6 BPM/15. Singularity at 2.64e+6 BPM.adofai"
     lines.append("# 形状压力：形状数最多的本地谱面（今天每形状一次 draw → 这里最糟）")
-    state("singularity_mid", f"{CHARTS}/15. Singularity at 2.64e+6 BPM/"
-                             "15. Singularity at 2.64e+6 BPM.adofai", "tile", "500000", 25.0)
+    state("singularity_mid", SING, "tile", "500000", 25.0)
+    lines.append("")
+    # ScaleRadius → 半径：这道门槛以前对这条路径**零覆盖** —— `singularity_mid` 抓在
+    # tile 500000，而这张谱最后一个 ScaleRadius 在 floor 179565、继承值正好 100 → 半径 1；
+    # MYC 的 `myc_t30_z25` 抓 t=30.0，它第一条事件在 t≈30.18。两张都躲开了。
+    # 这里选 floor 158：r(158)=2.00、r(159)=1.00，砖内**正好在插值**，钉的就是
+    # `orbitRadiusAt` 的 `r0 + (r1-r0)·progress`（常数区间钉不住这一段）。
+    # 负向对照（把半径强改回 1.0 再抓同一帧）：1280x720 差 **21,762 px（2.36%）**。
+    state("sr_radius_ramp", SING, "tile", "158", 400.0)
     with open(STATES_PATH, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
 

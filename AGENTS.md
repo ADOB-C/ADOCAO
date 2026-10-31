@@ -234,7 +234,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 几何测试（三层，2026-10 起）：`tests/tile_geometry_test.cpp`（中旋五边形不变量 + 调用点护栏）→
   `tests/tile_expansion_test.cpp`（**CPU 逐位**：形状表展开 vs 参考实现，168491 形状 / 3.3e7 坐标）→
   `tests/geom_probe_test.cpp`（**GPU 逐位**：真跑 `assets/shaders/tile.vert`，4.7e7 坐标；无显示时 SKIP）
-  → `scripts/capture-gate.sh store|check`（**像素逐字节**，54 个状态：51 个渲染基线 + 3 个运镜状态（`--capture-camera`，见 `docs/camera.md` §12）；基线默认 `~/Projects/.ADOCAO/gate/baseline`、不入库；带 `+hitsounds` 的状态会真的加载音色）；
+  → `scripts/capture-gate.sh store|check`（**像素逐字节**，55 个状态：52 个渲染基线 + 3 个运镜状态（`--capture-camera`，见 `docs/camera.md` §12）；基线默认工作区 `.gate/baseline`、不入库；带 `+hitsounds` 的状态会真的加载音色）；
   默认口径是几何尺度容差 1e-5 砖，`ADOCAO_TILE_EXACT=1` 才要求逐位（见 `docs/rendering.md` 的"砖块几何"段）
 - shader 一致性：`scripts/check-shader-fallback.sh`（`render/Shaders.hpp` 的内嵌回退 GLSL 必须与
   `assets/shaders/*` 逐字相同）

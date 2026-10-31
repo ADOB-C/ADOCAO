@@ -137,6 +137,8 @@ private:
     bool m_animVisDirty = true;                    // 时间变了才重算"动画砖是否全透明"
     mutable adofai::TileAnimSample m_scratchAnim;
     std::vector<uint8_t> m_animVisState;          // 每块动画砖上一帧的"隐藏"状态（2 = 未知）
+    double m_animVisT = -1e300;                   // 上次做可见性扫描的时刻（-1e300 = 还没扫过）
+    std::vector<uint32_t> m_animVisActive;        // 复用缓冲：本帧需要复判的帧下标
     bool m_visBuilt = false;
     bool m_timeChangedSinceVis = true;
 };

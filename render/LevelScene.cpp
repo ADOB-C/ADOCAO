@@ -423,14 +423,12 @@ void LevelScene::updateTileVisibility(const Timeline& timeline, double t, bool p
         // 全部可见。夹成 0 会取到 appear 首帧的 0，于是开场/暂停整条轨道是黑的
         // （2026-10-31 用户："暂停的时候什么都没有了"）。
         const double tt = t;
-        const auto& entries = m_tileAnim->entries();
-        if (m_animVisState.size() != entries.size()) m_animVisState.assign(entries.size(), 2);
-        for (size_t i = 0; i < entries.size(); ++i) {
-            const uint8_t hidden = m_tileAnim->hiddenAt(entries[i].tile, tt) ? 1 : 0;
-            if (m_animVisState[i] == hidden) continue;   // 只在状态翻转时才动实例缓冲
-            m_animVisState[i] = hidden;
-            m_tileMesh->updateVisibleRange((int)entries[i].tile, (int)entries[i].tile, hidden == 0);
-        }
+        // 只扫"时间窗内会翻状态"的砖（区间外是建帧时缓存的常量）——
+        // 全表扫描在 2.64e6 那张谱（997,664 块动画砖）实测 24.7 ms/帧。
+        m_tileAnim->updateVisibility(tt, m_animVisState, m_animVisT,
+            [&](int64_t tile, bool hidden) {
+                m_tileMesh->updateVisibleRange((int)tile, (int)tile, !hidden);
+            });
         return;
     }
     // 倒计时（timeInLevel < 0）期间按 t=0 处理：原版在 countdown 里**看得到开头那段轨道**，

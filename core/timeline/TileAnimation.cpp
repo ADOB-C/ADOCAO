@@ -300,6 +300,22 @@ void TileAnimation::build(const LevelData& lv, const Timeline& tl) {
         for (size_t i = 0; i < m_index.size(); ++i) m_index[i].idx = (uint32_t)i;
         m_frames = std::move(reordered);
     }
+    // ---- 区间索引：按 rangeStart 升序 + rangeEnd 的前缀最大值 ----
+    // 逐帧的可见性扫描只需要碰"区间与时间窗相交"的砖（见 hpp 的说明）。
+    {
+        m_rangeOrder.resize(m_frames.size());
+        for (size_t i = 0; i < m_rangeOrder.size(); ++i) m_rangeOrder[i] = (uint32_t)i;
+        std::sort(m_rangeOrder.begin(), m_rangeOrder.end(), [&](uint32_t a, uint32_t b) {
+            return m_frames[a].rangeStart < m_frames[b].rangeStart;
+        });
+        m_rangePrefixMaxEnd.resize(m_rangeOrder.size());
+        double mx = -1e300;
+        for (size_t i = 0; i < m_rangeOrder.size(); ++i) {
+            mx = std::max(mx, m_frames[m_rangeOrder[i]].rangeEnd);
+            m_rangePrefixMaxEnd[i] = mx;
+        }
+    }
+
     // 诊断：`ADOCAO_ANIM_DUMP_TILE=<n>` 打印该砖各通道的关键帧（排查"砖为什么看不见"）
     if (const char* dt = std::getenv("ADOCAO_ANIM_DUMP_TILE")) {
         const int64_t want = std::atoll(dt);
@@ -382,6 +398,32 @@ void TileAnimation::activeAt(double t, std::vector<int64_t>& out) const {
     out.clear();
     for (size_t i = 0; i < m_frames.size(); ++i)
         if (m_frames[i].activeAt(t)) out.push_back(m_index[i].tile);
+}
+
+void TileAnimation::queryActive(double t0, double t1, std::vector<uint32_t>& out) const {
+    out.clear();
+    if (m_rangeOrder.empty()) return;
+    if (t1 < t0) std::swap(t0, t1);
+    // 经典"区间刺点"：按 rangeStart 排序 + rangeEnd 的前缀最大值。
+    // 从**最后一个 rangeStart <= t1** 的位置往回走；一旦前缀最大 rangeEnd < t0 就停
+    // ——它之前的所有区间都结束得更早。这样代价是 O(log n + 命中数)，不是"扫到表尾"。
+    // （第一版写成"从前缀第一个 >= t0 的位置往后走"，在百万砖的谱上退化成扫全表 → 5.4 ms/帧。）
+    const size_t n = m_rangeOrder.size();
+    size_t hi = 0, lo = 0, h = n;   // hi = 满足 rangeStart <= t1 的元素个数
+    while (lo < h) {
+        const size_t mid = (lo + h) / 2;
+        if (m_frames[m_rangeOrder[mid]].rangeStart <= t1) lo = mid + 1;
+        else h = mid;
+    }
+    hi = lo;
+    for (size_t i = hi; i-- > 0;) {
+        if (m_rangePrefixMaxEnd[i] < t0) break;    // 更早的区间全部结束在 t0 之前
+        const uint32_t k = m_rangeOrder[i];
+        const TileKeyframes& f = m_frames[k];
+        if (f.rangeEnd < t0) continue;
+        out.push_back(k);
+    }
+    std::sort(out.begin(), out.end());             // 调用方按下标顺序更新（实例缓冲顺序友好）
 }
 
 }  // namespace adofai

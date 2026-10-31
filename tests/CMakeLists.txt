@@ -288,6 +288,10 @@ add_executable(adocao_tile_animation_test tile_animation_test.cpp)
 target_link_libraries(adocao_tile_animation_test PRIVATE adocao_core)
 add_test(NAME tile_animation COMMAND adocao_tile_animation_test)
 
+add_executable(adocao_tileanim_active_test tileanim_active_test.cpp)
+target_link_libraries(adocao_tileanim_active_test PRIVATE adocao_core)
+add_test(NAME tileanim_active COMMAND adocao_tileanim_active_test)
+
 add_executable(adocao_fast_tile_motion_test fast_tile_motion_test.cpp)
 target_link_libraries(adocao_fast_tile_motion_test PRIVATE adocao_core)
 add_test(NAME fast_tile_motion COMMAND adocao_fast_tile_motion_test)

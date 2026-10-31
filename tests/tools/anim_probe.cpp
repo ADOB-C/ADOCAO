@@ -188,5 +188,58 @@ int main(int argc, char** argv) {
     std::printf("② 成本（**墙钟，不可复现**，只当量级）：%d 采样点 × 3 砖 × (sample+moveTransformAt)"
                 " = %.3f ms/帧\n", samples, ms);
     (void)sink;
+
+    // ---- 可见性扫描成本（`LevelScene::updateTileVisibility` 的核心开销）----
+    {
+        const auto& es = anim.entries();
+        if (!es.empty()) {
+            std::vector<uint8_t> state(es.size(), 2);
+            const double t0 = tl.startTimeAt((int64_t)es.size() / 2);
+            // 冷：state 全"未知" → 每块砖都翻转（= 抓帧第一帧的真实情况）
+            long long flips = 0;
+            double a = msNow();
+            for (size_t k = 0; k < es.size(); ++k) {
+                const uint8_t h = anim.hiddenAt(es[k].tile, t0) ? 1 : 0;
+                if (state[k] == h) continue;
+                state[k] = h; ++flips;
+            }
+            double cold = msNow() - a;
+            // 稳态：时间前进一帧（1/60 s），只有跨过边界的砖才翻转
+            long long flips2 = 0;
+            a = msNow();
+            for (size_t k = 0; k < es.size(); ++k) {
+                const uint8_t h = anim.hiddenAt(es[k].tile, t0 + 1.0 / 60.0) ? 1 : 0;
+                if (state[k] == h) continue;
+                state[k] = h; ++flips2;
+            }
+            double steady = msNow() - a;
+            std::printf("\n可见性扫描：%zu 块动画砖\n", es.size());
+            std::printf("  冷启动第一帧：%.3f ms（翻转 %lld 块，每块都要动实例缓冲）\n", cold, flips);
+            std::printf("  稳态一帧：    %.3f ms（翻转 %lld 块）→ 每砖 %.1f ns\n", steady, flips2,
+                        steady * 1e6 / (double)es.size());
+
+            // 增量扫描（TileAnimation::updateVisibility）：只碰"时间窗内会翻状态"的砖
+            std::vector<uint8_t> inc;
+            double lastT = -1e300;
+            long long incFlips = 0;
+            double b0 = msNow();
+            for (int f = 0; f < 60; ++f)
+                anim.updateVisibility(t0 + (double)f / 60.0, inc, lastT,
+                                      [&](int64_t, bool) { ++incFlips; });
+            double incMs = (msNow() - b0) / 60.0;
+            std::printf("  增量扫描：    %.3f ms/帧（60 帧平均，翻转 %lld 块/60 帧）\n", incMs, incFlips);
+            {
+                std::vector<uint32_t> buf;
+                size_t tot = 0;
+                double q0 = msNow();
+                for (int f = 0; f < 60; ++f) {
+                    anim.queryActive(t0 + (double)f / 60.0, t0 + (double)(f + 1) / 60.0, buf);
+                    tot += buf.size();
+                }
+                std::printf("  只做区间查询：%.3f ms/帧，平均命中 %.0f 块\n",
+                            (msNow() - q0) / 60.0, (double)tot / 60.0);
+            }
+        }
+    }
     return 0;
 }

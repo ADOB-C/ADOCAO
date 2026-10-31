@@ -13,8 +13,13 @@
 namespace adofai {
 namespace {
 // 关键帧总量上限：超过就停止建帧并告警（超大谱保护；Re_ADOJAS 用 GLOBAL_ANIM_TILE_LIMIT）。
-constexpr size_t kMaxKeyframes = 4'000'000;
-constexpr size_t kMaxAnimatedTiles = 500'000;
+// **2026-10-31 用户："你的各种东西都太保守了"** —— 这两个数是自创的，参考实现只限制
+// "没有任何 AT 事件 + 超过 100000 砖的纯全局动画"。原来的 4M/500k 在 2.64e6 那张谱上
+// （997,664 砖）会**截掉后半张**：全局 Fade 只作用在前 50 万砖，后面的砖一直可见。
+// 现在按"每条关键帧 ~16 B"给预算：20M 条 ≈ 320 MB，够一张百万砖、每砖 20 帧的谱。
+// 真要 2^31 层的谱本来也不能逐砖建帧（那有 Re_ADOJAS 那条 100k 全局动画闸兜着）。
+constexpr size_t kMaxKeyframes = 20'000'000;
+constexpr size_t kMaxAnimatedTiles = 4'000'000;
 }  // namespace
 
 size_t TileAnimation::keyframeCount() const {

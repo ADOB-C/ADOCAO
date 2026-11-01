@@ -47,7 +47,14 @@ SWEEP = {
 
 # 每个常量要"打到底"需要的额外参数（不然它根本不绑定 —— 第一版就是这么白跑一轮的：
 # 默认抓帧参数下 9 个常量的输出**一张谱都没变**，因为它们没被触发）。
+# `{late}` = 该谱靠后的抓帧点（谱面砖数 - 1000）。第一轮固定 tile 100，全谱性的上限
+# （maxAnimTiles/maxKeyframes）在开头**根本看不到效果** —— 那一段根本没有动画砖。
+LATE = ["--capture-tile", "{late}"]
+
 STRESS = {
+    "maxAnimTiles":  LATE,
+    "maxKeyframes":  LATE,
+    "rangeGrace":    LATE,
     "maxPoints":     ["--trail-duration", "0.4", "--trail-sample-rate", "262144"],
     "rateMax":       ["--trail-sagitta", "0.5"],
     "rateMin":       ["--trail-sagitta", "0.5"],
@@ -60,6 +67,7 @@ STRESS = {
 
 SEG = re.compile(r"(cull|upload|draw|frame)=([0-9.]+)")
 DRAWN = re.compile(r"drawn=(\d+)")
+TILES = re.compile(r"TileMesh::build start: (\d+) tiles")
 RSS = re.compile(r"^ *(\d+) +maximum resident set size", re.M)
 
 
@@ -128,8 +136,13 @@ def main():
 
     # 基线只跑一次（每个常量都重跑基线是白烧 10× 的时间）
     base = {}
+    tiles = {}
     for chart, _sz in corpus:
         base[chart] = run_one(chart, "", None)
+        lg = open(os.path.join(ROOT, "build", "gate", "adocao.log"), encoding="utf-8",
+                  errors="replace").read()
+        m = TILES.search(lg)
+        tiles[chart] = int(m.group(1)) if m else 0
         print(f"  基线 {os.path.basename(chart)}: drawn={base[chart]['drawn']} "
               f"frame={base[chart]['frame']:.1f}ms png={base[chart]['png']}", flush=True)
 
@@ -140,6 +153,9 @@ def main():
             b = base[chart]
             for v in SWEEP[name]:
                 ex = STRESS.get(name)
+                if ex:
+                    late = max(1, tiles.get(chart, 0) - 1000)
+                    ex = [str(late) if a == "{late}" else a for a in ex]
                 r = run_one(chart, f"{name}={v}", ex)
                 # 基线也要用同一组额外参数，否则"变化"只是在比不同的抓帧参数
                 rb = run_one(chart, "", ex) if ex else b

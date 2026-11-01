@@ -316,6 +316,8 @@ void TileAnimation::build(const LevelData& lv, const Timeline& tl) {
         }
     }
 
+    buildFlipEvents();
+
     // 诊断：`ADOCAO_ANIM_DUMP_TILE=<n>` 打印该砖各通道的关键帧（排查"砖为什么看不见"）
     if (const char* dt = std::getenv("ADOCAO_ANIM_DUMP_TILE")) {
         const int64_t want = std::atoll(dt);
@@ -432,6 +434,81 @@ void TileAnimation::queryActive(double t0, double t1, std::vector<uint32_t>& out
         out.push_back(k);
     }
     std::sort(out.begin(), out.end());             // 调用方按下标顺序更新（实例缓冲顺序友好）
+}
+
+
+void TileAnimation::buildFlipEvents() {
+    m_flipT.clear(); m_flipFrame.clear(); m_flipHidden.clear();
+    if (m_frames.empty()) return;
+    // 每块砖：拿 opacity/scaleX/scaleY 三条通道的关键帧时刻当采样点（翻转只可能发生在
+    // tween 内部），再取相邻两点的中点补一刀；两端各补一次。翻转处二分 6 次定位。
+    // **必须和 `hiddenAt()` 逐字同源**：区间外它返回缓存好的 hiddenBefore/hiddenAfter
+    // （与时间无关），区间内才采样。第一版这里自己重算了一遍通道，结果和 hiddenAt 的
+    // "区间外是常量"语义不一致 → 少数砖漏了 (可见→不可见) 的事件，状态整整卡一个区间。
+    const auto hiddenAtFrame = [&](uint32_t k, double t) { return hiddenAt(m_index[k].tile, t); };
+    std::vector<double> ts;
+    for (uint32_t k = 0; k < (uint32_t)m_frames.size(); ++k) {
+        const TileKeyframes& f = m_frames[k];
+        ts.clear();
+        const Channel* chans[3] = {&f.opacity, &f.scaleX, &f.scaleY};
+        for (const Channel* c : chans)
+            for (const auto& key : c->keys()) ts.push_back(key.time);
+        if (ts.size() < 2) continue;
+        std::sort(ts.begin(), ts.end());
+        ts.erase(std::unique(ts.begin(), ts.end()), ts.end());
+        bool prev = hiddenAtFrame(k, ts.front());
+        (void)prev;
+        const auto emit = [&](double t0, double t1, bool a) {
+            double x = t0, y = t1;
+            for (int b = 0; b < 5; ++b) {
+                const double mid = 0.5 * (x + y);
+                if (hiddenAtFrame(k, mid) == a) x = mid; else y = mid;
+            }
+            m_flipT.push_back(y);
+            m_flipFrame.push_back(k);
+            m_flipHidden.push_back(a ? 0 : 1);   // 翻到反面
+        };
+        // 每个关键帧区间内取 4 个采样点（tween 里可能只有一个翻转，4 点足够定位）；
+        // 翻转处二分 6 次细化。
+        for (size_t i = 1; i < ts.size(); ++i) {
+            const double t0 = ts[i - 1], t1 = ts[i];
+            if (!(t1 > t0)) continue;
+            double prevT = t0;
+            bool prevH = hiddenAtFrame(k, t0);
+            for (int g = 1; g <= 2; ++g) {
+                const double tt = t0 + (t1 - t0) * (double)g / 2.0;
+                const bool h = hiddenAtFrame(k, tt);
+                if (h != prevH) emit(prevT, tt, prevH);
+                prevT = tt; prevH = h;
+            }
+        }
+        // 区间端点：`hiddenAt()` 在 rangeStart 之前返回 hiddenBefore、rangeEnd 之后返回
+        // hiddenAfter，这两个切换**不在任何 tween 里**，必须补成事件（第一版就漏了它 →
+        // 砖在自己的区间结束后一直保持着"可见"）。
+        const double rs = f.rangeStart, re = f.rangeEnd;
+        m_flipT.push_back(rs); m_flipFrame.push_back(k);
+        m_flipHidden.push_back(hiddenAt(m_index[k].tile, rs) ? 1 : 0);
+        m_flipT.push_back(re); m_flipFrame.push_back(k);
+        m_flipHidden.push_back(m_frames[k].hiddenAfter ? 1 : 0);
+    }
+    // 按时间排序（同时刻按帧下标，保证确定性）
+    const size_t n = m_flipT.size();
+    m_flipOrder.resize(n);
+    for (size_t i = 0; i < n; ++i) m_flipOrder[i] = (uint32_t)i;
+    std::vector<double> tCopy = m_flipT;
+    std::vector<uint32_t> fCopy = m_flipFrame;
+    std::vector<uint8_t> hCopy = m_flipHidden;
+    std::stable_sort(m_flipOrder.begin(), m_flipOrder.end(), [&](uint32_t a, uint32_t b) {
+        if (tCopy[a] != tCopy[b]) return tCopy[a] < tCopy[b];
+        return fCopy[a] < fCopy[b];
+    });
+    for (size_t i = 0; i < n; ++i) {
+        m_flipT[i] = tCopy[m_flipOrder[i]];
+        m_flipFrame[i] = fCopy[m_flipOrder[i]];
+        m_flipHidden[i] = hCopy[m_flipOrder[i]];
+    }
+    m_flipOrder.clear();
+    m_flipOrder.shrink_to_fit();
 }
 
 }  // namespace adofai

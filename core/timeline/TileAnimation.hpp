@@ -48,6 +48,16 @@ public:
     // 该砖的活跃区间（没有动画帧时返回 false）。事件式可见性要用它定采样范围。
     bool rangeOf(int64_t tile, double& start, double& end) const;
 
+    // **翻转事件**（建帧时算好）：每块砖"从可见翻成不可见 / 翻回来"的时刻，按时间升序。
+    // 逐帧只处理落进 (lastT, t] 的事件 —— 实测 2.64e6 那张谱：每砖恰好 2.00 个事件、
+    // 共 199 万个，60 fps 摊下来每帧 212 个（对比"扫活跃砖"每帧 25 万次判定）。
+    // 代价在建帧：约 0.7~1.0 s（一次性）、13 B/事件。
+    size_t flipEventCount() const { return m_flipT.size(); }
+    const std::vector<double>&   flipTimes()  const { return m_flipT; }
+    const std::vector<uint32_t>& flipFrames() const { return m_flipFrame; }
+    const std::vector<uint8_t>&  flipStates() const { return m_flipHidden; }
+    bool    flipEventsReady() const { return !m_flipT.empty(); }
+
     // 采样：tile 不在索引里 → 返回 false（调用方走"无动画"快路径）。
     bool sample(int64_t tile, double t, TileAnimSample& out) const;
 
@@ -75,12 +85,24 @@ public:
             state[k] = hidden;
             onFlip(m_index[k].tile, hidden != 0);
         };
-        // 全扫的三种情况：第一次、时间跳变 > 1 s（seek/停止）、**跨过 t=0**
-        // （`hiddenAt()` 对 t<0 一律返回"可见"——倒计时回落 base，所以 0 这一刻所有砖同时翻状态，
-        //   这不是"区间内"的事件，窗口查询看不到它）。
+        // 什么时候必须全扫：第一次、时间跳变 > 1 s、**时间倒退**（倒放/seek）、跨过 t=0
+        // （t<0 一律可见，那一刻所有砖同时翻状态，不属于任何区间事件）。
         const bool crossedZero = (lastT < 0.0) != (t < 0.0);
-        if (lastT < -1e299 || crossedZero || !(std::fabs(t - lastT) <= 1.0)) {
+        const bool full = lastT < -1e299 || crossedZero || t < lastT || !(std::fabs(t - lastT) <= 1.0);
+        if (full) {
             for (uint32_t k = 0; k < (uint32_t)m_index.size(); ++k) apply(k);
+            if (!m_flipT.empty())
+                m_flipCursor = (size_t)(std::lower_bound(m_flipT.begin(), m_flipT.end(), t) - m_flipT.begin());
+        } else if (!m_flipT.empty()) {
+            // **事件式**：只处理 (lastT, t] 里的事件，事件自带"新状态"，不用再采样。
+            while (m_flipCursor < m_flipT.size() && m_flipT[m_flipCursor] <= t) {
+                const uint32_t k = m_flipFrame[m_flipCursor];
+                const uint8_t h = m_flipHidden[m_flipCursor];
+                ++m_flipCursor;
+                if (state[k] == h) continue;
+                state[k] = h;
+                onFlip(m_index[k].tile, h != 0);
+            }
         } else {
             queryActive(std::min(lastT, t), std::max(lastT, t), m_scratch);
             for (uint32_t k : m_scratch) apply(k);
@@ -94,6 +116,13 @@ private:
     // 区间索引（build 末尾建）：按 rangeStart 升序的帧下标 + 其 rangeEnd 的前缀最大值。
     std::vector<uint32_t> m_rangeOrder;
     std::vector<double> m_rangePrefixMaxEnd;
+    // 翻转事件（并行数组，按时间升序）：13 B/事件
+    std::vector<double>   m_flipT;
+    std::vector<uint32_t> m_flipFrame;
+    std::vector<uint8_t>  m_flipHidden;
+    std::vector<uint32_t> m_flipOrder;   // 排序用的临时下标（build 后释放）
+    mutable size_t m_flipCursor = 0;     // 逐帧推进用（渲染线程单线程）
+    void buildFlipEvents();
     mutable std::vector<uint32_t> m_scratch;   // queryActive 的复用缓冲（渲染线程单线程用）
     bool m_truncated = false;
 

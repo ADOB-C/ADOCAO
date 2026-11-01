@@ -239,42 +239,6 @@ int main(int argc, char** argv) {
                 std::printf("  只做区间查询：%.3f ms/帧，平均命中 %.0f 块\n",
                             (msNow() - q0) / 60.0, (double)tot / 60.0);
             }
-            // ---- 事件式可见性的**原型成本**（只量，不接产品）----
-            {
-                double a0 = msNow();
-                size_t events = 0, scanned = 0;
-                const int grid = 8;          // 每个区间内的采样网格
-                const int bisect = 10;       // 翻转点的二分次数
-                for (const auto& e : es) {
-                    double lo = 0, hi = 0;
-                    if (!anim.rangeOf(e.tile, lo, hi)) continue;
-                    bool prev = anim.hiddenAt(e.tile, lo);
-                    double step = (hi - lo) / grid;
-                    if (!(step > 0)) continue;
-                    for (int g = 1; g <= grid; ++g) {
-                        const double tt = lo + step * g;
-                        const bool cur = anim.hiddenAt(e.tile, tt);
-                        ++scanned;
-                        if (cur == prev) continue;
-                        // 二分细化翻转时刻
-                        double x = tt - step, y = tt;
-                        for (int k = 0; k < bisect; ++k) {
-                            const double mid = 0.5 * (x + y);
-                            if (anim.hiddenAt(e.tile, mid) == prev) x = mid; else y = mid;
-                        }
-                        ++events;
-                        prev = cur;
-                    }
-                }
-                const double buildMs = msNow() - a0;
-                std::printf("\n事件式原型：%zu 次判定 / %zu 个翻转事件 / 建表 %.1f ms（%zu B ≈ %.1f MB）\n",
-                            scanned, events, buildMs, events * 12, (double)events * 12 / 1048576.0);
-                if (events) {
-                    std::printf("  平均每砖 %.2f 个事件；按 60 fps 摊，每帧约 %.0f 个事件\n",
-                                (double)events / (double)es.size(),
-                                (double)events / 157.0 / 60.0);
-                }
-            }
             {
                 // 区间宽度分布：决定"事件式"要不要做，以及候选集为何是十几万
                 std::vector<double> w;

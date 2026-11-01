@@ -62,6 +62,24 @@ int main() {
     check(lv.planetCountAt(2) == 3 && lv.planetCountAt(5) == 3, "floor 2..5 三球");
     check(lv.planetCountAt(6) == 2, "floor 6 回到两球");
 
+    // ①b 增星请求必须**精确命中**（2026-11-01 之前 off-by-half：2/3/3/4/4/5/5）
+    {
+        const char* evs2 =
+            R"({"floor":2,"eventType":"MultiPlanet","planets":"FourPlanets"},)"
+            R"({"floor":4,"eventType":"MultiPlanet","planets":"SixPlanets"},)"
+            R"({"floor":6,"eventType":"MultiPlanet","planets":"ThreePlanets"},)"
+            R"({"floor":8,"eventType":"MultiPlanet","planets":"TwoPlanets"})";
+        const std::string p2 =
+            (std::filesystem::temp_directory_path() / "adocao_multiplanet_count.adofai").string();
+        writeChart(p2.c_str(), evs2);
+        LevelData lv2; Timeline tl2; load(p2.c_str(), lv2, tl2);
+        check(lv2.planetCountAt(2) == 4, "请求 4 颗 → 恰好 4 颗（增星界限不随循环缩）");
+        check(lv2.planetCountAt(4) == 6, "请求 6 颗 → 恰好 6 颗");
+        check(lv2.planetCountAt(6) == 3, "请求 3 颗 → 恰好 3 颗");
+        check(lv2.planetCountAt(8) == 2, "请求 2 颗 → 恰好 2 颗");
+        check(lv2.planetCountAt(7) == 3, "中间层继承（floor 7 仍是 3 颗）");
+    }
+
     // ② 枢轴推进：常规 next
     {
         int n = 0, p0 = 0, p1 = 0;

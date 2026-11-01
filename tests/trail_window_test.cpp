@@ -82,6 +82,20 @@ int main() {
         near("④ governor 打开时才会夹到 rateMax", (double)w2.sampleRate, 4000.0, 50.0);
     }
 
+    {
+        // ⑤ sagitta 的 R 必须**和行星真正绕的半径同源**（ScaleRadius），不是恒 1。
+        //    以前用 `Timeline::tileStartDist/tileEndDist`（对所有非末层恒 1.0f）→ `scale:200`
+        //    的谱 R 差 2 倍 → sMax 偏大 → 采样率欠采样。
+        const char* json2 = R"({"angleData":[0,90,0,90,0,90,0,90,0,90,0,90],
+            "settings":{"bpm":120},
+            "actions":[{"floor":1,"eventType":"ScaleRadius","scale":200}]})";
+        LevelData lv2; Timeline tl2;
+        if (!lv2.loadFromBuffer(json2, std::strlen(json2))) { std::printf("FAIL load2\n"); return 1; }
+        tl2.build(lv2, false);
+        const double t2 = tl2.startTimeAt(3) + tl2.durationAt(3) * 0.5;
+        near("⑤ curvatureRadius = ScaleRadius 给的 2.0", PositionSolver::curvatureRadius(tl2, t2), 2.0, 0.05);
+    }
+
     if (g_fail) { std::printf("trail_window: %d 条失败\n", g_fail); return 1; }
     std::printf("trail_window: 全部通过\n");
     return 0;

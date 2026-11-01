@@ -199,7 +199,9 @@ tiles at BPM 1.5M) and the sample-count cap `maxPoints` is the only backstop.
 
 ```
 rate = max(base, tilePathSpeed(t) / sqrt(8·R·PX/pxPerTile))
-R = max(tileStartDist, tileEndDist)（砖，行星轨道半径）
+R = 行星实际绕行的半径（砖）= `orbitRadiusAt()`，来源是 **ScaleRadius** 的
+`r(i) → r(i+1)` 段内插值（2026-11-01 修：以前用 `Timeline::tileStartDist/tileEndDist`，
+那两个数对所有非末层恒 1.0f，不是几何距离 —— `scale: 200` 的谱上 R 差 2 倍）
 pxPerTile = 视口高 / 视野高（=12 砖 × 100/zoom）
 ```
 

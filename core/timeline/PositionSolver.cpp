@@ -291,8 +291,16 @@ double PositionSolver::tilePathSpeed(const Timeline& timeline, double t) {
 double PositionSolver::curvatureRadius(const Timeline& timeline, double t) {
     const int64_t n = timeline.tileCount();
     if (n <= 0) return 0.0;
-    const int idx = timeline.findTileIndex(t);
-    return std::max((double)timeline.tileStartDist(idx), (double)timeline.tileEndDist(idx));
+    const int idx = (int)timeline.findTileIndex(t);
+    // **R 必须和行星真正绕的半径同源**：`Timeline::tileStartDist/tileEndDist` 对所有非末层
+    // 恒返回 1.0f（不是几何距离），所以以前这里永远当 R=1 —— 而半径早就是 ScaleRadius 给的
+    // （`orbitRadiusAt`）。`scale: 200` 的谱上 R 会小 2 倍 → sMax 偏大 → 采样率欠。
+    const LevelData& L = *timeline.level();
+    const double start = timeline.startTimeAt(idx);
+    const double dur = timeline.durationAt(idx);
+    double progress = (dur > 0.0) ? (t - start) / dur : 1.0;
+    progress = std::clamp(progress, 0.0, 1.0);
+    return orbitRadiusAt(L, idx, progress);
 }
 
 PositionSolver::TrailWindow PositionSolver::trailWindow(const Timeline& timeline, double t,

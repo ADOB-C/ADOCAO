@@ -227,12 +227,15 @@
       逐砖表 + 枢轴模拟、正 N 边形布局、8 色行星池与解析式拖尾、`Vehicle±` 打拍音。
       验收与细节见 `docs/level-loading.md`「MultiPlanet」与 `tests/multiplanet_test.cpp`。
       仍缺：MP 虚线多边形指示器（纯装饰，未做）
-- [ ] **MultiPlanet 加星循环少加一半（≥4 星直接少一颗）**（2026-10-29 探针发现，
+- [x] **MultiPlanet 加星循环少加一半（≥4 星直接少一颗）**（2026-10-29 探针发现；**2026-11-01 已修**，
       **修法明确**：`applyCount` 的 `++numPlanets` 写在了增星循环体内，而循环条件是
       `k <= req - numPlanets` —— 每插一颗就把剩余额度吃掉一颗。参考实现是在 if/else **之后**
       才 `numPlanets = planetIds.length`。实测本机：请求 2/3/4/5/6/7/8 星 → 实得
       **2/3/3/4/4/5/5**（3 星恰好正确，所以 `tests/multiplanet_test.cpp` 没抓到 —— 它只用了
       `ThreePlanets`）。修法：循环体里去掉 `++numPlanets`，循环后 `numPlanets = 实际长度`。
+      **落地**：界限在循环外用 `add`、循环内用局部 `cur`、循环后 `numPlanets = cur`；
+      `multiplanet_test` 补了"请求 4/6/3/2 必须精确命中"（负向对照：两处都改回原写法 →
+      请求 4 得到 3，两条 FAIL）。
 - [ ] **MultiPlanet ≥3 星：每个砖边界有两颗星跳 1 砖**（2026-10-29 探针诊断完成，
       **结论：不是我们抄错，参考实现同样会跳**，所以修 = 主动偏离权威，需用户裁决）。
       3 星谱实测（`angleData` 12 砖 / 120 BPM / floor 0 `ThreePlanets`）：t=1.0⁻ →

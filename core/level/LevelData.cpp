@@ -3414,16 +3414,24 @@ void LevelData::buildPlanetTables(const std::vector<std::pair<int64_t, int>>& ev
         const uint8_t moverId = planetIds[chosenPos];
         const uint8_t refId = planetIds[prevPivotPos];
         if (req > numPlanets) {
-            for (int k = 1; k <= req - numPlanets; ++k) {
+            // **界限必须在循环外算**（= 参考实现 `for (k=1; k<=req-numPlanets; k++)`）：
+            // 参考里 `numPlanets` 在循环内**不变**（循环后才赋成 planetIds.length），
+            // 我们原来在循环里 `++numPlanets`，于是 `req - numPlanets` 每圈都在缩 ——
+            // 请求 N 颗实际只得到 ceil((N-2)/2)+2 颗（实测 2/3/3/4/4/5/5）。
+            const int add = req - numPlanets;
+            int cur = numPlanets;
+            for (int k = 1; k <= add; ++k) {
                 if (poolLen <= 0) break;
                 const uint8_t id = pool[0];
                 for (int i = 1; i < poolLen; ++i) pool[i - 1] = pool[i];
                 --poolLen;
-                const int at = prevPivotPos + k - 1;   // 插到参照星之前
-                for (int i = numPlanets; i > at; --i) planetIds[i] = planetIds[i - 1];
+                int at = prevPivotPos + k - 1;         // 插到参照星之前
+                if (at > cur) at = cur;
+                for (int i = cur; i > at; --i) planetIds[i] = planetIds[i - 1];
                 planetIds[at] = id;
-                ++numPlanets;
+                ++cur;
             }
+            numPlanets = cur;
         } else {
             const int remove = numPlanets - req;
             int positions[8] = {0};

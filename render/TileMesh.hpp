@@ -121,7 +121,14 @@ public:
     // `min(kMaxShapeRows, GL_MAX_TEXTURE_SIZE)`。4096 行 = 67 MB（真实谱面只有 215~9349 个形状，
     // 129,600 砖的 shapes_exhaustive 也在里面）；超过就按 `shapekey::kStepsLadder`
     // **放粗量化精度**，绝不硬传一张装不下的纹理 —— 那种失败是**静默黑屏**（Issue #2）。
-    static constexpr int kMaxShapeRows = 4096;
+    // 2026-11-01 实测（把这条上限也按"预算是多少"标了一遍）：
+    //   纹理**按实际需要分配**（`buildStaticGL: shapeTex 1024x265` 对应 9,349 个形状），
+    //   所以把上限抬高对普通谱面**零成本**。真正会撞上限的是 1° 底档：
+    //   理论上限 360×360×2 = 259,200 个形状 = 7,406 行；本地最狠的
+    //   `shapes_exhaustive.adofai` 是 129,600 个 = 3,703 行（占旧上限 4096 的 90%），
+    //   随机角度那张 130,321 个 = 3,691 行。留 10% 余量等于给一张"再随机一点"的谱挖坑，
+    //   所以抬到 8192（= 8,192×1,024×16 B = 134 MB，**只在真需要时才分配**）。
+    static constexpr int kMaxShapeRows = 8192;
     int shapeTableRows() const;             // min(kMaxShapeRows, GL_MAX_TEXTURE_SIZE)，下限 64
     size_t shapeTableCapacity() const;      // 上述行数能装多少个形状（GPU/CPU 路 texel 数不同）
     // 本次 build 实际用的量化档位（诊断用）：每度多少格。100 = 0.01°（基准档，与 7.2.0 逐位相同），

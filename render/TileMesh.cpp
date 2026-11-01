@@ -910,11 +910,16 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
     } else {
         // 只平移：与改造前同一条表达式（off = 世界坐标 - 相机），逐位相同
         const float dx = (float)(m_prevCamX - camX), dy = (float)(m_prevCamY - camY);
-        for (size_t k = 0; k < m_listTiles.size(); k++) {
-            m_listAttr[k * 5 + 0] += dx;
-            m_listAttr[k * 5 + 1] += dy;
+        if (dx != 0.0f || dy != 0.0f) {
+            for (size_t k = 0; k < m_listTiles.size(); k++) {
+                m_listAttr[k * 5 + 0] += dx;
+                m_listAttr[k * 5 + 1] += dy;
+            }
+            m_listUploaded = false;
         }
-        m_listUploaded = false;
+        // dx == dy == 0（静止帧/抓帧复渲染）→ **不要**作废实例缓冲：
+        // 以前无条件 `m_listUploaded = false`，于是每一帧都把整份实例重传一遍
+        // （2.55M × 76 B = 194 MB/帧，实测 13.6 ms），哪怕画面一像素都没动。
     }
     m_prevCamX = camX; m_prevCamY = camY;
 }

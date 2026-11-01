@@ -3,6 +3,8 @@
 #include <glm/glm.hpp>
 #include <vector>
 
+#include "core/util/Tuning.hpp"
+
 
 namespace adofai {
 
@@ -29,15 +31,15 @@ public:
         bool  speedAware     = false;  // raise the rate with track covered/second
         float samplesPerTile = 4.0f;
         float fixedRate      = 800.0f; // baseline rate (governor-adjusted)
-        float rateMin        = 60.0f;
-        float rateMax        = 4000.0f;
+        float rateMin        = adofai::tune::num("rateMin", 60.0);
+        float rateMax        = adofai::tune::num("rateMax", 4000.0);
         // **点数硬上限**（环容量），不是"采样率上限"。它曾经是 8192 —— 于是用户把采样率
         // 调到 2^18 也只会得到 `maxPoints / span = 8192/0.4 = 20480/s`（日志里那条
         // `trail: rate × span 超过 maxPoints=8192` 就是它）。2.64e6 BPM 那段一秒走 17.6 万砖，
         // 0.4 s 的窗口 = 7 万砖，8192 点等于**每 8.6 砖一个点** → 折线直接塌成直线。
         // 现在留 2^18 = 262144 点的硬上限（≈6 MB 顶点 + 6 MB 索引/球），
         // 超过才截断并告警（此时该缩短窗口，而不是继续加采样率）。
-        float maxPoints      = 262144.0f;
+        float maxPoints      = adofai::tune::num("maxPoints", 262144.0);
         // true = 这个 rate 是**自适应governor**给出的（受 rateMin/rateMax 夹）；
         // false = 用户显式选的固定率（Launcher/CLI），只受 maxPoints 约束 ——
         // 否则"把采样率调到 64000"会被 rateMax 静默夹回 4000，设置等于没生效。

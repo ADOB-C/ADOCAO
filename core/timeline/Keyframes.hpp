@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "core/util/Easing.hpp"
+#include "core/util/Tuning.hpp"
 
 namespace adofai {
 
@@ -62,6 +63,7 @@ struct TileKeyframes {
     bool hiddenAfter  = false;
 
     static constexpr double kRangeGrace = 0.1;   // Re_ADOJAS: RANGE_GRACE
+    static double rangeGrace() { static const double v = adofai::tune::num("rangeGrace", kRangeGrace); return v; }
     bool activeAt(double t) const { return t >= rangeStart && t < rangeEnd; }
     // 超过任何关键帧之后的状态就是"最后一帧的值"；没有关键帧时返回 fallback。
     float value(const Channel& c, double t, float fallback) const {

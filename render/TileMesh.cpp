@@ -443,7 +443,7 @@ void TileMesh::buildSlotTable() {
 // 形状表能有多少行：驱动上限与显存预算取小（见 hpp 的 kMaxShapeRows）。
 // 调用方必须已经**有 GL 上下文**（build() 里就是这么调的）。
 int TileMesh::shapeTableRows() const {
-    int rows = kMaxShapeRows;
+    int rows = maxShapeRowsT();
     GLint glMax = 0;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &glMax);
     if (glMax > 0 && (int)glMax < rows) rows = (int)glMax;
@@ -613,7 +613,7 @@ void TileMesh::limitWarn(const char* what, size_t n) const {
     if (now - m_limitWarnAt < 1.0) return;
     m_limitWarnAt = now;
     LOG_W("cull-limit: %s = %zu 超过预算（候选 %zu / 实例 %zu）→ 降级为最近块 / 截断实例（⑦ 容量边界）",
-          what, n, kMaxCullCandidates, kMaxInstances);
+          what, n, maxCullCandidatesT(), maxInstancesT());
 }
 
 void TileMesh::cullRange(size_t begin, size_t end, double vl, double vr, double vb, double vt,
@@ -750,7 +750,7 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
             });
             // ⑦ 闸①：候选太多**降级**为"只画离相机最近的块"（累计候选 ≤ 预算）。
             // 不能直接不画 —— 那会整帧黑屏（只剩行星/拖尾），实测被用户一眼看出来 ✗。
-            if (!limitOffCache() && candidates > kMaxCullCandidates * m_lodStride) {
+            if (!limitOffCache() && candidates > maxCullCandidatesT() * m_lodStride) {
                 limitWarn("cull-candidates", candidates);
                 const size_t before = candidates;
                 // 按层号顺序边剔边收，**可见数够 kMaxInstances 就停** —— 工作量由输出封顶。
@@ -760,20 +760,20 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
                 // **细块粒度**上按离相机的距离挑（不是按层号顺序！按顺序收满就永远画谱开头那一段，
                 // 相机在几百万层处 → 屏幕空白，用户实测截图就是那样 ✗）。
                 ranges.clear();
-                m_cullIndex.collectHitSubNearest(vl, vr, vb, vt, camX, camY, kMaxCullCandidates, ranges);
+                m_cullIndex.collectHitSubNearest(vl, vr, vb, vt, camX, camY, maxCullCandidatesT(), ranges);
                 // 选出来的集合不变，只把**处理顺序**改成砖号升序：窗口是 1 槽线程私有缓存，
                 // 按距离的顺序会在块之间跳 → 每跳一次重推一个窗口（局部性差）
                 std::sort(ranges.begin(), ranges.end());
                 for (const auto& r : ranges) {
-                    if (m_listTiles.size() >= kMaxInstances) break;
+                    if (m_listTiles.size() >= maxInstancesT()) break;
                     cullRange(r.first, r.second, vl, vr, vb, vt, camX, camY, m_listTiles, m_listAttr, m_lodStride);
                 }
-                if (m_listTiles.size() > kMaxInstances) {
-                    m_listTiles.resize(kMaxInstances);
-                    m_listAttr.resize(kMaxInstances * 5);
+                if (m_listTiles.size() > maxInstancesT()) {
+                    m_listTiles.resize(maxInstancesT());
+                    m_listAttr.resize(maxInstancesT() * 5);
                 }
                 LOG_W("cull-limit: 降级为就近细块 —— 候选 %zu → %zu 块 / 可见 %zu（预算 %zu）",
-                      before, ranges.size(), m_listTiles.size(), kMaxInstances);
+                      before, ranges.size(), m_listTiles.size(), maxInstancesT());
                 ranges.clear();          // 让下面的并行段变成空操作（列表已经填好了）
             }
 
@@ -793,8 +793,9 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
             // 以前这个阈值被迫定得很高（26.2 万）：并行段不能碰共享窗口缓存，只能主线程先 pin，
             // 候选一多 pin 本身就要 100 ms+ ✗。现在窗口是**线程私有**（纯函数派生）→ 阈值可以放开，
             // 让"候选多"的帧真正吃到多核。
-            constexpr size_t kCullSerialMax = 1u << 14;   // 16,384 块砖
-            if (jobs.size() > 1 && candidates > kCullSerialMax) {
+            static const size_t cullSerialMaxT =
+                (size_t)adofai::tune::num("cullSerialMax", (double)(1u << 14));   // 默认 16,384 块砖
+            if (jobs.size() > 1 && candidates > cullSerialMaxT) {
                 std::vector<std::vector<uint32_t>> tiles(jobs.size());
                 std::vector<std::vector<float>> attr(jobs.size());
                 auto jobBody = [&](size_t a, size_t b) {
@@ -873,12 +874,12 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
         // 两段式 LOD：第一遍按当前步长剔完，若**真实可见数**超预算 → 用
         // `ceil(可见/预算)` 重剔一遍（确定性、无历史依赖；第二遍只测 可见/步长 ≈ 预算 块砖，
         // 所以很便宜）。这比"截断列表"好：截断丢掉的是整片区域，抽稀是均匀采样 ✓。
-        if (m_listTiles.size() > kMaxInstances && !limitOffCache()) {
+        if (m_listTiles.size() > maxInstancesT() && !limitOffCache()) {
             const size_t visible1 = m_listTiles.size();
-            const size_t need = (visible1 + kMaxInstances - 1) / kMaxInstances;
+            const size_t need = (visible1 + maxInstancesT() - 1) / maxInstancesT();
             if (need > m_lodStride) {
                 LOG_I("lod: 可见 %zu > 预算 %zu → 重剔一遍，步长 %zu → %zu", visible1,
-                      (size_t)kMaxInstances, m_lodStride, need);
+                      (size_t)maxInstancesT(), m_lodStride, need);
                 m_lodStride = need;
                 m_listTiles.clear();
                 m_listAttr.clear();
@@ -894,11 +895,11 @@ void TileMesh::ensureDrawList(double viewL, double viewR, double viewB, double v
             }
         }
         // 记录收敛步长：这一帧"要不要抽"就是下一帧的种子（收紧视距时自动回落到 1 ✓）
-        if (!m_detCull) m_lodSeed = (m_listTiles.size() > kMaxInstances) ? m_lodStride : 1;
-        if (m_listTiles.size() > kMaxInstances && !limitOffCache()) {
+        if (!m_detCull) m_lodSeed = (m_listTiles.size() > maxInstancesT()) ? m_lodStride : 1;
+        if (m_listTiles.size() > maxInstancesT() && !limitOffCache()) {
             limitWarn("visible-instances", m_listTiles.size());
-            m_listTiles.resize(kMaxInstances);
-            m_listAttr.resize(kMaxInstances * 5);
+            m_listTiles.resize(maxInstancesT());
+            m_listAttr.resize(maxInstancesT() * 5);
         }
         // 逐实例砖色：只对**可见列表**算（每帧几百砖）。颜色与相机无关，只在重建列表时算；
         // 平移分支不动颜色。fn=nullptr → 全 0，shader 走 uniform（高亮/旧行为）。

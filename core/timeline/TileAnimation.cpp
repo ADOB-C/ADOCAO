@@ -10,6 +10,7 @@
 #include "core/timeline/Timeline.hpp"
 #include "core/util/Logger.hpp"
 #include "core/util/Scheduler.hpp"
+#include "core/util/Tuning.hpp"
 
 namespace adofai {
 namespace {
@@ -20,8 +21,18 @@ namespace {
 // 现在按"每条关键帧 ~16 B"给预算：20M 条 ≈ 320 MB，够一张百万砖、每砖 20 帧的谱。
 // 真要 2^31 层的谱本来也不能逐砖建帧（那有 Re_ADOJAS 那条 100k 全局动画闸兜着）。
 constexpr size_t kMaxKeyframes = 20'000'000;
-constexpr size_t kMaxAnimatedTiles = 4'000'000;
+constexpr size_t kMaxAnimatedTilesC = 4'000'000;
+
 }  // namespace
+
+static size_t maxAnimatedTilesT() {
+    static const size_t v = (size_t)adofai::tune::num("maxAnimTiles", (double)kMaxAnimatedTilesC);
+    return v;
+}
+static size_t maxKeyframesT() {
+    static const size_t v = (size_t)adofai::tune::num("maxKeyframes", (double)kMaxKeyframes);
+    return v;
+}
 
 size_t TileAnimation::keyframeCount() const {
     size_t n = 0;
@@ -42,10 +53,10 @@ TileKeyframes& TileAnimation::ensureFrame(int64_t tile, double rangeStart, doubl
     auto it = std::lower_bound(m_index.begin(), m_index.end(), tile,
                                [](const Entry& e, int64_t v) { return e.tile < v; });
     if (it != m_index.end() && it->tile == tile) return m_frames[it->idx];
-    if (m_frames.size() >= kMaxAnimatedTiles) {
+    if (m_frames.size() >= maxAnimatedTilesT()) {
         m_truncated = true;
         static bool warned = false;
-        if (!warned) { LOG_W("TileAnimation: 动画砖数超过上限 %zu，后续砖不建帧", kMaxAnimatedTiles); warned = true; }
+        if (!warned) { LOG_W("TileAnimation: 动画砖数超过上限 %zu，后续砖不建帧", maxAnimatedTilesT()); warned = true; }
         // 返回一个丢弃用的槽（保持引用语义）：把它挂到 tile=-1
         static TileKeyframes dummy;
         dummy = TileKeyframes{};
@@ -98,9 +109,9 @@ void TileAnimation::build(const LevelData& lv, const Timeline& tl) {
         for (const Item& it : items) {
             const auto& e = moves[it.ev];
             const double t0 = e.trigger + animShift;
-            TileKeyframes& fr = ensureFrame(it.tile, t0, t0 + e.durSec + TileKeyframes::kRangeGrace);
+            TileKeyframes& fr = ensureFrame(it.tile, t0, t0 + e.durSec + TileKeyframes::rangeGrace());
             fr.rangeStart = std::min(fr.rangeStart, t0);
-            fr.rangeEnd = std::max(fr.rangeEnd, t0 + e.durSec + TileKeyframes::kRangeGrace);
+            fr.rangeEnd = std::max(fr.rangeEnd, t0 + e.durSec + TileKeyframes::rangeGrace());
             // **旋转 = 在砖自身朝向上叠加**：我们的几何已经把砖朝向烘进顶点，而 Re_ADOJAS 的
             // `rotationOffset` 也是"相对其网格"的旋转 —— 两边都不再额外减基准角。
             // （2026-10-21 用 tile 14 的真实帧定案：减基准会让竖直暗列变成横条。）
@@ -151,9 +162,9 @@ void TileAnimation::build(const LevelData& lv, const Timeline& tl) {
             if (dt && i < dS.size()) {
                 rStart = std::min(rStart, dS[i] + animShift); rEnd = std::max(rEnd, dE[i] + animShift);
             }
-            TileKeyframes& fr = ensureFrame(tile, rStart, rEnd + TileKeyframes::kRangeGrace);
+            TileKeyframes& fr = ensureFrame(tile, rStart, rEnd + TileKeyframes::rangeGrace());
             fr.rangeStart = std::min(fr.rangeStart, rStart);
-            fr.rangeEnd = std::max(fr.rangeEnd, rEnd + TileKeyframes::kRangeGrace);
+            fr.rangeEnd = std::max(fr.rangeEnd, rEnd + TileKeyframes::rangeGrace());
             if (at) appearPins.emplace_back((size_t)(&fr - m_frames.data()), at, tile);
             // appear：从"起始状态"渐变到 base（位移 0 / 旋转 0 / 缩放 1 / 透明度 1）
             if (at) {
@@ -354,9 +365,9 @@ void TileAnimation::build(const LevelData& lv, const Timeline& tl) {
             LOG_I("anim-dump tile=%lld 没有动画帧", (long long)want);
         }
     }
-    if (keyframeCount() > kMaxKeyframes) {
+    if (keyframeCount() > maxKeyframesT()) {
         m_truncated = true;
-        LOG_W("TileAnimation: 关键帧总数 %zu 超过上限 %zu", keyframeCount(), kMaxKeyframes);
+        LOG_W("TileAnimation: 关键帧总数 %zu 超过上限 %zu", keyframeCount(), maxKeyframesT());
     }
     LOG_I("TileAnimation: %zu 砖有动画，%zu 条关键帧（%.1f KB，截断=%d）",
           m_index.size(), keyframeCount(),

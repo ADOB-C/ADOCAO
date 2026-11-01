@@ -5,6 +5,7 @@
 
 #include "glad/gl_core.hpp"
 #include "core/level/LevelData.hpp"
+#include "core/util/Tuning.hpp"
 #include "render/CullIndex.hpp"
 #include "render/ShapeKey.hpp"
 #include "render/TileShape.hpp"
@@ -129,6 +130,12 @@ public:
     //   随机角度那张 130,321 个 = 3,691 行。留 10% 余量等于给一张"再随机一点"的谱挖坑，
     //   所以抬到 8192（= 8,192×1,024×16 B = 134 MB，**只在真需要时才分配**）。
     static constexpr int kMaxShapeRows = 8192;
+    static constexpr size_t kMaxCullCandidatesC = 1u << 19;
+    static constexpr size_t kMaxInstancesC      = 1u << 18;
+    // 运行时可覆盖版（`ADOCAO_TUNE`），每个调用点用 `static const` 缓存一次；未设置时与常量逐位相同。
+    static int    maxShapeRowsT()     { static const int v = (int)adofai::tune::num("maxShapeRows", (double)kMaxShapeRows); return v; }
+    static size_t maxCullCandidatesT(){ static const size_t v = (size_t)adofai::tune::num("cullCand", (double)kMaxCullCandidatesC); return v; }
+    static size_t maxInstancesT()     { static const size_t v = (size_t)adofai::tune::num("maxInst", (double)kMaxInstancesC); return v; }
     int shapeTableRows() const;             // min(kMaxShapeRows, GL_MAX_TEXTURE_SIZE)，下限 64
     size_t shapeTableCapacity() const;      // 上述行数能装多少个形状（GPU/CPU 路 texel 数不同）
     // 本次 build 实际用的量化档位（诊断用）：每度多少格。100 = 0.01°（基准档，与 7.2.0 逐位相同），

@@ -17,6 +17,7 @@
 
 | 变量 | 类型 | 默认 | 作用 |
 |---|---|---|---|
+| `ADOCAO_TUNE` | `k=v,k=v` | 空 | **可调常数的运行时覆盖**（2026-11-01）。给"单变量扫描"用：`ADOCAO_TUNE="maxPoints=8192,maxShapeRows=512"`。名字表见 `core/util/Tuning.hpp` 与 `scripts/tune-sweep.py`；未设置时与编译期常量**逐位相同**。**只给验收/调参用**，不是用户旋钮 |
 | `ADOCAO_VSYNC` | 布尔 | 关 | swap interval = 1；帧率上限变成显示器刷新率。录屏防撕裂时开（`docs/cli.md`） |
 | `ADOCAO_UNCAPPED` | 布尔 | 关 | 去掉 320 fps 帧控，量机器真实上限（`docs/profiling.md`） |
 | `ADOCAO_GL_VERSION` | `M.m` | `4.1` | 强制 GL 版本；`3.3` 会走 CPU 几何回退（验收降级链） |

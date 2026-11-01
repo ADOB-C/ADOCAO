@@ -34,6 +34,7 @@
 #include "core/util/Env.hpp"
 #include <cstring>
 #include <string>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -68,7 +69,28 @@ struct Section {
     std::vector<double> samples;   // 第 2..N 帧各一次
 };
 
-inline std::vector<Entry>& current() { static std::vector<Entry> v; return v; }
+// **跨线程**：cull/deriveRange 现在跑在 Scheduler 的 worker 上，段计时必须能从 worker 累加。
+// 用一把互斥锁保护（每段每线程一次 lock/unlock，实测 ~20 ns，相对一次读钟 5~17 ns 可以忽略；
+// 段数只有十几个，不做无锁表——那会把这里变成第二个"看起来只读其实在写"的坑）。
+// 锁只包"找段 + 累加"，**不包** Clock::now()。
+inline std::mutex& tableMutex() { static std::mutex m; return m; }
+inline std::vector<Entry>& currentUnlocked() { static std::vector<Entry> v; return v; }
+
+// **独占计时**：段可以嵌套（`applyFrame` 里套着 `trailSample`/`vis`），
+// 父段的耗时里必须**减掉子段**，否则"段和"会大于墙钟、仪表盘自己就不可信
+// （实测 10.5M 层那张谱：段和 291 ms / 墙钟 217 ms，`other` 都是负的）。
+// 每线程一个栈：pop 时 `self = elapsed - childMs`，并把 elapsed 记到父段的 childMs。
+struct NestNode {
+    const char* name;
+    Clock::time_point t0;
+    double childMs = 0.0;
+};
+inline std::vector<NestNode>& nestStack() {
+    static thread_local std::vector<NestNode> s;
+    return s;
+}
+
+
 inline Frame& firstFrame() { static Frame f; return f; }
 inline std::vector<Section>& sections() { static std::vector<Section> v; return v; }
 inline std::vector<double>& frameSamples() { static std::vector<double> v; return v; }
@@ -85,7 +107,8 @@ inline Section& sectionFor(const char* name) {
 }
 
 inline void add(const char* name, double ms) {
-    auto& v = current();
+    std::lock_guard<std::mutex> g(tableMutex());
+    auto& v = currentUnlocked();
     for (Entry& e : v) {
         if (e.name == name || std::strcmp(e.name, name) == 0) {
             e.ms += ms;
@@ -97,24 +120,30 @@ inline void add(const char* name, double ms) {
 
 inline void frameBegin() {
     if (!enabled()) return;
-    current().clear();
+    {
+        std::lock_guard<std::mutex> g(tableMutex());
+        currentUnlocked().clear();
+        nestStack().clear();
+    }
     frameT0() = Clock::now();
 }
 
 inline void frameEnd() {
     if (!enabled()) return;
     const double ms = msSince(frameT0());
+    std::lock_guard<std::mutex> g(tableMutex());
     if (frameCount() == 0) {
-        firstFrame() = Frame{current(), ms, true};      // 首帧单次快照
+        firstFrame() = Frame{currentUnlocked(), ms, true};      // 首帧单次快照
     } else {
-        for (const Entry& e : current()) sectionFor(e.name).samples.push_back(e.ms);
+        for (const Entry& e : currentUnlocked()) sectionFor(e.name).samples.push_back(e.ms);
         frameSamples().push_back(ms);
     }
     ++frameCount();
 }
 
 inline void reset() {
-    current().clear();
+    std::lock_guard<std::mutex> g(tableMutex());
+    currentUnlocked().clear();
     sections().clear();
     frameSamples().clear();
     firstFrame() = Frame{};
@@ -179,17 +208,26 @@ inline double steadyFrameMed() {
     return frameSamples().empty() ? 0.0 : detail::basicOf(frameSamples()).med;
 }
 
-// RAII 段（只累加到 current；帧边界由 frameBegin/frameEnd 管）
+// RAII 段（独占时间累加到 current；帧边界由 frameBegin/frameEnd 管）
 struct Scoped {
     const char* name;
     Clock::time_point t0;
     bool on;
     explicit Scoped(const char* n) : name(n), on(enabled()) {
-        if (on) t0 = Clock::now();
+        if (!on) return;
+        t0 = Clock::now();
+        nestStack().push_back({n, t0, 0.0});
     }
     ~Scoped() {
         if (!on) return;
-        add(name, msSince(t0));
+        auto& st = nestStack();
+        if (st.empty()) return;                 // 防御：栈被 frameBegin 清过
+        const NestNode n = st.back();
+        st.pop_back();
+        const double elapsed = msSince(n.t0);
+        const double self = elapsed - n.childMs;
+        if (!st.empty()) st.back().childMs += elapsed;
+        add(n.name, self > 0.0 ? self : 0.0);
     }
     Scoped(const Scoped&) = delete;
     Scoped& operator=(const Scoped&) = delete;

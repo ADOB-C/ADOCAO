@@ -814,26 +814,42 @@ void GameWindow::captureAndExit() {
     // 否则运镜的 zoom 事件会被 CLI 覆盖掉，等于没测。普通抓帧仍走 --capture-zoom。
     if (m_cfg->captureFitAll) {
         // 包住"变换后"的全部砖（原始位置 + 关键帧动画的位移），用于复现编辑器的全图构图。
+        //
+        // ⚠️ **不能遍历 `m_level->tiles`**：窗口化的谱（无 ScaleRadius，例如 1055 万层那张
+        // `singularity_circle_1min`）在加载收尾就把密集 `tiles` 丢了 → 循环 0 次 → 包围盒停在
+        // ±1e300 → 缩放退化成一个荒唐值，但日志里照样打 `drawn=<很少>`，**看起来像"整张一帧很快"**。
+        // 所以统一走 `tilePositionAt(i)`：稠密路径是同一个值（`tiles[i].position`），窗口化路径按块物化。
+        const int64_t nFit = m_level->tileCount();
         double minX = 1e300, maxX = -1e300, minY = 1e300, maxY = -1e300;
-        const auto& tls = m_level->tiles;
-        for (size_t i = 0; i < tls.size(); ++i) {
-            double x = tls[i].position[0], y = tls[i].position[1];
+        for (int64_t i = 0; i < nFit; ++i) {
+            const auto& p = m_level->tilePositionAt(i);
+            double x = p[0], y = p[1];
             if (const adofai::TileAnimation* anim = m_scene->animation()) {
                 adofai::TileAnimSample an{};
-                if (anim->sample((int64_t)i, targetTime, an)) { x += an.posX; y += an.posY; }
+                if (anim->sample(i, targetTime, an)) { x += an.posX; y += an.posY; }
             }
             minX = std::min(minX, x); maxX = std::max(maxX, x);
             minY = std::min(minY, y); maxY = std::max(maxY, y);
         }
-        const float pad = 1.5f;
-        minX -= pad; maxX += pad; minY -= pad; maxY += pad;
-        m_camCtrl.snapTo((minX + maxX) * 0.5, (minY + maxY) * 0.5);
-        int fbw = 1280, fbh = 720;
-        glfwGetFramebufferSize(m_window, &fbw, &fbh);
-        const double aspect = (fbh > 0) ? (double)fbw / (double)fbh : 16.0 / 9.0;
-        const double w = std::max(1e-6, maxX - minX), h = std::max(1e-6, maxY - minY);
-        const double needH = std::max(h, w / aspect);
-        m_camera.setZoom((float)(1200.0 / needH));   // 视野高 = 1200/zoom 砖
+        if (!(std::isfinite(minX) && std::isfinite(maxX) && std::isfinite(minY) && std::isfinite(maxY)) ||
+            !(maxX > minX) || !(maxY > minY)) {
+            // 一砖都没有 / 位置非有限：**明确喊出来**，别拿一个退化缩放去冒充"全图"。
+            LOG_W("capture-fit-all: 包围盒无效（min=(%.3f,%.3f) max=(%.3f,%.3f), tiles=%lld）→ 保留 --capture-zoom",
+                  minX, minY, maxX, maxY, (long long)nFit);
+        } else {
+            const float pad = 1.5f;
+            minX -= pad; maxX += pad; minY -= pad; maxY += pad;
+            m_camCtrl.snapTo((minX + maxX) * 0.5, (minY + maxY) * 0.5);
+            int fbw = 1280, fbh = 720;
+            glfwGetFramebufferSize(m_window, &fbw, &fbh);
+            const double aspect = (fbh > 0) ? (double)fbw / (double)fbh : 16.0 / 9.0;
+            const double w = std::max(1e-6, maxX - minX), h = std::max(1e-6, maxY - minY);
+            const double needH = std::max(h, w / aspect);
+            m_camera.setZoom((float)(1200.0 / needH));   // 视野高 = 1200/zoom 砖
+            LOG_I("capture-fit-all: 跨度 %.1f x %.1f 砖 → zoom=%.4f（视野高 %.1f 砖，tiles=%lld）",
+                  maxX - minX, maxY - minY, (double)m_camera.zoom(), 1200.0 / (double)m_camera.zoom(),
+                  (long long)nFit);
+        }
     } else if (m_cfg->captureCamera) m_camera.setAdoZoom((float)m_cameraDirector.zoom());
     else                      m_camera.setZoom(m_cfg->captureZoom);   // 本类口径：100 = 视野高 12 砖
 
@@ -884,8 +900,11 @@ void GameWindow::captureAndExit() {
         std::memcpy(&flip[(size_t)y * rowBytes], &px[(size_t)(fbH - 1 - y) * rowBytes], rowBytes);
 
     if (stbi_write_png(m_cfg->capturePath.c_str(), fbW, fbH, 4, flip.data(), (int)rowBytes)) {
-        LOG_I("capture: %s %dx%d t=%.4fs zoom=%.1f tile=%d req=%d render_ms=%.3f first_ms=%.2f frames=%d drawn=%d",
-              m_cfg->capturePath.c_str(), fbW, fbH, targetTime, m_cfg->captureZoom, tileIdx,
+        // `zoom=` 打的是**相机生效的 zoom**（不是 `--capture-zoom` 的请求值）：
+        // `--capture-fit-all` 会覆盖它，两者可以差几个数量级（10.5M 层那张谱 req=100 → 实际 0.23）。
+        // 以前这里打请求值，配合"fit-all 在窗口化谱上失效"会让测量看起来像"整张一帧很快"。
+        LOG_I("capture: %s %dx%d t=%.4fs zoom=%.3f tile=%d req=%d render_ms=%.3f first_ms=%.2f frames=%d drawn=%d",
+              m_cfg->capturePath.c_str(), fbW, fbH, targetTime, (double)m_camera.zoom(), tileIdx,
               m_cfg->captureTile, renderMs, firstMs, frames, dragged);
     } else {
         // 前缀**不能**是 `capture:`：`capture-gate.sh` 用"日志里最后一条 capture: 行"核对
@@ -900,8 +919,11 @@ void GameWindow::captureAndExit() {
                 const double sum = profile::sumMs(f);
                 LOG_I("profile(单帧): %s ｜段和 %.3f / 帧 %.3f（%.0f%%）", profile::reportFirst().c_str(),
                       sum, f.ms, f.ms > 0 ? 100.0 * sum / f.ms : 0.0);
+                // 段和是**跨线程 CPU 累加**（worker 上的段也算进来），帧是**墙钟**。
+                // 有并行段时 sum > 墙钟是**正常**的，别当成口径错（以前 worker 不计入，
+                // 所以这条守卫只在"漏计"时响；现在它响 = 真的并行）。
                 if (sum > f.ms * 1.05 + 0.5)
-                    LOG_W("profile(单帧): 段和 %.3f ms > 该帧自量 %.3f ms —— 口径有问题（别信这张表）",
+                    LOG_I("profile(单帧): 段和 %.3f ms（跨线程 CPU）> 墙钟 %.3f ms —— 含并行段，正常",
                           sum, f.ms);
             } else {
                 LOG_I("profile(首帧): %s", profile::reportFirst().c_str());
@@ -909,7 +931,7 @@ void GameWindow::captureAndExit() {
                 const double secSum = profile::steadySectionSumMed();
                 const double fmed = profile::steadyFrameMed();
                 if (secSum > fmed * 1.05 + 0.5)
-                    LOG_W("profile(稳态): 段中位和 %.3f ms > 帧中位 %.3f ms —— 口径有问题（别信这张表）",
+                    LOG_I("profile(稳态): 段中位和 %.3f ms（跨线程 CPU）> 帧中位 %.3f ms —— 含并行段，正常",
                           secSum, fmed);
             }
         }

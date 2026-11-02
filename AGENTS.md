@@ -314,6 +314,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `docs/ilytx.md` | Re_ADOJAS 的 `.ilytx` 容器（xz(tar(ilybin))）规范摘要 + 我们只翻译成明文、不建第二条解析链 |
 | `docs/2e9.md` | **项目当前目标**：21 亿层的 DoD（内存与 n 解耦/seek/不掉帧）+ 阶段顺序 + 纪律 —— 动手前先读这份 |
 | `docs/scale-1e8-to-2e9.md` | 十亿层目标的三笔账、实测口径（§5 的记账法、§6.1 的 32 位边界） |
+| `docs/timeline-checkpoints.md` | 动 **Timeline 检查点化** 或 **`tiles` 按块物化（切片 4）** 前读：依赖表、步骤、验收口径（原 `TODO.md` 里的 349+139 行分析，2026-11-02 搬出，原文未改） |
 | `docs/project-structure.md` | 目录 / CMake 结构、历史决策 |
 
 **为什么拆**：本文件曾 70 KB，超过会话的指令预算（65536 B）后**尾部被静默截断** —— 被切掉的正好是

@@ -32,6 +32,15 @@ inline TileXform tileXformAt(const LevelData& lv, const TileAnimation* anim, int
     x.scaleX = (double)tr.scaleX;
     x.scaleY = (double)tr.scaleY;
     x.opacity = (double)tr.alpha;
+    // PositionTrack 的 rotation/scale/opacity（权威 `Player.ts:6855`：作为 mesh 的**基础**变换）。
+    // 这里当**修饰量**叠在 MoveTrack/AnimateTrack 之上：没有其它动画的砖得到的就是事件值本身，
+    // 两者都有的砖按乘积/相加合成。没有 PositionTrack 富字段的谱只多一次布尔判断。
+    if (lv.hasPosTrackXform()) {
+        const LevelData::PosTrackXform pt = lv.posTrackXformAt(tile);
+        if (pt.rotDeg != 0.0f) x.rot += (double)pt.rotDeg * 3.14159265358979323846 / 180.0;
+        if (pt.scale != 1.0f) { x.scaleX *= (double)pt.scale; x.scaleY *= (double)pt.scale; }
+        if (pt.opacity != 1.0f) x.opacity *= (double)pt.opacity;
+    }
     if (anim) {
         TileAnimSample an;
         if (anim->sample(tile, t, an)) {

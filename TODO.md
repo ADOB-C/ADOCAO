@@ -8,21 +8,19 @@
 
 ## 我这条线（渲染 / 动画 / 时间线）
 
-- [ ] **PositionTrack 剩下的字段 —— 逐字段量过了，只剩 `scale`/`opacity` 有实际内容**：
-      | 字段 | 实况（全语料） |
-      |---|---|
-      | `relativeTo` | **61,865 条全是 `[0,"ThisTile"]`** = target 指向自己 → `changeX` 恒为 0，**零影响** |
-      | `rotation` | **非零值 0 条** |
-      | `scale` | 非恒等（≠100）**220 条**：120/140/80/115/**0**/200/150… |
-      | `opacity` | 非恒等 **12 条**（全是 80） |
-      受影响的谱只有 7 张：The Moon **80 条**、source_missing 36、HELLO 2026 28、AWC2025 25、
-      2025 12、2025(No VFX) 9、scam 6。
-      权威会渲染（`Player.ts:6855` → `tileMesh.scale` / `material.opacity`），所以 `scale`+`opacity` 是真缺口；
-      但**The Moon 与 2025 都在像素门槛里** → 做完这两张的基线会变，得按"真缺口"重存并逐个解释。
-      实现要点：每砖一个值（事件值优先、否则继承 `cur*`）→ 只能存**稀疏 run 表**（不能 12 B/砖）；
-      `scale` 这个键在 MoveTrack 里是 `[x,y]` 数组、在 PositionTrack 里是**数字**，解析侧按类型分派。
-- [ ] （低优先，spec 完整性）`relativeTo` 的解析：现在解析器只认 MoveCamera 的字符串形式，
-      PositionTrack 的 `[offset, type]` **根本没读**。虽然全语料都退化成 no-op，但换一张谱就会错。
+- [x] ~~**PositionTrack 的 `rotation` / `scale` / `opacity`**~~ —— **2026-11-02 已实现**。
+      权威 `PositionTrackManager.ts`（b4590e4）：`tileX = v; if (!justThisTile) curX = v;`，
+      消费侧 `Player.ts:6855` 把它当 mesh 的基础变换。实现：解析 → `TilePositionOffset` 富字段 →
+      `applyPositionTrackOffsets` 里按**持久状态 + 本层事件值**累积 → **稀疏 run/override 表**
+      （`m_posRuns` / `m_posOv`，不占 12 B/砖）→ `posTrackXformAt()` → `tileXformAt()` 叠加。
+      验收：`tests/position_xform_test.cpp`（继承 / justThisTile 不推进持久状态 / 通道独立 / 消极对照）。
+      **像素门槛：57 个状态里只有 `myc_t30_z25` 变**（diff=464 px，maxdelta=187）——
+      原因是 MYC 第 1123 层 `scale: 90`，那块砖现在按 90% 画（三联图 `build/myc_pos_ab.png` 验过），
+      属**真缺口修复**，基线已重存。
+- [ ] **PositionTrack 的 `relativeTo`**：解析已经做了（`[offset,"ThisTile"|"Start"|"End"]`，
+      `IDFromTile` 的三种语义），但**位置算法还没接** —— 权威是两遍（先算 base/bitSum/pointX 再算
+      workX），我们是**一遍后缀累加**，要重构成两遍才装得下。全语料实测 61,865 条都是
+      `[0,"ThisTile"]`（target 指向自己 → change 恒 0），所以**先接哪一遍都不改变当前出图**。
 - [ ] **Hold / Release**（DLC 长按）：每个 hold 一个 mesh（uniform 驱动填充）+ `holdLength`。
 - [ ] **Bloom / Flash**：官方 Hidden/VideoBloom，`MediumAmount` 定标 = **0.28**（参照 Re_ADOJAS）。
 - [ ] **建帧 ~700 ms 拆三段**（MoveTrack / AnimateTrack / `buildFlipEvents`）：

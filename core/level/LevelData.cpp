@@ -367,7 +367,11 @@ struct ActionFields {
     bool hasRotation = false; double rotation = 0.0;
     bool hasZoom = false; double zoom = 100.0;
     bool hasEase = false; int easeId = 0;
-    int  relativeTo = -1;            // -1 未写；0..4 合法；100 写了但名字不认得
+    int  relativeTo = -1;            // -1 未写；0..4 合法；100 写了但名字不认得（**MoveCamera 的字符串/数字形式**）
+    // ── PositionTrack 的 `relativeTo` 是**另一种形状**：`[offset, "ThisTile"|"Start"|"End"]`。
+    // 权威 `PositionTrackManager.IDFromTile`：target = thisTile+offset / offset / totalTiles-1+offset，
+    // 再 clamp 到 [0, totalTiles-1]。全语料实测 61,865 条都是 `[0,"ThisTile"]`（= no-op），但形状必须读。
+    bool hasPosRelTo = false; int posRelOffset = 0; uint8_t posRelType = 0;   // 0 ThisTile / 1 Start / 2 End
     bool hasId = false; double idNum = 0.0;
     const char* tagPtr = nullptr; const char* tagEnd = nullptr;
     bool inactive = false, editorOnly = false;
@@ -504,6 +508,28 @@ inline void parsePositionPair(const char* v, const char* e, ActionFields& f) {
 //   字符串认不得   → **Unknown**（原函数返回 undefined → 运行时沿用上一次模式）。
 inline void parseRelativeToValue(const char* v, const char* e, ActionFields& f) {
     using C = LevelData;
+    // **PositionTrack 的数组形式**：`[offset, "ThisTile"|"Start"|"End"]`（MoveCamera 是字符串/数字）
+    if (e > v && *v == '[') {
+        const char* q = skipWs(v + 1, e);
+        double off = 0.0;
+        if (q < e && *q != ']') { if (!parseNumber(q, e, off)) return; q = skipWs(q, e);
+                                  if (q < e && *q == ',') q = skipWs(q + 1, e); }
+        uint8_t type = 0;
+        if (q < e && *q == '"') {
+            std::string s2;
+            if (!stringValue(q, e, s2)) return;
+            if      (s2 == "Start") type = 1;
+            else if (s2 == "End")   type = 2;
+            else if (s2 == "0")     type = 0;
+            else if (s2 == "1")     type = 1;
+            else if (s2 == "2")     type = 2;
+            // 其余（"ThisTile" / 认不得）→ ThisTile
+        }
+        f.posRelOffset = (int)off;
+        f.posRelType = type;
+        f.hasPosRelTo = true;
+        return;
+    }
     if (e > v && *v == '"') {
         std::string s;
         if (!stringValue(v, e, s)) return;
@@ -811,6 +837,10 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
         case 'r':
             if (keyIs(key, "rotationOffset")) {
                 double rd; if (parseNumber(v, vEnd, rd)) { f.rotOffset = (float)rd; f.hasRotOffset = true; }
+            } else if (keyIs(key, "rotation")) {
+                // PositionTrack 的 `rotation`（度，正=顺时针）与 MoveCamera 的同名字段是**不同事件**；
+                // 两者共用 ActionFields.rotation，由 buildAction 按类型取用。
+                double rd; if (parseNumber(v, vEnd, rd)) { f.rotation = rd; f.hasRotation = true; }
             } else if (rich) {
                 if (keyIs(key, "rotation")) {
                     double rd; if (parseNumber(v, vEnd, rd)) { f.rotation = rd; f.hasRotation = true; }
@@ -910,6 +940,13 @@ inline bool buildAction(const ActionFields& f, LevelData::FastAction& a, bool& k
     case T::PositionTrack:
         if (f.hasOffset) { a.val1 = f.offX; a.val2 = f.offY; }
         a.flag = f.justThisTile;
+        // 四个富字段（权威 `Player.ts:6855` 渲染 rotation/scale/opacity；relativeTo 改位置算法）
+        if (f.hasRotation)      { a.posRotation = (float)f.rotation; a.posFlags |= 1u; }
+        if (f.hasScale)         { a.posScale = f.scaleX;             a.posFlags |= 2u; }
+        // 权威 `PositionTrackManager`：`const o = event.opacity / 100`（百分数）
+        if (f.hasLegacyOpacity) { a.posOpacity = (float)(f.legacyOpacity / 100.0); a.posFlags |= 4u; }
+        if (f.hasPosRelTo)      { a.relOffset = (int16_t)f.posRelOffset; a.relType = f.posRelType;
+                                  a.posFlags |= 8u; }
         // 粘性开关（`stickToFloors`）三态：0 = 关、1 = 开、2 = 事件没写（保持上一个状态）。
         // 语义同 Re_ADOJAS PositionTrackManager：justThisTile → 只改本层；否则持续到之后所有层。
         // **存 strId2，不是 strId**：`strId` 是 actionStrTable 的下标，被 v7/schema 与
@@ -3294,7 +3331,9 @@ void LevelData::refreshDerivedCaches() {
         case FastAction::PositionTrack:
             tilePositionOffsets[floor].push_back(
                 {a.val1, a.val2, a.flag,
-                 (int8_t)(a.strId2 == 1u ? 1 : (a.strId2 == 0u ? 0 : -1))});
+                 (int8_t)(a.strId2 == 1u ? 1 : (a.strId2 == 0u ? 0 : -1)),
+                 a.posRotation, a.posScale, a.posOpacity,
+                 a.relOffset, a.relType, a.posFlags});
             if (a.strId2 <= 1u) hasStickEvents = true;
             break;
         case FastAction::SetHitsound:
@@ -3566,8 +3605,18 @@ void LevelData::applyPositionTrackOffsets() {
     //     正好落在点加模型的预测内（点加中位 1.46 / 最大 2.28），而"一律累积"会把花瓣甩到 3~5 倍外。
     // 非 justThisTile（缺省/"Disabled"）= 后缀加：本层及之后所有层都吃到（累进 cumX/cumY）。
     // 注：官方的 `vector`（累积偏移）只用于 relativeTo，我们还没实现 relativeTo。
+    // PositionTrack 的 rotation/scale/opacity：持久状态 `cur*` + 本层事件值（覆盖）。
+    // 权威 `PositionTrackManager`：事件值**总是**写本砖（`tileScale = v`），
+    // 而持久状态只在**非** justThisTile 时推进（`if (!justThisTile) curScale = v`）。
+    const bool wantXform = std::any_of(sorted.begin(), sorted.end(),
+                                       [](const auto& pr) { return pr.second.posMask != 0; });
+    float curRot = 0.0f, curScale = 1.0f, curOp = 1.0f;
+
     for (int i = 0; i < n; i++) {
         double px = 0.0, py = 0.0;       // 本层的"一次性"偏移（同层多个事件累加）
+        float tRot = 0.0f, tScale = 1.0f, tOp = 1.0f;
+        uint8_t tMask = 0;
+        bool curChanged = false;
         while (oi < sorted.size() && sorted[oi].first == i) {
             const TilePositionOffset& o = sorted[oi].second;
             if (o.justThisTile) {
@@ -3575,7 +3624,19 @@ void LevelData::applyPositionTrackOffsets() {
             } else {
                 cumX += o.offsetX; cumY += o.offsetY;
             }
+            if (o.posMask) {
+                if (o.posMask & 1u) { tRot = o.rotDeg; tMask |= 1u;
+                                      if (!o.justThisTile) { curRot = o.rotDeg; curChanged = true; } }
+                if (o.posMask & 2u) { tScale = o.scale; tMask |= 2u;
+                                      if (!o.justThisTile) { curScale = o.scale; curChanged = true; } }
+                if (o.posMask & 4u) { tOp = o.opacity; tMask |= 4u;
+                                      if (!o.justThisTile) { curOp = o.opacity; curChanged = true; } }
+            }
             oi++;
+        }
+        if (wantXform) {
+            if (tMask) m_posOv.push_back({i, tRot, tScale, tOp, tMask});
+            if (curChanged) m_posRuns.push_back({i, curRot, curScale, curOp});
         }
         tiles[i].position[0] += cumX + px;
         tiles[i].position[1] += cumY + py;
@@ -3595,6 +3656,30 @@ void LevelData::applyPositionTrackOffsets() {
                                                 : (curStick >= 0 ? curStick : (settings.stickToFloors ? 1 : 0)));
         }
     }
+}
+
+LevelData::PosTrackXform LevelData::posTrackXformAt(int64_t floor) const {
+    PosTrackXform x;
+    if (!m_posRuns.empty()) {
+        const int32_t f = (int32_t)std::max<int64_t>(0, std::min<int64_t>(floor, INT32_MAX));
+        auto it = std::upper_bound(m_posRuns.begin(), m_posRuns.end(), f,
+                                   [](int32_t v, const PosTrackRun& r) { return v < r.floor; });
+        if (it != m_posRuns.begin()) {
+            const PosTrackRun& r = *(it - 1);
+            x.rotDeg = r.rotDeg; x.scale = r.scale; x.opacity = r.opacity;
+        }
+    }
+    if (!m_posOv.empty()) {
+        const int32_t f = (int32_t)std::max<int64_t>(0, std::min<int64_t>(floor, INT32_MAX));
+        auto it = std::lower_bound(m_posOv.begin(), m_posOv.end(), f,
+                                   [](const PosTrackOv& o, int32_t v) { return o.floor < v; });
+        if (it != m_posOv.end() && it->floor == f) {
+            if (it->mask & 1u) x.rotDeg  = it->rotDeg;
+            if (it->mask & 2u) x.scale   = it->scale;
+            if (it->mask & 4u) x.opacity = it->opacity;
+        }
+    }
+    return x;
 }
 
 void LevelData::applyRadiusScaleOffsets() {

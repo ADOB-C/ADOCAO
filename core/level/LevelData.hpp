@@ -415,6 +415,15 @@ struct LevelData {
         enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, MoveCamera, RepeatEvents, ColorTrack, RecolorTrack, Flash, MoveTrack, Other, ScaleRadius, MultiPlanet } type = Other;
         bool flag = false;
         float val1 = 0, val2 = 0;
+        // ── PositionTrack 的四个富字段（权威 `Player.ts:6855` 会渲染 rotation/scale/opacity）──
+        // `posFlags` 位：1 rotation / 2 scale / 4 opacity / 8 relativeTo。
+        // 追加在**末尾**并给默认值 —— 老代码有按位置初始化既有字段的写法。
+        float posRotation = 0.0f;   // 度
+        float posScale = 1.0f;      // 已 /100（120 → 1.2）
+        float posOpacity = 1.0f;    // 已 /100
+        int16_t relOffset = 0;      // relativeTo 的 offset
+        uint8_t relType = 0;        // 0 ThisTile / 1 Start / 2 End
+        uint8_t posFlags = 0;
     };
     std::vector<FastAction> actions;
     std::vector<std::string> actionStrTable{std::string()};   // 驻留表（id 0 = 空串）
@@ -511,6 +520,14 @@ struct LevelData {
         bool  justThisTile = false;
         // `stickToFloors`：-1 = 事件没写（继承），0 = 关（行星不跟着轨道动），1 = 开（默认）。
         int8_t stick = -1;
+        // PositionTrack 的四个富字段（**追加在末尾**，默认值安全）：`posMask` 位 1/2/4 =
+        // rotation / scale / opacity 写了（relativeTo 将来接位置算法时再加位）。
+        float rotDeg = 0.0f;
+        float scale = 1.0f;
+        float opacity = 1.0f;
+        int16_t relOffset = 0;
+        uint8_t relType = 0;
+        uint8_t posMask = 0;
     };
 
     // Per-tile event data (computed from actions)
@@ -548,6 +565,22 @@ struct LevelData {
     struct CumOffset { int32_t floor = 0; double x = 0.0, y = 0.0; };  // 到该层为止的累计偏移
     std::vector<CumOffset> m_cumOffsets;                  // 稀疏（每个事件层一条）
     bool hasStickOverrides() const { return !m_tileStick.empty(); }
+
+    // ── PositionTrack 的逐砖变换（rotation/scale/opacity，2026-11-02）──────────
+    // 权威 `Player.ts:6855` 把 `getTileTransform(index)` 作为 mesh 的基础变换
+    // （rotation.z / scale / material.opacity × 颜色 alpha）。
+    // **稀疏存储**（2³¹ 目标下不能 12 B/砖）：
+    //   `m_posRuns` = 持久状态（`cur*`）变化点，升序；
+    //   `m_posOv`   = 本层事件值（覆盖 run），升序、只在该层有事件时出现。
+    struct PosTrackRun { int32_t floor = 0; float rotDeg = 0.0f, scale = 1.0f, opacity = 1.0f; };
+    struct PosTrackOv  { int32_t floor = 0; float rotDeg = 0.0f, scale = 1.0f, opacity = 1.0f;
+                         uint8_t mask = 0; };
+    struct PosTrackXform { float rotDeg = 0.0f; float scale = 1.0f; float opacity = 1.0f; };
+    PosTrackXform posTrackXformAt(int64_t floor) const;
+    bool hasPosTrackXform() const { return !m_posRuns.empty() || !m_posOv.empty(); }
+    const std::vector<PosTrackRun>& posTrackRuns() const { return m_posRuns; }
+    std::vector<PosTrackRun> m_posRuns;
+    std::vector<PosTrackOv>  m_posOv;
 
     // ── MultiPlanet（多星布局）────────────────────────────────────────────
     // 参考实现（Re_ADOJAS `Player.ts` 3050-3160）：逐砖 `numPlanets` + 行星颜色 id 列表 +

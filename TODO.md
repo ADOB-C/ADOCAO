@@ -12,8 +12,15 @@
       （现在只做了 `positionOffset` 与 `stickToFloors`）。权威口径：`PositionTrackManager.ts`
       （b4590e4）：`relativeTo` 的目标层 = `baseX[target]+bitSumX(target)+pointX[target]`，
       对本层的 `baseX[floor]+vectorX`，`vector = bitSum + point`。`justThisTile` 语义**已对齐**。
-- [ ] **ColorTrack**：`COLOR_FUNCS` / `FLOOR_FUNCS` / `RecolorTrack`。先统计本地谱面有多少条，
-      再决定做不做（几十万事件要走 GPU/GLSL，蓝图决策 8/9）。
+- [x] ~~**ColorTrack**：`COLOR_FUNCS` / `FLOOR_FUNCS` / `RecolorTrack`~~ —— **2026-11-02 量完：已经实现了**。
+      用量（本地 30 张谱）：**The Moon 2,664 条**（全 `Single`）、Lost Requiem 2,452（148 Rainbow /
+      39 Glow / 5 Blink）、2025 **2,046**（59 Rainbow / 87 Glow / 35 Blink）、2.64e6 1,488（全 Single）、
+      scam 1,163、hangazi 964（**653 条 Rainbow**）、missing_vfx 443（299 Switch）；
+      而三张巨谱（MYC 640MB / no-3P 295MB / level 315MB）**一条都没有**。
+      实现侧：`core/level/TileColor.cpp` 已覆盖 colorType `Single/Stripes/Switch/Glow/Blink/Rainbow/Volume`
+      + 样式 `Neon/NeonLight/Basic/Minimal/Standard`；`Gems` 落到 `Standard` 分支 —— 与权威一致
+      （`TileColorManager.ts:96` 的 `Gems` 与 `Standard` **颜色相同**，第三个布尔在调用方 `:636` 直接丢弃）。
+      结论：**这条不欠任何东西**，是又一条旧账。
 - [ ] **Hold / Release**（DLC 长按）：每个 hold 一个 mesh（uniform 驱动填充）+ `holdLength`。
 - [ ] **Bloom / Flash**：官方 Hidden/VideoBloom，`MediumAmount` 定标 = **0.28**（参照 Re_ADOJAS）。
 - [ ] **建帧 ~700 ms 拆三段**（MoveTrack / AnimateTrack / `buildFlipEvents`）：

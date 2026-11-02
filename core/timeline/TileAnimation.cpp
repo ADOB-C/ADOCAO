@@ -1,4 +1,6 @@
 #include "core/timeline/TileAnimation.hpp"
+
+#include <chrono>
 #include <cstdio>
 
 #include <algorithm>
@@ -81,6 +83,13 @@ void TileAnimation::build(const LevelData& lv, const Timeline& tl) {
     // （2026-10-21 我先误判成"动画晚 shift 秒"，后来用 harness 以本仓库网格复算才确认：
     //  它的 sample(t) 与我们的 chart 时间一一对应。）
     const double animShift = 0.0;
+    // 分段计时（`ADOCAO_PROFILE=1`）：拆分"建帧 700 ms"到底花在哪一段。
+    const bool prof = std::getenv("ADOCAO_PROFILE") != nullptr;
+    const auto tStart = std::chrono::steady_clock::now();
+    auto msSince = [](auto a) {
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - a).count();
+    };
+    auto tMark = tStart;
 
     // ---- 1) MoveTrack：逐砖建 tween（**先**建，之后被 AnimateTrack 覆盖） ----
     const auto& moves = lv.moveEvents();
@@ -147,6 +156,7 @@ void TileAnimation::build(const LevelData& lv, const Timeline& tl) {
         const auto& dT = tl.animDisappearType();
         const auto& dS = tl.animDisappearStart();
         const auto& dE = tl.animDisappearEnd();
+        if (prof) { LOG_I("anim-prof: MoveTrack 建帧 %.1f ms", msSince(tMark)); tMark = std::chrono::steady_clock::now(); }
         const size_t n = aT.size();
         // **关键帧预算**：`kMaxKeyframes` 以前只在最后打一条 LOG_W（名不副实 —— 名字像护栏，
         // 实际是注释：真超了照样把内存吃到爆）。现在这里维护运行总数，超了就**停止建新帧**
@@ -351,7 +361,10 @@ void TileAnimation::build(const LevelData& lv, const Timeline& tl) {
         }
     }
 
+    if (prof) { LOG_I("anim-prof: AnimateTrack 建帧 %.1f ms", msSince(tMark)); tMark = std::chrono::steady_clock::now(); }
     buildFlipEvents();
+    if (prof) { LOG_I("anim-prof: buildFlipEvents %.1f ms（事件 %zu 条）", msSince(tMark),
+                      m_flipT.size()); }
 
     // 诊断：`ADOCAO_ANIM_DUMP_TILE=<n>` 打印该砖各通道的关键帧（排查"砖为什么看不见"）
     if (const char* dt = std::getenv("ADOCAO_ANIM_DUMP_TILE")) {

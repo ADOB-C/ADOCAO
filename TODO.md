@@ -30,8 +30,14 @@
 
 - [ ] **Hold / Release**（DLC 长按）：每个 hold 一个 mesh（uniform 驱动填充）+ `holdLength`。
 - [ ] **Bloom / Flash**：官方 Hidden/VideoBloom，`MediumAmount` 定标 = **0.28**（参照 Re_ADOJAS）。
-- [ ] **建帧 ~700 ms 拆三段**（MoveTrack / AnimateTrack / `buildFlipEvents`）：
-      早先量到 361 ms、现在 700 ms，两个对照（增量记账、FMA 收缩）都排除了，没解释清。
+- [x] ~~**建帧 ~700 ms 拆三段**~~ —— **2026-11-02 结案：那 700 ms 是测量时的机器争用，不是回退**。
+      同一探针、同一张谱，今天（load 1.6）稳定 **372~386 ms**，与最早的 361~383 ms 吻合；
+      拆开看（`ADOCAO_PROFILE=1` 的 `anim-prof:` 行，2.64e6）：
+      **MoveTrack 0.0 ms + AnimateTrack 181.2 ms + buildFlipEvents 193.3 ms（3,990,674 条事件）**
+      —— 事件表在建帧里占一半，那是我后来加"rangeStart/rangeEnd 边界翻转"把事件数翻倍的结果。
+      教训：**测量要和构建/其它作业错开**，我上一轮在 `load 2.2` 就下结论"不是负载"，其实
+      5/15 分钟均值还有 6.0（自己的全量重编还没散），于是白查了两个对照。
+
 - [ ] **MultiPlanet ≥3 星：每砖边界两颗星跳 1 砖** —— **等裁决**：参考实现同样跳，
       修 = 主动偏离权威。根因见 `git log --grep=MultiPlanet`。
 

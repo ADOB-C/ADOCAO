@@ -310,6 +310,18 @@ cmake --build build --parallel 8
 0.3~3 µs，24 位尾数的 6e-8 相对量在整条时间线上会积成微秒级偏差，正好是"看起来一切正常、
 但对拍差半帧"的那一档。
 
+## 动画建帧的三段（`ADOCAO_PROFILE=1`）
+
+`TileAnimation::build` 会在日志里打三行 `anim-prof:`（只在 `ADOCAO_PROFILE=1` 时）：
+
+| 段 | 2.64e6 实测 | 说明 |
+|---|---|---|
+| MoveTrack 建帧 | 0.0 ms | 那张谱没有 MoveTrack |
+| AnimateTrack 建帧 | **181.2 ms** | 997,664 砖 × 6 通道，含 appear/disappear |
+| buildFlipEvents | **193.3 ms** | 3,990,674 条可见性翻转事件（每砖 rangeStart/rangeEnd 各一条） |
+
+**测这个的时候别同时跑构建**：同一探针在机器繁忙时量到 700 ms，空闲时 372~386 ms —— 差 2 倍。
+
 ## 可调常数的单变量扫描（2026-11-01）
 
 工具：`scripts/tune-sweep.py` + `ADOCAO_TUNE`（`core/util/Tuning.hpp`）。做法是**一次只改一个

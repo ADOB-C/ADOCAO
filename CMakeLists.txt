@@ -80,6 +80,17 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# **禁止 FMA 收缩**（2026-11-02 定案）：GCC 默认 `-ffp-contract=fast`、Clang 默认 `on`，
+# 两边会把 `a*b+c` 融成 FMA 的**时机不同** → 同一份源码在 Linux 与 macOS 上算出差 1 ULP 的
+# double。实测：`tests/adocao_window_test` 在 `-ffp-contract=fast` 下正好复现 CI 的
+# 「tileStartTimes 1612/9000 逐位不一致」，而 macOS 默认编译是绿的 —— 那条"偶发红"
+# 其实就是**构建机编译器默认值不同**（`c695dca` 红 / `3ba4283` 绿只是碰上了不同的 runner）。
+# 关掉收缩之后所有平台走同一套舍入，逐位对拍（.adocao checkpoints、窗口重算、像素门槛）
+# 才真正是跨平台可比的。代价：少数 a*b+c 不再用 FMA（实测这几种谱面帧时间无可测变化）。
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-ffp-contract=off)
+endif()
+
 # Maximum safe optimization (no -ffast-math — timing precision is critical)
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     # 交叉编译（如 mingw 出 Windows 包）时不能 `-march=native`（那是**构建机**的 CPU）。

@@ -354,6 +354,13 @@ A WinUI 3 C# launcher lived in a separate repo at `../ADOCAO_WinUI3_Launcher/` �
 
 ## Floating-Point Precision Rules
 
+**FMA 收缩一律关掉**（2026-11-02）：CMake 对 GNU/Clang 统一加 `-ffp-contract=off`。
+GCC 默认 `fast`、Clang 默认 `on`，`a*b+c` 融成 FMA 的**时机不同** → 同一份源码在不同平台
+算出差 1 ULP 的 double。实测：`adocao_window` 在 Linux 上"偶发"的 `tileStartTimes`
+1612/9000 不一致，用 `-ffp-contract=fast` 在 macOS 上**原样复现**；关掉之后 57/57 像素门槛
+逐字节不变、ctest 全绿。**别为了性能把它打开** —— 逐位对拍（窗口重算、checkpoint、像素门槛）
+全都建立在"所有平台同一套舍入"上。
+
 **ALL timing and position values must use `double` (float64).** Float32 precision loss at extreme values causes artifacts.
 - `angleData`: `std::vector<double>` (16 decimal places)
 - `tileStartTimes[]`, `m_elapsedTime`, camera target: all `double`

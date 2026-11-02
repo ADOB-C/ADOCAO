@@ -15,14 +15,14 @@
       速度剖面实测：t=113.2 → 96 砖/秒、t=140 → 58 砖/秒、**t=155.0 → 26,640 砖/秒**（突然爆发），
       所以"瞬时速度"和"窗口内平均速度"差 100 倍是谱面本身的性质。
 
-## 待查（偶发，尚无复现）
+## 已排除（2026-11-02：`adocao_window` 在 Linux 上偶发红）
 
-- [ ] `adocao_window` 在 **Linux CI** 上偶发失败：`tileStartTimes` 1612/9000 处逐位不一致
-      （提交 `6f94317` 的 run 41225860225；同一份测试在 `398775c` 的 run 41226440590 全绿，
-      Windows/macOS 也一直绿）。测试是纯内存的（不落临时文件），所以像是某处**未初始化内存**
-      或与分配顺序相关的差异，而不是逻辑错。下次复现时先在 Linux 上把该测试连跑 20 次
-      （`ctest --test-dir build -R adocao_window --repeat until-fail:20`）并开
-      `ADOCAO_BLOCK_DEBUG`（如果那条路径有的话）定位首个不一致的层号。
+- [x] ~~`adocao_window` 在 linux-Ultimaginable 偶发失败（tileStartTimes 1612/9000 逐位不一致）~~
+      **根因 = FMA 收缩**：GCC 默认 `-ffp-contract=fast`、Clang 默认 `on`，`a*b+c` 融成 FMA 的
+      时机不同 → 全量路径与窗口重算路径差 1 ULP。本地用 `-ffp-contract=fast` 重建
+      `tests/adocao_window_test` **原样复现**了 CI 的三条 FAIL（1612/1612/53，firstBad @1）。
+      修法：CMake 里对 GNU/Clang 统一加 `-ffp-contract=off`（像素门槛 57/57 逐字节不变，
+      ctest 54/54）。"偶发"的真相是**不同 runner 的编译器默认值不同**，不是内存/竞态。
 
 ## 并行模型（`docs/parallelism.md`，2026-10-16 拍板）
 

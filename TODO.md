@@ -199,15 +199,25 @@
       三份来源一致：编辑器指南 "Only change this tile" + Re_ADOJAS 的 `pointX[floor] += …` +
       在 The Moon 上量出的"花瓣环半径 ÷ 星半径 = 1.5~2.2"（点加预测 1.46/2.28 ✓，累积是 3~5 ✗）。
       教训：定结论要落在**尺度无关的可量值**上，别用"哪张图更像"。）
-- [ ] PositionTrack 剩下的官方对照点：状态类字段（rotation/scale/opacity/stickToFloors）在 `justThisTile` 时
-      是否**不更新持续状态**（编辑器指南说 Enabled = "only affect the event tile"）；`relativeTo` 的目标层要用
-      官方 `vector`（累积偏移）—— 见 `~/Repos/Re_ADOJAS/src/lib/Player/PositionTrackManager.ts`
-- [ ] **PositionTrack 同层多事件只生效最后一个**（潜在 fidelity bug）：`tilePositionOffsets` 是
-      `unordered_map<int, TilePositionOffset>`（`LevelData.hpp:101`），而 `LevelData.cpp:1558` 是**赋值** ——
-      同一层出现两个 PositionTrack 时前者被覆盖，于是"文件里最后一条赢"。
-      官方向照：真值应是**每个事件各作用一次**（Re_ADOJAS 的 `pointX[floor] += …` / `bitAdd` 是逐事件的）。
-      顺带：`applyPositionTrackOffsets()` 里"同层多个事件累加"那句注释与实际数据结构不符。
-      影响面：v3 checkpoint 的不变量 3（边界层 `floor == i0` 撞上多事件会少算）。
+- [x] ~~PositionTrack 状态类字段的 `justThisTile` 语义~~ —— **权威已确认，而且我们已照做**：
+      `Re_ADOJAS/src/lib/Player/PositionTrackManager.ts`（b4590e4, 2026-10-17）里
+      `scale/rotation/opacity/stickToFloors` 都是 `tileX = v; if (!justThisTile) curX = v;`
+      —— Enabled 只改本砖、不推进持续状态；我们的 `LevelData.cpp:3586` 那段
+      （`if (se.justThisTile) tileStick = …; else { curStick = …; tileStick = curStick; }`）同构。
+      **这条不欠任何东西**。
+- [ ] PositionTrack **还没实现**的字段（真缺口，不是语义问题）：`relativeTo`、`rotation`、
+      `scale`、`opacity` —— 现在只做了 `positionOffset` 与 `stickToFloors`。
+      权威口径（同文件）：`relativeTo` 的目标层是
+      `baseX[target] + bitSumX(target) + pointX[target]` 对 `baseX[floor] + vectorX`，
+      其中 `vector = bitSum + point`（含点加部分）。
+
+- [x] ~~**PositionTrack 同层多事件只生效最后一个**~~ —— **2026-11-02 复查：早就不成立**
+      （这条 TODO 写于数据结构还是 `unordered_map<int, TilePositionOffset>` 的时候）。
+      现在 `LevelData.hpp:541` 是 `unordered_map<int, **std::vector**<TilePositionOffset>>`、
+      `LevelData.cpp:3295` 是 `push_back`，两个消费方（`applyPositionTrackOffsets`、
+      `planetPivotAt`）都是**遍历整个 vector**，与权威实现 `pointX[floor] += …` / `bitAdd`
+      的"逐事件累加"一致。教训：**别拿旧 TODO 当现状**，改判据前先看代码。
+
 - [x] ~~拖尾的 sagitta 采样率判据仍按"半径 ≈ 1"~~ **2026-11-01 已修**：`curvatureRadius()` 改成
       `orbitRadiusAt()`（ScaleRadius 段内插值），回归 `trail_window` ⑤（负向对照 → got 1.000）。
       下面是原始记录：

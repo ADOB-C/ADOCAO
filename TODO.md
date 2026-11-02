@@ -9,9 +9,20 @@
 ## 我这条线（渲染 / 动画 / 时间线）
 
 - [ ] **PositionTrack 还差 4 个字段**：`relativeTo` / `rotation` / `scale` / `opacity`
-      （现在只做了 `positionOffset` 与 `stickToFloors`）。权威口径：`PositionTrackManager.ts`
-      （b4590e4）：`relativeTo` 的目标层 = `baseX[target]+bitSumX(target)+pointX[target]`，
-      对本层的 `baseX[floor]+vectorX`，`vector = bitSum + point`。`justThisTile` 语义**已对齐**。
+      （现在只做了 `positionOffset` 与 `stickToFloors`）。权威**确实会渲染**这些字段
+      （`Player.ts:6855` 取 `getTileTransform(index)` → `tileMesh.rotation.z / scale / material.opacity`），
+      所以是**真缺口**，不是"参考实现也没用"。
+      **用量（2026-11-02 普查，本地 30 张谱）**：`relativeTo` 出现在**每一张**用了 PositionTrack 的谱；
+      `rotation`/`scale`/`opacity` 最高的是 The Moon（**2,108 / 2,108 / 2,104 条**）、
+      2.64e6（1,445 / 1,438 / 1,438）、IDPLMA（1,090 / 986 / 989）、hangazi（831…）。
+      **两处结构性的活**（不是加个字段就行）：
+      1. `relativeTo`：权威是**两遍**（先算好 base/bitSum/pointX 再算 workX），
+         我们的 `applyPositionTrackOffsets` 是**一遍后缀累加**，要重构成两遍才装得下；
+      2. `rotation/scale/opacity`：每砖一个值（事件值优先、否则继承 `cur*`），
+         而 2³¹ 目标不能再加 12 B/砖 —— 得存**稀疏 run 表**（只在持久状态变化处分段，
+         类似 `m_cumOffsets` / `trackStyleRunEnd`），逐砖查。
+      另有一个坑：`scale` 这个键在 MoveTrack 里是 `[x,y]` 数组、在 PositionTrack 里是**数字**（百分数），
+      解析侧按事件类型分派。
 - [x] ~~**ColorTrack**：`COLOR_FUNCS` / `FLOOR_FUNCS` / `RecolorTrack`~~ —— **2026-11-02 量完：已经实现了**。
       用量（本地 30 张谱）：**The Moon 2,664 条**（全 `Single`）、Lost Requiem 2,452（148 Rainbow /
       39 Glow / 5 Blink）、2025 **2,046**（59 Rainbow / 87 Glow / 35 Blink）、2.64e6 1,488（全 Single）、

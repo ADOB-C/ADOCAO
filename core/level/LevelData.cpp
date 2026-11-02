@@ -512,12 +512,21 @@ inline void parseRelativeToValue(const char* v, const char* e, ActionFields& f) 
     if (e > v && *v == '[') {
         const char* q = skipWs(v + 1, e);
         double off = 0.0;
-        if (q < e && *q != ']') { if (!parseNumber(q, e, off)) return; q = skipWs(q, e);
-                                  if (q < e && *q == ',') q = skipWs(q + 1, e); }
+        if (q < e && *q != ']') {
+            if (!parseNumber(q, e, off)) return;
+            // `parseNumber` 不返回末尾指针：手动跳过这个数字 token（到 ',' 或 ']' 为止）。
+            while (q < e && *q != ',' && *q != ']') q++;
+            q = skipWs(q, e);
+            if (q < e && *q == ',') q = skipWs(q + 1, e);
+        }
         uint8_t type = 0;
         if (q < e && *q == '"') {
-            std::string s2;
-            if (!stringValue(q, e, s2)) return;
+            // 注意：`stringValue(p, vEnd, out)` 的 `vEnd` 必须是**这个字符串**的末尾
+            // （它做 `out.assign(p+1, vEnd-1)`），不能传整个数组的末尾 —— 否则拿到的是
+            // `End"]` 这种残渣，类型永远落回 ThisTile。
+            const char* qe = q + 1;
+            while (qe < e && *qe != '"') qe++;
+            std::string s2(q + 1, qe);
             if      (s2 == "Start") type = 1;
             else if (s2 == "End")   type = 2;
             else if (s2 == "0")     type = 0;
@@ -841,12 +850,11 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
                 // PositionTrack 的 `rotation`（度，正=顺时针）与 MoveCamera 的同名字段是**不同事件**；
                 // 两者共用 ActionFields.rotation，由 buildAction 按类型取用。
                 double rd; if (parseNumber(v, vEnd, rd)) { f.rotation = rd; f.hasRotation = true; }
+            } else if (keyIs(key, "relativeTo")) {
+                // 两种形状都要认：MoveCamera 的字符串/数字，PositionTrack 的 `[offset,"Type"]`。
+                parseRelativeToValue(v, vEnd, f);
             } else if (rich) {
-                if (keyIs(key, "rotation")) {
-                    double rd; if (parseNumber(v, vEnd, rd)) { f.rotation = rd; f.hasRotation = true; }
-                } else if (keyIs(key, "relativeTo")) {
-                    parseRelativeToValue(v, vEnd, f);
-                } else if (keyIs(key, "repeatType")) {
+                if (keyIs(key, "repeatType")) {
                     std::string s2;
                     if (stringValue(v, vEnd, s2)) f.isBeat = (s2 != "Floor");
                 } else if (keyIs(key, "repetitions")) {
@@ -3593,8 +3601,81 @@ void LevelData::applyPositionTrackOffsets() {
     sorted.reserve(tilePositionOffsets.size());
     for (const auto& kv : tilePositionOffsets)
         for (const TilePositionOffset& o : kv.second) sorted.push_back({kv.first, o});
-    std::sort(sorted.begin(), sorted.end(), [](auto& a, auto& b) { return a.first < b.first; });
+    // **必须 stable**：同层多个事件的顺序就是文件序（权威逐事件 `pointX[floor] += …`），
+    // relativeTo 还会把"前一条的结果"算进后一条 —— 不稳定排序会让结果随实现变化。
+    std::stable_sort(sorted.begin(), sorted.end(), [](auto& a, auto& b) { return a.first < b.first; });
     size_t oi = 0;
+
+    // ── Pass 1：算 relativeTo 的 change（**需要在砖位被烘之前**读原始坐标）──────────
+    // 权威 `PositionTrackManager.computeTransforms`：
+    //   target = IDFromTile(relativeTo, floor)（ThisTile: floor+off / Start: off / End: n-1+off，clamp）
+    //   若 target != floor：change += (baseX[target]+bitSumX(target)+pointX(target))
+    //                              − (baseX[floor]+vectorX)
+    // 之后 justThisTile → pointX[floor] += change；否则 bitAdd(floor, change) 且
+    // vectorX = bitSumX(floor) + pointX[floor]。
+    // 我们是**一遍后缀累加**（cumX/cumY），所以这里先单独跑一遍"只算 change、不动砖位"。
+    const bool wantRel = std::any_of(sorted.begin(), sorted.end(),
+                                     [](const auto& pr) { return (pr.second.posMask & 8u) != 0; });
+    if (wantRel) {
+        struct BitRun { int32_t floor; double x, y; };
+        std::vector<BitRun> bitRuns;                  // 每次 bitAdd 之后记一条（稀疏）
+        std::vector<std::pair<int32_t, std::pair<double, double>>> pointSums;  // floor → (x,y)
+        auto pointAt = [&](int32_t f, double& px, double& py) {
+            px = py = 0.0;
+            auto it = std::lower_bound(pointSums.begin(), pointSums.end(), f,
+                                       [](const auto& a, int32_t v) { return a.first < v; });
+            if (it != pointSums.end() && it->first == f) { px = it->second.first; py = it->second.second; }
+        };
+        auto pointAdd = [&](int32_t f, double dx, double dy) {
+            auto it = std::lower_bound(pointSums.begin(), pointSums.end(), f,
+                                       [](const auto& a, int32_t v) { return a.first < v; });
+            if (it != pointSums.end() && it->first == f) { it->second.first += dx; it->second.second += dy; }
+            else pointSums.insert(it, {f, {dx, dy}});
+        };
+        double cumX = 0.0, cumY = 0.0;                // = bitSumX(当前层)
+        auto bitSumAt = [&](int32_t f, double& bx, double& by) {
+            auto it = std::upper_bound(bitRuns.begin(), bitRuns.end(), f,
+                                       [](int32_t v, const BitRun& r) { return v < r.floor; });
+            if (it == bitRuns.begin()) { bx = by = 0.0; return; }
+            const BitRun& r = *(it - 1); bx = r.x; by = r.y;
+        };
+        double vecX = 0.0, vecY = 0.0;                // 权威的 `vector`（累积偏移，含点加）
+        const int32_t nPos = (int32_t)std::min<int64_t>(n, INT32_MAX);
+
+        for (auto& pr : sorted) {
+            TilePositionOffset& o = pr.second;
+            const int32_t f = (int32_t)pr.first;
+            double cx = (double)o.offsetX, cy = (double)o.offsetY;
+            if (o.posMask & 8u) {
+                int64_t target = (int64_t)f;
+                if (o.relType == 1)      target = (int64_t)o.relOffset;               // Start
+                else if (o.relType == 2) target = (int64_t)nPos - 1 + o.relOffset;    // End
+                else                     target = (int64_t)f + o.relOffset;           // ThisTile
+                target = std::max<int64_t>(0, std::min<int64_t>(target, (int64_t)nPos - 1));
+                if (target != f) {
+                    double bsx = 0.0, bsy = 0.0, ptx = 0.0, pty = 0.0;
+                    bitSumAt((int32_t)target, bsx, bsy);
+                    pointAt((int32_t)target, ptx, pty);
+                    const double tx = tiles[(size_t)target].position[0] + bsx + ptx;
+                    const double ty = tiles[(size_t)target].position[1] + bsy + pty;
+                    cx += tx - (tiles[(size_t)f].position[0] + vecX);
+                    cy += ty - (tiles[(size_t)f].position[1] + vecY);
+                }
+            }
+            // 写回（Pass 2 直接照这些值烘）
+            o.offsetX = (float)cx; o.offsetY = (float)cy;
+            if (o.justThisTile) {
+                pointAdd(f, cx, cy);
+            } else {
+                cumX += cx; cumY += cy;
+                if (!bitRuns.empty() && bitRuns.back().floor == f) { bitRuns.back().x = cumX; bitRuns.back().y = cumY; }
+                else bitRuns.push_back({f, cumX, cumY});
+                double px2 = 0.0, py2 = 0.0; pointAt(f, px2, py2);
+                vecX = cumX + px2; vecY = cumY + py2;
+            }
+        }
+        oi = 0;   // Pass 2 从头再走一遍
+    }
 
     // justThisTile 的语义 = **只作用于本层**（点加），三份来源一致：
     //   * 编辑器指南（adofaieditor.gitbook.io → Position Track → "Only change this tile"）：

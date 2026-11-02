@@ -17,10 +17,17 @@
       **像素门槛：57 个状态里只有 `myc_t30_z25` 变**（diff=464 px，maxdelta=187）——
       原因是 MYC 第 1123 层 `scale: 90`，那块砖现在按 90% 画（三联图 `build/myc_pos_ab.png` 验过），
       属**真缺口修复**，基线已重存。
-- [ ] **PositionTrack 的 `relativeTo`**：解析已经做了（`[offset,"ThisTile"|"Start"|"End"]`，
-      `IDFromTile` 的三种语义），但**位置算法还没接** —— 权威是两遍（先算 base/bitSum/pointX 再算
-      workX），我们是**一遍后缀累加**，要重构成两遍才装得下。全语料实测 61,865 条都是
-      `[0,"ThisTile"]`（target 指向自己 → change 恒 0），所以**先接哪一遍都不改变当前出图**。
+- [x] ~~**PositionTrack 的 `relativeTo`**~~ —— **2026-11-02 已实现（含位置算法）**。
+      解析：`[offset,"ThisTile"|"Start"|"End"]`（`IDFromTile` 三种语义 + clamp）。
+      算法：权威是两遍，现在 `applyPositionTrackOffsets` 也是两遍 ——
+      Pass 1 只算 change（读**未烘**的原始砖位 + `bitSum`/`point` 查询，`vector` 按权威只在
+      非 justThisTile 后更新），Pass 2 才烘进砖位。事件排序改成 `stable_sort`（同层顺序 = 文件序）。
+      踩到的坑：`stringValue(p, vEnd, out)` 的 `vEnd` 必须是**这个字符串**的末尾（它做
+      `assign(p+1, vEnd-1)`），传整个数组末尾会拿到 `End"]` 这种残渣 → 类型永远落回 ThisTile。
+      验收：`tests/position_xform_test.cpp` 的 relativeTo 段（ThisTile +2 / Start −4 / End 继承）；
+      像素门槛 **57/57 逐字节不变**（全语料 61,865 条都是 `[0,"ThisTile"]` = target 指向自己 → 恒 0），
+      正好证明这条新路径不会动到现有谱面。
+
 - [ ] **Hold / Release**（DLC 长按）：每个 hold 一个 mesh（uniform 驱动填充）+ `holdLength`。
 - [ ] **Bloom / Flash**：官方 Hidden/VideoBloom，`MediumAmount` 定标 = **0.28**（参照 Re_ADOJAS）。
 - [ ] **建帧 ~700 ms 拆三段**（MoveTrack / AnimateTrack / `buildFlipEvents`）：

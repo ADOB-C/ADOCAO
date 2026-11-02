@@ -80,6 +80,46 @@ int main() {
         }
     }
 
+    // ── relativeTo（2026-11-02）──────────────────────────────────────────────
+    // 权威 `IDFromTile`：ThisTile → floor+off；Start → off；End → n-1+off，都 clamp 到 [0,n-1]。
+    // 算法：change = (baseX[target]+bitSum(target)+point(target)) − (baseX[floor]+vector)。
+    // angleData 全 0 → 基础位置就是 (i, 0)，一眼可读。
+    static const char* kRel = R"JSON({"settings": {"bpm": 60},
+ "angleData": [0, 0, 0, 0, 0, 0, 0, 0],
+ "actions": [
+   {"floor": 3, "eventType": "PositionTrack", "relativeTo": [2, "ThisTile"],  "justThisTile": "Enabled"},
+   {"floor": 4, "eventType": "PositionTrack", "relativeTo": [-4, "Start"],    "justThisTile": "Enabled"},
+   {"floor": 6, "eventType": "PositionTrack", "relativeTo": [0, "End"],       "justThisTile": "Disabled"}
+ ]})JSON";
+    {
+        LevelData lv3;
+        if (!lv3.loadFromBuffer(kRel, std::strlen(kRel))) {
+            std::printf("  ✗ relativeTo 用例没加载成功\n");
+            failures++;
+        } else {
+            auto pos = [&](int f) { return lv3.tiles[(size_t)f].position[0]; };
+            // floor 3 → target 5：change = 5 − 3 = +2，点加只影响本层
+            if (std::fabs(pos(3) - 5.0) > 1e-9) {
+                std::printf("  ✗ relativeTo ThisTile: floor3 期望 x=5，实际 %.3f\n", pos(3)); failures++;
+            }
+            if (std::fabs(pos(4) - 4.0 - (-4.0)) > 1e-9) {
+                std::printf("  ✗ relativeTo Start: floor4 期望 x=0，实际 %.3f\n", pos(4)); failures++;
+            }
+            // floor 6 → target 8（End，n−1）：change = 8 − 6 = +2，继承型 → 6..8 都 +2
+            if (std::fabs(pos(6) - 8.0) > 1e-9 || std::fabs(pos(7) - 9.0) > 1e-9 ||
+                std::fabs(pos(8) - 10.0) > 1e-9) {
+                const auto& e6 = lv3.tilePositionOffsets.at(6)[0];
+                std::printf("  ✗ relativeTo End: 期望 8/9/10，实际 %.3f/%.3f/%.3f"
+                            "（mask=%u relType=%u relOff=%d n=%zu）\n",
+                            pos(6), pos(7), pos(8), (unsigned)e6.posMask,
+                            (unsigned)e6.relType, (int)e6.relOffset, lv3.tiles.size()); failures++;
+            }
+            if (std::fabs(pos(5) - 5.0) > 1e-9) {     // 5 不在 floor6 的继承范围之前
+                std::printf("  ✗ relativeTo 不该动 floor5，实际 %.3f\n", pos(5)); failures++;
+            }
+        }
+    }
+
     if (failures) {
         std::printf("position_xform: %d 处不一致\n", failures);
         return 1;

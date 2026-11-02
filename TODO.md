@@ -8,30 +8,21 @@
 
 ## 我这条线（渲染 / 动画 / 时间线）
 
-- [ ] **PositionTrack 还差 4 个字段**：`relativeTo` / `rotation` / `scale` / `opacity`
-      （现在只做了 `positionOffset` 与 `stickToFloors`）。权威**确实会渲染**这些字段
-      （`Player.ts:6855` 取 `getTileTransform(index)` → `tileMesh.rotation.z / scale / material.opacity`），
-      所以是**真缺口**，不是"参考实现也没用"。
-      **用量（2026-11-02 普查，本地 30 张谱）**：`relativeTo` 出现在**每一张**用了 PositionTrack 的谱；
-      `rotation`/`scale`/`opacity` 最高的是 The Moon（**2,108 / 2,108 / 2,104 条**）、
-      2.64e6（1,445 / 1,438 / 1,438）、IDPLMA（1,090 / 986 / 989）、hangazi（831…）。
-      **两处结构性的活**（不是加个字段就行）：
-      1. `relativeTo`：权威是**两遍**（先算好 base/bitSum/pointX 再算 workX），
-         我们的 `applyPositionTrackOffsets` 是**一遍后缀累加**，要重构成两遍才装得下；
-      2. `rotation/scale/opacity`：每砖一个值（事件值优先、否则继承 `cur*`），
-         而 2³¹ 目标不能再加 12 B/砖 —— 得存**稀疏 run 表**（只在持久状态变化处分段，
-         类似 `m_cumOffsets` / `trackStyleRunEnd`），逐砖查。
-      另有一个坑：`scale` 这个键在 MoveTrack 里是 `[x,y]` 数组、在 PositionTrack 里是**数字**（百分数），
-      解析侧按事件类型分派。
-- [x] ~~**ColorTrack**：`COLOR_FUNCS` / `FLOOR_FUNCS` / `RecolorTrack`~~ —— **2026-11-02 量完：已经实现了**。
-      用量（本地 30 张谱）：**The Moon 2,664 条**（全 `Single`）、Lost Requiem 2,452（148 Rainbow /
-      39 Glow / 5 Blink）、2025 **2,046**（59 Rainbow / 87 Glow / 35 Blink）、2.64e6 1,488（全 Single）、
-      scam 1,163、hangazi 964（**653 条 Rainbow**）、missing_vfx 443（299 Switch）；
-      而三张巨谱（MYC 640MB / no-3P 295MB / level 315MB）**一条都没有**。
-      实现侧：`core/level/TileColor.cpp` 已覆盖 colorType `Single/Stripes/Switch/Glow/Blink/Rainbow/Volume`
-      + 样式 `Neon/NeonLight/Basic/Minimal/Standard`；`Gems` 落到 `Standard` 分支 —— 与权威一致
-      （`TileColorManager.ts:96` 的 `Gems` 与 `Standard` **颜色相同**，第三个布尔在调用方 `:636` 直接丢弃）。
-      结论：**这条不欠任何东西**，是又一条旧账。
+- [ ] **PositionTrack 剩下的字段 —— 逐字段量过了，只剩 `scale`/`opacity` 有实际内容**：
+      | 字段 | 实况（全语料） |
+      |---|---|
+      | `relativeTo` | **61,865 条全是 `[0,"ThisTile"]`** = target 指向自己 → `changeX` 恒为 0，**零影响** |
+      | `rotation` | **非零值 0 条** |
+      | `scale` | 非恒等（≠100）**220 条**：120/140/80/115/**0**/200/150… |
+      | `opacity` | 非恒等 **12 条**（全是 80） |
+      受影响的谱只有 7 张：The Moon **80 条**、source_missing 36、HELLO 2026 28、AWC2025 25、
+      2025 12、2025(No VFX) 9、scam 6。
+      权威会渲染（`Player.ts:6855` → `tileMesh.scale` / `material.opacity`），所以 `scale`+`opacity` 是真缺口；
+      但**The Moon 与 2025 都在像素门槛里** → 做完这两张的基线会变，得按"真缺口"重存并逐个解释。
+      实现要点：每砖一个值（事件值优先、否则继承 `cur*`）→ 只能存**稀疏 run 表**（不能 12 B/砖）；
+      `scale` 这个键在 MoveTrack 里是 `[x,y]` 数组、在 PositionTrack 里是**数字**，解析侧按类型分派。
+- [ ] （低优先，spec 完整性）`relativeTo` 的解析：现在解析器只认 MoveCamera 的字符串形式，
+      PositionTrack 的 `[offset, type]` **根本没读**。虽然全语料都退化成 no-op，但换一张谱就会错。
 - [ ] **Hold / Release**（DLC 长按）：每个 hold 一个 mesh（uniform 驱动填充）+ `holdLength`。
 - [ ] **Bloom / Flash**：官方 Hidden/VideoBloom，`MediumAmount` 定标 = **0.28**（参照 Re_ADOJAS）。
 - [ ] **建帧 ~700 ms 拆三段**（MoveTrack / AnimateTrack / `buildFlipEvents`）：

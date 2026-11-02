@@ -208,11 +208,14 @@
       官方向照：真值应是**每个事件各作用一次**（Re_ADOJAS 的 `pointX[floor] += …` / `bitAdd` 是逐事件的）。
       顺带：`applyPositionTrackOffsets()` 里"同层多个事件累加"那句注释与实际数据结构不符。
       影响面：v3 checkpoint 的不变量 3（边界层 `floor == i0` 撞上多事件会少算）。
-- [ ] 拖尾的 sagitta 采样率判据仍按"半径 ≈ 1"（`PositionSolver::tilePathSpeed` 里用
+- [x] ~~拖尾的 sagitta 采样率判据仍按"半径 ≈ 1"~~ **2026-11-01 已修**：`curvatureRadius()` 改成
+      `orbitRadiusAt()`（ScaleRadius 段内插值），回归 `trail_window` ⑤（负向对照 → got 1.000）。
+      下面是原始记录：
+       ~~（`PositionSolver::tilePathSpeed` 里用
       `max(tileStartDist, tileEndDist)`，而这两个访问器对非末层恒为 1.0f）。
       `ScaleRadius` 现在真的接上半径了（`radiusScaleAt`），`scale` 很大的谱面这里会略欠采样 ——
       只影响折线密度，不影响位置。改法：那条判据换成 `radiusScaleAt(idx)`（注意会动拖尾采样率 →
-      得重存像素门槛里碰得到的基线）。
+      得重存像素门槛里碰得到的基线）。~~
 - [x] **ScaleRadius**（继承状态 + 逐层累积偏移）：官方 `scnGame 1294/1380/758` —— `radiusScale = scale/100`
       默认 1、继承到下一个事件；`val4 += direction(entryangle) * ((1 - radiusScale) * tileSize)` 逐层累加后
       加到砖位，**叠加在 PositionTrack 偏移之上**。

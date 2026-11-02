@@ -238,7 +238,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   默认口径是几何尺度容差 1e-5 砖，`ADOCAO_TILE_EXACT=1` 才要求逐位（见 `docs/rendering.md` 的"砖块几何"段）
 - shader 一致性：`scripts/check-shader-fallback.sh`（`render/Shaders.hpp` 的内嵌回退 GLSL 必须与
   `assets/shaders/*` 逐字相同）
-- 待办（已筛选）：`TODO.md`（未完成清单 + 遥远的未来：MoveTrack）
+- 待办（已筛选）：`TODO.md` —— **只放「还没做的、能动手的」**（2026-11-02 从 918 行压到 69 行：
+  设计分析搬去 `docs/timeline-checkpoints.md`、已完成历史交给 git log、失效旧账进「已排除」）
 - 已彻底删除：GPU compute culling（2.0.0 起不需要，勿再引入）
 - **本项目是"查看器"，不该具备"产出谱面"的能力**（2026-10-25 用户拍板；原话："首先这个项目不应该
   具备输出能力，有也放 tests/"）。判据：凡是**把谱面写成文件**（`.adocao` / `.adofai` / 任何容器）

@@ -3194,7 +3194,6 @@ bool LevelData::finishLoad(ProgressCb onProgress, bool exportOnly) {
     if (onProgress) onProgress(0.40f, "Processing actions...");
     refreshDerivedCaches();
     if (!exportOnly) {
-        applyHoldOffsets();
         applyPositionTrackOffsets();
         applyRadiusScaleOffsets();
     }
@@ -3791,36 +3790,6 @@ LevelData::PosTrackXform LevelData::posTrackXformAt(int64_t floor) const {
         }
     }
     return x;
-}
-
-// DLC 长按的砖位偏移（权威 `Player.ts:1632` Hold 位置偏移）：
-//   holdDistance[i] = nearZero ? 0 : (holdLen*2 + 1) * distanceMultiplier/100
-//   砖 i+1 **及其后所有砖** 沿 exitAngle 累计偏移 —— 偏移进累积量并逐砖向后传递，
-//   否则轨道会在 i+2 处断开。**这一步必须早于 PositionTrack**（参考也是这个顺序），
-//   而且它正是"长按带能横跨空场"的原因：尾砖被推远，带子的终点圆心跟着跑。
-void LevelData::applyHoldOffsets() {
-    if (m_tileHoldLength.empty()) return;
-    const int64_t n = (int64_t)tiles.size();
-    double hx = 0.0, hy = 0.0;
-    for (int64_t i = 1; i < n; ++i) {
-        const int holdLen = holdLengthAt(i - 1);
-        if (holdLen >= 0) {
-            // nearZero（扫角 ≈0 / ≈整圈）在参考里 holdDistance 记 0。我们用"两砖几乎重合"
-            // 近似那个判据（真正的判据要扫角，而这里只有位置）：重合段推不动方向。
-            const double dx = tiles[(size_t)i].position[0] - tiles[(size_t)(i - 1)].position[0];
-            const double dy = tiles[(size_t)i].position[1] - tiles[(size_t)(i - 1)].position[1];
-            const double len = std::sqrt(dx * dx + dy * dy);
-            if (len > 1e-5) {
-                const double d = (double)(holdLen * 2 + 1) * (double)holdMultAt(i - 1);
-                hx += dx / len * d;
-                hy += dy / len * d;
-            }
-        }
-        if (hx != 0.0 || hy != 0.0) {
-            tiles[(size_t)i].position[0] += hx;
-            tiles[(size_t)i].position[1] += hy;
-        }
-    }
 }
 
 void LevelData::applyRadiusScaleOffsets() {

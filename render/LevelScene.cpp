@@ -1,4 +1,5 @@
 #include "render/LevelScene.hpp"
+#include <fstream>
 
 #include <cstdio>
 #include <cstdlib>   // getenv（诊断转储）
@@ -67,6 +68,12 @@ bool LevelScene::compileShaders() {
     // （查 CPU 展开表，见 assets/shaders/tile_cpu.vert）。选哪支靠**试编**，不按版本号猜 ——
     // 同 `archive/LzmaMtCompat` 的教训：版本区间 ≠ 实际能力（有的驱动给 4.1 上下文但 GLSL
     // 编译器的 fma 行为不同，反过来也有）。高亮与砖共用同一支 VS，只有 FS 不同。
+    // **路径必须用 std::string 保活**：`resolveAsset(...).c_str()` 传参时临时对象立刻析构，
+    // 指针悬空 → 文件永远读不到 → 静默退回内嵌串（2026-10-17 踩过一次，2026-11-03 又在
+    // 长按着色器上重演：程序里只剩顶点 shader 的 uniform，uColor/uOpacity 全是 -1 → 带子全黑）。
+    const std::string holdVp = resolveAsset("assets/shaders/hold.vert");
+    const std::string holdFp = resolveAsset("assets/shaders/hold.frag");
+
     auto compileTile = [&](const char* vsFile, const char* vsInline) -> bool {
         // ⚠️ 路径必须存成 std::string：`resolveAsset(...).c_str()` 绑到 `const char*` 上时，
         // 那个临时 string 在本行结束时就被销毁 → 指针悬空 → 文件永远"加载失败"、静默退回内嵌串。
@@ -102,7 +109,7 @@ bool LevelScene::compileShaders() {
 
     if (!compileShader(*m_planetShader, resolveAsset("assets/shaders/planet.vert").c_str(), resolveAsset("assets/shaders/planet.frag").c_str(), Shaders::kPlanetVertSrc, Shaders::kPlanetFragSrc)
      || !compileShader(*m_trailShader, resolveAsset("assets/shaders/trail.vert").c_str(), resolveAsset("assets/shaders/trail.frag").c_str(), Shaders::kTrailVertSrc, Shaders::kTrailFragSrc)
-     || !compileShader(*m_holdShader, resolveAsset("assets/shaders/hold.vert").c_str(), resolveAsset("assets/shaders/hold.frag").c_str(), Shaders::kHoldVertSrc, Shaders::kHoldFragSrc)) {
+     || !compileShader(*m_holdShader, holdVp.c_str(), holdFp.c_str(), Shaders::kHoldVertSrc, Shaders::kHoldFragSrc)) {
         LOG_E("Shader compilation failed");
         return false;
     }

@@ -96,6 +96,7 @@ void HoldBands::build(const LevelData& lv, const Timeline& tl) {
         band.startTime = tl.startTimeAt(i);
         band.endTime = tl.startTimeAt(i + 1);
         band.indexCount = (int)idx.size();
+        for (size_t k = 0; k < 15 && k < verts.size(); ++k) band.probe[k] = verts[k];
 
         glGenVertexArrays(1, &band.vao);
         glBindVertexArray(band.vao);
@@ -123,6 +124,11 @@ void HoldBands::draw(Shader& shader, const Camera& camera, double camX, double c
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDisable(GL_DEPTH_TEST);
+    // **必须关面剔除**：带子是薄片，背朝相机的段会被 GL_BACK 剔掉。
+    // 之前"顶点合法、程序链好、无 GL 错误、NDC 在屏幕正中，却一个像素都没有"就是它
+    // （连硬编码 `FragColor = vec4(1,0,1,1)` 都不出像素 ——fragment 根本没跑）。
+    // 参考实现用 `side: DoubleSide`，等价於这里关剔除。
+    glDisable(GL_CULL_FACE);
     for (const Band& b : m_bands) {
         const double dur = b.endTime - b.startTime;
         const double prog = dur > 0.0 ? (timeSec - b.startTime) / dur : 0.0;
@@ -131,13 +137,14 @@ void HoldBands::draw(Shader& shader, const Camera& camera, double camX, double c
         const TileXform xf = tileXformAt(lv, anim, b.floor, timeSec);
         const glm::dvec2 off = b.center + glm::dvec2(xf.moveX, xf.moveY) - glm::dvec2(camX, camY);
         auto model = glm::translate(glm::mat4(1.0f), glm::vec3((float)off.x, (float)off.y, 0.0f));
+
         const glm::mat4 mvp = camera.viewProj() * model;
         shader.setMat4("uMVP", glm::value_ptr(mvp));
         shader.setFloat("uCompletion", (float)std::clamp(prog, 0.0, 1.0));
         shader.setVec3("uColor", 1.0f, 1.0f, 1.0f);
         // **不用 `tileXformAt().opacity`**：那条路对"已经消失的砖"返回 0，而长按带只在
         // 自己那块砖的这段时间里画（prog ∈ [0,1]），本来就该跟着砖亮；实测用它会让整条带全透明。
-        shader.setFloat("uOpacity", (float)std::clamp(prog * 4.0, 0.0, 1.0));
+        shader.setFloat("uOpacity", 1.0f);
         glBindVertexArray(b.vao);
         glDrawElements(GL_TRIANGLES, b.indexCount, GL_UNSIGNED_INT, nullptr);
     }

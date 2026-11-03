@@ -34,6 +34,7 @@ private:
     struct Band {
         unsigned vao = 0, vbo = 0, ebo = 0;
         int indexCount = 0;
+        float probe[15] = {0};   // 前 3 个顶点（诊断用）
         glm::dvec2 center{0.0, 0.0};   // 相机相对偏移用（取起点圆心）
         int64_t floor = 0;
         double startTime = 0.0, endTime = 0.0;

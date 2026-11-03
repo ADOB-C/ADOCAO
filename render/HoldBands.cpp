@@ -34,8 +34,10 @@ static GLuint makeHoldTexture() {
     std::vector<unsigned char> px((size_t)W * H * 4, 0);
     for (int y = 0; y < H; ++y) {
         const float t = (float)y / (float)(H - 1);
-        // HSV(hue=t, s=0.85, v=1)
-        const float h = t * 6.0f;
+        // 官方 `holdTex.png` 在**一条带子里含多轮彩虹**（UV 只走一遍 0→1，颜色循环好几次），
+        // 我们只做一轮就变成"单调渐变"。这里按 4 轮生成（可调）。
+        constexpr float kCycles = 4.0f;
+        const float h = std::fmod(t * kCycles, 1.0f) * 6.0f;
         const int i = (int)std::floor(h) % 6;
         const float f = h - std::floor(h);
         const float p = 0.15f, q = 1.0f - 0.85f * f, u = 1.0f - 0.85f * (1.0f - f);

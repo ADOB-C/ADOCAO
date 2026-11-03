@@ -487,6 +487,11 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
                                       float sampleRate, const glm::dvec2& redHead,
                                       const glm::dvec2& blueHead, std::vector<glm::dvec2>& redOut,
                                       std::vector<glm::dvec2>& blueOut, const TileAnimation* anim) {
+    // **拖尾只覆盖真正播过的时间**：窗口起点早于谱面首砖时，那些"负进度"的采样点没有意义
+    // （行星还没出发），硬算会得到"从砖心连到行星"的一条直线（用户看到的那条锥形）。
+    // 把它当成正常情况处理：窗口裁到首砖起点，裁完没有历史就干脆不画。
+    const double firstStart = timeline.firstStartTime();
+    if (startTime < firstStart) startTime = firstStart;
     if (sampleRate <= 0.0f || t <= startTime) return;
 
     const int maxSamples = (int)std::ceil((t - startTime) * sampleRate) + 1;

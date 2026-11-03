@@ -408,6 +408,8 @@ struct TrailTileConsts {
     double totalAngle = 0.0;
     double startDist = 0.0;
     double endDist = 0.0;
+    // 长按砖：圆心从 pivot 线性平移到 pivot+slide（与 `positionAtTile` 同一算式）
+    double slideX = 0.0, slideY = 0.0;
     double firstStart = 0.0;  // == timeline.firstStartTime()（首砖之前的特例判据）
     bool isRed = true;
     bool tileMain = false;    // false = 落在 `positionAtTile` 的两个特例（首砖之前 / 末尾合成砖）
@@ -430,6 +432,16 @@ inline void loadTrailTileConsts(const Timeline& timeline, int tileIdx, int n, do
     // 半径：起点 = ScaleRadius(i)，终点 = ScaleRadius(i+1)（砖内线性插值，与行星同源）
     c.startDist = (double)L.radiusScaleAt(tileIdx);
     c.endDist = (double)L.radiusScaleAt(tileIdx + 1);
+    // **长按**：拖尾也必须用"滑动圆心"，否则行星在转圈、拖尾却沿轨道走 —— 看起来就是
+    // 一条水平的直线（用户报的"拖尾是水平的"）。
+    if (L.holdLengthAt(tileIdx) >= 0 && tileIdx + 1 < (int)L.tileCount()) {
+        const double exitDir = (double)timeline.startAngleAt(tileIdx) + (double)totalAngle;
+        const auto tail = L.tilePositionAt(tileIdx + 1);
+        const double endCX = (double)tail[0] - std::cos(exitDir) * c.endDist;
+        const double endCY = (double)tail[1] - std::sin(exitDir) * c.endDist;
+        c.slideX = endCX - c.pivotX;
+        c.slideY = endCY - c.pivotY;
+    }
     c.isRed = (tileIdx % 2 == 0);
     c.firstStart = timeline.firstStartTime();
     // 与 `positionAtTile` 的分支判据一致：n < 2 或首砖之前走特例；末尾合成砖（>= n-1）也走特例。
@@ -457,10 +469,12 @@ inline void trailPointAt(const TrailTileConsts& c, double tt, double& rx, double
     if (progress < 0) progress = 0; if (progress > 1) progress = 1;
     const double angle = c.startAngle + c.totalAngle * progress;
     const double dist = c.startDist + (c.endDist - c.startDist) * progress;
-    const double mvx = c.pivotX + std::cos(angle) * dist;
-    const double mvy = c.pivotY + std::sin(angle) * dist;
-    if (c.isRed) { rx = c.pivotX; ry = c.pivotY; bx = mvx; by = mvy; }
-    else         { bx = c.pivotX; by = c.pivotY; rx = mvx; ry = mvy; }
+    const double cx = c.pivotX + c.slideX * progress;
+    const double cy = c.pivotY + c.slideY * progress;
+    const double mvx = cx + std::cos(angle) * dist;
+    const double mvy = cy + std::sin(angle) * dist;
+    if (c.isRed) { rx = cx; ry = cy; bx = mvx; by = mvy; }
+    else         { bx = cx; by = cy; rx = mvx; ry = mvy; }
 }
 
 }  // namespace

@@ -165,6 +165,12 @@ void HoldBands::build(const LevelData& lv, const Timeline& tl) {
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(idx.size() * sizeof(unsigned)), idx.data(), GL_STATIC_DRAW);
         glBindVertexArray(0);
 
+        {
+            float x0=1e9f,x1=-1e9f,y0=1e9f,y1=-1e9f;
+            for (size_t k=0;k+4<verts.size();k+=5){x0=std::min(x0,verts[k]);x1=std::max(x1,verts[k]);
+                                                  y0=std::min(y0,verts[k+1]);y1=std::max(y1,verts[k+1]);}
+            LOG_I("hold-bbox: 局部 x=[%.2f,%.2f] y=[%.2f,%.2f] 段=%d", x0,x1,y0,y1,segs);
+        }
         m_bands.push_back(band);
     }
     LOG_I("HoldBands: %zu 条长按带（事件 %zu 条）", m_bands.size(), lv.m_tileHoldLength.size());

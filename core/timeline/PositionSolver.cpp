@@ -410,6 +410,7 @@ struct TrailTileConsts {
     double endDist = 0.0;
     // 长按砖：圆心从 pivot 线性平移到 pivot+slide（与 `positionAtTile` 同一算式）
     double slideX = 0.0, slideY = 0.0;
+    bool hasSlide = false;
     double firstStart = 0.0;  // == timeline.firstStartTime()（首砖之前的特例判据）
     bool isRed = true;
     bool tileMain = false;    // false = 落在 `positionAtTile` 的两个特例（首砖之前 / 末尾合成砖）
@@ -434,14 +435,7 @@ inline void loadTrailTileConsts(const Timeline& timeline, int tileIdx, int n, do
     c.endDist = (double)L.radiusScaleAt(tileIdx + 1);
     // **长按**：拖尾也必须用"滑动圆心"，否则行星在转圈、拖尾却沿轨道走 —— 看起来就是
     // 一条水平的直线（用户报的"拖尾是水平的"）。
-    if (L.holdLengthAt(tileIdx) >= 0 && tileIdx + 1 < (int)L.tileCount()) {
-        const double exitDir = (double)timeline.startAngleAt(tileIdx) + (double)totalAngle;
-        const auto tail = L.tilePositionAt(tileIdx + 1);
-        const double endCX = (double)tail[0] - std::cos(exitDir) * c.endDist;
-        const double endCY = (double)tail[1] - std::sin(exitDir) * c.endDist;
-        c.slideX = endCX - c.pivotX;
-        c.slideY = endCY - c.pivotY;
-    }
+    c.hasSlide = (L.holdLengthAt(tileIdx) >= 0) && (tileIdx + 1 < (int)L.tileCount());
     c.isRed = (tileIdx % 2 == 0);
     c.firstStart = timeline.firstStartTime();
     // 与 `positionAtTile` 的分支判据一致：n < 2 或首砖之前走特例；末尾合成砖（>= n-1）也走特例。
@@ -453,12 +447,22 @@ inline void loadTrailTileConsts(const Timeline& timeline, int tileIdx, int n, do
 // 返回 false = 这三块砖都没有位移，调用方继续用缓存好的静态常量（逐位不变、也不多花时间）。
 inline void loadTrailTileConstsLive(const Timeline& timeline, const TileAnimation* anim,
                                    int tileIdx, double tt, TrailTileConsts& c) {
-    if (!anim) return;
+    void(0);
     const LevelData& L = *timeline.level();
     // **只挪枢轴**：半径/起始角一律用静态值（半径只由 ScaleRadius 决定 —— 它已烘进砖位，
     // `tileStartDist/tileEndDist` 就是它）。按活邻居重算半径会随 MoveTrack 位移伸缩，
     // 违反"只有 ScaleRadius 改半径"（用户 2026-10-30）。
-    livePivot(L, anim, tileIdx, tt, c.pivotX, c.pivotY);
+    if (anim) livePivot(L, anim, tileIdx, tt, c.pivotX, c.pivotY);
+    // 长按砖的滑动圆心**必须在这里按活枢轴重算**：缓存在 `loadTrailTileConsts` 里的那份
+    // 是按"进砖那一刻"的枢轴算的，到达瞬间与活值错位 → 拖尾被拉成跨屏横带（踩过）。
+    if (c.hasSlide) {
+        const double exitDir = c.startAngle + c.totalAngle;
+        const auto tail = L.tilePositionAt(tileIdx + 1);
+        const double endCX = (double)tail[0] - std::cos(exitDir) * c.endDist;
+        const double endCY = (double)tail[1] - std::sin(exitDir) * c.endDist;
+        c.slideX = endCX - c.pivotX;
+        c.slideY = endCY - c.pivotY;
+    }
 }
 
 // `positionAtTile` 主分支的算术，逐字照抄（同操作、同顺序、同类型）。
@@ -544,12 +548,12 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
                   (double)L.tileDirectionAt((int64_t)tileIdx - 1));
         }
         double rx = 0.0, ry = 0.0, bx = 0.0, by = 0.0;
-        // **长按砖直接走 `positionAtTile`**：那块砖的圆心在平移，缓存的推导式容易与行星分家
-        // （之前加 slide 就出现过"到达瞬间拖尾被拉成一条跨屏横带"）。长按极少，慢一点无所谓。
-        const bool isHoldTile = timeline.level()->holdLengthAt(tileIdx) >= 0;
-        if (c.tileMain && tt >= c.firstStart && !isHoldTile) {
-            trailPointAt(c, tt, rx, ry, bx, by);
-        } else {
+        // **拖尾 = 行星轨迹**，所以采样点必须由**算行星位置的同一个函数**给出。
+        // 原来这里走 `trailPointAt`（一份"缓存副本"），为它已经踩过两次坑：
+        //   ① 长按期间圆心在平移，副本不知道 → 拖尾是水平直线；
+        //   ② 补了 slide 之后，到达瞬间缓存常量与活值错位 → 拖尾被拉成跨屏横带。
+        // 现在一律调 `positionAtTile`（与行星逐位相同），慢一点换来"不可能分家"。
+        if (c.tileMain && tt >= c.firstStart) {
             // 特例（首砖之前 / 末尾合成砖）：照原样调 positionAtTile，语义与逐位都不动。
             glm::dvec2 r(0), b(0);
             positionAtTile(timeline, tt, tileIdx, r, b, anim);

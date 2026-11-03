@@ -338,6 +338,7 @@ inline LevelData::FastAction::Type eventTypeOf(KeyRef k) {
     if (keyIs(k, "MoveTrack"))     return T::MoveTrack;      // → moveTrackEvents（轨道动画）
     if (keyIs(k, "ScaleRadius"))   return T::ScaleRadius;    // 轨道半径缩放（烘进砖位）
     if (keyIs(k, "MultiPlanet"))   return T::MultiPlanet;    // 多星布局（逐砖表，见 buildPlanetTables）
+    if (keyIs(k, "Hold"))          return T::Hold;            // DLC 长按（只影响图标 + 长按带）
     return T::Other;
 }
 
@@ -357,6 +358,7 @@ struct ActionFields {
     float offX = 0.0f, offY = 0.0f;
     bool justThisTile = false;
     bool hasStickToFloors = false, stickToFloors = true;   // PositionTrack 的"粘性轨道"开关
+    bool hasDistanceMult = false; double distanceMultiplier = 100.0;   // Hold 的 distanceMultiplier
     bool hasPlanets = false; int planets = 2;              // MultiPlanet 的星数（2..8）
     std::string hitsound, trackDisappear, trackAnimation;
 
@@ -743,6 +745,9 @@ inline bool parseActionObject(const char* p, const char* e, ActionFields& f, boo
             if (keyIs(key, "duration")) {
                 if (!parseNumber(v, vEnd, d)) return false;
                 f.duration = (float)d; f.hasDuration = true;
+            } else if (keyIs(key, "distanceMultiplier")) {
+                if (!parseNumber(v, vEnd, d)) return false;
+                f.distanceMultiplier = d; f.hasDistanceMult = true;
             } else if (rich && keyIs(key, "disabled")) {
                 parseDisabledObject(v, vEnd, f);
             }
@@ -944,6 +949,12 @@ inline bool buildAction(const ActionFields& f, LevelData::FastAction& a, bool& k
         break;
     case T::Pause:
         a.val1 = f.hasDuration ? f.duration : 0.0f;
+        break;
+    case T::Hold:
+        // 权威 `buildHoldLengths`：`duration` 直接当 holdLength（整型，≥0 才算长按）。
+        // `distanceMultiplier` 是百分数（÷100 存）。
+        a.val1 = f.hasDuration ? (float)std::trunc(f.duration) : -1.0f;
+        a.val2 = f.hasDistanceMult ? (float)(f.distanceMultiplier / 100.0) : 1.0f;
         break;
     case T::PositionTrack:
         if (f.hasOffset) { a.val1 = f.offX; a.val2 = f.offY; }
@@ -3336,6 +3347,13 @@ void LevelData::refreshDerivedCaches() {
             break;
         case FastAction::MultiPlanet:
             multiEvents.push_back({(int64_t)floor, (int)std::lround(a.val1)}); break;
+        case FastAction::Hold:
+            // 需要下一砖才挂得住（权威 `floor >= n - 1` 直接跳过）
+            if (a.val1 >= 0.0f && (int64_t)floor < (int64_t)tiles.size() - 1) {
+                m_tileHoldLength[(int32_t)floor] = (int16_t)std::min(32767.0f, a.val1);
+                if (a.val2 != 1.0f) m_tileHoldMult[(int32_t)floor] = a.val2;
+            }
+            break;
         case FastAction::PositionTrack:
             tilePositionOffsets[floor].push_back(
                 {a.val1, a.val2, a.flag,

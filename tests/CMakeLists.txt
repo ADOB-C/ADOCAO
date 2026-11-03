@@ -204,6 +204,12 @@ target_include_directories(adocao_position_xform_test PRIVATE ${CMAKE_SOURCE_DIR
 target_link_libraries(adocao_position_xform_test PRIVATE adocao_core)
 add_test(NAME position_xform COMMAND adocao_position_xform_test)
 
+# Hold（DLC 长按）：逐砖 / 无继承 / distanceMultiplier / 末砖跳过
+add_executable(adocao_hold_test hold_test.cpp)
+target_include_directories(adocao_hold_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(adocao_hold_test PRIVATE adocao_core)
+add_test(NAME hold COMMAND adocao_hold_test)
+
 # audio-as-chart（raw-PCM 直通）：整谱就是波形 —— 这条链决定"能不能听见和弦"（do-mi-sol）。
 # 三层断言：buildRawPcm 认谱 + **负向对照**（普通打拍音谱必须被拒）+ 重采样后三个分音
 # 同时远高于对照频率。要链 audio（HitsoundManager 在这里）。

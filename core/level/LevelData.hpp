@@ -412,7 +412,11 @@ struct LevelData {
         uint16_t strId2 = 0;
         // MoveCamera / RepeatEvents **不留在 actions 里**（keep=false）：它们走 cameraEvents /
         // repeatEvents 两个富结构。这两个枚举值只用于"解析时认出它"。
-        enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack, MoveCamera, RepeatEvents, ColorTrack, RecolorTrack, Flash, MoveTrack, Other, ScaleRadius, MultiPlanet } type = Other;
+        // `Hold` 是 DLC 长按（官方 `scnGame:1297`）。**必须追加在末尾** —— .adocao v7 按类型列存储，
+        // 改既有编号会让旧容器解析串行。
+        enum Type : uint8_t { Twirl, SetSpeed, PositionTrack, SetHitsound, Bookmark, Pause, AnimateTrack,
+                              MoveCamera, RepeatEvents, ColorTrack, RecolorTrack, Flash, MoveTrack, Other,
+                              ScaleRadius, MultiPlanet, Hold } type = Other;
         bool flag = false;
         float val1 = 0, val2 = 0;
         // ── PositionTrack 的四个富字段（权威 `Player.ts:6855` 会渲染 rotation/scale/opacity）──
@@ -565,6 +569,21 @@ struct LevelData {
     struct CumOffset { int32_t floor = 0; double x = 0.0, y = 0.0; };  // 到该层为止的累计偏移
     std::vector<CumOffset> m_cumOffsets;                  // 稀疏（每个事件层一条）
     bool hasStickOverrides() const { return !m_tileStick.empty(); }
+
+    // ── Hold（DLC 长按，2026-11-03）────────────────────────────────────────
+    // 权威 `Player.ts::buildHoldLengths`：逐砖独立、**无继承**；`holdLength = duration`（整型），
+    // 没事件的砖 = -1。它**不参与时间线**（时长仍由砖的角度算），只决定图标与长按带的可见性。
+    // 本地语料 0 条，所以存**稀疏表**（2³¹ 目标下不能 2 B/砖）。
+    std::unordered_map<int32_t, int16_t> m_tileHoldLength;   // floor → holdLength（≥0 才有）
+    std::unordered_map<int32_t, float>   m_tileHoldMult;     // floor → distanceMultiplier/100
+    int holdLengthAt(int64_t floor) const {
+        auto it = m_tileHoldLength.find((int32_t)floor);
+        return it == m_tileHoldLength.end() ? -1 : (int)it->second;
+    }
+    float holdMultAt(int64_t floor) const {
+        auto it = m_tileHoldMult.find((int32_t)floor);
+        return it == m_tileHoldMult.end() ? 1.0f : it->second;
+    }
 
     // ── PositionTrack 的逐砖变换（rotation/scale/opacity，2026-11-02）──────────
     // 权威 `Player.ts:6855` 把 `getTileTransform(index)` 作为 mesh 的基础变换

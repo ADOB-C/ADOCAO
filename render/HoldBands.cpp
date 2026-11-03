@@ -192,7 +192,10 @@ void HoldBands::draw(Shader& shader, const Camera& camera, double camX, double c
     for (const Band& b : m_bands) {
         const double dur = b.endTime - b.startTime;
         const double prog = dur > 0.0 ? (timeSec - b.startTime) / dur : 0.0;
-        if (prog < -0.02) continue;                      // 还没到，不画（与参考一致：砖还没到不亮带）
+        // **不要"没到就不画"**：参考 `updateHoldRenderers` 里带子**常驻在场景**，
+        // 完成度 clamp 到 0..1，可见性只跟砖的透明度走。所以暂停在长按之前时，
+        // 带子应以"未填充"的样子显示；以前这里 `prog < -0.02 → continue`，
+        // 于是**暂停时整条带子消失**（用户报的就是这个）。
         // 起点砖的 MoveTrack/AnimateTrack 位移：整条带跟着平移（官方挂在起点砖下）
         const TileXform xf = tileXformAt(lv, anim, b.floor, timeSec);
         const glm::dvec2 off = b.center + glm::dvec2(xf.moveX, xf.moveY) - glm::dvec2(camX, camY);

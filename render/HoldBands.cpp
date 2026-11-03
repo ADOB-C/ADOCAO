@@ -27,20 +27,20 @@ void HoldBands::destroy() {
     // 贴图保留（重建时不重复生成）；进程退出由驱动回收。
 }
 
-// 程序生成"彩虹长按带"贴图（不引外部资产）：UV.y 沿路径走彩虹色相，
-// UV.x 横跨带宽：中间白核、两侧逐渐透明。64×256，RGBA8。
+// 程序生成"彩虹长按带"贴图（照官方 holdTex.png 的**实测**特征，不引外部资产）：
+//   官方图 50×200，沿路径（y）约 **2 轮**彩虹、HSV 饱和度 ≈0.55，
+//   横跨带宽（x）颜色不变、alpha 由边缘 0 升到中心 255，并有一条**白核**（中心列全白）。
 static GLuint makeHoldTexture() {
     const int W = 64, H = 256;
     std::vector<unsigned char> px((size_t)W * H * 4, 0);
+    constexpr float kCycles = 2.0f;      // 官方实测：一条带子里约两轮
+    constexpr float kSat = 0.55f;        // 最暗通道 ≈116/255
     for (int y = 0; y < H; ++y) {
         const float t = (float)y / (float)(H - 1);
-        // 官方 `holdTex.png` 在**一条带子里含多轮彩虹**（UV 只走一遍 0→1，颜色循环好几次），
-        // 我们只做一轮就变成"单调渐变"。这里按 4 轮生成（可调）。
-        constexpr float kCycles = 4.0f;
         const float h = std::fmod(t * kCycles, 1.0f) * 6.0f;
         const int i = (int)std::floor(h) % 6;
         const float f = h - std::floor(h);
-        const float p = 0.15f, q = 1.0f - 0.85f * f, u = 1.0f - 0.85f * (1.0f - f);
+        const float p = 1.0f - kSat, q = 1.0f - kSat * f, u = 1.0f - kSat * (1.0f - f);
         float r = 0, g = 0, b = 0;
         switch (i) {
             case 0: r = 1; g = u; b = p; break;
@@ -52,11 +52,13 @@ static GLuint makeHoldTexture() {
         }
         for (int x = 0; x < W; ++x) {
             const float tx = (float)x / (float)(W - 1);
-            const float d = std::fabs(tx - 0.5f) * 2.0f;          // 0 中心 → 1 边缘
-            float a = 1.0f - d * d;                                // 柔和边缘
-            if (a < 0.0f) a = 0.0f;
+            const float d = std::fabs(tx - 0.5f) * 2.0f;    // 0 中心 → 1 边缘
+            const float edge = 1.0f - d;
+            const float a = edge * edge;                     // 官方：边缘 0、中心 255，指数型衰减
             const float core = std::max(0.0f, 1.0f - d / 0.25f);   // 中央白核
-            const float rr = r + (1.0f - r) * core, gg = g + (1.0f - g) * core, bb = b + (1.0f - b) * core;
+            const float rr = r + (1.0f - r) * core;
+            const float gg = g + (1.0f - g) * core;
+            const float bb = b + (1.0f - b) * core;
             const size_t o = ((size_t)y * W + x) * 4;
             px[o + 0] = (unsigned char)(rr * 255);
             px[o + 1] = (unsigned char)(gg * 255);
@@ -71,7 +73,7 @@ static GLuint makeHoldTexture() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);   // 沿路径重复
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     glBindTexture(GL_TEXTURE_2D, 0);
     return tex;
 }

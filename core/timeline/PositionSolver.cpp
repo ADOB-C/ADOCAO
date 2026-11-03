@@ -544,7 +544,10 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
                   (double)L.tileDirectionAt((int64_t)tileIdx - 1));
         }
         double rx = 0.0, ry = 0.0, bx = 0.0, by = 0.0;
-        if (c.tileMain && tt >= c.firstStart) {
+        // **长按砖直接走 `positionAtTile`**：那块砖的圆心在平移，缓存的推导式容易与行星分家
+        // （之前加 slide 就出现过"到达瞬间拖尾被拉成一条跨屏横带"）。长按极少，慢一点无所谓。
+        const bool isHoldTile = timeline.level()->holdLengthAt(tileIdx) >= 0;
+        if (c.tileMain && tt >= c.firstStart && !isHoldTile) {
             trailPointAt(c, tt, rx, ry, bx, by);
         } else {
             // 特例（首砖之前 / 末尾合成砖）：照原样调 positionAtTile，语义与逐位都不动。

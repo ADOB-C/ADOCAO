@@ -210,6 +210,12 @@ target_include_directories(adocao_hold_test PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(adocao_hold_test PRIVATE adocao_core)
 add_test(NAME hold COMMAND adocao_hold_test)
 
+# 拖尾快路径 vs 行星求值器：逐位对拍（含长按/ MoveTrack / AnimateTrack）
+add_executable(adocao_trail_parity_test trail_parity_test.cpp)
+target_include_directories(adocao_trail_parity_test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(adocao_trail_parity_test PRIVATE adocao_core)
+add_test(NAME trail_parity COMMAND adocao_trail_parity_test)
+
 # audio-as-chart（raw-PCM 直通）：整谱就是波形 —— 这条链决定"能不能听见和弦"（do-mi-sol）。
 # 三层断言：buildRawPcm 认谱 + **负向对照**（普通打拍音谱必须被拒）+ 重采样后三个分音
 # 同时远高于对照频率。要链 audio（HitsoundManager 在这里）。

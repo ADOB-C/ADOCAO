@@ -571,6 +571,27 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
     blueOut.resize(base + samples);
 }
 
+// 供对拍：复刻 `sampleTrailRange` 里"给定砖 + 时刻"那一步（缓存常量 + 活值刷新 + 快路径）。
+void PositionSolver::trailPointForTest(const Timeline& timeline, int tileIdx, double t,
+                                       const TileAnimation* anim,
+                                       glm::dvec2& redOut, glm::dvec2& blueOut) {
+    TrailTileConsts c;
+    const int n = (int)timeline.tileCount();
+    loadTrailTileConsts(timeline, tileIdx, n, timeline.startTimeAt(tileIdx), c);
+    loadTrailTileConstsLive(timeline, anim, tileIdx, t, c);
+    double rx = 0, ry = 0, bx = 0, by = 0;
+    const bool isHoldTile = timeline.level()->holdLengthAt(tileIdx) >= 0;
+    if (c.tileMain && t >= c.firstStart && !isHoldTile) {
+        trailPointAt(c, t, rx, ry, bx, by);
+    } else {
+        glm::dvec2 r(0), b(0);
+        positionAtTile(timeline, t, tileIdx, r, b, anim);
+        rx = r.x; ry = r.y; bx = b.x; by = b.y;
+    }
+    redOut = glm::dvec2(rx, ry);
+    blueOut = glm::dvec2(bx, by);
+}
+
 void PositionSolver::sampleTrail(const Timeline& timeline, double t, float trailDuration,
                                  float sampleRate, const glm::dvec2& redHead,
                                  const glm::dvec2& blueHead, std::vector<glm::dvec2>& redOut,

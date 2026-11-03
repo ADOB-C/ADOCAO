@@ -71,6 +71,13 @@ public:
     // 枢轴星在砖心，移动星在半径 r 处，其余星落在正 N 边形上（边长 = r）。
     // N<=2 时逐位退化成 positionAtTile 的结果（保证既有像素门槛不变）。
     struct PlanetPos { uint8_t id; glm::dvec2 pos; };
+    // **诊断/对拍用**：拖尾采样走的是"快路径"（缓存常量 + 每点刷新活值），与行星的
+    // `positionAtTile` 是**两份**实现。这个入口复刻采样循环里那一步，供
+    // `tests/trail_parity_test.cpp` 逐位对拍 —— 两边一旦分家，ctest 当场红。
+    static void trailPointForTest(const Timeline& timeline, int tileIdx, double t,
+                                  const TileAnimation* anim,
+                                  glm::dvec2& redOut, glm::dvec2& blueOut);
+
     static void planetsAt(const Timeline& timeline, double t, std::vector<PlanetPos>& out,
                           const TileAnimation* anim = nullptr);
 

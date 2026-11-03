@@ -213,7 +213,10 @@ void HoldBands::draw(Shader& shader, const Camera& camera, double camX, double c
         shader.setVec3("uColor", 1.0f, 1.0f, 1.0f);
         // **不用 `tileXformAt().opacity`**：那条路对"已经消失的砖"返回 0，而长按带只在
         // 自己那块砖的这段时间里画（prog ∈ [0,1]），本来就该跟着砖亮；实测用它会让整条带全透明。
-        shader.setFloat("uOpacity", 1.0f);
+        // 透明度跟**起点砖的真实可见性**（AnimateTrack 的 appear/disappear + MoveTrack 的 alpha），
+        // 与参考 `setOpacity(tileOpacity)` / `setVisible(tileOpacity > 0.001)` 同构。
+        shader.setFloat("uOpacity", (float)std::clamp(xf.opacity, 0.0, 1.0));
+        if (xf.opacity <= 0.001) continue;
         glBindVertexArray(b.vao);
         glDrawElements(GL_TRIANGLES, b.indexCount, GL_UNSIGNED_INT, nullptr);
     }

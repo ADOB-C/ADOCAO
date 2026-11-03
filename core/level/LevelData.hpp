@@ -711,6 +711,7 @@ private:
 
     void calculateTilePositions();
     void convertPathToAngles();
+    void applyHoldOffsets();
     void applyPositionTrackOffsets();
     // MultiPlanet 逐砖表（参考实现 Re_ADOJAS `Player.ts` 3050-3160 的移植）。
     // 没有 MultiPlanet 事件时**不分配任何表**（恒 2 颗，零开销）。

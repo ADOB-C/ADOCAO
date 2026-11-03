@@ -131,8 +131,21 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
     if (progress<0) progress=0; if (progress>1) progress=1;
     double angle = (double)timeline.startAngleAt(tileIdx)+(double)timeline.totalAngleAt(tileIdx)*progress;
     double dist = orbitRadiusAt(L, tileIdx, progress);
-    glm::dvec2 pv(pivotPos[0],pivotPos[1]);
-    glm::dvec2 mv(pivotPos[0]+std::cos(angle)*dist, pivotPos[1]+std::sin(angle)*dist);
+    // **长按**：权威 `Player.ts:7213` —— 圆心从砖心**线性平移**到 `tail位置 − rTail·dir(exitDir)`，
+    // 其中 `exitDir = startAngle + totalAngle` 是**固定**的出口角（不是当前角）。
+    // 行星/拖尾/相机都跟着这个滑动圆心走（相机跟行星，所以改这里一处就够）。
+    double cx = pivotPos[0], cy = pivotPos[1];
+    if (L.holdLengthAt(tileIdx) >= 0 && tileIdx + 1 < L.tileCount()) {
+        const double exitDir = (double)timeline.startAngleAt(tileIdx) + (double)timeline.totalAngleAt(tileIdx);
+        const auto tail = L.tilePositionAt(tileIdx + 1);
+        const double rTail = (double)L.radiusScaleAt(tileIdx + 1);
+        const double endCX = (double)tail[0] - std::cos(exitDir) * rTail;
+        const double endCY = (double)tail[1] - std::sin(exitDir) * rTail;
+        cx += (endCX - cx) * progress;
+        cy += (endCY - cy) * progress;
+    }
+    glm::dvec2 pv(cx, cy);
+    glm::dvec2 mv(cx+std::cos(angle)*dist, cy+std::sin(angle)*dist);
     if (isRed) { redOut=pv; blueOut=mv; }
     else       { blueOut=pv; redOut=mv; }
 }

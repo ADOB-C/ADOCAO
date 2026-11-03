@@ -60,7 +60,10 @@ LevelScene::~LevelScene() {
 bool LevelScene::compileShaders() {
     auto compileShader = [](Shader& s, const char* vp, const char* fp,
                             const char* vs, const char* fs) -> bool {
-        if (s.compileFile(vp, fp)) return true;
+        // 诊断（临时）：把实际参与编译的源码长度/首行打出来 —— 资产包可能藏着旧版本。
+        if (s.compileFile(vp, fp)) {
+            return true;
+        }
         LOG_W("Shader file loading failed, using inline fallback");
         return s.compile(vs, fs);
     };

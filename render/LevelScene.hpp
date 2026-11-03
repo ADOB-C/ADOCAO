@@ -2,6 +2,7 @@
 
 #include "render/SceneConfig.hpp"
 #include "core/timeline/TileAnimation.hpp"
+#include "render/HoldBands.hpp"
 #include "core/util/Scheduler.hpp"   // Handle 是**按值**成员 → 需要完整类型
 
 #include <array>
@@ -81,6 +82,8 @@ private:
     adofai::Shader* m_tileShader = nullptr;
     adofai::Shader* m_planetShader = nullptr;
     adofai::Shader* m_trailShader = nullptr;
+    adofai::Shader* m_holdShader = nullptr;
+    adofai::HoldBands* m_holdBands = nullptr;   // DLC 长按带（懒建：谱里没有 Hold 就不建）
     adofai::Shader* m_highlightShader = nullptr;
     adofai::Shader* m_flashShader = nullptr;   // Flash 全屏叠层
     unsigned int m_flashVao = 0;               // 空 VAO（全屏三角形，无 VBO）

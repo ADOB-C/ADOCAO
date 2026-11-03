@@ -51,6 +51,7 @@ LevelScene::~LevelScene() {
     delete m_tileShader;
     delete m_flashShader;
     delete m_planetShader;
+    delete m_holdShader;
     delete m_trailShader;
     delete m_highlightShader;
 }
@@ -100,7 +101,8 @@ bool LevelScene::compileShaders() {
     LOG_I("砖块几何：%s", m_cpuGeometry ? "CPU 展开表（GL 3.3 回退）" : "GPU 按形状表展开（GLSL 4.10, fma）");
 
     if (!compileShader(*m_planetShader, resolveAsset("assets/shaders/planet.vert").c_str(), resolveAsset("assets/shaders/planet.frag").c_str(), Shaders::kPlanetVertSrc, Shaders::kPlanetFragSrc)
-     || !compileShader(*m_trailShader, resolveAsset("assets/shaders/trail.vert").c_str(), resolveAsset("assets/shaders/trail.frag").c_str(), Shaders::kTrailVertSrc, Shaders::kTrailFragSrc)) {
+     || !compileShader(*m_trailShader, resolveAsset("assets/shaders/trail.vert").c_str(), resolveAsset("assets/shaders/trail.frag").c_str(), Shaders::kTrailVertSrc, Shaders::kTrailFragSrc)
+     || !compileShader(*m_holdShader, resolveAsset("assets/shaders/hold.vert").c_str(), resolveAsset("assets/shaders/hold.frag").c_str(), Shaders::kHoldVertSrc, Shaders::kHoldFragSrc)) {
         LOG_E("Shader compilation failed");
         return false;
     }
@@ -169,6 +171,7 @@ bool LevelScene::init(const SceneConfig& cfg, const LevelData& level, const Time
     m_tileShader = new Shader();
     m_planetShader = new Shader();
     m_trailShader = new Shader();
+    m_holdShader = new Shader();
     m_highlightShader = new Shader();
     if (!compileShaders()) return false;
     {   // Flash：全屏三角形（无 VBO），一个空 VAO 就够
@@ -601,6 +604,20 @@ void LevelScene::render(Camera& camera, const Timeline& timeline, bool playing,
                 pl->trail->draw(*m_trailShader, camera, camera.targetX(), camera.targetY());
             }
         }
+    }
+
+    // Hold 长按带（砖之上、行星之下，与参考 renderOrder 105 vs 110 一致）。
+    // **懒建在这里**：`buildTileAnimation` 被调用的时刻 timeline 还没建好（实测 startTimes=0），
+    // 而 render() 拿到的 timeline 一定已经 precalculateTiming 过。
+    if (m_holdBands == nullptr && m_level != nullptr && !m_level->m_tileHoldLength.empty() &&
+        timeline.tileCount() >= (int64_t)m_level->tiles.size()) {
+        m_holdBands = new HoldBands();
+        m_holdBands->build(*m_level, timeline);
+    }
+    if (m_holdBands != nullptr && !m_holdBands->empty()) {
+        profile::Scoped _s("hold");
+        m_holdBands->draw(*m_holdShader, camera, camera.targetX(), camera.targetY(), timeInLevel,
+                          *m_level, m_tileAnim.get());
     }
 
     // Planets

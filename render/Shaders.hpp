@@ -395,6 +395,36 @@ void main() {
 )";
 
 
+// Hold 长按带（2026-11-03）：与 assets/shaders/hold.{vert,frag} 逐字一致（check-shader-fallback.sh 会验）。
+constexpr const char* kHoldVertSrc = R"(#version 330 core
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec2 aUv;
+uniform mat4 uMVP;
+out vec2 vUv;
+void main() {
+    vUv = aUv;
+    gl_Position = uMVP * vec4(aPos, 1.0);
+}
+)";
+
+constexpr const char* kHoldFragSrc = R"(#version 330 core
+in vec2 vUv;
+uniform float uCompletion;
+uniform vec3 uColor;
+uniform float uOpacity;
+out vec4 FragColor;
+void main() {
+    // 官方用一张彩虹贴图；我们没有那张资产，用"球色 + 中央白线"近似（差异记在 docs/rendering.md）。
+    float filled = vUv.y <= uCompletion ? 1.0 : 0.0;
+    vec3 col = uColor * mix(0.55, 1.15, filled);
+    float core = smoothstep(0.4, 0.0, abs(vUv.x - 0.5));
+    col = mix(col, vec3(1.0), core * mix(0.25, 0.5, filled));
+    float a = uOpacity;
+    if (a <= 0.003) discard;
+    FragColor = vec4(col, a);
+}
+)";
+
 } // namespace Shaders
 
 }  // namespace adofai

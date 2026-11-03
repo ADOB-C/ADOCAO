@@ -3089,6 +3089,17 @@ bool LevelData::parseLegacy(const std::string& jsonStr, ProgressCb onProgress, b
             else if (et == "Flash") { jsonReadFlashEvent(a, flashEvents); continue; }
             else if (et == "MoveTrack") { jsonReadMoveTrackEvent(a, moveTrackEvents); continue; }
             else if (et == "ScaleRadius") act.type = FastAction::ScaleRadius;
+            else if (et == "Hold") {
+                // DLC 长按。**两条解析路径必须同时认它** —— 这条就是踩过的坑：只改了快路径，
+                // 而 Fledgling 因非法尾逗号走的是 DOM 路径，Hold 被 `continue` 丢掉，带子永远不建。
+                act.type = FastAction::Hold;
+                act.val1 = (a.HasMember("duration") && a["duration"].IsNumber())
+                               ? (float)std::trunc(a["duration"].GetDouble()) : -1.0f;
+                act.val2 = (a.HasMember("distanceMultiplier") && a["distanceMultiplier"].IsNumber())
+                               ? (float)(a["distanceMultiplier"].GetDouble() / 100.0) : 1.0f;
+                actions.push_back(act);
+                continue;
+            }
             else continue;
             if (act.type == FastAction::SetSpeed) {
                 if (a.HasMember("speedType") && std::string(a["speedType"].GetString()) == "Multiplier") {

@@ -65,3 +65,5 @@ sr_radius_ramp|~/Documents/Charts/15. Singularity at 2.64e+6 BPM/15. Singularity
 
 trackvis_fade_ahead|~/Documents/Charts/15. Singularity at 2.64e+6 BPM/15. Singularity at 2.64e+6 BPM.adofai|time|2.0|12.0|1280x720|
 trackvis_countdown|~/Documents/Charts/15. Singularity at 2.64e+6 BPM/15. Singularity at 2.64e+6 BPM.adofai|time|-1.0|25.0|1280x720|
+hold_band_mid|~/Documents/Charts/Sot-C - Fledgling/Fledgling.adofai|tile|2768|200.0|1280x720|--no-trail
+hold_band_done|~/Documents/Charts/Sot-C - Fledgling/Fledgling.adofai|tile|2769|200.0|1280x720|--no-trail

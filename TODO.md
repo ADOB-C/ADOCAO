@@ -28,25 +28,16 @@
       像素门槛 **57/57 逐字节不变**（全语料 61,865 条都是 `[0,"ThisTile"]` = target 指向自己 → 恒 0），
       正好证明这条新路径不会动到现有谱面。
 
-- [ ] **Hold / Release**（DLC 长按）：每个 hold 一个 mesh（uniform 驱动填充）+ `holdLength`。
-- [ ] **Bloom / Flash**：官方 Hidden/VideoBloom，`MediumAmount` 定标 = **0.28**（参照 Re_ADOJAS）。
-- [x] ~~**建帧 ~700 ms 拆三段**~~ —— **2026-11-02 结案：那 700 ms 是测量时的机器争用，不是回退**。
-      同一探针、同一张谱，今天（load 1.6）稳定 **372~386 ms**，与最早的 361~383 ms 吻合；
-      拆开看（`ADOCAO_PROFILE=1` 的 `anim-prof:` 行，2.64e6）：
-      **MoveTrack 0.0 ms + AnimateTrack 181.2 ms + buildFlipEvents 193.3 ms（3,990,674 条事件）**
-      —— 事件表在建帧里占一半，那是我后来加"rangeStart/rangeEnd 边界翻转"把事件数翻倍的结果。
-      教训：**测量要和构建/其它作业错开**，我上一轮在 `load 2.2` 就下结论"不是负载"，其实
-      5/15 分钟均值还有 6.0（自己的全量重编还没散），于是白查了两个对照。
-
-- [ ] **MultiPlanet ≥3 星：每砖边界两颗星跳 1 砖** —— **等裁决**：参考实现同样跳，
-      修 = 主动偏离权威。根因见 `git log --grep=MultiPlanet`。
-
-- [ ] **启动瞬态偶尔帧率低（待复现，2026-11-03）**：本地量 2025 / MYC / The Moon，**只有第 1 帧慢**
-      （work 26~38 ms，窗口/着色器/首次上传），之后立刻稳态（5.2 / 0.2 / 0.28 ms）。用户判断可能是
-      **系统调度**，先搁置。量具已埋：`ADOCAO_PROFILE=1` 会打 `startup(前 3 s):` 一行（帧数、
-      work/frame 的 p50/p95/max、当时 trail 采样率），下次复现直接看它。
-      可疑点：拖尾 governor 3 秒内从 800 Hz 爬到上限 4000 Hz，规则是"余额就 +50%/帧、超了砍 75%"，
-      拖尾重的谱可能在预算边界振荡 —— 要动就加滞回。
+- [x] ~~**Hold / Release**（DLC 长按）~~ —— **2026-11-03 已实现**（`Release` 权威里就没有这个事件）。
+      * 解析：逐砖 `holdLength = duration`、**无继承**、末砖跳过；稀疏表（语料只有 3 个文件用到）。
+        **两条解析路径都要认** —— 只改快路径时 Fledgling（非法尾逗号走 DOM 路径）的 Hold 被丢，
+        带子永远不建，这是本次踩的坑。
+      * 渲染：`render/HoldBands` —— 每块 Hold 砖一条 ribbon，圆心从砖位**线性平移**到
+        `下一砖 − rTail·dir(exitAngle)`，半径 rStart→rTail，角度扫完 totalAngle（含整圈），
+        宽度 `max(0.15, 0.275·(rStart+rTail)/2)`，UV.y 沿路径，进度只改 uniform。
+      * 与参考的差异：官方那圈**彩虹贴图**我们没有，用"球色 + 中央白线"近似。
+      * 验收：`tests/hold_test.cpp`（解析）+ 像素门槛新增 **hold_band_mid / hold_band_done**
+        两个状态（Fledgling floor 2768，真实谱面）—— 门槛现在 **59/59**，ctest **56/56**。
 
 ## 加载 / 内存（2e9 主线）
 

@@ -5,6 +5,7 @@ add_library(adocao_render STATIC
     TileMesh.cpp
     Planet.cpp
     PlanetTrail.cpp
+    HoldBands.cpp
     LevelScene.cpp
 )
 # 注意：TileGeometryReference.cpp（改造前的 CPU 几何）是**只进测试**的 A/B 基准

@@ -522,14 +522,9 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
     double tileStart = startTimeOf(tileIdx);
     double nextStart = startTimeOf(tileIdx + 1);
 
-    const double firstHist = timeline.firstStartTime();
     for (int i = 0; i < maxSamples; i++) {
         double tt = startTime + dt * (double)i;
         if (tt > t) break;
-        // **首砖之前没有历史**：不产生采样点。否则那些点会被 clamp 到砖心，再拼上 head，
-        // 就画成"从砖心连到行星"的一条锥形（用户报的）。这里只是**不记这个点**，
-        // 窗口与其它逻辑一律不动（比改窗口起点的影响面小）。
-        if (tt < firstHist) continue;
         // 推进语义与原来逐字相同：`while (tileIdx + 1 < tsz && tt >= startTimeAt(tileIdx + 1))`。
         // 区别只是下一砖的起始时间被记下来了（它是纯函数，值不变），不必每采样点重取。
         while (tileIdx + 1 < tsz && tt >= nextStart) {

@@ -24,10 +24,59 @@ void HoldBands::destroy() {
         if (b.vao) glDeleteVertexArrays(1, &b.vao);
     }
     m_bands.clear();
+    // 贴图保留（重建时不重复生成）；进程退出由驱动回收。
+}
+
+// 程序生成"彩虹长按带"贴图（不引外部资产）：UV.y 沿路径走彩虹色相，
+// UV.x 横跨带宽：中间白核、两侧逐渐透明。64×256，RGBA8。
+static GLuint makeHoldTexture() {
+    const int W = 64, H = 256;
+    std::vector<unsigned char> px((size_t)W * H * 4, 0);
+    for (int y = 0; y < H; ++y) {
+        const float t = (float)y / (float)(H - 1);
+        // HSV(hue=t, s=0.85, v=1)
+        const float h = t * 6.0f;
+        const int i = (int)std::floor(h) % 6;
+        const float f = h - std::floor(h);
+        const float p = 0.15f, q = 1.0f - 0.85f * f, u = 1.0f - 0.85f * (1.0f - f);
+        float r = 0, g = 0, b = 0;
+        switch (i) {
+            case 0: r = 1; g = u; b = p; break;
+            case 1: r = q; g = 1; b = p; break;
+            case 2: r = p; g = 1; b = u; break;
+            case 3: r = p; g = q; b = 1; break;
+            case 4: r = u; g = p; b = 1; break;
+            default: r = 1; g = p; b = q; break;
+        }
+        for (int x = 0; x < W; ++x) {
+            const float tx = (float)x / (float)(W - 1);
+            const float d = std::fabs(tx - 0.5f) * 2.0f;          // 0 中心 → 1 边缘
+            float a = 1.0f - d * d;                                // 柔和边缘
+            if (a < 0.0f) a = 0.0f;
+            const float core = std::max(0.0f, 1.0f - d / 0.25f);   // 中央白核
+            const float rr = r + (1.0f - r) * core, gg = g + (1.0f - g) * core, bb = b + (1.0f - b) * core;
+            const size_t o = ((size_t)y * W + x) * 4;
+            px[o + 0] = (unsigned char)(rr * 255);
+            px[o + 1] = (unsigned char)(gg * 255);
+            px[o + 2] = (unsigned char)(bb * 255);
+            px[o + 3] = (unsigned char)(a * 255);
+        }
+    }
+    GLuint tex = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);   // 沿路径重复
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return tex;
 }
 
 void HoldBands::build(const LevelData& lv, const Timeline& tl) {
     destroy();
+    if (m_tex == 0) m_tex = makeHoldTexture();
     if (lv.m_tileHoldLength.empty()) return;
 
     const int64_t n = (int64_t)lv.tiles.size();
@@ -129,6 +178,13 @@ void HoldBands::draw(Shader& shader, const Camera& camera, double camX, double c
     // （连硬编码 `FragColor = vec4(1,0,1,1)` 都不出像素 ——fragment 根本没跑）。
     // 参考实现用 `side: DoubleSide`，等价於这里关剔除。
     glDisable(GL_CULL_FACE);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_tex);
+    {
+        const GLuint prog = (GLuint)shader.id();
+        const GLint loc = glGetUniformLocation(prog, "uMap");
+        if (loc >= 0) glUniform1i(loc, 0);
+    }
     for (const Band& b : m_bands) {
         const double dur = b.endTime - b.startTime;
         const double prog = dur > 0.0 ? (timeSec - b.startTime) / dur : 0.0;

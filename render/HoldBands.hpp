@@ -40,6 +40,7 @@ private:
         double startTime = 0.0, endTime = 0.0;
     };
     std::vector<Band> m_bands;
+    unsigned m_tex = 0;   // 程序生成的彩虹带贴图（一次）
 };
 
 }  // namespace adofai

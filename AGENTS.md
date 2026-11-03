@@ -252,6 +252,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   * 推论：查 `.adocao` 写入/压缩相关的问题时，别顺手扩 `AdocaoWriter` 的公开能力；
     要造测试数据就在 `tests/` 里拼。
 
+- **仓库/组织级设置不是"让流程变绿"的旋钮**（2026-11-02 血的教训）：2026-10-04 16:51，
+  仓库刚转进 `ADOB-C` 的 40 秒内，**secret scanning 与 push protection 被一起关掉**
+  （审计日志：`repository_secret_scanning.disable` / `…_push_protection.disable`，actor = 本机 gh token，
+  `GitHub CLI 2.102.0`）。**没有任何会话日志留下这条命令**，直到用户一个月后"瞎逛"才发现。
+  规则：**push protection 挡住你就去改内容或加 allowlist，绝不关功能**；
+  任何 `gh api -X PATCH/DELETE` 打在**仓库/组织设置**上（security、branch protection、visibility、
+  Actions 权限、secrets），一律**先问用户**再执行 —— 这类变更对外、近不可逆，而且不留痕迹。
+  自检：`gh api repos/ADOB-C/ADOCAO --jq .security_and_analysis` 应全是 `enabled`。
+
 - **不要盯 CI、不要长超时、不要轮询后台任务**（2026-10-22 用户明确，三条一起）：
   * push 之后**不必**等 CI：用户会收到失败邮件并主动告知。真要等就**用现成的
     `scripts/push-ci.sh`**（它处理重试、失败摘要、`--stats` 平台耗时），**别手搓**

@@ -110,6 +110,10 @@ private:
     float m_trailSagitta  = 0.0f;   // >0 = 按"每样本偏离 ≤ N px"反推采样率（0 = 关闭）
     float m_lastZoom      = 100.0f; // 上一帧渲染时的相机放大倍数（applyFrame 算 pixelsPerTile 用）
     float m_trailSampleRate = 200.0f;
+public:
+    // 仅供诊断（`startup` profiler 行要打它，判断"启动时的采样率是不是偏高"）。
+    float trailSampleRate() const { return m_trailSampleRate; }
+private:
     // Trail sample-rate governor (see setMeasuredFrameMs)
     bool m_trailAdaptive = true;
     float m_trailTargetFps = 120.0f;

@@ -1154,6 +1154,12 @@ void GameWindow::run() {
     double soakLastLog = 0.0;
     ProfFile prof;                        // ADOCAO.prof（CSV，逐行 flush）
     std::vector<double> ivWork, ivFrame;  // 只装"本采样间隔"的帧（CSV 要看随时间变化）
+    // 启动瞬态：用户报过"刚打开时帧率低、过一会才好"（偶发）。采样窗口设成**前 3 秒**，
+    // 到点打一行 `startup`（含最多 N 帧的 p50/p95/max），这样下次发生时日志里直接有数，
+    // 不用靠人回忆"当时大概多卡"。
+    std::vector<double> stWork, stFrame;
+    std::vector<int> stDrawn;
+    bool stDone = false;
     std::vector<int> ivDrawn;
     if (profile::enabled()) prof.ensureOpen();
     // 采样间隔可调：`ADOCAO_PROFILE_INTERVAL_MS`（默认 10000）。只影响"每 N 秒打一行"，
@@ -1231,6 +1237,22 @@ void GameWindow::run() {
                 ivWork.push_back(workMs);
                 ivFrame.push_back(soakFrame.back());
                 ivDrawn.push_back(soakDrawn.back());
+                if (!stDone) {
+                    stWork.push_back(workMs);
+                    stFrame.push_back(soakFrame.back());
+                    stDrawn.push_back(soakDrawn.back());
+                    if (glfwGetTime() - runT0 >= 3.0) {
+                        stDone = true;
+                        profStatsRow(prof, "startup", prof.runId, glfwGetTime() - runT0,
+                                     stWork.size(), stWork, stFrame, stDrawn, 1000.0 / 60.0);
+                        LOG_I("startup(前 3 s): %zu 帧，work p50=%.2f p95=%.2f max=%.2f ms，"
+                              "frame p50=%.2f max=%.2f ms，trail=%.0f Hz",
+                              stWork.size(), pctOf(stWork, 0.50), pctOf(stWork, 0.95),
+                              *std::max_element(stWork.begin(), stWork.end()),
+                              pctOf(stFrame, 0.50), *std::max_element(stFrame.begin(), stFrame.end()),
+                              (double)m_scene->trailSampleRate());
+                    }
+                }
                 const double nowS = glfwGetTime();
                 if (nowS - soakLastLog >= soakIntervalSec) {
                     soakLastLog = nowS;

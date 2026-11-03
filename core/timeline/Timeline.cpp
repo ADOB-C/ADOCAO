@@ -170,6 +170,14 @@ float Timeline::totalAngleAt(int64_t i) const {
         else       { relAngle = delta; }
         if (delta < 0.0001) relAngle = 360.0;
     }
+    // **DLC 长按**：权威 `buildAngles` 在算 totalAngle **之前**做
+    //     `if (holdLen > 0) sweepAngle += holdLen * 2π;`
+    // 所以长按砖的扫角多出整圈、**时长也跟着变长**（duration 由 rotationAmount 推）。
+    // 没有 Hold 的谱只多一次空 map 判断（`m_tileHoldLength` 为空时立即返回）。
+    if (!m_level->m_tileHoldLength.empty()) {
+        const int holdLen = m_level->holdLengthAt(i);
+        if (holdLen > 0) relAngle += (double)holdLen * 360.0;
+    }
     float totalAngle = (float)relAngle * 3.14159265f / 180.0f;
     if (isCW) totalAngle = -totalAngle;
     const float rot = extraRotAt(i);

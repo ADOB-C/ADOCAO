@@ -436,6 +436,12 @@ inline void loadTrailTileConsts(const Timeline& timeline, int tileIdx, int n, do
     // **长按**：拖尾也必须用"滑动圆心"，否则行星在转圈、拖尾却沿轨道走 —— 看起来就是
     // 一条水平的直线（用户报的"拖尾是水平的"）。
     c.hasSlide = (L.holdLengthAt(tileIdx) >= 0) && (tileIdx + 1 < (int)L.tileCount());
+    // **必须清零**：`TrailTileConsts c` 在采样循环里是**复用**的，而 slide 只在长按砖里被
+    // `loadTrailTileConstsLive` 写入。不清零的话，离开长按砖后 `slide` 还残留上一砖的 40 单位，
+    // `trailPointAt` 会把圆心按 progress 平移出去 —— 实测半径算出 9.25（应为 1），
+    // 拖尾在砖边界拉出一条长线（用户："这里飞了 50 个单位"）。
+    c.slideX = 0.0;
+    c.slideY = 0.0;
     c.isRed = (tileIdx % 2 == 0);
     c.firstStart = timeline.firstStartTime();
     // 与 `positionAtTile` 的分支判据一致：n < 2 或首砖之前走特例；末尾合成砖（>= n-1）也走特例。
@@ -516,6 +522,7 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
         if (idx < 0 || idx >= tsz) return std::numeric_limits<double>::infinity();
         return denseStarts ? startArr[idx] : timeline.startTimeAt(idx);
     };
+
 
     TrailTileConsts c;
     int cTile = -1;              // c 对应的砖号（-1 = 还没有；推进后置 -1 变懒加载）

@@ -553,8 +553,9 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
         // 那块砖圆心在平移，快路径的缓存式与它分家过两次（水平直线 / 到达瞬间横带）。
         // `ADOCAO_TRAIL_SLOW=1` 可强制全部走 `positionAtTile`（诊断对比用）。
         static const bool kTrailSlow = env::flag("ADOCAO_TRAIL_SLOW");
+        static const bool kTrailFast = env::flag("ADOCAO_TRAIL_FAST");   // 诊断：长按砖也走快路径
         const bool isHoldTile = timeline.level()->holdLengthAt(tileIdx) >= 0;
-        if (!kTrailSlow && c.tileMain && tt >= c.firstStart && !isHoldTile) {
+        if (!kTrailSlow && c.tileMain && tt >= c.firstStart && (!isHoldTile || kTrailFast)) {
             trailPointAt(c, tt, rx, ry, bx, by);
         } else {
             // 特例（首砖之前 / 末尾合成砖 / 长按 / 慢路径）：照原样调 positionAtTile。

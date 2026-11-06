@@ -548,13 +548,16 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
                   (double)L.tileDirectionAt((int64_t)tileIdx - 1));
         }
         double rx = 0.0, ry = 0.0, bx = 0.0, by = 0.0;
-        // **拖尾 = 行星轨迹**，所以采样点必须由**算行星位置的同一个函数**给出。
-        // 原来这里走 `trailPointAt`（一份"缓存副本"），为它已经踩过两次坑：
-        //   ① 长按期间圆心在平移，副本不知道 → 拖尾是水平直线；
-        //   ② 补了 slide 之后，到达瞬间缓存常量与活值错位 → 拖尾被拉成跨屏横带。
-        // 现在一律调 `positionAtTile`（与行星逐位相同），慢一点换来"不可能分家"。
-        if (c.tileMain && tt >= c.firstStart) {
-            // 特例（首砖之前 / 末尾合成砖）：照原样调 positionAtTile，语义与逐位都不动。
+        // **拖尾 = 行星轨迹**：普通砖走快路径（`trailPointAt`，与 `positionAtTile` 逐位相同，
+        // 由 `tests/trail_parity_test` 钉住）；**长按砖直接调 `positionAtTile`** ——
+        // 那块砖圆心在平移，快路径的缓存式与它分家过两次（水平直线 / 到达瞬间横带）。
+        // `ADOCAO_TRAIL_SLOW=1` 可强制全部走 `positionAtTile`（诊断对比用）。
+        static const bool kTrailSlow = env::flag("ADOCAO_TRAIL_SLOW");
+        const bool isHoldTile = timeline.level()->holdLengthAt(tileIdx) >= 0;
+        if (!kTrailSlow && c.tileMain && tt >= c.firstStart && !isHoldTile) {
+            trailPointAt(c, tt, rx, ry, bx, by);
+        } else {
+            // 特例（首砖之前 / 末尾合成砖 / 长按 / 慢路径）：照原样调 positionAtTile。
             glm::dvec2 r(0), b(0);
             positionAtTile(timeline, tt, tileIdx, r, b, anim);
             rx = r.x; ry = r.y; bx = b.x; by = b.y;

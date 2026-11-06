@@ -563,6 +563,26 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
         blueOut[base + samples] = glm::dvec2(bx, by);
         samples++;
     }
+    // **采样点塌成一点时不算拖尾**：谱面首砖起点的瞬间两颗星都在砖心（`positionAtTile`
+    // 本身就这样），采样点全部相同；此时再把 head 拼上去，就画成"连接两颗行星"的一条直线。
+    // 参考是在球底下连续贴半透明圆盘，天然跟着球走；我们坚持**解析式采样**（可复现），
+    // 所以这里只做一件事：**没有位移就没有拖尾** —— 不去桥接那个跳变。
+    {
+        auto degenerate = [](const std::vector<glm::dvec2>& v, size_t b, size_t n2) {
+            if (n2 < 2) return true;
+            const glm::dvec2& a = v[b];
+            for (size_t k = 1; k < n2; ++k) {
+                if (std::fabs(v[b + k].x - a.x) > 1e-9 || std::fabs(v[b + k].y - a.y) > 1e-9)
+                    return false;
+            }
+            return true;
+        };
+        if (degenerate(redOut, base, samples) && degenerate(blueOut, base, samples)) {
+            redOut.resize(base);
+            blueOut.resize(base);
+            return;
+        }
+    }
     // Bind trail head directly to planet's actual position.
     redOut[base + samples]  = glm::dvec2(redHead.x, redHead.y);
     blueOut[base + samples] = glm::dvec2(blueHead.x, blueHead.y);

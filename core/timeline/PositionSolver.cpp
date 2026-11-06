@@ -562,6 +562,28 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
             positionAtTile(timeline, tt, tileIdx, r, b, anim);
             rx = r.x; ry = r.y; bx = b.x; by = b.y;
         }
+        // 自检：`ADOCAO_TRAIL_CHECK=1` 时，**每个采样点**都用 `positionAtTile` 复算一遍并逐位比较，
+        // 结束时打一行"比了多少点、差了多少点"。这是对"快路径 == positionAtTile"的现场取证
+        // （对拍测试只覆盖每块砖 5 个时刻，这里覆盖**真实拖尾窗口里的每一个点**）。
+        static const bool kTrailCheck = env::flag("ADOCAO_TRAIL_CHECK");
+        if (kTrailCheck) {
+            glm::dvec2 r2(0), b2(0);
+            positionAtTile(timeline, tt, tileIdx, r2, b2, anim);
+            static long sChecked = 0, sDiff = 0;
+            ++sChecked;
+            if (std::memcmp(&r2.x, &rx, sizeof(double)) != 0 ||
+                std::memcmp(&r2.y, &ry, sizeof(double)) != 0 ||
+                std::memcmp(&b2.x, &bx, sizeof(double)) != 0 ||
+                std::memcmp(&b2.y, &by, sizeof(double)) != 0) {
+                if (sDiff < 5)
+                    LOG_W("trail-check: tt=%.6f idx=%d 快路径=(%.17g,%.17g|%.17g,%.17g) "
+                          "positionAtTile=(%.17g,%.17g|%.17g,%.17g)", tt, tileIdx, rx, ry, bx, by,
+                          r2.x, r2.y, b2.x, b2.y);
+                ++sDiff;
+            }
+            if (i + 1 == maxSamples || tt + dt > t)
+                LOG_I("trail-check: 共比 %ld 点，差异 %ld 点", sChecked, sDiff);
+        }
         redOut[base + samples]  = glm::dvec2(rx, ry);
         blueOut[base + samples] = glm::dvec2(bx, by);
         samples++;

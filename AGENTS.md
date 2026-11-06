@@ -86,6 +86,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   验过 4/4 也挡不住这个（brew 的 lzma 5.8.4 ≥ 5.6）。注意 `tests/level_parse_test.cpp`
   **自己**在用 lzma/zstd API 造压缩样本（`lzma_easy_buffer_encode` / `ZSTD_compress`），所以那个
   测试目标的 include 与链接依赖不能跟着删。
+- **开发期绝不能把 `ADOCAO-data.tar.xz` 留在 `build/`**（2026-11-06 血的教训）：查找顺序是
+  **资产包 → 目录 → 搜索根**，包会**静默盖住** `assets/` 下的同名文件 —— 改 shader 完全不生效
+  （今天为此白查一轮：12 个 shader 一直读的是 10 月 25 日的包）。`build.sh` 现在每次构建前
+  会删掉它并打印一行提示；包只在 CI 的 `release.yml` 里生成（`tar -cJf ADOCAO-data.tar.xz -C .. assets`）。
+
 - **资产包：`ADOCAO-data.tar.xz`**（2026-10-25 起，替代 `ADOCAO-data.zip`）。xz 里的 tar，
   条目名就是 `assets/shaders/...`；解压 + tar 索引在 **archive 模块**（`archive/AssetPack.cpp`，
   用已有的 liblzma），core 只通过 `ArchiveBackend::readAssetPack` 钩子读。

@@ -124,6 +124,15 @@ else
     echo ""
 fi
 
+# ── 清掉过期的资产包（2026-11-06）───────────────────────────────
+# `ADOCAO-data.tar.xz` 只在**打包**时生成（CI release.yml / 手动 tar），而资产查找顺序是
+# **资产包 → 目录 → 搜索根**。开发期若把包留在 build/ 里，它会**静默盖住** assets/ 下的同名文件 ——
+# 改 shader 完全不生效（今天为此白查了一轮：12 个 shader 一直是 10 月 25 日的版本）。
+if [[ -f build/ADOCAO-data.tar.xz ]]; then
+    echo -e "${YELLOW}发现 build/ADOCAO-data.tar.xz（打包产物）→ 删除，避免遮蔽 assets/ 下的新文件${NC}"
+    rm -f build/ADOCAO-data.tar.xz
+fi
+
 # ── CMake build（公共，增量安全）───────────────────────────────
 echo -e "${CYAN}Building...${NC}"
 if ! cmake --build . --parallel "$(nproc 2>/dev/null || echo 4)" 2>&1 | while IFS= read -r line; do

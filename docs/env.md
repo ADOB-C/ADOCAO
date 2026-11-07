@@ -17,10 +17,10 @@
 
 | 变量 | 类型 | 默认 | 作用 |
 |---|---|---|---|
-| `ADOCAO_TRAIL_CHECK` | 布尔 | 关 | **拖尾自检**：每个采样点都用 `positionAtTile` 复算并逐位比较，结束打一行"共比 N 点，差异 M 点"。排查"快路径与行星分家"用 |
+| `ADOCAO_TRAIL_CHECK` | 布尔 | 关 | **拖尾自检**两层：① 每个采样点都用 `positionAtTile` 复算并逐位比较，结束打一行"共比 N 点，差异 M 点"；② 断言拖尾末点（head，由 `positionAt` 求的**实时行星位置**）与该时刻的 `positionAtTile` 一致，不一致 `LOG_E`（`positionAt` 与 `positionAtTile` 是**两份代码**，2026-11-07 它们漏了同一个长按滑动圆心，拖尾甩出 30 单位的直条） |
 | `ADOCAO_TRAIL_SLOW` | 布尔 | 关 | 拖尾强制走 `positionAtTile`（不走快路径），做 A/B 对比用 |
 | `ADOCAO_TRAIL_FAST` | 布尔 | 关 | 拖尾**全部**走快路径（连长按砖也不落到 `positionAtTile`），A/B 对比用；与 `TRAIL_SLOW` 同时开会以 SLOW 优先 |
-| `ADOCAO_TRAIL_TRACE` | 布尔 | 关 | 每 40 个采样点打一行 `t[i] tt= idx= red= blue=`（抓"采样对、画出来不对"用） |
+| `ADOCAO_TRAIL_TRACE` | 布尔 | 关 | 配合 `TRAIL_CHECK`：两求值器一致时也打一行 `trail-head: t= … 两求值器一致`（抓"采样对、画出来不对"用） |
 | `ADOCAO_TUNE` | `k=v,k=v` | 空 | **可调常数的运行时覆盖**（2026-11-01）。给"单变量扫描"用：`ADOCAO_TUNE="maxPoints=8192,maxShapeRows=512"`。名字表见 `core/util/Tuning.hpp` 与 `scripts/tune-sweep.py`；未设置时与编译期常量**逐位相同**。**只给验收/调参用**，不是用户旋钮 |
 | `ADOCAO_VSYNC` | 布尔 | 关 | swap interval = 1；帧率上限变成显示器刷新率。录屏防撕裂时开（`docs/cli.md`） |
 | `ADOCAO_UNCAPPED` | 布尔 | 关 | 去掉 320 fps 帧控，量机器真实上限（`docs/profiling.md`） |

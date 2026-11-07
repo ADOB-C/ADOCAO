@@ -39,13 +39,17 @@
       * 验收：`tests/hold_test.cpp`（解析）+ 像素门槛新增 **hold_band_mid / hold_band_done**
         两个状态（Fledgling floor 2768，真实谱面）—— 门槛现在 **59/59**，ctest **56/56**。
 
-- [ ] **拖尾画成横贯屏幕的直条**（Fledgling t≈255，长按段）—— 求值侧已排除：
-      `ADOCAO_TRAIL_TRACE` 证明 320 个采样点全在以砖心为心、半径 1 的圆上（red 恒为静态砖心）。
-      所以嫌疑在 `render/PlanetTrail.cpp::setPoints` 的 ribbon 构建：`m_points.resize(m_maxPoints)`
-      只扩不清，`m_count` 变化时若仍按 `m_maxPoints` 遍历（或 `ringAt()` 越界兜底），
-      会把上一帧/上一颗星的残留点连进来 —— 与"只在拖尾长短切换的那几秒出现"吻合。
-      **下一步（一次定位）**：在 `setPoints` 里打出顶点 bbox，与采样点 bbox 对拍 ——
-      bbox≈半径 1 就是着色/带宽问题，跨越几十单位就是 `m_center`/`ringAt` 取到残留点。
+- [x] ~~**拖尾画成横贯屏幕的直条**~~ —— **2026-11-07 修好**。根因不是渲染：`positionAtTile`
+      **漏了长按滑动圆心**（`positionAt` 有）。于是拖尾采样停在砖上（-54.99），而拖尾**末点**用的
+      `frame.*Position`（走 `positionAt`）已经滑到 -24.99 —— 差恰好一个 `holdDistance`（30 单位），
+      这段距离全摊在最后一条边上 → 一条横贯全屏的直条（Fledgling t=254/255/256 分别差 20/30/40）。
+      修法：抽出 `applyHoldSlide()`，两个求值器**共用同一份**。验收：末点与末采样**逐位相等**；
+      `ADOCAO_TRAIL_CHECK` 0/321 差异（`FAST` 也是 0）；ctest 57/57；像素门槛 59/59 逐字节不变。
+  * 教训：`positionAt` 与 `positionAtTile` 是**两份代码**，任何"只在一处实现"的几何量都会让
+    拖尾末点与采样分家。`ADOCAO_TRAIL_CHECK` 现在会**断言这两者一致**（负向对照验过：去掉那一步
+    立刻 `LOG_E`，差值 29.999919）。
+  * 另一个把这条藏了很久的原因：t=254~256 的谱面本身是全黑（`--no-trail` 纯黑），**只有拖尾可见**，
+    所以看到的就是那根直条；宽视角（`--capture-zoom 20`）下才看得出正常时它只是一小段弧。
 - [ ] **`trail_parity_test` 复用同一个 `TrailTileConsts`**：现在每次都新建，所以
       "跨砖复用时旧字段没清零"（`slideX/slideY` 那次的 50 单位 bug）这类错它**抓不到** ——
       改成模拟真实循环（一个 struct 反复填）才覆盖得到。

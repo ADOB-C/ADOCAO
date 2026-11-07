@@ -592,6 +592,9 @@ void PositionSolver::sampleTrailRange(const Timeline& timeline, double startTime
             if (i + 1 == maxSamples || tt + dt > t)
                 LOG_I("trail-check: 共比 %ld 点，差异 %ld 点", sChecked, sDiff);
         }
+        if (env::flag("ADOCAO_TRAIL_TRACE") && (i % 40 == 0))
+            LOG_I("t[%d] tt=%.4f idx=%d red=(%.3f,%.3f) blue=(%.3f,%.3f)",
+                  i, tt, tileIdx, rx, ry, bx, by);
         redOut[base + samples]  = glm::dvec2(rx, ry);
         blueOut[base + samples] = glm::dvec2(bx, by);
         samples++;

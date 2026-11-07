@@ -39,6 +39,17 @@
       * 验收：`tests/hold_test.cpp`（解析）+ 像素门槛新增 **hold_band_mid / hold_band_done**
         两个状态（Fledgling floor 2768，真实谱面）—— 门槛现在 **59/59**，ctest **56/56**。
 
+- [ ] **拖尾画成横贯屏幕的直条**（Fledgling t≈255，长按段）—— 求值侧已排除：
+      `ADOCAO_TRAIL_TRACE` 证明 320 个采样点全在以砖心为心、半径 1 的圆上（red 恒为静态砖心）。
+      所以嫌疑在 `render/PlanetTrail.cpp::setPoints` 的 ribbon 构建：`m_points.resize(m_maxPoints)`
+      只扩不清，`m_count` 变化时若仍按 `m_maxPoints` 遍历（或 `ringAt()` 越界兜底），
+      会把上一帧/上一颗星的残留点连进来 —— 与"只在拖尾长短切换的那几秒出现"吻合。
+      **下一步（一次定位）**：在 `setPoints` 里打出顶点 bbox，与采样点 bbox 对拍 ——
+      bbox≈半径 1 就是着色/带宽问题，跨越几十单位就是 `m_center`/`ringAt` 取到残留点。
+- [ ] **`trail_parity_test` 复用同一个 `TrailTileConsts`**：现在每次都新建，所以
+      "跨砖复用时旧字段没清零"（`slideX/slideY` 那次的 50 单位 bug）这类错它**抓不到** ——
+      改成模拟真实循环（一个 struct 反复填）才覆盖得到。
+
 ## 加载 / 内存（2e9 主线）
 
 - [ ] **加载期常驻内存**：MYC 走真无头 `adocao image` 的实测口径见 `docs/scale-1e8-to-2e9.md`。

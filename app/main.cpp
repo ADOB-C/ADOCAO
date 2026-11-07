@@ -129,6 +129,7 @@ void printHelp(Mode mode, bool all) {
         "  --msaa N                                 抗锯齿采样数（0/2/4/8）\n"
         "  --windowed | --borderless                窗口 / 无边框全屏（默认 Borderless；= osu! 的 Borderless 语义）\n"
         "  --no-hitsound  --force-hitsound [TYPE]  --auto-play  --no-trail\n"
+        "  --manual-zoom                            手动缩放：谱面 zoom 事件不再生效（播放中键盘 Z 切换）\n"
         "  --show-all-tiles                          忽略 appear/disappear，显示全部砖（= 编辑器全图视角，诊断/对拍用）\n"
         "  --capture-fit-all                         抓帧时相机包住全部砖（复现编辑器全图构图）\n"
         "  --start-at SEC            播放从该时刻开始（等价于选砖后按空格；含音乐 seek）\n"
@@ -276,6 +277,7 @@ int main(int argc, char* argv[]) {
             else if (std::strcmp(a, "--start-at") == 0 && i+1<argc)    cli.startAt = (float)atof(argv[++i]);
             else if (std::strcmp(a, "--msaa") == 0 && i+1<argc)      cli.msaaSamples = atoi(argv[++i]);
             else if (std::strcmp(a, "--no-trail") == 0)              cli.showTrail = false;
+            else if (std::strcmp(a, "--manual-zoom") == 0)           cli.manualZoom = true;
             else if (std::strcmp(a, "--show-all-tiles") == 0)        cli.showAllTiles = true;
             else if (std::strcmp(a, "--capture-fit-all") == 0)       cli.captureFitAll = true;
             else if (std::strcmp(a, "--cull-block") == 0 && i+1<argc) cli.cullBlockFloors = atoi(argv[++i]);

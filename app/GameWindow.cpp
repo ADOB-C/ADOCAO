@@ -323,6 +323,9 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
     }
     m_camCtrl.attach(m_camera);
     resetToInitialView();
+    m_manualZoom = cfg.manualZoom;
+    if (m_manualZoom)
+        LOG_I("manual-zoom: ON（来自 CLI）—— 谱面 zoom 事件不再生效，滚轮手动缩放");
     rebuildCameraTimeline();
 
     // Mesh build: 同步（主线程、主上下文）。异步/共享上下文那条路已删除：
@@ -467,6 +470,18 @@ void GameWindow::handleInput() {
     }
     m_wasSpacePressed = spacePressed;
 
+    // Z = 手动缩放开关（只切缩放，不动位置/旋转）
+    {
+        const bool z = glfwGetKey(m_window, GLFW_KEY_Z) == GLFW_PRESS;
+        if (z && !m_wasKeyZ) {
+            m_manualZoom = !m_manualZoom;
+            LOG_I("manual-zoom: %s —— %s", m_manualZoom ? "ON" : "OFF",
+                  m_manualZoom ? "谱面 zoom 事件不再生效，滚轮/触控板手动缩放"
+                               : "缩放交回谱面（settings.zoom + MoveCamera）");
+        }
+        m_wasKeyZ = z;
+    }
+
     // Click-to-select tile (only when stopped)
     if (!m_playback->isPlaying() && m_camCtrl.consumeClick()) {
         int fbW, fbH;
@@ -610,7 +625,8 @@ void GameWindow::update(float deltaMs) {
         m_cameraDirector.drive(t, (double)deltaMs / 1000.0, bpm, pitch, p[0], p[1], tileIdx);
 
         m_camera.setTarget(m_cameraDirector.x(), m_cameraDirector.y());
-        m_camera.setAdoZoom((float)m_cameraDirector.zoom());
+        // 手动缩放开着时，**缩放不归谱面管**（位置与旋转照旧由相机时间线驱动）。
+        if (!m_manualZoom) m_camera.setAdoZoom((float)m_cameraDirector.zoom());
         m_camera.setRotation((float)m_cameraDirector.rotation());
     } else if (m_wasPlaying) {
         m_cameraDirector.resetDrive();
@@ -862,7 +878,11 @@ void GameWindow::captureAndExit() {
                   maxX - minX, maxY - minY, (double)m_camera.zoom(), 1200.0 / (double)m_camera.zoom(),
                   (long long)nFit);
         }
-    } else if (m_cfg->captureCamera) m_camera.setAdoZoom((float)m_cameraDirector.zoom());
+    } else if (m_cfg->captureCamera) {
+        // 与主循环同一条规则：手动缩放开着 → 相机时间线不改缩放（`--capture-zoom` 说了算）。
+        if (!m_manualZoom) m_camera.setAdoZoom((float)m_cameraDirector.zoom());
+        else               m_camera.setZoom(m_cfg->captureZoom);
+    }
     else                      m_camera.setZoom(m_cfg->captureZoom);   // 本类口径：100 = 视野高 12 砖
 
     int fbW = 0, fbH = 0;
@@ -1155,6 +1175,8 @@ void GameWindow::run() {
     } else {
         LOG_I("帧率上限：320 fps（ADOCAO_UNCAPPED=1 关闭节流）");
     }
+    LOG_I("操作：空格 = 播放/停止（停止 = 关卡回初始状态，相机原地保留）；"
+          "Z = 手动缩放开关（谱面 zoom 不再生效）；Ctrl/⌘ + ←/→ = 书签；Esc = 退出");
     // 诊断钩子：跑到 N 毫秒后**正常退出**（好让 `profile::reportSteady()` 打分段报告）。
     // 只给 `ADOCAO_PROFILE=1` 的全流程剖面用；不设 = 行为完全不变。
     double exitAfterMs = 0.0;

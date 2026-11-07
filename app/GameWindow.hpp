@@ -42,6 +42,10 @@ private:
     const adofai::CameraTimeline* m_cameraTimeline = nullptr;   // 归 LoadResult 所有
     adofai::CameraDirector m_cameraDirector;
     bool   m_wasPlaying = false;
+    // 手动缩放（开关）：ON = 谱面/相机时间线**不再写缩放**，滚轮/触控板的手动缩放保持。
+    // 位置/旋转仍由播放相机驱动（用户 2026-11-07："加个手动控制缩放功能，不再控制缩放"）。
+    bool   m_manualZoom = false;
+    bool   m_wasKeyZ = false;
     double m_lastCamX = 0.0, m_lastCamY = 0.0;
     double m_startTime = 0.0;   // 启动期焦点兜底用   // camera-jump 诊断
 

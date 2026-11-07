@@ -39,6 +39,9 @@ struct LauncherConfig {
     int  resolutionH = 1080;
     bool fullscreen = false;
     bool showTrail = true;
+    // **手动缩放开关**（默认关 = 谱面/相机时间线说了算）。开着时 `MoveCamera` / `settings.zoom`
+    // 不再改缩放，滚轮/触控板的手动缩放在播放中也保留（键盘 `Z` 可随时切换）。
+    bool manualZoom = false;
     // 诊断/对拍用：忽略 appear/disappear（= Re_ADOJAS `#/editor` 的全图视角），显示全部砖。
     bool showAllTiles = false;
     float trailDuration = 0.4f;    // seconds of trail history

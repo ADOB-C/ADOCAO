@@ -38,6 +38,11 @@ void drawGraphicsPage(State& st, const Chrome& ch) {
     // 用户指出"其他地方都没有"，向导里只有这一个控件有 tooltip，很突兀 → 去掉 ✗。
     // 这份权衡有正式去处：`docs/rendering.md`「可见性/剔除缓存」+ `tests/cull_cost_probe.cpp`。
 
+    // 布尔字段 = 字段行（标签在左列、复选框在控件列），见 docs/ui-design.md §5。
+    // 只给启动时定：运行中不再有快捷键（用户 2026-11-07）。
+    formLabel(ch, "Manual zoom");
+    ImGui::Checkbox("##manualzoom", &st.manualZoom);
+
     formStyleEnd();
 
     bool back = false;

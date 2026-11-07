@@ -470,18 +470,6 @@ void GameWindow::handleInput() {
     }
     m_wasSpacePressed = spacePressed;
 
-    // Z = 手动缩放开关（只切缩放，不动位置/旋转）
-    {
-        const bool z = glfwGetKey(m_window, GLFW_KEY_Z) == GLFW_PRESS;
-        if (z && !m_wasKeyZ) {
-            m_manualZoom = !m_manualZoom;
-            LOG_I("manual-zoom: %s —— %s", m_manualZoom ? "ON" : "OFF",
-                  m_manualZoom ? "谱面 zoom 事件不再生效，滚轮/触控板手动缩放"
-                               : "缩放交回谱面（settings.zoom + MoveCamera）");
-        }
-        m_wasKeyZ = z;
-    }
-
     // Click-to-select tile (only when stopped)
     if (!m_playback->isPlaying() && m_camCtrl.consumeClick()) {
         int fbW, fbH;
@@ -1176,7 +1164,7 @@ void GameWindow::run() {
         LOG_I("帧率上限：320 fps（ADOCAO_UNCAPPED=1 关闭节流）");
     }
     LOG_I("操作：空格 = 播放/停止（停止 = 关卡回初始状态，相机原地保留）；"
-          "Z = 手动缩放开关（谱面 zoom 不再生效）；Ctrl/⌘ + ←/→ = 书签；Esc = 退出");
+          "Ctrl/⌘ + ←/→ = 书签；Esc = 退出（手动缩放在启动器 Graphics 页 / --manual-zoom）");
     // 诊断钩子：跑到 N 毫秒后**正常退出**（好让 `profile::reportSteady()` 打分段报告）。
     // 只给 `ADOCAO_PROFILE=1` 的全流程剖面用；不设 = 行为完全不变。
     double exitAfterMs = 0.0;

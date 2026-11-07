@@ -58,6 +58,7 @@ void drawMusicPage(State& st, const Chrome& ch) {
         st.cfg.resolutionH       = kResoH[st.resoIdx];
         st.cfg.fullscreen        = st.fullscreen;
         st.cfg.cullBlockFloors   = kCullBlockValues[st.cullBlockIdx];
+        st.cfg.manualZoom        = st.manualZoom;
         st.cfg.showTrail         = st.showTrail;
         st.cfg.trailDuration     = st.trailDuration;
         st.cfg.trailSampleRate   = st.trailSampleRate;

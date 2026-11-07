@@ -148,6 +148,9 @@ struct State {
     int  msaaIdx = 2;                  // 默认 4x（0=Off / 1=2x / 2=4x / 3=8x）
     int  resoIdx = 2;                  // default: 1920x1080
     int  cullBlockIdx = kCullBlockDefaultIdx;   // 剔除粗块粒度（Graphics 页）
+    // Graphics 页：手动缩放。ON = 谱面（settings.zoom + MoveCamera）不再改缩放，
+    // 滚轮/触控板说了算。**只在启动时定**（用户 2026-11-07：不做运行中切换）。
+    bool manualZoom = false;
 
     std::string lastError;
 

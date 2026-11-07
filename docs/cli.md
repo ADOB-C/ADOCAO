@@ -62,14 +62,15 @@ Visuals page / CLI):
 音色游标一起跳过去。给 profiling/自动化用（配合 `ADOCAO_PROFILE=1 ADOCAO_EXIT_AFTER_MS=N`
 就能量"从某个中途点开始播"的整段剖面，而不必从头播）。
 
-### 手动缩放开关（`--manual-zoom` / 键盘 `Z`）
+### 手动缩放开关（`--manual-zoom` / 向导 Graphics 页）
 
 默认**缩放归谱面管**：播放时 `settings.zoom` + `MoveCamera` 的 zoom 事件驱动相机，
 `--capture-camera` 下 `--capture-zoom` 会被忽略（否则运镜测不到）。
 
-`--manual-zoom`（运行中按 `Z` 随时切换）把它反过来：**缩放不再由谱面写**，滚轮/触控板的手动缩放
-在播放中也保留；位置与旋转仍由相机时间线驱动。`--capture-camera --manual-zoom` 时缩放回到
-`--capture-zoom`，所以这条开关可以脚本化验证：
+`--manual-zoom`（向导 **Graphics 页的 `Manual zoom`** 复选框是同一个开关）把它反过来：
+**缩放不再由谱面写**，滚轮/触控板的手动缩放能在播放中保住；位置与旋转仍由相机时间线驱动。
+**只在启动时定**，运行中没有快捷键（2026-11-07 用户明确：不能运行时切换）。
+`--capture-camera --manual-zoom` 时缩放回到 `--capture-zoom`，所以这条开关可以脚本化验证：
 
 ```
 无 --manual-zoom：--capture-zoom 100 与 400 出图**逐字节相同**（0 px 差异）

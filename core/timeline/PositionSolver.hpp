@@ -60,9 +60,21 @@ public:
     // `anim`（可选）= 该谱的轨道动画（MoveTrack/AnimateTrack 关键帧）。给了就按"粘性轨道"
     // 语义跟随被动画搬走的砖：枢轴 + 相邻砖的活位置一起算（参考实现
     // `Player.updatePlanetsPosition` 的 `useStickToFloor` 分支）。nullptr = 现有静态行为。
+    // `pivotOut`（可选）：把**枢轴星**的世界位置也带出来 —— 相机 `relativeTo: Player`
+    // 跟的就是它（权威 `Player.ts:7138` 的 `currentPivotPosition`）。
+    // **必须由这一份实现带出**：另写一份"求枢轴"的代码就会和行星分家
+    // （2026-11-07：相机以前直接用加载期烘好的静态砖位 → 不跟 MoveTrack、也不跟长按滑动）。
     static void positionAt(const Timeline& timeline, double t,
                            glm::dvec2& redOut, glm::dvec2& blueOut,
-                           const TileAnimation* anim = nullptr);
+                           const TileAnimation* anim = nullptr,
+                           glm::dvec2* pivotOut = nullptr,
+                           glm::dvec2* holdSlideOut = nullptr);
+
+    // 相机用的枢轴（= positionAt 里那颗枢轴星）。与行星**逐位同源**。
+    // 名字别叫 `pivotAt`：文件里已有一个 `pivotAt(const LevelData&, int64_t, …)` 静态助手。
+    static void pivotStarAt(const Timeline& timeline, double t, double& x, double& y,
+                            const TileAnimation* anim = nullptr,
+                            glm::dvec2* holdSlideOut = nullptr);
     static void positionAtTile(const Timeline& timeline, double t, int tileIdx,
                                glm::dvec2& redOut, glm::dvec2& blueOut,
                                const TileAnimation* anim = nullptr);

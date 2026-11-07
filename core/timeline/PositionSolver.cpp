@@ -81,7 +81,8 @@ static void applyHoldSlide(const LevelData& L, const Timeline& timeline, int til
 
 
 void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& redOut,
-                                glm::dvec2& blueOut, const TileAnimation* anim) {
+                                glm::dvec2& blueOut, const TileAnimation* anim,
+                                glm::dvec2* pivotOut, glm::dvec2* holdSlideOut) {
     const LevelData& L = *timeline.level();   // ③ 切片 4：走访问器，不直接碰 tiles[]
     const int64_t nFull = L.tileCount();   // #0：int64 算，收窄前显式判
     if (!fitsInt32(nFull)) {
@@ -111,6 +112,8 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
         glm::dvec2 mv(p0[0] + std::cos(angle) * dist, p0[1] + std::sin(angle) * dist);
         glm::dvec2 pv(p0[0], p0[1]);
         redOut = pv; blueOut = mv;
+        if (pivotOut) *pivotOut = pv;
+        if (holdSlideOut) *holdSlideOut = glm::dvec2(0.0);
         return;
     }
 
@@ -134,6 +137,8 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
         glm::dvec2 mv(pivotPos[0]+std::cos(currentAngle), pivotPos[1]+std::sin(currentAngle));
         if (lastIdx%2==0) { redOut=glm::dvec2(pivotPos[0],pivotPos[1]); blueOut=mv; }
         else              { blueOut=glm::dvec2(pivotPos[0],pivotPos[1]); redOut=mv; }
+        if (pivotOut) *pivotOut = glm::dvec2(pivotPos[0], pivotPos[1]);
+        if (holdSlideOut) *holdSlideOut = glm::dvec2(0.0);
         return;
     }
 
@@ -154,11 +159,24 @@ void PositionSolver::positionAt(const Timeline& timeline, double t, glm::dvec2& 
     // 长按滑动圆心（细节见 applyHoldSlide）
     // 行星/拖尾/相机都跟着这个滑动圆心走（相机跟行星，所以改这里一处就够）。
     double cx = pivotPos[0], cy = pivotPos[1];
+    const double preSlideX = cx, preSlideY = cy;
     applyHoldSlide(L, timeline, tileIdx, progress, cx, cy);
+    if (holdSlideOut) *holdSlideOut = glm::dvec2(cx - preSlideX, cy - preSlideY);
     glm::dvec2 pv(cx, cy);
     glm::dvec2 mv(cx+std::cos(angle)*dist, cy+std::sin(angle)*dist);
     if (isRed) { redOut=pv; blueOut=mv; }
     else       { blueOut=pv; redOut=mv; }
+    if (pivotOut) *pivotOut = pv;
+}
+
+void PositionSolver::pivotStarAt(const Timeline& timeline, double t, double& x, double& y,
+                                 const TileAnimation* anim, glm::dvec2* holdSlideOut) {
+    glm::dvec2 r{}, b{}, pv{}, slide{};
+    positionAt(timeline, t, r, b, anim, &pv, &slide);
+    // 权威把长按滑动量当**相机跟随目标的偏移**（`setHoldOffset`，`CameraController.ts:388`），
+    // 不并进 `planetWorldPos` —— 并进去的话 `relativeTo: Player` 的事件换算会多一个滑动量。
+    x = pv.x - slide.x; y = pv.y - slide.y;
+    if (holdSlideOut) *holdSlideOut = slide;
 }
 
 void PositionSolver::planetsAt(const Timeline& timeline, double t, std::vector<PlanetPos>& out,

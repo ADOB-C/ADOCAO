@@ -13,6 +13,7 @@
 #include "core/level/LevelData.hpp"
 #include "core/timeline/Timeline.hpp"
 #include "core/timeline/PlaybackClock.hpp"
+#include "core/timeline/PositionSolver.hpp"
 #include "core/util/Easing.hpp"
 #include <algorithm>
 #include <array>
@@ -610,7 +611,14 @@ void GameWindow::update(float deltaMs) {
         const double t = m_playback->timeInLevel();
 
         // seek/update 的判据在库里（`CameraDirector::drive`），宿主不再自己判断。
-        m_cameraDirector.drive(t, (double)deltaMs / 1000.0, bpm, pitch, p[0], p[1], tileIdx);
+        // 相机跟的是**行星枢轴**，不是加载期烘好的静态砖位（权威 `Player.ts:7138`
+        // 的 `currentPivotPosition` = 实时网格位置 + 长按滑动量）。两者不同源时，
+        // MoveTrack 搬砖 / 长按滑动都会让画面相对星球漂开。
+        double camPx = p[0], camPy = p[1];
+        glm::dvec2 holdSlide{};
+        PositionSolver::pivotStarAt(*m_timeline, t, camPx, camPy, m_scene->animation(), &holdSlide);
+        m_cameraDirector.setHoldOffset(holdSlide.x, holdSlide.y);   // 每帧写（非长按砖为 0）
+        m_cameraDirector.drive(t, (double)deltaMs / 1000.0, bpm, pitch, camPx, camPy, tileIdx);
 
         m_camera.setTarget(m_cameraDirector.x(), m_cameraDirector.y());
         // 手动缩放开着时，**缩放不归谱面管**（位置与旋转照旧由相机时间线驱动）。
@@ -808,13 +816,15 @@ void GameWindow::captureAndExit() {
         // 重放历史事件时用"当时"的行星位置：否则 relativeTo=Player 的运镜会把 rig 算错，
         // 抓帧/跳转后的画面整体偏移、旋转中心也不对（2026-10-24 MM2 实测）
         auto planetAt = [this](double tt, double& x, double& y) {
-            int64_t ii = m_timeline->findTileIndex(tt);
-            if (ii < 0) ii = 0;
-            if (ii >= m_level->tileCount()) ii = m_level->tileCount() - 1;
-            const auto q = m_level->tilePositionAt(ii);
-            x = q[0]; y = q[1];
+            // 与主循环同一个枢轴（含 MoveTrack 实时位移 + 长按滑动），别再退回静态砖位。
+            PositionSolver::pivotStarAt(*m_timeline, tt, x, y, m_scene->animation());
         };
-        m_cameraDirector.seek(m_playback->timeInLevel(), p[0], p[1], tileIdx, pitch, planetAt);
+        double camPx = p[0], camPy = p[1];
+        glm::dvec2 holdSlide{};
+        PositionSolver::pivotStarAt(*m_timeline, m_playback->timeInLevel(), camPx, camPy,
+                                    m_scene->animation(), &holdSlide);
+        m_cameraDirector.setHoldOffset(holdSlide.x, holdSlide.y);
+        m_cameraDirector.seek(m_playback->timeInLevel(), camPx, camPy, tileIdx, pitch, planetAt);
         m_camCtrl.snapTo(m_cameraDirector.x(), m_cameraDirector.y());
         if (env::flag("ADOCAO_CAM_DEBUG")) {
             LOG_I("capture-cam: target=(%.2f,%.2f) zoom=%.2f", m_camera.targetX(), m_camera.targetY(), (double)m_camera.zoom());

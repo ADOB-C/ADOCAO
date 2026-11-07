@@ -154,8 +154,9 @@ void CameraDirector::update(double nowSeconds, double deltaSeconds, float bpm, d
 
     if (m_followMode) {
         const double t = clamp01(m_timer / camspeed);
-        const double tx = m_topos.x;
-        const double ty = m_topos.y;
+        // 长按：跟随目标 = 枢轴 + 圆心滑动量（权威同款）
+        const double tx = m_topos.x + m_holdX;
+        const double ty = m_topos.y + m_holdY;
         m_pos.x = m_frompos.x + (tx - m_frompos.x) * t;
         m_pos.y = m_frompos.y + (ty - m_frompos.y) * t;
     } else {
@@ -361,6 +362,7 @@ void CameraDirector::setToFreeMode() {
     m_frompos = Vec{};
     m_topos = Vec{};
     m_pos = Vec{};
+    m_holdX = m_holdY = 0.0;   // 权威 reset 时也把 holdOffset 归零
     m_followMode = false;
 }
 

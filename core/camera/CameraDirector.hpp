@@ -59,7 +59,10 @@ public:
     void resetDrive() { m_driveActive = false; m_driveLastTime = 0.0; }
     bool driveActive() const { return m_driveActive; }
 
-    // 长按带：跟随目标叠加的圆心滑动量（每帧由 app 写；非长按砖写 0）。
+    // 长按带：**相机跟随目标的偏移**（权威 `CameraController.ts:388` 的 `holdOffset`）。
+    // 每帧由 app 写（非长按砖写 0）。注意它只影响跟随层的 lerp 目标，
+    // **不进** `relativeTo: Player` 的事件换算（那边用未滑动的枢轴）。
+    void setHoldOffset(double x, double y) { m_holdX = x; m_holdY = y; }
 
     // ── 结果 ───────────────────────────────────────────────────────────────
     double x() const { return m_camParent.x + m_pos.x; }
@@ -105,6 +108,7 @@ private:
 
     // 跟随层
     Vec    m_frompos, m_topos, m_pos;
+    double m_holdX = 0.0, m_holdY = 0.0;   // 长按滑动量（跟随目标偏移）
     double m_timer = 0.0;
     bool   m_followMode = true;
 

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>   // std::memcmp（ADOCAO_TRAIL_CHECK 的逐位比较）
 #include <limits>
 #include <vector>
 #include <chrono>

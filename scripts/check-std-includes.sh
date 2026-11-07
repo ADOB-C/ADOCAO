@@ -10,7 +10,8 @@ fail=0
 check() {  # check <用法正则> <需要的头> <说明>
     local pat="$1" hdr="$2" what="$3"
     while IFS= read -r f; do
-        grep -q "^#include ${hdr}$" "$f" && continue
+        # 行尾允许 `//` 注释（本仓库的惯例：`#include <cstdlib>   // getenv（诊断）`）
+        grep -qE "^#include ${hdr}[[:space:]]*(//.*)?$" "$f" && continue
         # 头文件里也可能只是声明；只报真正出现用法的
         printf '缺 %s（用了 %s）：%s\n' "$hdr" "$what" "$f"
         fail=1

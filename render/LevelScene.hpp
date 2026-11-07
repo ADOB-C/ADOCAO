@@ -62,6 +62,12 @@ public:
     // 好让 `PlaybackClock`（它先算行星位置）也能拿到同一份动画去跟随。
     void ensureTileAnimation(const adofai::Timeline& timeline);
 
+    // 把"砖的可见性"重置回**刚加载完**的状态（全部可见、阈值/闩锁清零）。
+    // 空格停止 = 回到初始状态（用户 2026-10-28 定的口径），但 TrackVis 的增量簿记只把
+    // `0..m_lastHiddenEnd` 还原回来，而且只在 keyframe 模型那条路做 —— 停止后偶尔会留下
+    // "该显示的砖没显示"。这里无条件全量还原，与初始状态等价。
+    void resetVisualState(const adofai::Timeline& timeline);
+
     // GameWindow reports the measured work time (ms, excluding vsync/sleep) of
     // the previous frame. Used by the trail sample-rate governor.
     void setMeasuredFrameMs(double workMs);

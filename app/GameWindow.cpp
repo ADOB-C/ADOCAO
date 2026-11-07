@@ -322,13 +322,7 @@ bool GameWindow::init(const LauncherConfig& cfg, LoadResult& result) {
             m_bgR=r/255.0f; m_bgG=g/255.0f; m_bgB=b/255.0f; }
     }
     m_camCtrl.attach(m_camera);
-    m_camera.setAdoZoom(m_level->settings.zoom);   // 谱面 zoom 是 ADOFAI 口径（越大看得越远）
-    if (m_level->tileCount() > 0) {
-        const auto& p0 = m_level->tilePositionAt(0);
-        m_camCtrl.snapTo(p0[0], p0[1]);
-        LOG_I("camera init: tile0=(%.3f,%.3f) adoZoom=%.1f internalZoom=%.2f", (double)p0[0], (double)p0[1],
-              (double)m_level->settings.zoom, (double)m_camera.zoom());
-    }
+    resetToInitialView();
     rebuildCameraTimeline();
 
     // Mesh build: 同步（主线程、主上下文）。异步/共享上下文那条路已删除：
@@ -459,11 +453,12 @@ void GameWindow::handleInput() {
             m_hitsoundMgr->stop();
             m_musicPending = false;
             m_selectedTile = -1;
-            if (m_level->tileCount() > 0) {
-                const auto& p0 = m_level->tilePositionAt(0);
-                m_camCtrl.snapTo(p0[0], p0[1]);
-            }
-            LOG_I("playback: 停止 → 回到初始状态（t=0，相机回起点，音色光标归零）");
+            // "回到初始状态"必须是**整个视角**回到初始：位置 + 谱面 zoom + 旋转 0。
+            // 以前只 snap 了位置，播放相机留下的 zoom/角度会留着 —— 停下后既不是初始构图，
+            // 极端 zoom/旋转下还会看起来"整条轨道不见了"（用户 2026-11-07："暂停看不见 Tile"）。
+            resetToInitialView();
+            m_scene->resetVisualState(*m_timeline);   // 可见性也回到"刚加载完"
+            LOG_I("playback: 停止 → 回到初始状态（t=0，相机回起点+谱面 zoom，音色光标归零）");
         }
     }
     m_wasSpacePressed = spacePressed;
@@ -668,6 +663,19 @@ void GameWindow::update(float deltaMs) {
                   (int)(glfwGetKey(m_window, GLFW_KEY_SPACE) == GLFW_PRESS));
         }
     }
+}
+
+void GameWindow::resetToInitialView() {
+    if (!m_level) return;
+    m_camera.setRotation(0.0f);
+    m_camera.setAdoZoom(m_level->settings.zoom);   // 谱面 zoom 是 ADOFAI 口径（越大看得越远）
+    if (m_level->tileCount() > 0) {
+        const auto& p0 = m_level->tilePositionAt(0);
+        m_camCtrl.snapTo(p0[0], p0[1]);
+    }
+    LOG_I("camera reset: tile0=(%.3f,%.3f) adoZoom=%.1f internalZoom=%.2f rot=0",
+          (double)m_camera.targetX(), (double)m_camera.targetY(),
+          (double)m_level->settings.zoom, (double)m_camera.zoom());
 }
 
 void GameWindow::render() {

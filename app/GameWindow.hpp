@@ -73,6 +73,11 @@ private:
 
     void navigateToTile(int floor, bool center = true);
     void rebuildCameraTimeline();
+    // 把相机恢复到**刚加载完**的视角：旋转 0、谱面 zoom（`settings.zoom`）、对准砖 0。
+    // 加载时与"空格停止"时都走这一份，避免两处各写一遍再漂移
+    // （2026-11-07：停止只 snap 了位置，没收 zoom/旋转 → 停下后画面还停在播放相机的
+    //  zoom/角度上，看起来"没有轨道"、也不是初始状态）。
+    void resetToInitialView();
     void handleInput();
     void update(float deltaMs);
     void render();

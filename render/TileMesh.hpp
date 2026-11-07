@@ -153,6 +153,9 @@ public:
 
     // 验收/诊断用：上次 draw 实际画了多少个实例、形状数
     int lastDrawnInstances() const { return m_lastDrawn; }
+    // 是否已经有逐砖可见性位图（没有 = 从没隐藏过砖，停止时不需要"全量还原"，
+    // 也就不该为 2^31 层的谱白分配 n/8 字节）。
+    bool hasVisibilityState() const { return visAllocated(); }
 
 private:
     void destroy();

@@ -5,6 +5,7 @@
 #include <cstdlib>   // getenv（诊断转储）
 
 #include "core/util/AssetPaths.hpp"
+#include "core/util/CountLimits.hpp"
 
 #include "glad/gl_core.hpp"
 #include "render/Camera.hpp"
@@ -423,6 +424,19 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
     }
     m_redPlanet->setTrailPoints(redXY.data(), (int)redPts.size(), maxPoints);
     m_bluePlanet->setTrailPoints(blueXY.data(), (int)bluePts.size(), maxPoints);
+}
+
+void LevelScene::resetVisualState(const Timeline& timeline) {
+    m_animVisDirty = true;
+    m_lastHiddenEnd = -1;
+    m_sgVisibleLatch = false;
+    if (!m_tileMesh) return;
+    // 只在**已经存在**逐砖可见性位图时还原：没有位图就说明从没有砖被隐藏过（已经等价于初始状态），
+    // 这时别去分配 —— 2^31 层谱的位图是 268 MB，按一次空格就白占一大块。
+    m_tileMesh->setVisibleThreshold(-1);            // 阈值回到"没有"（并作废剔除缓存）
+    if (!m_tileMesh->hasVisibilityState()) return;   // 从没隐藏过砖 = 已经是初始状态
+    const int64_t n = timeline.tileCount();
+    if (n > 0 && fitsInt32(n)) m_tileMesh->updateVisibleRange(0, (int)(n - 1), true);
 }
 
 void LevelScene::updateTileVisibility(const Timeline& timeline, double t, bool playing) {

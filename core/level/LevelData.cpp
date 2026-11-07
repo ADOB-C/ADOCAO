@@ -3194,6 +3194,7 @@ bool LevelData::finishLoad(ProgressCb onProgress, bool exportOnly) {
     if (onProgress) onProgress(0.40f, "Processing actions...");
     refreshDerivedCaches();
     if (!exportOnly) {
+        snapshotCameraAnchorFloors();   // 必须在 PositionTrack 烘进砖位**之前**收集
         applyHoldOffsets();
         applyPositionTrackOffsets();
         applyRadiusScaleOffsets();
@@ -3576,6 +3577,30 @@ void LevelData::buildPlanetTables(const std::vector<std::pair<int64_t, int>>& ev
     }
 }
 
+void LevelData::snapshotCameraAnchorFloors() {
+    m_camAnchorFloors.clear();
+    m_camAnchorOffset.clear();
+    for (const CameraEvent& ev : cameraEvents) {
+        if (ev.relativeTo != CamTile) continue;
+        if (ev.floor < 0) continue;
+        m_camAnchorFloors.push_back(ev.floor);
+    }
+    std::sort(m_camAnchorFloors.begin(), m_camAnchorFloors.end());
+    m_camAnchorFloors.erase(std::unique(m_camAnchorFloors.begin(), m_camAnchorFloors.end()),
+                            m_camAnchorFloors.end());
+    m_camAnchorOffset.assign(m_camAnchorFloors.size(), {0.0, 0.0});
+}
+
+void LevelData::rawTilePositionAt(int64_t i, double& x, double& y) const {
+    const auto p = tilePositionAt(i);
+    x = p[0]; y = p[1];
+    if (m_camAnchorFloors.empty()) return;
+    auto it = std::lower_bound(m_camAnchorFloors.begin(), m_camAnchorFloors.end(), (int32_t)i);
+    if (it == m_camAnchorFloors.end() || *it != (int32_t)i) return;
+    const auto& off = m_camAnchorOffset[(size_t)(it - m_camAnchorFloors.begin())];
+    x -= off[0]; y -= off[1];
+}
+
 void LevelData::planetPivotAt(int64_t i, double& x, double& y) const {
     const auto p = tilePositionAt(i);
     x = p[0]; y = p[1];
@@ -3751,6 +3776,11 @@ void LevelData::applyPositionTrackOffsets() {
         }
         tiles[i].position[0] += cumX + px;
         tiles[i].position[1] += cumY + py;
+        if (!m_camAnchorFloors.empty()) {
+            auto it = std::lower_bound(m_camAnchorFloors.begin(), m_camAnchorFloors.end(), (int32_t)i);
+            if (it != m_camAnchorFloors.end() && *it == (int32_t)i)
+                m_camAnchorOffset[(size_t)(it - m_camAnchorFloors.begin())] = {cumX + px, cumY + py};
+        }
         if (wantStick) {
             if (!m_cumOffsets.empty() && m_cumOffsets.back().floor != i)
                 m_cumOffsets.push_back({i, cumX, cumY});      // 该层生效的累计偏移（每层一条）

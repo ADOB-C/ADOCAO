@@ -132,8 +132,9 @@ void CameraTimeline::build(const LevelData& level,
         if (!info) {
             CameraKey k;
             k.time = timeAt(ev.floor, ev.angleOffset);
-            k.anchorX = level.tilePositionAt(ev.floor)[0];
-            k.anchorY = level.tilePositionAt(ev.floor)[1];
+            // `relativeTo: Tile` 的锚点是**原始**砖位（权威 `getTilePosition(this.positions)`，
+            // 那份数组不含 PositionTrack 偏移，见 `Player.ts:494`）。
+            level.rawTilePositionAt(ev.floor, k.anchorX, k.anchorY);
             k.bpm = bpmAt(ev.floor);
             k.ev = ev;
             m_keys.push_back(std::move(k));
@@ -164,8 +165,7 @@ void CameraTimeline::build(const LevelData& level,
 
             CameraKey k;
             k.time = timeAt(epFloor, epAngleOffset);
-            k.anchorX = level.tilePositionAt(epFloor)[0];
-            k.anchorY = level.tilePositionAt(epFloor)[1];
+            level.rawTilePositionAt(epFloor, k.anchorX, k.anchorY);
             k.bpm = bpmAt(epFloor);
             k.ev = ev;
             k.ev.floor = (int32_t)epFloor;          // 与 Player 的 `{...event, floor}` 一致

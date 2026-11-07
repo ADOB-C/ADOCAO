@@ -468,6 +468,14 @@ struct LevelData {
     // 可选 `wc`：并行剔除时传**本线程自己的克隆**（见 `FloorWindowCache::clone()`）；
     // 不传 = 用共享缓存（单线程路径，语义与以前逐位相同）。
     std::array<double, 2> tilePositionAt(int64_t i, FloorWindowCache* wc = nullptr) const;
+    // ── 相机 `relativeTo: Tile` 的锚点用**原始**砖位（不含 PositionTrack 偏移）──────
+    // 权威 `Player.ts:494`："basic tile positions (without PositionTrack)"，
+    // 相机那边 `getTilePosition(this.positions, floor)` 读的就是它。
+    // 加载期把 PositionTrack 烘进了 `tiles[i].position`，原始值没保留 —— 所以只为
+    // 相机 Tile 事件引用的那几层记下被减掉的偏移量（最多几百条；**绝不能按层记**，那等于 16 B/砖）。
+    void snapshotCameraAnchorFloors();
+    void rawTilePositionAt(int64_t i, double& x, double& y) const;
+
     // 行星枢轴：`stickToFloors=false` 的层返回**未加 PositionTrack 偏移**的原始位置
     // （默认全 true → 与 tilePositionAt 完全一致）。
     bool stickyAt(int64_t i) const {
@@ -568,6 +576,9 @@ struct LevelData {
     std::vector<uint8_t> m_tileStick;                     // 1 B/砖；空 = 全 true
     struct CumOffset { int32_t floor = 0; double x = 0.0, y = 0.0; };  // 到该层为止的累计偏移
     std::vector<CumOffset> m_cumOffsets;                  // 稀疏（每个事件层一条）
+    // 相机 `relativeTo: Tile` 的锚点层（排序）与其被减掉的 PositionTrack 累计偏移
+    std::vector<int32_t> m_camAnchorFloors;
+    std::vector<std::array<double, 2>> m_camAnchorOffset;
     bool hasStickOverrides() const { return !m_tileStick.empty(); }
 
     // ── Hold（DLC 长按，2026-11-03）────────────────────────────────────────
@@ -713,6 +724,7 @@ private:
     void convertPathToAngles();
     void applyHoldOffsets();
     void applyPositionTrackOffsets();
+
     // MultiPlanet 逐砖表（参考实现 Re_ADOJAS `Player.ts` 3050-3160 的移植）。
     // 没有 MultiPlanet 事件时**不分配任何表**（恒 2 颗，零开销）。
     void buildPlanetTables(const std::vector<std::pair<int64_t, int>>& events);

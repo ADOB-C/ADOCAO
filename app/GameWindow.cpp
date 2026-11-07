@@ -453,12 +453,16 @@ void GameWindow::handleInput() {
             m_hitsoundMgr->stop();
             m_musicPending = false;
             m_selectedTile = -1;
-            // "回到初始状态"必须是**整个视角**回到初始：位置 + 谱面 zoom + 旋转 0。
-            // 以前只 snap 了位置，播放相机留下的 zoom/角度会留着 —— 停下后既不是初始构图，
-            // 极端 zoom/旋转下还会看起来"整条轨道不见了"（用户 2026-11-07："暂停看不见 Tile"）。
-            resetToInitialView();
-            m_scene->resetVisualState(*m_timeline);   // 可见性也回到"刚加载完"
-            LOG_I("playback: 停止 → 回到初始状态（t=0，相机回起点+谱面 zoom，音色光标归零）");
+            // **相机原地保留**（用户 2026-11-07："位置还是保留下来吧"）：停下之后
+            // 还看着刚才那一块，别把镜头拽回砖 0。只有**关卡状态**收回初始：
+            // 时间回 t=0、行星/拖尾收起、音色光标归零、砖的可见性全量还原。
+            // （以前这里 snap 到砖 0，位置/zoom/旋转三样一起变了；
+            //   `resetToInitialView()` 现在只给"加载完"那一处用。）
+            m_scene->resetVisualState(*m_timeline);   // 可见性回到"刚加载完"
+            LOG_I("playback: 停止 → 关卡回初始（t=0，音色光标归零，可见性复位）；相机原地保留 "
+                  "(%.2f,%.2f) zoom=%.1f rot=%.1f",
+                  m_camera.targetX(), m_camera.targetY(), (double)m_camera.zoom(),
+                  (double)m_camera.rotation());
         }
     }
     m_wasSpacePressed = spacePressed;

@@ -95,11 +95,12 @@
 
 ## 已排除（别再查）
 
-- **空格停止后"看不见轨道"**（2026-11-07）：空格是**停止并回到 t=0**，但那一步只 `snapTo` 了位置，
-  没收播放相机的 **zoom/旋转** —— 停下后既不是初始构图，极端值下还会像是"整条轨道没了"。
-  现在加载与停止共用 `GameWindow::resetToInitialView()`（rot=0 + `setAdoZoom(settings.zoom)` + 砖 0），
-  并调 `LevelScene::resetVisualState()` 把逐砖可见性位图全量还原（无位图时**不分配**，2^31 层是 268 MB）。
-  验收：`--capture-camera` 下"初始状态"与"停止后"两帧**逐字节相同**（差异 0 px，310,444 非黑像素）。
+- **空格停止后"看不见轨道"**（2026-11-07）：空格是**停止并回到 t=0**。两个坑：
+  ① 那一步以前只 `snapTo` 了位置（后来干脆改成**相机原地保留** —— 用户要"还看着刚才那一块"），
+  但 `resetToInitialView()` 仍给"加载完"那一处用，别让两处再各写一遍；
+  ② 逐砖可见性只靠 TrackVis 分支那句"恢复 `0..m_lastHiddenEnd`"，**keyframe 模型那条路根本没还原**
+  → 停下后该显示的砖不显示。现在 `LevelScene::resetVisualState()` 全量还原（无位图时**不分配**，
+  2^31 层是 268 MB）。实测 Fledgling：播放中 `drawn` 0~2（谱面自己把砖藏了），停止后 `drawn` 62~215。
 
 - **Tile 索引与行星位置"差 100 倍"**：拿**空间距离**当成了"走过的砖数"，折叠轨道上两者本就不同。
 - **`adocao_window` 在 Linux 偶发红**：FMA 收缩（GCC `fast` vs Clang `on`），已全局 `-ffp-contract=off`。

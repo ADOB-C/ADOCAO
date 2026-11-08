@@ -366,35 +366,11 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
         if (n < 2) n = 2;
         for (auto& v : m_mpTrailPts) v.clear();
         std::vector<PositionSolver::PlanetPos> tmp;
-        // 断开点：多星布局在**换砖**时逐砖跳变（权威 `applyMultiPlanetLayout` 同款），
-        // 不断开就会在两个跳变点之间画一条横穿轨道的直条。判据 = 换砖 **且** 位移 > 0.4 砖
-        // （实测：砖内最大步长 0.26，换砖跳变 0.77~0.83）。
-        std::vector<unsigned char> mpBreak[8];
-        glm::dvec2 mpPrev[8] = {};
-        int64_t mpPrevTile[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
-        int mpPrevK[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
-        constexpr double kMpBreakStep = 0.4;
         for (int k = 0; k < n; ++k) {
             const double tt = win.startTime + span * ((double)k / (double)(n - 1));
             PositionSolver::planetsAt(timeline, tt, tmp, m_tileAnim.get());
-            const int64_t tk = timeline.findTileIndex(tt);
-            for (const auto& pp : tmp) {
-                if (pp.id >= 8) continue;
-                auto& pts = m_mpTrailPts[(size_t)pp.id];
-                // 两种断裂：①这颗星在这段时间里**不存在**（k 跳号）②换砖时的布局跳变。
-                bool cut = false;
-                if (!pts.empty()) {
-                    const bool missing = (k - mpPrevK[pp.id]) > 1;
-                    const bool jumped  = (tk != mpPrevTile[pp.id]) &&
-                                         glm::length(pp.pos - mpPrev[pp.id]) > kMpBreakStep;
-                    cut = missing || jumped;
-                }
-                pts.push_back(pp.pos);
-                mpBreak[pp.id].push_back(cut ? 1u : 0u);
-                mpPrev[pp.id] = pp.pos;
-                mpPrevTile[pp.id] = tk;
-                mpPrevK[pp.id] = k;
-            }
+            for (const auto& pp : tmp)
+                if (pp.id < 8) m_mpTrailPts[pp.id].push_back(pp.pos);
         }
         for (int id = 0; id < 8; ++id) {
             const auto& pts = m_mpTrailPts[(size_t)id];
@@ -404,8 +380,7 @@ void LevelScene::applyFrame(const PlaybackFrame& frame, const Timeline& timeline
             }
             std::vector<double> xy(pts.size() * 2);
             for (size_t i = 0; i < pts.size(); ++i) { xy[i*2] = pts[i].x; xy[i*2+1] = pts[i].y; }
-            m_planetPool[(size_t)id]->setTrailPoints(xy.data(), (int)pts.size(), n,
-                                                     mpBreak[id].data());
+            m_planetPool[(size_t)id]->setTrailPoints(xy.data(), (int)pts.size(), n);
         }
         return;   // 两球路径不再走（MultiPlanet 谱）
     }

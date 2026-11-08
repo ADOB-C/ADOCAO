@@ -27,7 +27,8 @@ public:
     Planet(const Planet&) = delete;
     Planet& operator=(const Planet&) = delete;
 
-    void setTrailPoints(const double* xy, int count, int maxExpected);
+    void setTrailPoints(const double* xy, int count, int maxExpected,
+                        const unsigned char* breaks = nullptr);
 
     void buildGPU();
     void draw(Shader& shader, const Camera& camera, double camX, double camY) const;

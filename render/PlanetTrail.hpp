@@ -18,7 +18,11 @@ public:
     PlanetTrail(const PlanetTrail&) = delete;
     PlanetTrail& operator=(const PlanetTrail&) = delete;
 
-    void setPoints(const double* xy, int count, int maxExpected);
+    // `breaks`（可选，长度 = count）：`breaks[i] != 0` = **不要把样本 i-1 连到 i**。
+    // 多星（≥3）的布局在换砖时是**逐砖跳变**的（权威 `applyMultiPlanetLayout` 同款）：
+    // 不在这里断开，就会在两个跳变点之间画一条横穿轨道的直条（用户 2026-11-08 报的就是这个）。
+    void setPoints(const double* xy, int count, int maxExpected,
+                   const unsigned char* breaks = nullptr);
     void draw(Shader& shader, const Camera& camera, double camX, double camY);
     void clear();
 

@@ -20,9 +20,10 @@ Planet::~Planet() {
     delete trail;
 }
 
-void Planet::setTrailPoints(const double* xy, int count, int maxExpected) {
+void Planet::setTrailPoints(const double* xy, int count, int maxExpected,
+                            const unsigned char* breaks) {
     if (trail)
-        trail->setPoints(xy, count, maxExpected);
+        trail->setPoints(xy, count, maxExpected, breaks);
 }
 
 void Planet::destroyGPU() {

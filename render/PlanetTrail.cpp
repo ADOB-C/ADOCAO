@@ -44,7 +44,8 @@ void PlanetTrail::clear() {
     m_count = 0;
 }
 
-void PlanetTrail::setPoints(const double* xy, int count, int maxExpected) {
+void PlanetTrail::setPoints(const double* xy, int count, int maxExpected,
+                            const unsigned char* breaks) {
     if (count < 2) { clear(); return; }
     int needed = std::max(count, maxExpected);
     if (needed > m_maxPoints) { m_maxPoints = needed; m_points.resize(m_maxPoints); }
@@ -84,6 +85,11 @@ void PlanetTrail::setPoints(const double* xy, int count, int maxExpected) {
     }
     int ii = 0;
     for (int seg = 0; seg < totalSegments; seg++) {
+        // 断开点：这一段的终点样本是 `(seg+1)/segsPerPoint`；它之前被标记"别连"就跳过这个四边形。
+        if (breaks && (seg + 1) % segsPerPoint == 0) {
+            const int j = (seg + 1) / segsPerPoint;
+            if (j >= 1 && j < count && breaks[j]) continue;
+        }
         unsigned base = seg*2;
         m_indices[ii++]=base; m_indices[ii++]=base+1; m_indices[ii++]=base+2;
         m_indices[ii++]=base+1; m_indices[ii++]=base+3; m_indices[ii++]=base+2;

@@ -30,7 +30,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND
     enable_language(OBJCXX)
 endif()
 
-project(ADOCAO VERSION 7.2.0 LANGUAGES CXX C)
+project(ADOCAO VERSION 7.3.0 LANGUAGES CXX C)
 
 if(MSVC)
     message(FATAL_ERROR

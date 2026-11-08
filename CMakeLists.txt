@@ -22,7 +22,11 @@ endif()
 # 但**不能无条件** enable —— Windows/mingw 上 CMake 会去找 ObjC++ 编译器（cc1objplus 不存在），
 # Configure 直接失败（2026-10-21 CI windows-portable 就是这么红的）。
 # 所以用**宿主系统**判断（project() 之前还拿不到 APPLE）。
-if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+# 判据要**同时**看宿主与目标：从 macOS 交叉编 Windows（`-DCMAKE_SYSTEM_NAME=Windows`）时
+# 宿主仍是 Darwin，光看宿主就会去启用 ObjC++，而 CMake 会拿**宿主** clang++ 试编 .mm，
+# Apple ld 解析不了 mingw 风格的 `-Wl,-Map=` → Configure 直接失败（2026-11-07 交叉打包踩到）。
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND
+   (NOT DEFINED CMAKE_SYSTEM_NAME OR CMAKE_SYSTEM_NAME STREQUAL "Darwin"))
     enable_language(OBJCXX)
 endif()
 
